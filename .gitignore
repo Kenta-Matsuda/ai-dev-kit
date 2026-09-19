@@ -1,0 +1,46 @@
+# ai-dev-kit — wrapper repository ignores.
+#
+# Two rules decide what is listed here:
+#   1. Anything holding a credential, or that could come to hold one, is ignored.
+#   2. Local state whose source of truth lives elsewhere (Azure DevOps, the
+#      remote, or this machine) is ignored — committing it would make the repo
+#      disagree with the system that actually owns the fact.
+
+# --- personal and credential-bearing -----------------------------------------
+.claude/settings.local.json
+.env
+.env.*
+!.env.example
+*.pat
+*.pem
+*.pfx
+*.key
+
+# --- local runtime state (.aidev/) -------------------------------------------
+# policy.yaml is deliberately NOT ignored: it is reviewed, committed and shared.
+.aidev/cache/
+.aidev/tasks/
+.aidev/leases/
+.aidev/sync.lock
+
+# --- generated Wiki intermediates --------------------------------------------
+# knowledge/** itself IS committed; only the scratch area is not.
+knowledge/.cache/
+
+# --- workflow run logs --------------------------------------------------------
+# Logs can capture prompts, responses and environment values; keeping them out
+# of git is what makes it safe for a workflow to log verbosely.
+workflows/*/runs/
+
+# --- tooling ------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+
+# --- OS and editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json

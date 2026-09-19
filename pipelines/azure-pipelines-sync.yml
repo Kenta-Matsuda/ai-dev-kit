@@ -1,0 +1,99 @@
+# ai-dev-kit — scheduled sync.
+#
+# This is defence #3 of the staleness model: "必ず収束する". Defences #1 and #2
+# (the SessionStart warning and the PreToolUse guard) only make a human notice.
+# Nothing converges unless something runs `aidev sync` on a clock — a repo where
+# everyone ignores the warning stays stale forever without this pipeline.
+#
+# Bot permissions, deliberately minimal:
+#   - push to the sync branch on the WRAPPER repo
+#   - create pull requests on the WRAPPER repo
+#   - read on the PKG repo
+# NOT push to the default branch of either. This pipeline opens a PR; a human
+# merges it. That is the same rule the interactive path follows.
+
+trigger: none          # never on push: this is a clock, not a reaction
+pr: none
+
+schedules:
+  - cron: "0 18 * * *"           # daily, 18:00 UTC
+    displayName: 'Nightly PKG sync'
+    branches:
+      include: [main]
+    always: true                 # run even when the wrapper had no commits
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: NODE_VERSION
+    value: '20.x'
+
+steps:
+  - checkout: self
+    submodules: true
+    fetchDepth: 0
+    # The bot's token must reach `git push` for the sync branch.
+    persistCredentials: true
+
+  - task: NodeTool@0
+    displayName: 'Use Node $(NODE_VERSION)'
+    inputs:
+      versionSpec: $(NODE_VERSION)
+
+  - script: ./scripts/install.sh
+    displayName: 'Install aidev CLI'
+
+  - script: |
+      set -euo pipefail
+      git config user.email "$(AIDEV_BOT_EMAIL)"
+      git config user.name  "$(AIDEV_BOT_NAME)"
+    displayName: 'Configure bot identity'
+    env:
+      AIDEV_BOT_EMAIL: $(AIDEV_BOT_EMAIL)
+      AIDEV_BOT_NAME: $(AIDEV_BOT_NAME)
+
+  # Report the 3 SHAs before changing anything, so the run's log explains why
+  # it did or did not do work.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev knowledge status || true
+    displayName: 'Report 3-SHA state'
+
+  # `aidev sync` resolves targetSha itself by fetching the tracking branch. No
+  # SHA is passed in through a pipeline variable: a variable could name a commit
+  # that is not reachable from the tracking branch, which is precisely the
+  # input the sync path refuses.
+  #
+  # Idempotent by the operation key (pkgRepoId + targetSha + wrapperRepoId), so
+  # a nightly run over an unchanged PKG is a no-op, and an existing open sync PR
+  # is updated rather than duplicated.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev sync
+    displayName: 'aidev sync'
+    env:
+      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+  # A sync that was interrupted mid-flight leaves a lease behind. Surfacing it
+  # here means the next run reports the condition instead of failing opaquely.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev check || echo "::warning::aidev check reported exit $? after sync"
+    displayName: 'Post-sync check'
+    condition: always()
+
+  # Advance any issue-to-pr task whose PKG PR a human merged since the last run.
+  # Idempotent and derived from the Azure DevOps state, so running it on a clock
+  # cannot double-advance a task.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev task advance
+    displayName: 'aidev task advance'
+    condition: succeededOrFailed()
+    env:
+      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)

@@ -1,0 +1,29 @@
+# Normalise line endings in the repository.
+#
+# This is a correctness requirement, not a style preference: `aidev check`
+# compares a SHA-256 of each kit-owned file against `.aidev-lock`. If git
+# handed Windows a CRLF copy of a file that was hashed as LF, every wrapper on
+# Windows would report drift (exit 2) on a checkout nobody had touched.
+#
+# Committing LF and checking out LF keeps the bytes identical on every
+# platform, which is exactly what the static-asset contract claims.
+
+* text=auto eol=lf
+
+# Windows-only entry points that must keep CRLF to run reliably.
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Binary: never translated, never diffed as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.pfx  binary
+*.woff binary
+*.woff2 binary

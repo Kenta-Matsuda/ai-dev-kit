@@ -1,0 +1,77 @@
+# ai-dev-kit — wrapper repository CI.
+#
+# This pipeline is layer 5 of the permission design: the enforcement that sits
+# outside the AI. Layers 1 and 2 (the deny list and the runtime guard) can be
+# edited away locally; this one cannot, because the change that disables it is
+# itself a diff that this pipeline is required to approve.
+#
+# Set this as a REQUIRED build-validation policy on the wrapper's default
+# branch. Without that, a drifted `.claude/**` merges cleanly and the whole
+# integrity model is advisory.
+
+trigger:
+  branches:
+    include: [main]
+
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: NODE_VERSION
+    value: '20.x'
+
+steps:
+  - checkout: self
+    # The 3-SHA model compares the submodule pointer against the Wiki's target,
+    # so a checkout without submodules cannot evaluate `submoduleSha` at all.
+    submodules: true
+    fetchDepth: 0
+
+  - task: NodeTool@0
+    displayName: 'Use Node $(NODE_VERSION)'
+    inputs:
+      versionSpec: $(NODE_VERSION)
+
+  - script: ./scripts/install.sh
+    displayName: 'Install aidev CLI'
+
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev --version
+    displayName: 'Verify CLI'
+
+  # Runtime, tooling and connectivity. Advisory: doctor reports environment
+  # facts (a missing PAT, a proxy) that are not the PR author's fault.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev doctor
+    displayName: 'aidev doctor'
+    continueOnError: true
+
+  # The gate. Exit codes are the contract:
+  #   0 ok · 2 drift in .claude/** CLAUDE.md .mcp.json · 3 policy · 4 Wiki stale
+  # Nothing here interprets them further — a non-zero exit fails the build, and
+  # the exit code tells the author which of the four problems they have.
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev check
+    displayName: 'aidev check (required)'
+
+  - script: |
+      set -euo pipefail
+      export PATH="$HOME/.local/bin:$PATH"
+      aidev check --json > "$(Build.ArtifactStagingDirectory)/aidev-check.json" || true
+    displayName: 'Capture check report'
+    condition: always()
+
+  - publish: $(Build.ArtifactStagingDirectory)
+    artifact: aidev-check
+    displayName: 'Publish check report'
+    condition: always()
