@@ -53,6 +53,26 @@ my-pkg-ai-dev/                 ← チームがClaude Codeを起動する場所
 
 PKGのソース履歴は既存リポジトリに残ります。ラッパーリポジトリには、利用するPKGコミットへのポインタ、AI実行環境、生成Wikiをコミットします。
 
+## 同梱されるAgentsとSkills
+
+`aidev init`を実行すると、5つのAgent定義が`.claude/agents/`へ配置されます。
+
+| Agent | 現在の使い方 |
+| --- | --- |
+| `knowledge-builder` | `knowledge build --agent`と`sync --agent`から起動し、Wikiのproseを生成 |
+| `agents-creator` | Claude Codeの対話から、追加Agentの設計・作成を支援 |
+| `issue-to-pr` | Work Item対応の定義を同梱。ただしCLIとのエンドツーエンド接続は未完成 |
+| `workflow-creator` | workflow設計用の定義を同梱。現在の`workflow new`自体は固定scaffoldを生成 |
+| `permission-setting` | policy設計用の定義を同梱。現在の`permission configure`自体は設定から機械生成 |
+
+次のSkillsも同梱されます。
+
+- 調査・計画: `repository-discovery`、`change-planning`、`knowledge-usage`
+- 実装品質: `test-and-verify`、`code-review`、`secure-coding`
+- 開発運用: `azure-devops`、`commit-and-pr`、`submodule-sync`、`failure-triage`
+
+Skillsは標準手順を共有するための指示であり、権限制御ではありません。書き込み制御はpolicy、hooks、Azure DevOpsの認証・branch policyで行います。
+
 ## 前提条件
 
 ### 必須
