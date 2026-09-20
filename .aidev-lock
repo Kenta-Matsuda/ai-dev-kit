@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kitCommit": "9491efee4acdc2405beb7b0b4e849587072f0a16",
+  "kitVersion": null,
+  "appliedAt": "2026-09-20T15:06:22.937Z",
+  "files": {
+    ".claude/agents/agents-creator.md": "sha256:6dd89ba93f022bd59e3020f307ce07f8f76c9e79926f29e13eaed4b9bc7159d8",
+    ".claude/agents/issue-to-pr.md": "sha256:e33882d9d76127f15b03c2a8ec467ebc35085fa944c09bd10b509714fb9037df",
+    ".claude/agents/knowledge-builder.md": "sha256:7f66590d5ba050216f5dc909a0782f988a353355e79fbcf0f3f927b4a862b43d",
+    ".claude/agents/permission-setting.md": "sha256:812244ea73ba2313ee27623c8aaa398d6ce81d5e3d062c2886a3cf894e5b127e",
+    ".claude/agents/workflow-creator.md": "sha256:02307f11b35ec9136e2e69e6a1d9814cab924bb2948c394b0b48295ab5426067",
+    ".claude/settings.json": "sha256:e8d6bb493ab0d2b05eb45259a2fbbc12d954b129397d17a5cf66645383207a5a",
+    ".claude/skills/azure-devops/SKILL.md": "sha256:4d6e289233f8dfa8332fbb1f4b1b0e617c0518545dce6c9f220e1c88c687cc3f",
+    ".claude/skills/change-planning/SKILL.md": "sha256:250d3965d43e4117e35116cbd81838949cc550718c64c98b3838640bbbd89654",
+    ".claude/skills/code-review/SKILL.md": "sha256:2e588482c473d04072f58ee4e25323e124f321b63325bc4ad59bb6ce7be880c2",
+    ".claude/skills/commit-and-pr/SKILL.md": "sha256:2dfede817f5ae1a92cb0fad7ffcd95e6c7abc92367b92004bef5714afe565d90",
+    ".claude/skills/failure-triage/SKILL.md": "sha256:c780284f83a6681cf0932e2cd88376e8834e57dd08185e342b145fecd5bdc812",
+    ".claude/skills/knowledge-usage/SKILL.md": "sha256:214f9835255e76d5d490a6e24eac2f8ec741390aa51d3fca1db5a6cf225a1ab9",
+    ".claude/skills/repository-discovery/SKILL.md": "sha256:4220ade21f48b7e595da98cbcd2e6bacace349debe72e4cde36a75354d0513b0",
+    ".claude/skills/secure-coding/SKILL.md": "sha256:f5a3bcd5f4a801bad9ab6f05db7544d599a1316c5fb60351b0b2c6e8837b1715",
+    ".claude/skills/submodule-sync/SKILL.md": "sha256:ac0b0c01cdd4aca6a2590bd3341d9a511948c141aeb39e16707566acebd7533e",
+    ".claude/skills/test-and-verify/SKILL.md": "sha256:a3a1a8eb7c504fac108eebcedbae8035bb63a1e7dfcf411eaeabee88b5947f2a",
+    ".mcp.json": "sha256:ace70f76a003760bfd9739ac44019b54cb1970e83f67aa8f06600fd7f1db1c07",
+    "CLAUDE.md": "sha256:30c9b386926bc2a29c8cc955d4e7f9d1b5b6471973544216e9b0888a46354909"
+  }
+}

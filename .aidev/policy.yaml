@@ -1,0 +1,37 @@
+# .aidev/policy.yaml — 書き込み権限ポリシー
+#
+# このファイルは "aidev permission configure --approve" によってのみ配置されます。
+# エージェントは編集できません（protected に自分自身を含むため）。
+#
+# 生成元: aidev.yaml (package.name=voice-adventure)
+
+version: 1
+
+# 常に保護（このリストから削除しても CLI が強制的に再付与します）
+protected:
+  - ".claude/**"
+  - "CLAUDE.md"
+  - ".mcp.json"
+  - ".aidev/policy.yaml"
+  - ".aidev/leases/**"
+  - ".aidev/sync.lock"
+  - ".aidev-lock"
+  - ".aidev-ejected"
+  - "src/**/*.pem"
+  - "src/**/*.pfx"
+  - "src/**/secrets/**"
+  - "src/.env*"
+
+# PKG 本体。書き込みは issue-to-pr が取得する work lease 経由のみ。
+read_only:
+  - "src/**"
+
+# sync lease 保持中に限って書き込み可能
+writable_during_sync:
+  - "knowledge/**"
+
+# 通常時に書き込み可能
+writable:
+  - "knowledge/**"
+  - "workflows/**"
+  - "docs/**"

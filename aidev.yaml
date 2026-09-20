@@ -1,0 +1,71 @@
+# ai-dev-kit — PKG-specific configuration.
+# This is the only file where PKGs differ; everything under .claude/ is
+# byte-identical across all PKGs applying the same central-kit commit.
+version: 1
+
+package:
+  name: voice-adventure
+  include: ["src/packages/**", "src/docs/**", "src/scripts/**", "src/bug-reports/**", "README.md", "specs.md","tasks.md"]
+  exclude:
+    - "**/node_modules/**"
+    - "**/generated/**"
+    - "**/vendor/**"
+
+# Never read or written by the AI; also masked out of the Wiki.
+secrets_paths:
+  - "src/**/*.pem"
+  - "src/**/*.pfx"
+  - "src/**/secrets/**"
+  - "src/.env*"
+
+azure_devops:
+  organization: test
+  project: test
+  repository: voice-adventure
+  wrapper_repository: ws-langrush
+  # The PAT itself lives in this environment variable, never in this file.
+  auth_env: AZURE_DEVOPS_PAT
+  triage:
+    labels: ["ai-ready"]
+
+sync:
+  tracking_branch: main
+  auto_pr: true
+  remote_check_timeout_ms: 3000
+  remote_check_ttl_minutes: 60
+
+task:
+  state_backend: azure_devops
+  lease_ttl_minutes: 120
+
+knowledge:
+  max_files_per_dir: 20
+  subagent_concurrency: 4
+  inventory_shard_size: 2000
+  # Generation targets come from package.include. Evidence is the broader
+  # read-only research scope used to verify docs against implementation.
+  evidence:
+    include: ["src/**"]
+    # exclude defaults to package.exclude when omitted.
+  # Ceiling for an agent started with --agent (default 30 minutes).
+  agent_timeout_ms: 1800000
+
+model:
+  # The model aidev hands to an agent it starts itself (--agent). An alias
+  # (sonnet, opus, haiku), a pinned name (claude-opus-4-8), or a provider ID.
+  # Set it to "" to pass no --model at all and leave the choice to Claude
+  # Code. Override for a single run with --agent-model.
+  agent: fable
+  # Your interactive sessions are not set here: .claude/ is byte-identical
+  # across PKGs, so the kit default lives in .claude/settings.json and each
+  # developer overrides it in .claude/settings.local.json ("model": "opus").
+
+self_evolution:
+  enabled: true
+  cadence: weekly
+
+# Run after every edit by the PostToolUse hook. Commands run inside src/.
+# quality_gates:
+#   format: npm run format
+#   lint: npm run lint
+#   typecheck: npm run typecheck
