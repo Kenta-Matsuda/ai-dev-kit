@@ -1,0 +1,202 @@
+[[automation]]
+== Workflow、Task、CI/CD
+
+{project-name}には、review済みJavaScriptを実行するcustom workflow、既存task cacheを操作するCLI、wrapper整合性と定期同期のAzure Pipelines例が含まれます。それぞれの成熟度と信頼境界は異なります。
+
+[[automation-workflow]]
+=== custom workflow
+
+==== 作成から実行まで
+
+[source,bash]
+----
+aidev workflow new my-flow
+git diff -- workflows/my-flow/
+aidev workflow approve my-flow
+aidev workflow run my-flow
+----
+
+`new`が作る主なfileは次のとおりです。
+
+[cols="2,3,1",options="header"]
+|===
+|path |役割 |Git管理
+
+|`workflows/<name>/workflow.yaml`
+|目的、budget、step metadataなどの定義です。
+|する
+
+|`workflows/<name>/steps.js`
+|Node.jsで実行するstep実装です。
+|する
+
+|`workflows/<name>/approval.json`
+|review済みdefinitionとcodeのcontent hashです。
+|する
+
+|`workflows/<name>/runs/<timestamp>/log.txt`
+|実行logです。prompt、response、環境値を含み得ます。
+|しない
+
+|`workflows/<name>/runs/<timestamp>/checkpoint.json`
+|中断・再開用checkpointです。
+|しない
+|===
+
+nameは小文字英数字で始め、小文字英数字とdashだけを使い、64文字以内にします。
+
+==== 承認モデル
+
+`approve`は`workflow.yaml`と`steps.js`のhashを保存します。承認後にどちらかが変わると、再承認するまで`run`は拒否します。変更時はdiffをreviewし直します。
+
+[source,bash]
+----
+git diff -- workflows/my-flow/
+aidev workflow approve my-flow
+----
+
+==== 実行上限
+
+runnerは次を強制します。
+
+* 最大10 iterations
+* 最大60分
+* 同一failureが3回続いた場合に停止
+* runner経由commandに対するbasename allowlist
+* 同じapproved bytesに対応する未完checkpointだけを`--resume`可能
+
+一時的に、より小さい上限を指定できます。
+
+[source,bash]
+----
+aidev workflow run my-flow --max-iterations 3 --max-minutes 15
+----
+
+[WARNING]
+====
+workflowはsandboxではありません。`steps.js`は任意Node.js codeを実行できます。token数、USD上限、破壊操作前human approvalは、現時点では実消費量や実commandを基に強制停止する仕組みではありません。
+====
+
+`runs/**`をGit管理しないこと、低権限credentialを使うこと、実行環境を分離することが重要です。
+
+[[automation-task]]
+=== task操作
+
+`aidev task`は、既に`.aidev/tasks/*.json`に存在するtask metadataの操作を提供します。
+
+[source,bash]
+----
+aidev task list --all
+aidev task show <task-id>
+aidev task resume <task-id>
+aidev task advance <task-id>
+aidev task abandon <task-id> --reason "superseded"
+----
+
+現時点の制約は次のとおりです。
+
+* Work Item IDからtaskを初期作成する公開commandがありません。
+* 公開・監査可能なwork lease作成経路が未接続です。
+* 別端末でAzure DevOpsのWork ItemやPRからcacheを決定論的に再構築できません。
+* bulk `advance`はlocal cacheを入口にします。
+* `task.state_backend`は設定できますが、完成したstorage abstractionではありません。
+
+そのため、task commandを導入の中核automationとして扱わず、既存cacheの診断・進行補助として使用します。
+
+[[automation-check-pipeline]]
+=== PR整合性pipeline
+
+`pipelines/azure-pipelines-check.yml`は、main pushとPRでwrapperを検査する例です。
+
+主な動作は次のとおりです。
+
+. Ubuntu agentを使用します。
+. Node.js 20.xを準備します。
+. full historyとsubmoduleをcheckoutします。
+. wrapperにcommitされた`node ./cli/bin/aidev.js`を直接実行します。
+. `doctor`はadvisory、`check`はrequiredとして扱います。
+. JSON reportを常にartifactとしてpublishします。
+
+CIではinstallerを呼びません。wrapperにcommitされたCLI copyを使うことで、PRが実際に含むkit版を検査します。
+
+最小構成の考え方は次のとおりです。
+
+[source,yaml]
+----
+steps:
+  - checkout: self
+    submodules: recursive
+    fetchDepth: 0
+  - task: NodeTool@0
+    inputs:
+      versionSpec: 20.x
+  - script: node ./cli/bin/aidev.js doctor --json
+    continueOnError: true
+  - script: node ./cli/bin/aidev.js check --strict --json
+----
+
+実際にはrepository内の同梱pipelineを出発点にし、artifact publishとエラー処理を保持してください。
+
+[[automation-sync-pipeline]]
+=== 定期sync pipeline
+
+`pipelines/azure-pipelines-sync.yml`は、triggerとPR triggerを無効にし、毎日18:00 UTCにmainから実行する例です。
+
+主な処理は次のとおりです。
+
+. submoduleとpersisted Git credentialを含めてcheckoutします。
+. bot identityを設定します。
+. `knowledge status`で現在状態を確認します。
+. secret variableからPATを環境変数へ渡して`sync`します。
+. sync後に`check`を実行します。
+. cached taskがある場合に`task advance`を試みます。
+
+既定例は`sync --agent`ではなく`sync`を実行するため、structured stateだけを進め、prose pendingが残る可能性があります。CIでproseも生成する場合はClaude Code実行環境、認証、token cost、secret exposureを設計してから変更します。
+
+[NOTE]
+====
+Microsoft-hostedのfresh agentには通常`.aidev/tasks` cacheがありません。そのためscheduled pipeline末尾のbulk `task advance`はno-opになり得ます。現行実装はAzure DevOpsからtask cacheを再構築しません。
+====
+
+[[automation-credentials]]
+=== automation identity
+
+人間のPATをscheduled pipelineへ流用しないでください。専用botまたはservice identityを使い、次の最小権限を与えます。
+
+* PKG repositoryとtracking branchのread
+* wrapperの`ai/sync-*` branchへのpush
+* wrapper PRの作成・更新
+* 必要なWork Item/PR metadataのread
+
+次は与えません。
+
+* wrapperまたはPKG default branchへの直接push
+* branch policy bypass
+* PR auto-completeまたはauto-merge
+* 不要なproject管理権限
+* 他repositoryや他projectへの包括的write
+
+PATはsecret variableとして保存し、`azure_devops.auth_env`が指す名前へstep environmentで渡します。
+
+[[automation-branch-policy]]
+=== required checkとreview
+
+wrapperでは次を推奨します。
+
+. `aidev check --strict` pipelineをrequiredにします。
+. static assetとcontrol stateへの変更にrequired reviewerを設定します。
+. sync PRも人間がreviewし、submodule SHAとWiki差分を確認します。
+. botのpolicy bypassとauto-mergeを禁止します。
+. pipeline file自体にも保護reviewを要求します。
+
+保護対象には少なくとも`.claude/**`、`.aidev/**`、`.aidev-lock`、`CLAUDE.md`、`.mcp.json`を含めます。
+
+[[automation-failure]]
+=== automation失敗時
+
+* pipeline logへPATやMCP credentialが出ていないことを確認します。
+* sync failureでは`.aidev/sync.lock`とtarget/original SHAを確認します。
+* botがpush済みの場合はopen branchとPRを確認し、自動削除しません。
+* fresh checkoutで`aidev doctor`と`aidev check --strict`を再現します。
+* partial proseは`knowledge build --refresh --agent`で再開します。
+* force pushやpolicy bypassで復旧せず、通常PRとhuman reviewを使います。

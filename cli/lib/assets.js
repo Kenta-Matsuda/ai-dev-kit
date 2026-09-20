@@ -26,7 +26,7 @@ const STATIC_EXCLUDE = Object.freeze(['.claude/settings.local.json']);
  * The pristine source for everything under `.claude/`.
  *
  * `.claude/` is a *generated* tree: `aidev init` materialises it from here and
- * `aidev update` re-materialises it after pulling the kit forward. Keeping the
+ * `aidev kit apply` re-materialises it after pulling the kit forward. Keeping the
  * source separate from the destination is what makes both operations safe to
  * repeat -- the templates are never the thing an agent or a hook edits, so
  * there is always an unambiguous answer to "what should this file contain".
@@ -90,7 +90,7 @@ function listTemplateFiles(repoRoot) {
  * *conflict*, not an overwrite: kit-owned files are shared byte-identically
  * across every PKG, so a local edit belongs in a PR to the kit, and silently
  * discarding it here would destroy the only copy. `--force` resolves it the
- * way `aidev update` does, by taking the kit's version.
+ * way `aidev kit apply` does, by taking the kit's version.
  *
  * Stale files are pruned only when the previous lock proves they were
  * kit-generated. Anything a team added by hand is left untouched, because the
@@ -122,7 +122,7 @@ function materializeStaticAssets(repoRoot, { dryRun = false, force = false } = {
 
     if (current !== null) {
       // A file differing from the template is not yet evidence of a local edit.
-      // After `aidev update` pulls a newer kit, every changed file differs
+      // After `aidev kit apply` pulls a newer kit, every changed file differs
       // precisely because it is the previous generation. The lock separates the
       // two: matching its recorded hash means nobody has touched the file since
       // it was generated, so replacing it loses nothing. Only an unrecorded

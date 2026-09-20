@@ -79,7 +79,7 @@ Skillsは標準手順を共有するための指示であり、権限制御で�
 
 - Node.js **20以上**
 - Git
-- Claude Code
+- Claude Code **2.1.259以上**（hook exec formとheadless permission protocolを使用）
 - 中央ai-dev-kit、対象PKG、作成するラッパーリポジトリへのアクセス
 - Windows PowerShell、またはmacOS/Linux/WSLのbash
 
@@ -95,6 +95,33 @@ Pythonは不要です。workflowも現在はNode.jsで実行されます。
 
 ## 初回セットアップ
 
+CLI本体とwrapperは別のcheckoutとして管理します。CLIのlauncherをwrapperへ向けると、self-updateとwrapperの履歴を安全に分離できません。
+
+### 0. CLI専用のai-dev-kit checkoutを用意する
+
+一度だけ、移動・削除しない安定した場所へ中央kitをcloneし、`origin`を中央ai-dev-kitのまま維持してinstallerを実行します。
+
+Windows / PowerShell:
+
+```powershell
+git clone https://dev.azure.com/<org>/<project>/_git/ai-dev-kit "$env:LOCALAPPDATA\ai-dev-kit\source"
+Set-Location "$env:LOCALAPPDATA\ai-dev-kit\source"
+.\scripts\install.ps1
+aidev --version
+```
+
+macOS / Linux / WSL:
+
+```bash
+git clone https://dev.azure.com/<org>/<project>/_git/ai-dev-kit "$HOME/.local/share/ai-dev-kit"
+cd "$HOME/.local/share/ai-dev-kit"
+./scripts/install.sh
+export PATH="$HOME/.local/bin:$PATH"  # installerから案内された場合
+aidev --version
+```
+
+`aidev update`は、この専用checkoutの`origin/main`だけをfast-forwardします。実行時に開いているwrapper、その`origin`、wrapperの作業ツリーは更新しません。既存のlauncherがwrapperを指している場合は、この手順でinstallerを再実行してください。
+
 以下では、中央kitを`ai-dev-kit`、対象PKGを`my-pkg`、新しいラッパーを`my-pkg-ai-dev`とします。先にAzure DevOps上へ空の`my-pkg-ai-dev`リポジトリを作成してください。
 
 ### 1. 中央kitをラッパーの土台としてcloneする
@@ -108,7 +135,7 @@ git remote add origin https://dev.azure.com/<org>/<project>/_git/my-pkg-ai-dev
 ```
 
 - `origin`: PKG固有のラッパーリポジトリ
-- `upstream`: 中央ai-dev-kit。後から`aidev update`で取り込む更新元
+- `upstream`: 中央ai-dev-kit。後から`aidev kit apply`で管理対象を取り込む更新元
 
 ### 2. 対象PKGを`src/`へ追加する
 
@@ -119,24 +146,15 @@ git submodule update --init --recursive
 
 `src/`という配置はCLIの前提です。別名へ変更しないでください。
 
-### 3. `aidev` CLIを使えるようにする
+### 3. `aidev` CLIを確認する
 
-Windows / PowerShell:
-
-```powershell
-.\scripts\install.ps1
-aidev --version
-```
-
-macOS / Linux / WSL:
+CLIは手順0の専用checkoutからインストール済みです。wrapper内のinstallerは実行しません。
 
 ```bash
-./scripts/install.sh
-export PATH="$HOME/.local/bin:$PATH"  # installerから案内された場合
 aidev --version
 ```
 
-installerは、このcheckout内の`cli/bin/aidev.js`を呼ぶlauncherを作ります。セットアップ後にラッパーのディレクトリを移動・削除するとlauncherが動かなくなるため、その場合はinstallerを再実行してください。
+launcherはCLI専用checkout内の`cli/bin/aidev.js`を呼びます。そのcheckoutを移動・削除するとlauncherが動かなくなるため、その場合は専用checkoutからinstallerを再実行してください。
 
 ### 4. PATを現在のshellへ設定する
 
@@ -266,9 +284,11 @@ CLIの`generation targets`とqueue一覧は「今回ページを更新する起�
 
 生成対象外のsupporting evidence（たとえば実装コード）だけが変わった場合も、依存ページを取りこぼさないようgeneration targets全体が保守的に再queueされます。中断したpending targetも`--refresh`で再投入されます。
 
-既存ラッパーへ新しいknowledge-builder指示を反映するには中央kit更新後に`aidev update`を実行し、Claude Codeを再起動してください。`knowledge.evidence`を未記載でも既定の`src/**`が使われます。
+既存ラッパーへ新しいknowledge-builder指示を反映するには、`aidev update`でCLI本体を更新した後、wrapperで`aidev kit apply`を実行し、Claude Codeを再起動してください。`knowledge.evidence`を未記載でも既定の`src/**`が使われます。
 
 `claude`コマンドが見つからない場合、構造化部分までは生成されますがproseは残ります。`knowledge status`で`pending targets`を確認してください。
+
+agent実行中は15秒ごとに経過時間とcheckpoint進捗を表示します。Claudeの終了コードが0でも、今回queueしたtargetが`checkpoint.pendingPaths`から1件も減っていなければ成功とは扱わず、Claudeの最終回答を表示してexit 1にします。Windowsでは複数行promptをshell引数にせずstdinで渡すため、`--agent`や`--model`を含む起動optionが保持されます。
 
 ### 9. 環境を確認する
 
@@ -321,7 +341,7 @@ cd my-pkg-ai-dev
 git submodule update --init --recursive
 ```
 
-その後、各自のOS用installerを実行し、PATを各自のshellへ設定します。
+その後、各自が手順0と同様にCLI専用ai-dev-kit checkoutを用意してinstallerを実行し、PATを各自のshellへ設定します。wrapper内のinstallerは実行しません。
 
 ```bash
 aidev doctor
@@ -329,7 +349,7 @@ aidev check
 claude
 ```
 
-`.claude/settings.json`、Agents、Skills、hooksはClaude Codeのセッション開始時に読み込まれます。`aidev init`または`aidev update`後はClaude Codeを再起動してください。
+`.claude/settings.json`、Agents、Skills、hooksはClaude Codeのセッション開始時に読み込まれます。`aidev init`または`aidev kit apply`後はClaude Codeを再起動してください。
 
 ## 日常運用
 
@@ -380,18 +400,29 @@ aidev sync --abort   # 元のsrc SHAへ戻してleaseを解放
 
 `--dry-run`でもfetchによりremote-tracking refは更新されますが、作業ツリーは変更しません。`--agent`なしの`sync`は構造化Wikiだけを更新し、proseがpendingのままになることがあります。
 
-### 中央kitの更新を取り込む
+### ai-dev-kit CLI本体を更新する
 
-作業ツリーをcleanにして実行します。
+どのディレクトリから実行しても、launcherが指すCLI専用checkoutだけが対象です。
 
 ```bash
 aidev update --dry-run
 aidev update
+```
+
+固定のCLI専用checkoutの`origin/main`をfetchし、現在のcommitからfast-forwardできる場合だけcheckout全体を進めます。wrapperの`origin`と作業ツリーには触れません。CLI専用checkoutがdirty、`main`以外、detached、または分岐している場合は更新せず停止します。
+
+### 中央kitの管理対象をwrapperへ取り込む
+
+wrapperの作業ツリーをcleanにして実行します。
+
+```bash
+aidev kit apply --dry-run
+aidev kit apply
 git diff
 aidev check
 ```
 
-差分をレビューしてラッパー側へコミットし、Claude Codeを再起動します。ラッパー固有の`aidev.yaml`、`knowledge/`、`src/`は更新対象ではありません。`--force`はkit由来ファイルのローカル変更を破棄し得るため、通常運用では使わないでください。
+差分をレビューしてwrapper側へコミットし、Claude Codeを再起動します。wrapper固有の`aidev.yaml`、`knowledge/`、`src/`は更新対象ではありません。`--force`はkit由来ファイルのローカル変更を破棄し得るため、通常運用では使わないでください。
 
 ### policyを変更する
 
@@ -452,8 +483,9 @@ aidev sync --agent --agent-model opus
 | --- | --- |
 | `aidev init` | 初回セットアップ。先に`--dry-run`を推奨 |
 | `aidev doctor` | 環境・設定・認証変数・SHAの診断 |
-| `aidev plan` | `init` / `update` / `sync`の概算確認 |
-| `aidev update` | `upstream`から中央kitの管理対象を更新 |
+| `aidev plan` | `init` / `kit apply` / `sync`の概算確認 |
+| `aidev update` | CLI専用ai-dev-kit checkoutを`origin`からfast-forward更新 |
+| `aidev kit apply` | wrapperの`upstream`から中央kitの管理対象を適用 |
 | `aidev check` | ドリフト、policy、PKGとWikiの整合性を検査 |
 | `aidev knowledge build\|status` | LLM Wikiの生成・状態確認 |
 | `aidev permission configure\|reconfigure\|show` | policy候補、再生成、表示 |
@@ -493,7 +525,7 @@ PKGのremoteが手元より先行しているだけなら通常は警告で、�
 
 1. checkout時にsubmoduleを取得する
 2. Node.js 20を使用する
-3. installerを実行する
+3. wrapperにcommitされた`cli/bin/aidev.js`をNode.jsで直接実行する（同梱pipeline例はinstallerを呼ばない）
 4. `aidev check`をラッパーPRの必須チェックにする
 5. PATをsecret variableから環境変数へ渡す
 6. botへ既定branchへの直接pushや自動マージ権限を与えない
@@ -516,9 +548,10 @@ branch policyでは、少なくとも`.claude/**`、`.aidev/**`、`.aidev-lock`�
 
 | 症状 | 確認・対処 |
 | --- | --- |
-| `aidev`が見つからない | installerを再実行し、新しいshellを開く。POSIXでは`~/.local/bin`が`PATH`にあるか確認 |
+| `aidev`が見つからない | CLI専用ai-dev-kit checkoutからinstallerを再実行し、新しいshellを開く。POSIXでは`~/.local/bin`が`PATH`にあるか確認 |
+| `aidev update`がwrapperを検出して停止 | launcherがwrapperを指している。手順0の専用checkoutからinstallerを再実行する |
 | `init`が`.claude/`の衝突で停止 | `--dry-run`と`git diff`で確認。必要な変更は中央kitへ移し、安易に`--force`を使わない |
-| `check`がexit 2 | kit管理ファイルが`.aidev-lock`と不一致。`aidev update --dry-run`で差分を確認 |
+| `check`がexit 2 | kit管理ファイルが`.aidev-lock`と不一致。`aidev kit apply --dry-run`で差分を確認 |
 | `check`がexit 3 | `aidev permission show`を実行し、未配置なら候補生成・承認を行う |
 | `check`がexit 4 | `src`と`knowledge/manifest.json`のSHAが不一致。`aidev sync`、または中断中なら`--resume` / `--abort` |
 | `pending targets`が残る | `aidev knowledge build --refresh --agent`を実行し、Claude Codeの利用可否も確認 |

@@ -1,0 +1,227 @@
+[[operations]]
+== 日常運用
+
+AI作業はwrapper repositoryをrootとして開始します。対象PKGだけをcloneした場所では、共通Wiki、hooks、policyが読み込まれません。
+
+[[operations-start-session]]
+=== sessionを開始する
+
+作業前にwrapperとsubmoduleを更新し、整合性を確認します。
+
+[source,bash]
+----
+git pull
+git submodule update --init --recursive
+aidev check
+claude
+----
+
+`aidev check`が非0の場合は、終了コードとメッセージを確認してから作業します。remote aheadだけで`submoduleSha == knowledgeSha`なら通常はwarningですが、CIや厳格な作業開始条件には`--strict`を使用できます。
+
+[WARNING]
+====
+現行の`issue-to-pr`はエンドツーエンドではありません。Work Item IDからwork leaseとtaskを作成する公開CLI経路がないため、「Work Itemを渡せばどの端末からでも自動再開できる」という前提で運用しないでください。
+====
+
+[[operations-sync]]
+=== PKGのtracking branchへ追従する
+
+worktreeをcleanにし、最初に状態と変更予定を確認します。
+
+[source,bash]
+----
+aidev knowledge status
+aidev sync --dry-run
+----
+
+proseを含めて同期する場合は次を実行します。
+
+[source,bash]
+----
+aidev sync --agent
+aidev check
+----
+
+`sync --agent`の主な処理は次のとおりです。
+
+. `src/origin/<tracking_branch>`をfetchします。
+. branch先端、または到達可能な`--to` SHAをtargetに決定します。
+. 旧inventoryとtarget treeからchange setを計算します。
+. sync leaseを取得します。
+. `src`をtargetへdetached checkoutします。
+. inventory shard、manifest、orphan pageを更新します。
+. local 3SHAとstatic driftを検査します。
+. sync leaseを解放します。
+. `--agent`指定時だけknowledge-builderを起動します。
+. `src` gitlinkと`knowledge/`だけをcommit対象にします。
+. 条件が揃えば`origin`へ同期branchをpushし、wrapper PRを作成します。
+
+branch名は`ai/sync-<targetSha先頭12文字>`です。新targetでsource branchが変わる場合は、新しいPRを作成して旧PRにsuperseded注記を付けることがあります。旧PRを自動closeせず、PRを自動mergeしません。
+
+==== PRを作成せずに確認する
+
+[source,bash]
+----
+aidev sync --no-pr --agent
+----
+
+`--no-pr`はworktreeまたはlocal branchで結果を確認する場合に使用します。`sync.auto_pr: false`、`wrapper_repository`未設定、PATなし、push権限不足の場合も、自動PRを作成せず成果がローカルに残ることがあります。
+
+==== 特定SHAへ同期する
+
+[source,bash]
+----
+aidev sync --to <commit-sha> --dry-run
+aidev sync --to <commit-sha> --agent
+----
+
+`--to`は、fetch済みtracking branch先端から到達可能なcommitだけを受け付けます。agentの一時branch先端や、未merge PRのSHAをそのまま同期対象にはできません。
+
+==== `--agent`を付けない同期
+
+`aidev sync`だけを実行すると、structured Wikiはtarget SHAへ進みますが、proseの`pendingPaths`が残る場合があります。prose完全性を必須にする場合は`--agent`を使用し、その後`aidev check --strict`を実行します。
+
+==== dry-runの副作用
+
+[NOTE]
+====
+`--dry-run`はworktreeを書き換えませんが、`sync`、`update`、`kit apply`はfetchによりremote-tracking refを更新し得ます。状態確認commandはcacheを更新することがあります。「networkも含めて完全に無変更」という意味ではありません。
+====
+
+[[operations-sync-recovery]]
+=== 中断したsyncを復旧する
+
+失敗時は、半適用状態を隠さないため`.aidev/sync.lock`が残ることがあります。表示されたoriginal SHA、target SHA、現在の`src`、`knowledge/`差分を確認します。
+
+[cols="1,2,3",options="header"]
+|===
+|状況 |選択 |command
+
+|同じtargetへの処理を続ける
+|resume
+|`aidev sync --resume`
+
+|誤ったtarget、不要な同期、差分を破棄して元へ戻す
+|abort
+|`aidev sync --abort`
+
+|まず内容だけ確認する
+|dry-runまたはcheck-only
+|`aidev sync --dry-run`、`aidev sync --check-only`
+|===
+
+`--abort`はleaseに記録されたoriginal SHAへ`src`を戻し、leaseを解放します。ローカル作業が混ざっていないことを確認してから使用してください。期限切れleaseを無条件に再利用しません。
+
+[[operations-update-cli]]
+=== CLI本体を更新する
+
+`aidev update`は、現在のdirectoryではなくlauncherが参照するCLI専用checkoutだけを更新します。
+
+[source,bash]
+----
+aidev update --dry-run
+aidev update
+----
+
+更新条件は次のとおりです。
+
+* CLI専用checkoutがcleanである。
+* branchが`main`でdetached HEADではない。
+* 中央repositoryが`origin`である。
+* 現在commitから`origin/main`へfast-forwardできる。
+
+条件を満たさない場合は変更せず停止します。wrapperの`origin`、wrapper worktree、`src/`は更新しません。
+
+[[operations-kit-apply]]
+=== 中央kitをwrapperへ反映する
+
+wrapperのworktreeをcleanにして実行します。
+
+[source,bash]
+----
+aidev kit apply --dry-run
+aidev kit apply
+git diff
+aidev check
+----
+
+既定の更新元は`upstream/main`です。必要に応じて`--remote`と`--ref`を指定できます。
+
+[source,bash]
+----
+aidev kit apply --remote upstream --ref main --dry-run
+----
+
+現行の対象は`templates/claude-assets`、`CLAUDE.md`、`.mcp.json`、`cli`、`scripts`です。wrapper固有の`aidev.yaml`、`src/`、`knowledge/`は更新しません。また、`package.json`、`pipelines/`、`.gitignore`、`maintainer-docs/`、このUser Guideは現行の`kit apply`対象外です。
+
+[CAUTION]
+====
+`kit apply --force`はkit由来ファイルのローカル差分を破棄し得ます。通常更新には使わず、中央kitへ戻すべき変更がないことを確認した復旧時だけ使用してください。
+====
+
+適用後はdiffをwrapperにcommitし、Claude Codeを再起動します。
+
+[[operations-policy-change]]
+=== policyを変更する
+
+`aidev.yaml`の`secrets_paths`などを変更した後、candidateを再生成します。
+
+[source,bash]
+----
+aidev permission reconfigure
+# .aidev/policy.yamlと.aidev/policy.candidate.yamlを比較
+aidev permission reconfigure --approve
+----
+
+保護を弱める差分は通常の`--approve`だけでは拒否されます。組織のreviewを経た後、意図した変更である場合だけ`--approve --force`を使用します。
+
+[[operations-model]]
+=== agent modelを一時変更する
+
+[source,bash]
+----
+aidev knowledge build --agent --agent-model opus
+aidev sync --agent --agent-model opus
+----
+
+継続的な既定値は`aidev.yaml`の`model.agent`、個人の対話sessionは`.claude/settings.local.json`で変更します。この2つは別設定です。
+
+[[operations-offline]]
+=== offlineまたはremote障害時
+
+remote stateを取得できなくても、`submoduleSha == knowledgeSha`ならlocal作業を無条件には停止しません。最後に確認したcacheと時刻を表示します。remote確認を避ける対応commandでは`--no-remote`を使用できます。
+
+[source,bash]
+----
+aidev check --no-remote
+aidev knowledge status --no-remote
+aidev plan --no-remote
+----
+
+remote aheadの有無は確認できないため、接続復旧後に通常の`aidev check`を再実行してください。
+
+[[operations-eject]]
+=== kit管理から外す
+
+[CAUTION]
+====
+`eject`はpolicy、lock、hook wiringなどの制御面を削除する高影響操作です。branch policyやCIも別途外す必要があります。必ずbackupとhuman reviewを行ってください。
+====
+
+有効なleaseを解消し、最初に変更予定を確認します。
+
+[source,bash]
+----
+aidev eject --dry-run
+aidev eject --yes
+----
+
+既定ではcontrol stateとstatic assetを除去し、`src/`、`knowledge/`、`aidev.yaml`、`workflows/`を残し、`.aidev-ejected` markerを作成します。static assetも残したい場合は`--keep-assets`を指定します。
+
+[source,bash]
+----
+aidev eject --dry-run --keep-assets
+aidev eject --yes --keep-assets
+----
+
+`--force`は有効leaseなどの保護を越える可能性があるため、復旧手順と影響を理解した場合だけ使用します。ejected repositoryでは`aidev check`は管理対象なしとして0を返します。再採用する場合は`aidev init`を実行し、marker削除後にpolicyとWikiを再構成します。

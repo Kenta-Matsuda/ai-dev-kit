@@ -12,6 +12,25 @@ const fs = require('fs');
 const path = require('path');
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const REPOSITORY_ENV_KEYS = new Set([
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+]);
+
+function sanitizedGitEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (REPOSITORY_ENV_KEYS.has(key.toUpperCase())) delete env[key];
+  }
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.GIT_OPTIONAL_LOCKS = '0';
+  return env;
+}
 
 function isSha(s) {
   return typeof s === 'string' && SHA_RE.test(s.trim());
@@ -37,7 +56,7 @@ function run(args, opts = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: opts.timeoutMs || 120000,
       maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
+      env: sanitizedGitEnv(),
     });
     return { ok: true, stdout: out.toString().trim(), stderr: '', status: 0 };
   } catch (err) {
@@ -59,6 +78,23 @@ function must(args, opts = {}) {
 
 function isRepo(cwd) {
   return run(['rev-parse', '--git-dir'], { cwd }).ok;
+}
+
+function canonicalPath(value) {
+  try { return fs.realpathSync.native(path.resolve(value)); }
+  catch { return path.resolve(value); }
+}
+
+/** The canonical worktree root Git resolves for cwd, or null outside a worktree. */
+function repoTopLevel(cwd) {
+  const r = run(['rev-parse', '--show-toplevel'], { cwd });
+  return r.ok && r.stdout ? canonicalPath(r.stdout) : null;
+}
+
+function samePath(left, right) {
+  const a = canonicalPath(left);
+  const b = canonicalPath(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 /**
@@ -186,11 +222,13 @@ function lsTreeBlobs(cwd, ref = 'HEAD') {
 
 function hasUncommittedChanges(cwd) {
   const r = run(['status', '--porcelain'], { cwd });
-  return r.ok ? r.stdout.length > 0 : false;
+  // Callers use this as a destructive-operation guard, so an unreadable status
+  // must fail closed rather than pretending the worktree is clean.
+  return r.ok ? r.stdout.length > 0 : true;
 }
 
 module.exports = {
-  run, must, isRepo, findRepoRoot, isSha, assertSafeRef,
+  run, must, isRepo, repoTopLevel, samePath, findRepoRoot, isSha, assertSafeRef,
   headSha, currentBranch, submoduleSha, submoduleWorktreeSha,
   remoteSha, fetch, revParse, commitExists, isAncestor,
   lsTreeBlobs, hasUncommittedChanges,

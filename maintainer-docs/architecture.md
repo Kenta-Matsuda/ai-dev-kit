@@ -20,7 +20,7 @@ wrapper repository
 
 この分離により、PKG repositoryへAI環境や生成Wikiを混在させず、wrapper PRでsubmodule pointerとWikiを同時にレビューできます。
 
-中央kitのremoteは`upstream`、PKG固有wrapperは`origin`として保持します。`aidev update`はupstreamからkit管理対象を取り込み、`aidev sync`はoriginへ同期branchをpushします。
+CLI専用checkoutの`origin`は中央ai-dev-kit、wrapperの中央kit remoteは`upstream`、PKG固有wrapperは`origin`として保持します。`aidev update`はCLI専用checkoutだけをfast-forwardし、`aidev kit apply`はwrapperの`upstream`からkit管理対象を取り込み、`aidev sync`はwrapperの`origin`へ同期branchをpushします。
 
 ## 2. static assetと実行時解決
 
@@ -32,11 +32,11 @@ wrapper repository
 - `CLAUDE.md`
 - `.mcp.json`
 
-`.claude/**`の正本は`templates/claude-assets/**`です。`aidev init`と`aidev update`が実体化します。`CLAUDE.md`と`.mcp.json`はclone時から存在します。
+`.claude/**`の正本は`templates/claude-assets/**`です。`aidev init`と`aidev kit apply`が実体化します。`CLAUDE.md`と`.mcp.json`はclone時から存在します。
 
 `.aidev-lock`はkit commitとstatic fileごとのSHA-256を保持します。`aidev check`は実ファイルとlockを比較し、変更・欠落をdriftとしてexit 2にします。個人用`.claude/settings.local.json`はstatic assetとdrift検出から除外します。
 
-wrapperでstatic assetを直接変更せず、変更は中央kitへ戻します。`update --force`はローカル差分を捨てる復旧手段であり、通常更新の前提ではありません。
+wrapperでstatic assetを直接変更せず、変更は中央kitへ戻します。`kit apply --force`はローカル差分を捨てる復旧手段であり、通常更新の前提ではありません。
 
 ### 実行時解決
 
@@ -227,6 +227,10 @@ generation-target inventoryのblob hashにより、旧commit objectがなくて�
 
 inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootには必ず`knowledge/index.md`を置き、初回はCLIがstubを作成します。実際のprose構造はagentが維持します。大きいagent planはgitignore済み`knowledge/.cache/agent-task-*.json`へ保存され、`generationTargets`と`evidence.paths`を別配列で保持します。
 
+Claude launcherは自然言語promptをargvではなくstdin textとして渡します。特にWindowsで`cmd.exe`を経由した場合、空白・改行・shell metacharacterによってpromptや後続の`--agent` / `--model`が分割されるのを防ぐためです。native `claude.exe`はPATH上の絶対pathへ解決してshellなしで起動し、legacy `.cmd`は明示的な`cmd.exe` argvで起動します。timeout時はWindowsのprocess tree全体を停止し、子Claudeだけが課金・書き込みを継続する状態を避けます。headless実行は`acceptEdits`と`permission-prompts none`を使用し、編集を進めつつprojectのdeny ruleとPreToolUse guardを維持します。これらのprotocolを備えるClaude Code 2.1.259以上を起動前に検査します。
+
+subprocessのexit 0はtransport成功にすぎません。呼び出し側はagent終了後にmanifestを再読込し、target SHA、checkout SHA、`checkpoint.pendingPaths`のarray形状を検証してから、今回queueしたpathが除かれた件数を数えます。全件除去で完了、一部除去でpartial、1件も減らなければno-progress failure、manifest/checkpoint欠落やtarget変更はcheckpoint failureです。同一targetでcheckpointだけが壊れた場合はpre-agent queueをatomicに復元し、target/checkoutが変わった場合は復元もsync publicationも行いません。partial/no-progress/checkpoint failureはClaude最終回答の短い診断を残してexit 1にします。human modeでは15秒ごとに経過時間とcheckpoint件数を表示します。
+
 ### hand edit
 
 `knowledge build`は手編集を検出すると`--force`なしで停止します。一方、現行`sync`は警告を表示した後も処理を続ける経路があります。この不一致が解消されるまで、利用者にはWikiを手編集しないよう案内し、sync前のdiff確認を求めます。
@@ -242,7 +246,7 @@ inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootに�
 | generation target外のsource変更 | evidence fingerprint差分で全generation targetを保守的に再queue |
 | docs-only generation target | `src/**` evidenceを別途渡し、実装・test・config・CIを横断調査 |
 | `--scope`付きbuild | generation targetだけ絞り、repository evidenceは維持 |
-| agent中断・失敗 | 既存`pendingPaths`を`--refresh`時に再queue |
+| agent中断・失敗・無進捗 | subprocess結果とcheckpoint減少を検証し、既存`pendingPaths`を`--refresh`時に再queue |
 | source削除 | orphan pageを削除し、parent indexをstaleへ記録 |
 | excludeだけの変更 | prose対象なしでknowledge SHAを前進可能 |
 | secret path変更 | 本文を読まずmasked recordとして扱う |
@@ -256,16 +260,16 @@ inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootに�
 
 同梱`.claude/settings.json`は次のeventを`aidev`へ接続します。
 
-| event | command | 現在の責務 |
+| event | exec-form args | 現在の責務 |
 | --- | --- | --- |
-| SessionStart | `aidev hook session-start` | 3SHAとremote freshnessの表示 |
-| PreToolUse | `aidev hook guard-write` | path、policy、leaseによるallow/deny |
-| PostToolUse | `aidev hook quality-gate` | configured gate実行 |
-| Stop | `aidev hook session-stop` | pending refreshとevolution観測のlocal記録 |
+| SessionStart | `node` + `[…/aidev.js, hook, session-start]` | 3SHAとremote freshnessの表示 |
+| PreToolUse | `node` + `[…/aidev.js, hook, guard-write]` | path、policy、leaseによるallow/deny |
+| PostToolUse | `node` + `[…/aidev.js, hook, quality-gate]` | configured gate実行 |
+| Stop | `node` + `[…/aidev.js, hook, session-stop]` | pending refreshとevolution観測のlocal記録 |
+
+各`args[0]`は`${CLAUDE_PROJECT_DIR}/cli/bin/aidev.js`です。Claude Codeのexec formでplaceholderを絶対pathへ置換し、session cwdやshell tokenizationに依存せずwrapper内のCLIを起動します。これにより、Windowsでhook shellがGit BashになってもPowerShell側でだけ解決できるglobal `aidev`のPATHに依存しません。
 
 重い処理をhook内で同期実行しない設計ですが、現時点でpending refresh queueを消費するbackground runnerはありません。Stop hookを「自動でWiki更新まで完了する」と説明してはいけません。
-
-Windows/POSIX差をsettings側へ持ち込まないため、hook commandは`aidev`だけです。
 
 ## 9. workflow runner
 

@@ -1,129 +1,168 @@
 'use strict';
 /**
- * `aidev update` — pull the central kit forward.
+ * `aidev update` — fast-forward the dedicated ai-dev-kit checkout that
+ * provides the running CLI.
  *
- * Static assets are replaced wholesale from `upstream`, which is safe only
- * because they are byte-identical across PKGs by construction: nothing
- * PKG-specific lives in them, so nothing PKG-specific can be lost. Local edits
- * to kit-owned files are a drift error, not a merge conflict — they belong in
- * a PR to the central kit.
- *
- * `.claude/` is not fetched directly. Upstream carries the templates it is
- * generated from, so the update checks out those and rebuilds the tree, which
- * is also how a file the kit has stopped shipping gets removed.
+ * The target is derived from this executable's location, never from the
+ * caller's current wrapper repository. A wrapper checkout is rejected rather
+ * than risking a merge from its PKG-specific `origin`.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { EXIT, AidevError } = require('../lib/errors');
 const gitMod = require('../lib/git');
-const assets = require('../lib/assets');
 const ui = require('../lib/ui');
 
-const FLAGS = { 'dry-run': 'boolean', ref: 'string', remote: 'string', json: 'boolean', force: 'boolean' };
+const FLAGS = { 'dry-run': 'boolean', json: 'boolean' };
+const REMOTE = 'origin';
+const REF = 'main';
+const WRAPPER_MARKERS = ['aidev.yaml', '.aidev-lock', '.aidev-ejected'];
+
+function readVersionAt(installRoot, sha) {
+  const shown = gitMod.run(['show', `${sha}:package.json`], { cwd: installRoot });
+  if (!shown.ok) return null;
+  try {
+    const pkg = JSON.parse(shown.stdout);
+    return typeof pkg.version === 'string' ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function wrapperEvidence(installRoot, remotes) {
+  const marker = WRAPPER_MARKERS.find((name) => fs.existsSync(path.join(installRoot, name)));
+  if (marker) return marker;
+  if (remotes.includes('origin') && remotes.includes('upstream')) return 'origin + upstream remotes';
+  return null;
+}
+
+function assertClean(installRoot) {
+  const status = gitMod.run(['status', '--porcelain'], { cwd: installRoot });
+  if (!status.ok) {
+    throw new AidevError(`could not inspect the dedicated ai-dev-kit checkout: ${status.stderr}`);
+  }
+  if (status.stdout) {
+    throw new AidevError(
+      `the dedicated ai-dev-kit checkout has uncommitted changes (${installRoot}). ` +
+      'Commit or stash them before updating the CLI.');
+  }
+}
 
 function run(ctx) {
-  const { repoRoot, flags } = ctx;
-  const remote = flags.remote || 'upstream';
-  const ref = flags.ref || 'main';
+  const { installRoot, flags } = ctx;
   const dryRun = !!flags['dry-run'];
+  const json = !!flags.json;
 
-  if (!gitMod.isRepo(repoRoot)) throw new AidevError(`${repoRoot} is not a git repository`);
-
-  const remotes = gitMod.run(['remote'], { cwd: repoRoot });
-  if (!remotes.ok || !remotes.stdout.split('\n').includes(remote)) {
+  if (!installRoot || !gitMod.isRepo(installRoot)) {
     throw new AidevError(
-      `remote "${remote}" is not configured. The central kit should be kept as "upstream":\n` +
-      '    git remote rename origin upstream\n' +
-      '    git remote add origin <wrapper-repo-url>');
+      'the running CLI is not backed by a git checkout. Reinstall ai-dev-kit from a dedicated clone.');
   }
 
-  // A dirty working tree plus a wholesale asset replacement loses work.
-  if (!flags.force && gitMod.hasUncommittedChanges(repoRoot)) {
+  const topLevel = gitMod.repoTopLevel(installRoot);
+  if (!topLevel || !gitMod.samePath(topLevel, installRoot)) {
     throw new AidevError(
-      'the working tree has uncommitted changes. Commit or stash them first, or pass --force ' +
-      'if you are certain they do not touch kit-owned files.');
+      `the CLI directory is not the root of its Git checkout (${installRoot}). ` +
+      'Reinstall from a dedicated ai-dev-kit clone.');
   }
 
-  ui.heading(`aidev update${dryRun ? ' (dry run)' : ''}`);
-
-  const fetched = gitMod.fetch(repoRoot, remote, ref);
-  if (!fetched.ok) throw new AidevError(`failed to fetch ${remote}/${ref}: ${fetched.stderr}`);
-  const targetSha = gitMod.revParse(repoRoot, `${remote}/${ref}`);
-  if (!targetSha) throw new AidevError(`could not resolve ${remote}/${ref}`);
-
-  const before = assets.hashStaticFiles(repoRoot);
-  const drift = assets.detectDrift(repoRoot);
-  if (!drift.noLock && !drift.ok && !flags.force) {
-    ui.warn('local kit-owned files already differ from .aidev-lock:');
-    for (const m of drift.modified) ui.dim(`    modified: ${m.path}`);
-    for (const m of drift.missing) ui.dim(`    missing:  ${m}`);
-    ui.dim('    "aidev update" would overwrite these. Send intended changes to the central kit as a PR,');
-    ui.dim('    or pass --force to discard them.');
-    if (!dryRun) return EXIT.DRIFT;
+  const remoteResult = gitMod.run(['remote'], { cwd: installRoot });
+  if (!remoteResult.ok) throw new AidevError(`could not inspect CLI remotes: ${remoteResult.stderr}`);
+  const remotes = remoteResult.stdout.split('\n').filter(Boolean);
+  const evidence = wrapperEvidence(installRoot, remotes);
+  if (evidence) {
+    throw new AidevError(
+      `the aidev launcher points at a wrapper checkout (${installRoot}; detected ${evidence}).\n` +
+      '    aidev update never updates a wrapper or its origin. Clone ai-dev-kit into a separate, stable\n' +
+      '    directory and run that clone\'s scripts/install.ps1 or scripts/install.sh, then retry.');
+  }
+  if (!remotes.includes(REMOTE)) {
+    throw new AidevError(
+      `remote "${REMOTE}" is not configured in the CLI checkout (${installRoot}). ` +
+      'The dedicated ai-dev-kit clone must keep the central repository as "origin".');
   }
 
-  // Preview what the incoming commit changes among kit-owned paths. `.claude/`
-  // is absent here on purpose: it is generated from the templates below, so the
-  // templates are what upstream actually carries.
-  const KIT_PATHS = [assets.TEMPLATE_ROOT, 'CLAUDE.md', '.mcp.json', 'cli', 'scripts'];
-  const diff = gitMod.run(['diff', '--name-only', 'HEAD', targetSha, '--', ...KIT_PATHS],
-    { cwd: repoRoot });
-  const changed = diff.ok ? diff.stdout.split('\n').filter(Boolean) : [];
+  const branch = gitMod.currentBranch(installRoot);
+  if (!branch) {
+    throw new AidevError(
+      'the dedicated ai-dev-kit checkout is detached. Check out main before running aidev update.');
+  }
+  if (branch !== REF) {
+    throw new AidevError(
+      `the dedicated ai-dev-kit checkout is on branch "${branch}"; expected "${REF}". ` +
+      'Switch to main before updating the CLI.');
+  }
+  assertClean(installRoot);
 
-  if (changed.length === 0) {
-    ui.ok(`already up to date with ${remote}/${ref} (${targetSha.slice(0, 7)}) for kit-owned files.`);
-  } else {
-    ui.info(`${changed.length} kit-owned file(s) change in ${targetSha.slice(0, 7)}:`);
-    for (const c of changed.slice(0, 40)) ui.dim(`    ${c}`);
+  if (!json) ui.heading(`aidev update${dryRun ? ' (dry run)' : ''}`);
+
+  const fetched = gitMod.fetch(installRoot, REMOTE, REF);
+  if (!fetched.ok) throw new AidevError(`failed to fetch CLI update from ${REMOTE}/${REF}: ${fetched.stderr}`);
+
+  const currentSha = gitMod.headSha(installRoot);
+  const targetSha = gitMod.revParse(installRoot, `${REMOTE}/${REF}`);
+  if (!currentSha) throw new AidevError('could not resolve the current ai-dev-kit checkout commit');
+  if (!targetSha) throw new AidevError(`could not resolve ${REMOTE}/${REF} in the CLI checkout`);
+
+  const currentVersion = readVersionAt(installRoot, currentSha);
+  const targetVersion = readVersionAt(installRoot, targetSha);
+  const baseResult = {
+    ok: true,
+    dryRun,
+    updated: false,
+    installRoot,
+    remote: REMOTE,
+    ref: REF,
+    currentSha,
+    targetSha,
+    currentVersion,
+    targetVersion,
+    changed: [],
+  };
+
+  if (currentSha === targetSha) {
+    if (json) ui.json(baseResult);
+    else ui.ok(`ai-dev-kit CLI is already current at ${targetSha.slice(0, 7)}${targetVersion ? ` (v${targetVersion})` : ''}.`);
+    return EXIT.OK;
+  }
+
+  if (!gitMod.isAncestor(installRoot, currentSha, targetSha)) {
+    throw new AidevError(
+      `cannot fast-forward the CLI checkout from ${currentSha.slice(0, 7)} to ${targetSha.slice(0, 7)}.\n` +
+      '    The checkout has diverged from origin/main; resolve it manually or reinstall from a clean clone.');
+  }
+
+  const diff = gitMod.run(['diff', '--name-only', currentSha, targetSha], { cwd: installRoot });
+  if (!diff.ok) throw new AidevError(`failed to inspect the CLI update: ${diff.stderr}`);
+  const changed = diff.stdout.split('\n').filter(Boolean);
+  const result = { ...baseResult, changed };
+
+  if (!json) {
+    ui.info(`${changed.length} file(s) change in ai-dev-kit ${currentSha.slice(0, 7)} -> ${targetSha.slice(0, 7)}:`);
+    for (const file of changed.slice(0, 40)) ui.dim(`    ${file}`);
     if (changed.length > 40) ui.dim(`    … and ${changed.length - 40} more`);
   }
 
   if (dryRun) {
-    if (flags.json) ui.json({ ok: true, dryRun: true, targetSha, changed });
+    if (json) ui.json(result);
     return EXIT.OK;
   }
 
-  if (changed.length > 0) {
-    // checkout limits the update to kit-owned paths; aidev.yaml, knowledge/
-    // and the submodule pointer are wrapper-owned and must survive untouched.
-    const co = gitMod.run(['checkout', targetSha, '--', ...KIT_PATHS], { cwd: repoRoot });
-    if (!co.ok) throw new AidevError(`failed to apply kit files: ${co.stderr}`);
-    ui.ok(`applied kit files from ${targetSha.slice(0, 7)}`);
+  if (gitMod.currentBranch(installRoot) !== branch || gitMod.headSha(installRoot) !== currentSha) {
+    throw new AidevError('the CLI checkout branch or commit changed while the update was being prepared; retry the command');
   }
+  assertClean(installRoot);
 
-  // The new templates are on disk; `.claude/` still holds the previous
-  // generation until it is rebuilt from them. --force here matches the flag's
-  // meaning above: discard local edits to kit-owned files.
-  const mat = assets.materializeStaticAssets(repoRoot, { force: !!flags.force });
-  if (mat.noTemplates) {
-    throw new AidevError(
-      `${assets.TEMPLATE_ROOT}/ is missing after the update; ${remote}/${ref} looks incomplete.`);
-  }
-  if (mat.conflicts.length > 0) {
-    ui.warn(`${mat.conflicts.length} kit-owned file(s) differ from the kit copy:`);
-    for (const c of mat.conflicts) ui.dim(`    ${c.path} — ${c.reason}`);
-    ui.dim('    Pass --force to replace them with the kit version.');
-    return EXIT.DRIFT;
-  }
-  const rebuilt = mat.created.length + mat.updated.length;
-  if (rebuilt > 0 || mat.pruned.length > 0) {
-    ui.ok(`rebuilt .claude/ (${rebuilt} written, ${mat.pruned.length} removed)`);
-  } else {
-    ui.ok('.claude/ is already current');
-  }
+  const merged = gitMod.run(['merge', '--ff-only', '--no-edit', targetSha], { cwd: installRoot });
+  if (!merged.ok) throw new AidevError(`failed to fast-forward the CLI checkout: ${merged.stderr}`);
 
-  const lock = assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: targetSha }));
-  ui.ok(`updated .aidev-lock (${Object.keys(lock.files).length} file hashes)`);
-
-  const after = assets.hashStaticFiles(repoRoot);
-  const touched = Object.keys(after).filter((k) => before[k] !== after[k]);
-  if (flags.json) ui.json({ ok: true, targetSha, changed, touched });
+  const updatedResult = { ...result, updated: true };
+  if (json) ui.json(updatedResult);
   else {
-    ui.out('');
-    ui.info('review the diff and commit: git add -A && git commit -m "chore: update ai-dev-kit"');
+    ui.ok(`updated ai-dev-kit CLI to ${targetSha.slice(0, 7)}${targetVersion ? ` (v${targetVersion})` : ''}.`);
+    ui.info('The next aidev invocation will use the updated CLI code.');
   }
   return EXIT.OK;
 }
 
-module.exports = { run, FLAGS, summary: '中央kitの更新を取り込む' };
+module.exports = { run, FLAGS, summary: 'ai-dev-kit CLI 本体を更新する' };

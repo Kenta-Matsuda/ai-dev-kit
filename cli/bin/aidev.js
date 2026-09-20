@@ -4,7 +4,7 @@
  * `aidev` — the single entry point every Skill, hook and pipeline invokes.
  *
  * Responsibilities, deliberately few:
- *   - locate the wrapper repository root
+ *   - locate the wrapper repository root and this CLI's installation root
  *   - route one- and two-word commands to cli/commands/<name>.js
  *   - parse argv against that command's own FLAGS declaration
  *   - translate a thrown AidevError into its documented exit code
@@ -24,12 +24,13 @@ const gitMod = require('../lib/git');
 const ui = require('../lib/ui');
 
 const COMMANDS = [
-  'init', 'update', 'check', 'doctor', 'plan', 'sync',
+  'init', 'update', 'kit', 'check', 'doctor', 'plan', 'sync',
   'knowledge', 'permission', 'task', 'workflow', 'hook', 'mcp', 'eject',
 ];
 
 /** Subcommands are routed inside the command module, but listed here for help. */
 const SUBCOMMANDS = {
+  kit: ['apply'],
   knowledge: ['build', 'status'],
   permission: ['configure', 'reconfigure', 'show'],
   task: ['list', 'show', 'resume', 'advance', 'abandon'],
@@ -38,11 +39,12 @@ const SUBCOMMANDS = {
   mcp: ['azure-devops'],
 };
 
+const INSTALL_ROOT = path.resolve(__dirname, '..', '..');
 const VERSION = readVersion();
 
 function readVersion() {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'package.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(INSTALL_ROOT, 'package.json'), 'utf8'));
     return pkg.version || '0.0.0';
   } catch { return '0.0.0'; }
 }
@@ -134,8 +136,15 @@ async function main(argv) {
       `aidev ${name} requires a subcommand: ${SUBCOMMANDS[name].join(', ')}`);
   }
 
-  const repoRoot = gitMod.findRepoRoot(process.cwd());
-  const ctx = { repoRoot, flags, positionals, argv: rest, command: name };
+  // Self-update is intentionally independent of the caller's cwd wrapper.
+  // Hooks may fire while Claude's current directory is a nested folder or the
+  // PKG submodule. Claude Code supplies the wrapper root explicitly; starting
+  // discovery there prevents the submodule from being mistaken for the wrapper.
+  const hookStart = name === 'hook' && process.env.CLAUDE_PROJECT_DIR
+    ? path.resolve(process.env.CLAUDE_PROJECT_DIR)
+    : process.cwd();
+  const repoRoot = name === 'update' ? null : gitMod.findRepoRoot(hookStart);
+  const ctx = { installRoot: INSTALL_ROOT, repoRoot, flags, positionals, argv: rest, command: name };
 
   // init exports an async run; the rest are synchronous. Awaiting covers both.
   const code = await mod.run(ctx);

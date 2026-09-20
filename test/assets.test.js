@@ -165,8 +165,9 @@ function run() {
       for (const [event, matchers] of Object.entries(settings.hooks || {})) {
         for (const matcher of matchers) {
           for (const h of matcher.hooks || []) {
-            const m = /aidev\s+hook\s+([\w-]+)/.exec(h.command || '');
-            ok(m, `${event}: "${h.command}" is not an "aidev hook <name>" invocation`);
+            const invocation = [h.command, ...(h.args || [])].join(' ');
+            const m = /aidev(?:\.js)?["']?\s+hook\s+([\w-]+)/.exec(invocation);
+            ok(m, `${event}: ${JSON.stringify(h)} does not invoke an "aidev hook <name>" subcommand`);
             ok(implemented.includes(m[1]),
               `${event}: hook "${m[1]}" is not implemented (have: ${implemented.join(', ')})`);
           }
@@ -178,7 +179,8 @@ function run() {
     // is the bypass the guard is specifically written to catch.
     test('the guard matches the write tools and Bash', () => {
       const pre = (settings.hooks.PreToolUse || [])
-        .find((m) => (m.hooks || []).some((h) => /guard-write/.test(h.command || '')));
+        .find((m) => (m.hooks || []).some((h) =>
+          /guard-write/.test([h.command, ...(h.args || [])].join(' '))));
       ok(pre, 'no PreToolUse matcher runs guard-write');
       for (const tool of ['Write', 'Edit', 'MultiEdit', 'Bash']) {
         ok(new RegExp(`\\b${tool}\\b`).test(pre.matcher),
@@ -227,12 +229,16 @@ function run() {
       }
     });
 
-    test('hooks invoke the CLI with no shell syntax', () => {
+    test('hooks use exec form anchored to Claude\'s project root', () => {
       for (const matchers of Object.values(settings.hooks || {})) {
         for (const matcher of matchers) {
           for (const h of matcher.hooks || []) {
-            ok(!/[|&;><$`]/.test(h.command || ''),
-              `"${h.command}" contains shell syntax; hooks must run on Windows and POSIX alike`);
+            eq(h.command, 'node', 'hook executable');
+            ok(Array.isArray(h.args), `hook has no exec-form args: ${JSON.stringify(h)}`);
+            eq(h.args[0], '${CLAUDE_PROJECT_DIR}/cli/bin/aidev.js', 'project-root CLI path');
+            eq(h.args[1], 'hook', 'hook command group');
+            ok(typeof h.args[2] === 'string' && h.args[2].length > 0,
+              `hook subcommand is missing: ${JSON.stringify(h)}`);
           }
         }
       }

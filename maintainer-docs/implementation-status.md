@@ -14,14 +14,15 @@
 
 | 機能 | status | 現在の到達範囲 | 主な不足 |
 | --- | --- | --- | --- |
-| Windows/POSIX installer | 実装済み | Node/Git確認、checkoutを指すlauncher作成 | checkout移動時は再installが必要 |
+| Windows/POSIX installer | 実装済み | Node/Git確認、CLI専用checkoutを指すlauncher作成 | checkout移動時は再installが必要 |
 | `aidev init` | 実装済み | config、`.claude/`実体化、lock、後続案内 | policy/Wikiは別command。ADO接続試験はしない |
 | static drift / `aidev check` | 実装済み | lock、policy、3SHA、strict warning | external serviceの完全診断ではない |
 | `aidev doctor` | 実装済み | local runtime、repo、PAT有無、proxy、3SHA | Claude/npxの検査、ADO API認証試験はない |
-| `aidev update` | 実装済み | 限定KIT_PATHSのfetch/checkout、`.claude`再生成 | package/pipeline/gitignore/maintainer docsは対象外 |
+| `aidev update` | 実装済み | CLI専用checkoutの固定`origin/main`をfetchしfast-forward-onlyでself-update | npm/release archive配布ではない |
+| `aidev kit apply` | 実装済み | wrapperへ限定KIT_PATHSをfetch/checkout、`.claude`再生成 | package/pipeline/gitignore/maintainer docsは対象外 |
 | permission candidate / approval | 実装済み | configから機械生成、human approve、weakening検出 | `permission-setting` agentとの対話生成ではない |
 | structured Wiki | 実装済み | generation target inventory、repository evidence走査/fingerprint、mask、blob diff、manifest、checkpoint | page単位evidence dependency graphはなく、supporting evidence変更時は全target refresh |
-| prose Wiki agent | 実装済み（opt-in） | `--agent`でPKG全体のtracked・非secret evidenceを渡してknowledge-builder起動、timeout/model指定 | `claude`なしではskip。意味品質とcostは外部管理 |
+| prose Wiki agent | 実装済み（opt-in） | `--agent`でPKG全体のtracked・非secret evidenceをstdin planで渡してknowledge-builder起動、heartbeat、checkpoint完了検証、timeout/model指定 | `claude`なしではskip。意味品質とcostは外部管理 |
 | 3SHA / sync lease | 実装済み | local/remote判定、TTL lease、resume/abort | hand-edit扱いがknowledge buildとsyncで不統一 |
 | `aidev sync` | 実装済み | fetch、bump、structured Wiki、任意agent、commit/push/PR | ADO/PAT/push失敗時はmanual completionが必要 |
 | wrapper PR dedup | 実装済み | stream marker検索、同branch更新、旧PR注記 | 新targetでは旧PRを自動closeしない |
@@ -115,9 +116,9 @@ structured inventoryがtarget SHAへ進んだ時点で3SHAは一致し、`pendin
 
 `knowledge.evidence`はgeneration targetsから独立してPKG全体を調査できますが、現時点のinventoryは「どのpageがどのsupporting evidenceへ依存したか」を記録しません。そのためgeneration target外のcode/test/config/CIが1件でも変わると、stale proseを避ける側へ倒して全generation targetをqueueします。大規模PKGでcostを下げる将来改善はpage単位dependency graphであり、evidence範囲をdocsだけへ戻して回避してはいけません。
 
-### update coverage
+### kit apply coverage
 
-`aidev update`は`package.json`、`pipelines/`、`.gitignore`、`maintainer-docs/`を取り込みません。wrapperのCLIとpackage metadataがずれる可能性があります。対象を広げる場合はwrapper固有ファイルを誤上書きしないmigration設計が必要です。
+`aidev kit apply`は`package.json`、`pipelines/`、`.gitignore`、`maintainer-docs/`をwrapperへ取り込みません。wrapper内に残るCLI copyとpackage metadataが専用CLI checkoutとずれる可能性がありますが、launcherは専用checkoutだけを実行します。対象を広げる場合はwrapper固有ファイルを誤上書きしないmigration設計が必要です。
 
 ### workflow safety
 
@@ -156,4 +157,4 @@ content hash、iteration、time、same failure、basename allowlistは実装済�
 6. dry-runのnetwork/cache副作用を明記した
 7. secretがconfig、log、PR description、fixtureへ入っていない
 8. `npm run check`が成功する
-9. wrapperへ影響する変更は`aidev update`の対象範囲も検討した
+9. wrapperへ影響する変更は`aidev kit apply`の対象範囲も検討した

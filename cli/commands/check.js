@@ -55,7 +55,7 @@ function run(ctx) {
   const drift = assets.detectDrift(repoRoot);
   report.drift = drift;
   if (drift.noLock) {
-    problems.push({ code: EXIT.DRIFT, message: '.aidev-lock is missing — run "aidev init" or "aidev update".' });
+    problems.push({ code: EXIT.DRIFT, message: '.aidev-lock is missing — run "aidev init" or "aidev kit apply".' });
   } else if (!drift.ok) {
     const parts = [];
     if (drift.modified.length) parts.push(`${drift.modified.length} modified`);
@@ -64,7 +64,7 @@ function run(ctx) {
     problems.push({
       code: EXIT.DRIFT,
       message: `kit-owned static files differ from .aidev-lock (${parts.join(', ')}). ` +
-        'Run "aidev update" to restore them, or send the change to the central kit as a PR.',
+        'Run "aidev kit apply" to restore them, or send the change to the central kit as a PR.',
       detail: drift,
     });
   }

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev plan` — show what init / update / sync would change. Never writes.
+ * `aidev plan` — show what init / kit apply / sync would change. Never writes.
  *
  * Exists so the destructive-looking commands have a safe rehearsal, and so a
  * reviewer can see the intended change set without granting write access.
@@ -20,7 +20,7 @@ const FLAGS = { json: 'boolean', 'no-remote': 'boolean' };
 
 function run(ctx) {
   const { repoRoot, flags } = ctx;
-  const plan = { init: [], update: [], sync: [] };
+  const plan = { init: [], kitApply: [], sync: [] };
 
   const hasConfig = fs.existsSync(cfgMod.configPath(repoRoot));
   const config = hasConfig ? cfgMod.loadConfig(repoRoot) : null;
@@ -49,13 +49,13 @@ function run(ctx) {
   }
   if (!fs.existsSync(cfgMod.lockPath(repoRoot))) plan.init.push('write .aidev-lock');
 
-  // --- update --------------------------------------------------------------
+  // --- kit apply -----------------------------------------------------------
   const drift = assets.detectDrift(repoRoot);
-  if (drift.noLock) plan.update.push('no .aidev-lock — run "aidev init" or "aidev update"');
+  if (drift.noLock) plan.kitApply.push('no .aidev-lock — run "aidev init" or "aidev kit apply"');
   else if (!drift.ok) {
-    for (const m of drift.modified) plan.update.push(`restore modified kit file: ${m.path}`);
-    for (const m of drift.missing) plan.update.push(`restore missing kit file: ${m}`);
-    for (const m of drift.extra) plan.update.push(`untracked kit-owned file: ${m}`);
+    for (const m of drift.modified) plan.kitApply.push(`restore modified kit file: ${m.path}`);
+    for (const m of drift.missing) plan.kitApply.push(`restore missing kit file: ${m}`);
+    for (const m of drift.extra) plan.kitApply.push(`untracked kit-owned file: ${m}`);
   }
 
   // --- sync ----------------------------------------------------------------
@@ -94,4 +94,4 @@ function run(ctx) {
   return EXIT.OK;
 }
 
-module.exports = { run, FLAGS, summary: 'init / update / sync の差分をプレビュー' };
+module.exports = { run, FLAGS, summary: 'init / kit apply / sync の差分をプレビュー' };

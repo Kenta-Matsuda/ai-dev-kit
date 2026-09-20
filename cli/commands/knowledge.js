@@ -228,6 +228,7 @@ async function build(ctx, config) {
   }
 
   let shards;
+  let structuredManifest = null;
   try {
     shards = inventory.writeInventory(repoRoot, records, config.knowledge.inventory_shard_size);
     const manifest = existing || inventory.emptyManifest();
@@ -247,6 +248,7 @@ async function build(ctx, config) {
     };
     manifest.evidence = evidenceState;
     manifest.checkpoint = { completedShards: shards.length, pendingPaths: [...pending, ...deferred] };
+    structuredManifest = JSON.parse(JSON.stringify(manifest));
     inventory.writeManifest(repoRoot, manifest);
 
     // The index is the entry point the design requires; create a stub if absent
@@ -321,16 +323,51 @@ async function build(ctx, config) {
   // Re-read rather than trusting the list we queued: the agent owns clearing
   // its own completed paths, and a partial run must leave the remainder
   // visible so --refresh can resume.
-  const after = inventory.readManifest(repoRoot);
-  const remaining = after?.checkpoint?.pendingPaths?.length ?? pending.length;
-  if (human && agentResult.ran && agentResult.ok) {
-    if (remaining === 0) ui.ok('all queued generation targets are complete.');
-    else ui.warn(`${remaining} generation target(s) still pending — re-run with --refresh --agent to continue.`);
+  let after = null;
+  let afterReadError = null;
+  try { after = inventory.readManifest(repoRoot); }
+  catch (e) { afterReadError = e; }
+  const observedPending = after?.checkpoint?.pendingPaths;
+  const actualSourceSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
+  agentResult = agentMod.assessWikiProgress(agentResult, pending, observedPending, {
+    expectedTargetSha: targetSha,
+    actualTargetSha: afterReadError ? targetSha : after?.knowledgeSha,
+    actualSourceSha,
+  });
+  if (afterReadError) {
+    agentResult = { ...agentResult, reason: `Wiki manifest could not be read after Claude exited: ${afterReadError.message}` };
   }
 
+  let structuredOk = true;
+  if (agentResult.checkpointInvalid) {
+    // If Claude only damaged/deleted the checkpoint while the source and
+    // manifest target stayed put, restore the exact pre-agent queue. Never
+    // overwrite state belonging to a concurrent sync that moved the target.
+    const canRestore = structuredManifest && actualSourceSha === targetSha
+      && (!after || after.knowledgeSha === targetSha);
+    if (canRestore) {
+      inventory.writeManifest(repoRoot, structuredManifest);
+      after = structuredManifest;
+      agentResult = { ...agentResult, checkpointRestored: true };
+    } else {
+      structuredOk = false;
+    }
+  }
+
+  const afterPending = after?.checkpoint?.pendingPaths;
+  const remaining = Array.isArray(afterPending) ? afterPending.length : pending.length;
+  agentMod.renderWikiProgress(agentResult, { human });
+  if (human && agentResult.reason?.startsWith('not requested')) {
+    ui.warn('Claude was not started because agent execution is opt-in.');
+    ui.dim('    Run "aidev knowledge build --refresh --agent" to generate the LLM Wiki prose.');
+    ui.dim('    The manifest and checkpoint are already saved, so the queued work is not lost.');
+  }
+
+  const commandOk = structuredOk && !(agentResult.ran && !agentResult.ok);
   if (!human) {
     ui.json({
-      ok: true,
+      ok: commandOk,
+      structuredOk,
       targetSha,
       files: records.length,
       generationTargets: records.length,
@@ -342,9 +379,9 @@ async function build(ctx, config) {
       agent: agentResult,
     });
   }
-  // A failed agent is reported but does not discard the structured write; the
-  // non-zero exit is what tells CI that the Wiki is not yet complete.
-  return agentResult.ran && !agentResult.ok ? EXIT.GENERAL : EXIT.OK;
+  // A failed or incomplete agent is reported but does not discard the
+  // structured write; the non-zero exit tells CI that prose is still owed.
+  return commandOk ? EXIT.OK : EXIT.GENERAL;
 }
 
 async function run(ctx) {

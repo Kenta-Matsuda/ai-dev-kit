@@ -32,6 +32,9 @@ knowledge/.cache/
 # of git is what makes it safe for a workflow to log verbosely.
 workflows/*/runs/
 
+# --- generated documentation -------------------------------------------------
+/build/docs/
+
 # --- tooling ------------------------------------------------------------------
 node_modules/
 npm-debug.log*

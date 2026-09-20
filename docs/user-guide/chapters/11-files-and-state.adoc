@@ -1,0 +1,208 @@
+[[files-and-state]]
+== ファイルと状態
+
+wrapperには、reviewしてcommitする設定・生成物と、各端末だけに保持するcache・lease・logが共存します。誤ってlocal stateやcredentialをcommitしないよう、役割を区別してください。
+
+[[files-inventory]]
+=== path一覧
+
+[cols="2,3,1,1",options="header"]
+|===
+|path |役割 |手編集 |Git管理
+
+|`aidev.yaml`
+|PKG固有の設定です。
+|可。review必須
+|する
+
+|`.gitmodules`
+|`src/` submodule URLを定義します。
+|Git手順で変更
+|する
+
+|`src/`
+|対象PKGのsubmodule worktreeです。
+|PKG側の通常手順またはsync
+|gitlinkだけする
+
+|`.claude/**`
+|共通Agents、Skills、hooks、settingsです。
+|wrapperでは不可
+|する
+
+|`CLAUDE.md`
+|共通の行動指示です。
+|wrapperでは不可
+|する
+
+|`.mcp.json`
+|MCP launcher設定です。
+|wrapperでは不可
+|する
+
+|`.aidev-lock`
+|kit commitとstatic asset SHA-256です。
+|不可
+|する
+
+|`.aidev/policy.yaml`
+|承認済み書き込みpolicyです。
+|CLI経由のみ
+|する
+
+|`.aidev/policy.candidate.yaml`
+|review中のpolicy候補です。承認後は削除されます。
+|reviewのみ
+|通常しない
+
+|`knowledge/manifest.json`
+|knowledge SHA、inventory、evidence、checkpointのroot metadataです。
+|不可
+|する
+
+|`knowledge/inventory/*.json`
+|generation targetとpageの対応、blob、self hashです。
+|不可
+|する
+
+|`knowledge/**/*.md`
+|生成されたLLM Wikiです。
+|原則不可
+|する
+
+|`knowledge/.cache/**`
+|大きいagent planなどの一時fileです。
+|不可
+|しない
+
+|`.aidev/cache/**`
+|remote state、pending refresh、evolution journalなどのlocal cacheです。
+|不可
+|しない
+
+|`.aidev/tasks/**`
+|local task metadataです。
+|不可
+|しない
+
+|`.aidev/leases/**`
+|work leaseです。
+|不可
+|しない
+
+|`.aidev/sync.lock`
+|sync leaseです。
+|不可
+|しない
+
+|`workflows/<name>/workflow.yaml`
+|workflow metadataです。
+|可。review必須
+|する
+
+|`workflows/<name>/steps.js`
+|workflowの任意JavaScriptです。
+|可。review必須
+|する
+
+|`workflows/<name>/approval.json`
+|承認時のcontent hashです。
+|CLI経由
+|する
+
+|`workflows/*/runs/**`
+|実行logとcheckpointです。
+|不可
+|しない
+
+|`.aidev-ejected`
+|意図的にkit管理を外したことを示すmarkerです。
+|不可
+|eject方針に従う
+
+|`cli/`、`scripts/`、`templates/`
+|wrapperに配布されたkit実装です。
+|wrapperでは不可
+|する
+
+|`pipelines/`
+|Azure Pipelinesの導入例です。
+|適用先に合わせてreview
+|する
+
+|`docs/user-guide/**`
+|中央kitのUser Guide AsciiDoc sourceです。現行`kit apply`対象外です。
+|中央kitで可
+|中央kitでする
+
+|`build/docs/**`
+|生成HTMLです。
+|不可
+|しない
+|===
+
+[[files-static-lock]]
+=== `.aidev-lock`
+
+`.aidev-lock`は、適用したkit commitとstatic assetごとのSHA-256を保持します。`aidev check`は実fileと比較し、変更・欠落をdriftとしてexit 2にします。
+
+個人用`.claude/settings.local.json`はlock対象外です。static assetの正当な変更は中央kitで行い、wrapperへ`aidev kit apply`したときにlockも更新します。lockだけを手で合わせてdriftを隠さないでください。
+
+[[files-aidev-state]]
+=== `.aidev/` local state
+
+`.aidev/cache/`、`tasks/`、`leases/`、`sync.lock`はGit管理外です。source of truthがremote、Azure DevOps、または当該端末にあるため、共有すると現実の状態と食い違います。
+
+[WARNING]
+====
+復旧時にlease fileを手で削除すると、original/target SHAと許可範囲の証跡を失います。`sync --resume`または`sync --abort`を使い、task leaseは関連taskとPRを確認してから処理してください。
+====
+
+`policy.yaml`は例外で、review・commit・共有します。policy不在をGit ignoreで隠さないでください。
+
+[[files-knowledge]]
+=== `knowledge/`
+
+`knowledge/**`の本体はwrapper PRでsubmodule pointerと一緒にreview・commitします。`knowledge/.cache/**`だけを除外します。
+
+manifestの`knowledgeSha`が`src`と一致していても、`checkpoint.pendingPaths`が残っていればproseは未完了です。厳格な運用では`aidev check --strict`を使用します。
+
+生成pageの手編集は`selfHashes`で検出されます。正しい内容であっても、sourceまたはagent指示へ反映して再生成するまではdriftとして扱います。
+
+[[files-workflows]]
+=== `workflows/`
+
+workflow definition、code、approval hashはreview対象としてcommitします。run logとcheckpointはlocal stateです。
+
+logには次が含まれる可能性があります。
+
+* promptとmodel response
+* command output
+* path、branch、commit SHA
+* environment由来の値
+* error stack
+
+secretをlogへ書かない実装にし、`runs/**`をartifactとして外部公開しないでください。
+
+[[files-ignore]]
+=== Git ignoreの原則
+
+`.gitignore`は次の2原則に基づきます。
+
+. credential、または将来credentialを含み得るものを除外する。
+. source of truthが別にあるlocal stateを除外する。
+
+代表例は`.env*`、key/certificate、`.aidev/cache/`、task/lease、knowledge cache、workflow run log、`node_modules/`、生成HTMLです。ただしignoreだけに依存せず、commit前にstaged diffをreviewします。
+
+[source,bash]
+----
+git status --short
+git diff --cached
+----
+
+[[files-eject-marker]]
+=== `.aidev-ejected`
+
+markerは「半端なinstall」ではなく「人間が意図して管理解除した」ことをtoolへ伝えます。marker自体がsecurity switchなのではなく、ejectがpolicy、lock、hook wiringも除去します。
+
+markerがある間、`aidev check`は管理対象なしとして0を返します。再採用は`aidev init`から行い、static asset、policy、Wiki、CI、branch policyを一式で再確認します。

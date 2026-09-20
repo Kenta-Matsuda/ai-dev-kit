@@ -97,8 +97,17 @@ function unwireHooks(repoRoot) {
 
   const removed = [];
   const isKitHook = (entry) => {
-    const cmd = entry && typeof entry === 'object' ? entry.command : null;
-    return typeof cmd === 'string' && /(^|[\s/\\"'])aidev(\.js)?(["']?\s+|\s+)hook\b/.test(cmd);
+    if (!entry || typeof entry !== 'object') return false;
+    const cmd = entry.command;
+    if (typeof cmd !== 'string') return false;
+    // Legacy shell-form hooks invoked `aidev hook ...` directly.
+    if (/(^|[\s/\\"'])aidev(\.js)?(["']?\s+|\s+)hook\b/.test(cmd)) return true;
+    // Current hooks use Claude Code's exec form so the project-root placeholder
+    // is substituted as one argv element without cwd or shell-tokenisation risk.
+    const args = Array.isArray(entry.args) ? entry.args : [];
+    const script = args.findIndex((arg) =>
+      typeof arg === 'string' && /(^|[\\/])aidev\.js$/.test(arg));
+    return cmd === 'node' && script >= 0 && args[script + 1] === 'hook';
   };
 
   for (const [event, matchers] of Object.entries(doc.hooks)) {

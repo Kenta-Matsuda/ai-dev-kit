@@ -76,26 +76,44 @@ const argv = process.argv.slice(2);
 if (process.env.STUB_ARGV_OUT) {
   fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.stringify(argv, null, 2));
 }
-const mode = process.env.STUB_MODE || 'ok';
-if (mode === 'fail') {
-  process.stderr.write('stub: the agent could not continue\\n');
-  process.stdout.write(JSON.stringify({ result: 'boom', is_error: true }) + '\\n');
-  process.exit(1);
-}
-if (mode === 'hang') { setTimeout(() => {}, 600000); return; }
-if (mode === 'drain') {
-  // Behave like a real run: clear the checkpoint the CLI queued.
-  const mp = 'knowledge/manifest.json';
-  try {
-    const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
-    m.checkpoint = Object.assign({}, m.checkpoint, { pendingPaths: [] });
-    fs.writeFileSync(mp, JSON.stringify(m, null, 2) + '\\n');
-  } catch (e) { /* leave it be */ }
-}
-process.stdout.write(JSON.stringify({
-  result: 'wrote the pages', is_error: false, total_cost_usd: 0.0123,
-  session_id: 'stub-session',
-}) + '\\n');
+let prompt = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { prompt += chunk; });
+process.stdin.on('end', () => {
+  if (process.env.STUB_PROMPT_OUT) {
+    fs.writeFileSync(process.env.STUB_PROMPT_OUT, prompt);
+  }
+  const mode = process.env.STUB_MODE || 'drain';
+  if (mode === 'fail') {
+    process.stderr.write('stub: the agent could not continue\\n');
+    process.stdout.write(JSON.stringify({ result: 'boom', is_error: true }) + '\\n');
+    process.exit(1);
+  }
+  if (mode === 'hang') { setTimeout(() => {}, 600000); return; }
+  if (mode === 'drain' || mode === 'partial' || mode === 'missing-checkpoint' || mode === 'target-mismatch') {
+    // Behave like a complete, partial, or corrupting run.
+    const mp = 'knowledge/manifest.json';
+    try {
+      const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
+      if (mode === 'drain') {
+        m.checkpoint = Object.assign({}, m.checkpoint, { pendingPaths: [] });
+      } else if (mode === 'partial') {
+        m.checkpoint = Object.assign({}, m.checkpoint, {
+          pendingPaths: (m.checkpoint && m.checkpoint.pendingPaths || []).slice(1),
+        });
+      } else if (mode === 'missing-checkpoint') {
+        delete m.checkpoint;
+      } else {
+        m.knowledgeSha = 'ffffffffffffffffffffffffffffffffffffffff';
+      }
+      fs.writeFileSync(mp, JSON.stringify(m, null, 2) + '\\n');
+    } catch (e) { /* leave it be */ }
+  }
+  process.stdout.write(JSON.stringify({
+    result: mode === 'no-progress' ? 'need more information' : 'wrote the pages',
+    is_error: false, total_cost_usd: 0.0123, session_id: 'stub-session',
+  }) + '\\n');
+});
 `, 'utf8');
   return p;
 }
@@ -382,27 +400,28 @@ function run() {
   // ------------------------------------------------- agent invocation (unit)
   suite('agent: argv and prompt construction');
 
-  test('the prompt is positional and precedes every variadic flag', () => {
-    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', prompt: 'DO IT' });
-    // --tools/--allowedTools/--disallowedTools are variadic in the Claude CLI,
-    // so a prompt placed after one of them would be eaten as its value.
+  test('the prompt stays out of argv so a Windows shell cannot split it', () => {
+    const argv = agentMod.buildArgv({ agent: 'knowledge-builder' });
     eq(argv[0], '-p');
-    eq(argv[1], 'DO IT');
-    const firstVariadic = argv.findIndex((a) => /^--(tools|allowedTools|disallowedTools)$/.test(a));
-    ok(firstVariadic === -1 || firstVariadic > 1, 'a variadic flag precedes the prompt');
+    ok(!argv.includes('DO IT'), 'natural-language prompt leaked into argv');
+    const pair = (name) => argv[argv.indexOf(name) + 1];
+    eq(pair('--input-format'), 'text');
   });
 
-  test('the run is non-interactive, machine-readable and cannot hang on a prompt', () => {
-    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', prompt: 'x' });
+  test('the run is non-interactive, machine-readable and permits guarded edits', () => {
+    const argv = agentMod.buildArgv({ agent: 'knowledge-builder' });
     const pair = (name) => argv[argv.indexOf(name) + 1];
     ok(argv.includes('-p'), 'not one-shot');
     eq(pair('--agent'), 'knowledge-builder');
     eq(pair('--output-format'), 'json');
-    eq(pair('--permission-mode'), 'dontAsk');
+    eq(pair('--permission-mode'), 'acceptEdits');
+    eq(pair('--permission-prompts'), 'none');
+    ok(agentMod.versionAtLeast('2.1.278'), 'current Claude Code version was rejected');
+    ok(!agentMod.versionAtLeast('2.1.258'), 'unsupported permission protocol was accepted');
   });
 
   test('bypassPermissions is never passed — it would disable the kit guard', () => {
-    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', prompt: 'x' });
+    const argv = agentMod.buildArgv({ agent: 'knowledge-builder' });
     ok(!argv.includes('bypassPermissions'), 'the guard must stay in force');
   });
 
@@ -456,16 +475,14 @@ function run() {
   test('no --model is passed when nothing configured one', () => {
     // Passing a model unconditionally would sit above the developer's own
     // settings.local.json and ANTHROPIC_MODEL, overriding a choice nobody made.
-    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', prompt: 'x' });
+    const argv = agentMod.buildArgv({ agent: 'knowledge-builder' });
     ok(!argv.includes('--model'), '--model was passed with no model configured');
   });
 
   test('the configured model reaches argv as the value of --model', () => {
-    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', prompt: 'x', model: 'opus' });
+    const argv = agentMod.buildArgv({ agent: 'knowledge-builder', model: 'opus' });
     eq(argv[argv.indexOf('--model') + 1], 'opus');
-    // The prompt stays positional and first no matter what is inserted after it.
     eq(argv[0], '-p');
-    eq(argv[1], 'x');
   });
 
   test('model.agent in aidev.yaml is the default and --agent-model overrides it', () => {
@@ -500,6 +517,7 @@ function run() {
         root: fx.root,
         stub: writeClaudeStub(fx.root),
         argvOut: path.join(fx.root, 'argv.json'),
+        promptOut: path.join(fx.root, 'prompt.txt'),
       });
     } finally { fx.cleanup(); }
   };
@@ -519,17 +537,63 @@ function run() {
     ok(!fs.existsSync(argvOut), 'a dry run spawned the agent');
   }));
 
-  test('--agent spawns it with the documented argv', () => withRepo(({ root, stub, argvOut }) => {
+  test('--agent spawns it with the documented argv and prompt on stdin', () => withRepo(({ root, stub, argvOut, promptOut }) => {
     const r = aidev(root, ['knowledge', 'build', '--agent'],
-      { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
+      { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut } });
     eq(r.code, 0, r.out);
     ok(fs.existsSync(argvOut), `the agent never ran: ${r.out}`);
     const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+    const pair = (name) => argv[argv.indexOf(name) + 1];
     eq(argv[0], '-p');
-    eq(argv[argv.indexOf('--agent') + 1], 'knowledge-builder');
-    eq(argv[argv.indexOf('--output-format') + 1], 'json');
-    eq(argv[argv.indexOf('--permission-mode') + 1], 'dontAsk');
+    eq(pair('--input-format'), 'text');
+    eq(pair('--agent'), 'knowledge-builder');
+    eq(pair('--output-format'), 'json');
+    eq(pair('--permission-mode'), 'acceptEdits');
+    eq(pair('--permission-prompts'), 'none');
+    ok(!argv.some((arg) => /Generate the LLM Wiki/.test(arg)), 'prompt leaked into argv');
+    const prompt = fs.readFileSync(promptOut, 'utf8');
+    ok(prompt.includes('Generate the LLM Wiki prose'), 'complete prompt did not arrive on stdin');
   }));
+
+  test('a legacy Windows .cmd launcher preserves stdin and terminates its process tree', () => {
+    if (process.platform !== 'win32') return;
+    const writeCmd = (root, stub) => {
+      const cmd = path.join(root, 'fake-claude.cmd');
+      fs.writeFileSync(cmd, [
+        '@echo off',
+        'if "%~1"=="--version" (',
+        '  echo 2.1.278 ^(Claude Code^)',
+        '  exit /b 0',
+        ')',
+        `"${process.execPath}" "${stub}" %*`,
+        '',
+      ].join('\r\n'), 'utf8');
+      return cmd;
+    };
+    withRepo(({ root, stub, argvOut, promptOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent'], { env: {
+        AIDEV_CLAUDE_BIN: writeCmd(root, stub),
+        STUB_ARGV_OUT: argvOut,
+        STUB_PROMPT_OUT: promptOut,
+      } });
+      eq(r.code, 0, `legacy .cmd launcher failed: ${r.out}`);
+      const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+      eq(argv[argv.indexOf('--agent') + 1], 'knowledge-builder');
+      ok(fs.readFileSync(promptOut, 'utf8').includes('Generate the LLM Wiki prose'),
+        'legacy .cmd launcher truncated stdin prompt');
+    });
+    withRepo(({ root, stub, argvOut }) => {
+      const started = Date.now();
+      const r = aidev(root, ['knowledge', 'build', '--agent', '--agent-timeout', '10000', '--json'], { env: {
+        AIDEV_CLAUDE_BIN: writeCmd(root, stub),
+        STUB_ARGV_OUT: argvOut,
+        STUB_MODE: 'hang',
+      } });
+      eq(r.code, 1, `legacy .cmd timeout did not fail: ${r.out}`);
+      eq(lastJson(r.out).agent.timedOut, true, 'legacy .cmd timeout was not reported');
+      ok(Date.now() - started < 20000, 'Claude grandchild survived after cmd.exe timeout');
+    });
+  });
 
   test('--agent-name overrides which agent is started', () => withRepo(({ root, stub, argvOut }) => {
     aidev(root, ['knowledge', 'build', '--agent-name', 'custom-builder'],
@@ -569,13 +633,55 @@ function run() {
     ok(fs.existsSync(path.join(root, 'knowledge', 'manifest.json')), 'the manifest was lost');
   }));
 
-  test('an agent failure exits non-zero but keeps the checkpoint', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--agent'],
-      { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
-    eq(r.code, 1, `expected exit 1: ${r.out}`);
-    const m = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
-    ok(m.checkpoint.pendingPaths.length > 0, 'a failed agent discarded the work queue');
-  }));
+  test('agent failures preserve the queue and align human, JSON, and exit status', () => {
+    withRepo(({ root, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent'],
+        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
+      eq(r.code, 1, `expected exit 1: ${r.out}`);
+      const m = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
+      ok(m.checkpoint.pendingPaths.length > 0, 'a failed agent discarded the work queue');
+    });
+    withRepo(({ root, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent'],
+        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
+      eq(r.code, 1, `zero progress was reported as success: ${r.out}`);
+      ok(/made no Wiki progress/.test(r.out), `missing no-progress diagnosis: ${r.out}`);
+      ok(/need more information/.test(r.out), `Claude's result was hidden: ${r.out}`);
+    });
+    withRepo(({ root, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent', '--json'],
+        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
+      eq(r.code, 1, `zero-progress JSON run exited ${r.code}: ${r.out}`);
+      const j = lastJson(r.out);
+      eq(j.ok, false, 'top-level JSON contradicted the failing exit code');
+      eq(j.structuredOk, true, 'the completed structured write was not distinguished');
+      eq(j.agent.noProgress, true, 'agent no-progress state was lost');
+    });
+    withRepo(({ root, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent', '--json'],
+        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'partial' } });
+      eq(r.code, 1, `partial JSON run exited ${r.code}: ${r.out}`);
+      const j = lastJson(r.out);
+      eq(j.ok, false, 'partial completion was reported as success');
+      eq(j.agent.partial, true, 'partial state was not reported');
+      eq(j.agent.completed, 1, 'completed target count is wrong');
+      ok(j.agent.remaining > 0, 'unfinished targets disappeared');
+    });
+    withRepo(({ root, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'build', '--agent', '--json'],
+        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'missing-checkpoint' } });
+      eq(r.code, 1, `missing checkpoint run exited ${r.code}: ${r.out}`);
+      const j = lastJson(r.out);
+      eq(j.ok, false, 'missing checkpoint was reported as success');
+      eq(j.agent.checkpointInvalid, true, 'checkpoint corruption was not exposed');
+      eq(j.agent.checkpointRestored, true, 'pre-agent queue was not restored');
+      eq(j.agent.completed, 0, 'missing checkpoint invented completed work');
+      const restored = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
+      ok(restored.checkpoint.pendingPaths.length > 0, 'restored checkpoint lost the unfinished queue');
+      const retry = aidev(root, ['knowledge', 'build', '--refresh', '--dry-run', '--json']);
+      ok(lastJson(retry.out).pending.length > 0, 'the next --refresh cannot recover the queue');
+    });
+  });
 
   test('--json stays exactly one document and carries the agent result', () => withRepo(({ root, stub, argvOut }) => {
     const r = aidev(root, ['knowledge', 'build', '--agent', '--json'],
@@ -595,12 +701,11 @@ function run() {
     eq(lastJson(r.out).remaining, 0, 'the drained checkpoint was not re-read');
   }));
 
-  test('--scope narrows generation targets but preserves repository evidence', () => withRepo(({ root, stub, argvOut }) => {
+  test('--scope narrows generation targets but preserves repository evidence', () => withRepo(({ root, stub, argvOut, promptOut }) => {
     aidev(root, ['knowledge', 'build', '--agent', '--scope', 'src/docs'],
-      { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
+      { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut } });
     ok(fs.existsSync(argvOut), 'the scoped run never started an agent');
-    const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
-    const prompt = argv[argv.indexOf('-p') + 1];
+    const prompt = fs.readFileSync(promptOut, 'utf8');
     const generationStart = prompt.indexOf('Generation targets');
     const evidenceStart = prompt.indexOf('Repository evidence');
     const generationSection = prompt.slice(generationStart, evidenceStart);
@@ -660,15 +765,48 @@ function run() {
       ok(!fs.existsSync(path.join(root, '.aidev', 'sync.lock')), 'the sync lease outlived the run');
     }));
 
-    test('a failed agent does not unwind a completed sync', () => withAdvancedRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['sync', '--no-pr', '--agent'],
-        { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
-      eq(r.code, 1, `expected exit 1: ${r.out}`);
-      // src/ stays bumped and the Wiki stays consistent: only prose is owed.
-      const m = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
-      ok(m.knowledgeSha, 'the manifest was rolled back by an agent failure');
-      ok(!fs.existsSync(path.join(root, '.aidev', 'sync.lock')), 'the lease was stranded');
-    }));
+    test('agent failure or no progress does not unwind sync and JSON reports failure', () => {
+      withAdvancedRepo(({ root, stub, argvOut }) => {
+        const r = aidev(root, ['sync', '--no-pr', '--agent'],
+          { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
+        eq(r.code, 1, `expected exit 1: ${r.out}`);
+        // src/ stays bumped and the Wiki stays consistent: only prose is owed.
+        const m = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
+        ok(m.knowledgeSha, 'the manifest was rolled back by an agent failure');
+        ok(!fs.existsSync(path.join(root, '.aidev', 'sync.lock')), 'the lease was stranded');
+      });
+      withAdvancedRepo(({ root, stub, argvOut }) => {
+        const r = aidev(root, ['sync', '--no-pr', '--agent', '--json'],
+          { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
+        eq(r.code, 1, `zero-progress sync exited ${r.code}: ${r.out}`);
+        const j = lastJson(r.out);
+        eq(j.ok, false, 'sync JSON contradicted its failing exit code');
+        eq(j.structuredOk, true, 'sync lost its successful structured result');
+        eq(j.agent.noProgress, true, 'sync did not report agent no progress');
+        ok(!fs.existsSync(path.join(root, '.aidev', 'sync.lock')), 'the lease was stranded');
+      });
+      withAdvancedRepo(({ root, stub, argvOut }) => {
+        const r = aidev(root, ['sync', '--agent', '--json'],
+          { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'missing-checkpoint' } });
+        eq(r.code, 1, `missing-checkpoint sync exited ${r.code}: ${r.out}`);
+        const j = lastJson(r.out);
+        eq(j.ok, false, 'checkpoint failure was reported as success');
+        eq(j.agent.checkpointRestored, true, 'sync did not restore its pending queue');
+        eq(j.pr.blocked, true, 'sync attempted publication after checkpoint failure');
+        const m = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', 'manifest.json'), 'utf8'));
+        ok(m.checkpoint.pendingPaths.length > 0, 'sync lost its restored queue');
+      });
+      withAdvancedRepo(({ root, stub, argvOut }) => {
+        const r = aidev(root, ['sync', '--agent', '--json'],
+          { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'target-mismatch' } });
+        eq(r.code, 1, `target-mismatch sync exited ${r.code}: ${r.out}`);
+        const j = lastJson(r.out);
+        eq(j.ok, false, 'target mismatch was reported as success');
+        eq(j.structuredOk, false, 'target mismatch kept structuredOk true');
+        eq(j.agent.targetMismatch, true, 'target mismatch was not exposed');
+        eq(j.pr.blocked, true, 'sync attempted publication for the wrong target');
+      });
+    });
   }
 }
 

@@ -1,0 +1,193 @@
+[[maintenance]]
+== 保守者ガイド
+
+この章は、中央{project-name}のCLI、設定schema、static asset、pipeline、User Guideを変更する保守者向けです。利用PKGから生成される`knowledge/`へkit内部資料を混在させないでください。
+
+[[maintenance-layout]]
+=== repository構成
+
+[cols="2,4",options="header"]
+|===
+|path |責務
+
+|`cli/bin/aidev.js`
+|entrypoint、command routing、help、repository root解決、exit code変換です。
+
+|`cli/commands/*.js`
+|`init`、`update`、`kit`、`check`、`doctor`、`plan`、`sync`、`knowledge`、`permission`、`task`、`workflow`、`hook`、`mcp`、`eject`のuse caseです。
+
+|`cli/lib/*.js`
+|Azure DevOps REST、agent process、argument、asset、config、error、Git、inventory、scope、lease、path、policy、state、UI、YAMLの共通層です。
+
+|`templates/claude-assets/`
+|wrapperへ実体化するAgents、Skills、Claude settingsの正本です。
+
+|`scripts/install.ps1` / `install.sh`
+|CLI専用checkoutを参照するWindows/POSIX launcherをinstallします。
+
+|`pipelines/`
+|wrapperで使うAzure Pipelines例です。
+
+|`maintainer-docs/`
+|内部architecture、CLI、config、実装状況の詳細です。
+
+|`docs/user-guide/`
+|利用者から保守者までを対象にしたAsciiDoc User Guideの正本です。
+
+|`test/`
+|asset、CLI、completion、eject、inventory、policy、stateなどのtest harnessです。
+|===
+
+[[maintenance-source-of-truth]]
+=== 変更時のsource of truth
+
+[cols="2,4",options="header"]
+|===
+|契約 |正本
+
+|commandとsubcommand
+|`cli/bin/aidev.js`の`COMMANDS`と`SUBCOMMANDS`
+
+|option
+|各command moduleの`FLAGS`と実際の参照箇所
+
+|設定defaultとvalidation
+|`cli/lib/config.js`
+
+|終了コード
+|`cli/lib/errors.js`
+
+|static asset
+|`templates/claude-assets/`、root `CLAUDE.md`、`.mcp.json`
+
+|wrapperへ適用するpath
+|`cli/commands/kit.js`の対象list
+
+|実装成熟度
+|production code、test、`maintainer-docs/implementation-status.md`
+
+|利用者向け説明
+|root `README.md`とこのUser Guide
+|===
+
+Agent templateに書かれた目標フローを、production codeから到達できる機能と誤認しないでください。
+
+[[maintenance-architecture]]
+=== 実装層
+
+entrypointはroutingとerror translationに限定し、use caseはcommand layer、再利用処理はlib layerへ置きます。ファイル更新は原則temp fileとrenameによるatomic writeを使います。Git refとpathを検証し、child processは可能な限りshell文字列ではなくargv配列で起動します。
+
+agent promptはstdinで渡し、特にWindows shellによる分割を避けます。secretをargv、stdout、PR descriptionへ含めません。
+
+[[maintenance-add-command]]
+=== commandを追加・変更する
+
+. entrypointのcommand/subcommand routingを更新します。
+. command moduleの`FLAGS`、summary、validation、dry-run、JSON、exit codeを実装します。
+. repository外で動くcommandか、wrapper rootが必要かを明示します。
+. WindowsとPOSIXのpath、shell、process起動差を確認します。
+. credentialとuntrusted inputを特定します。
+. failure時に半適用stateを隠さず、resume/abortまたはrollback方針を決めます。
+. CLI help、README、User Guide、maintainer docsを同時更新します。
+. targeted testと`npm run check`を実行します。
+
+`--json`ではstdoutに単一JSON documentだけを出すことを目標とし、human messageはstderrへ分離します。既存の混在経路をコピーしないでください。
+
+[[maintenance-config-change]]
+=== config schemaを変更する
+
+少なくとも次を同期します。
+
+. `DEFAULTS`
+. validatorとnormalizer
+. `init`が作るtemplate
+. credential混入防止
+. READMEのsample
+. xref:configuration[設定リファレンス]
+. config unit test
+. migrationまたは後方互換方針
+
+未知keyが静かに捨てられる場合があるため、新keyのtypo検出とversioningも検討します。
+
+[[maintenance-static-assets]]
+=== static assetを変更する
+
+`.claude/**`の正本は`templates/claude-assets/**`です。rootにあるmaterialized copyだけを変更しないでください。`CLAUDE.md`と`.mcp.json`もlock対象です。
+
+変更後に確認すること:
+
+* `init`が新規wrapperへ正しく実体化する。
+* `kit apply`が既存wrapperへ適用する。
+* `.aidev-lock`が正しいhashを持つ。
+* `check`が意図したdriftを検出する。
+* Claude Code再起動が必要であることをrelease noteに記載する。
+* deny、hook、MCP変更はsecurity reviewする。
+
+[[maintenance-kit-coverage]]
+=== `kit apply`対象範囲
+
+現行の`kit apply`は`package.json`、`pipelines/`、`.gitignore`、`maintainer-docs/`、`docs/user-guide/`をwrapperへ取り込みません。対象を広げる場合は、wrapper固有変更の誤上書き、migration、lock、drift、package `files` allowlistを同時設計します。
+
+CLI launcherは専用checkoutを実行する一方、pipelineはwrapperにcommitされたCLI copyを実行します。両者のversion差があり得ることを考慮してください。
+
+[[maintenance-validation]]
+=== 検証
+
+既存scriptは次のとおりです。
+
+[source,bash]
+----
+npm test          # node test/run.js
+npm run lint      # module load確認。style linterではない
+npm run check     # load確認 + test suite
+npm run docs:build
+npm run docs:check
+----
+
+変更内容に応じ、targeted test、全check、Windows/POSIX smoke test、HTML文書buildを実行します。networkやClaude Codeを必要とする経路は、実行できなかった条件を記録します。
+
+[[maintenance-release]]
+=== versionと配布
+
+`package.json`のversionが`aidev --version`の値です。公開npm packageではなく`private: true`、`UNLICENSED`です。installは中央repositoryの専用checkoutを前提にします。
+
+release時は次を確認します。
+
+* CLI versionと変更内容が一致する。
+* Node.js {node-min-version}以上でtestする。
+* installerが専用checkoutを安全に識別する。
+* `aidev update`が`origin/main`へfast-forwardできる。
+* wrapperへの反映手順をrelease noteに記載する。
+* breaking config/state変更にはmigrationを用意する。
+* fixed MCP packageとdoc tool依存のversion、license、supply chainをreviewする。
+
+[[maintenance-docs]]
+=== 文書を保守する
+
+User Guideのsourceは`{guide-source-dir}`です。章ごとにAsciiDocを更新し、root `index.adoc`からincludeします。
+
+文書変更の完了条件:
+
+. production codeから到達できる操作だけを現在機能として記述する。
+. CLI help、`FLAGS`、config validator、終了コードと一致する。
+. dry-runのnetwork/cache副作用を明示する。
+. Windows PowerShellとPOSIX shellの差を含める。
+. exampleに実credentialや社内固有PIIを含めない。
+. xref、include、明示ID、placeholderを`npm run docs:check`で検証する。
+. 生成HTMLを実際に開き、左TOC、表、code block、responsive表示を確認する。
+
+buildの詳細はxref:document-build[このガイドのビルド]を参照してください。
+
+[[maintenance-definition-of-done]]
+=== 保守時の完了条件
+
+. READMEとUser Guideが現在到達可能な操作だけを案内している。
+. CLI help、文書、`FLAGS`が一致している。
+. config default、validator、init template、referenceが一致している。
+. stdout JSON契約とexit codeを壊していない。
+. Windows/POSIX installer、path、shell差を考慮した。
+. dry-runのnetwork/cache副作用を明記した。
+. secretがconfig、log、PR description、fixtureへ入っていない。
+. `npm run check`と`npm run docs:check`が成功する。
+. wrapperへ影響する変更で`kit apply`対象範囲を検討した。
+. 実装済み、部分実装、設計のみの台帳を更新した。

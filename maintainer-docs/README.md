@@ -30,7 +30,8 @@
 | CLI routing / help | `cli/bin/aidev.js` |
 | `aidev.yaml` / policy schema | `cli/lib/config.js` |
 | 初期化 | `cli/commands/init.js` |
-| kit assetとlock | `cli/lib/assets.js`、`cli/commands/update.js` |
+| CLI self-update | `cli/bin/aidev.js`、`cli/commands/update.js` |
+| wrapperのkit assetとlock | `cli/lib/assets.js`、`cli/commands/kit.js` |
 | 3SHA | `cli/lib/state.js` |
 | Wiki manifest / inventory / evidence scope | `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/commands/knowledge.js` |
 | syncとwrapper PR | `cli/commands/sync.js`、`cli/lib/ado.js`、`cli/lib/leases.js` |
@@ -48,11 +49,13 @@ npm test       # test/run.js
 npm run check  # 上記2つ
 ```
 
-`package.json`は`private: true`で、Node.js 20以上を要求します。公開npm packageとしての配布ではなく、cloneしたcheckoutへinstallerがlauncherを作る方式です。
+`package.json`は`private: true`で、Node.js 20以上を要求します。公開npm packageとしての配布ではなく、専用にcloneしたai-dev-kit checkoutへinstallerがlauncherを作る方式です。開発者がwrapper checkoutからinstallすることは拒否し、旧wrapper pipelineの移行互換として`TF_BUILD=True`の一時環境だけを例外にします。
 
 ## 更新時の注意
 
-現行の`aidev update`が`upstream`から取り込む対象は、次に限定されています。
+`aidev update`は、launcherが指すCLI専用ai-dev-kit checkoutを固定の`origin/main`へfast-forwardします。wrapperのremoteやworktreeは更新しません。wrapperを導入元にした旧launcherは拒否されるため、専用checkoutからinstallerを再実行してください。
+
+wrapperへ中央kitの管理対象を取り込む操作は`aidev kit apply`へ分離されています。対象は次に限定されています。
 
 - `templates/claude-assets/`
 - `CLAUDE.md`
@@ -60,4 +63,4 @@ npm run check  # 上記2つ
 - `cli/`
 - `scripts/`
 
-`package.json`、`pipelines/`、`.gitignore`、この`maintainer-docs/`は自動更新対象ではありません。wrapperへこれらも追従させる方針に変える場合は、`cli/commands/update.js`の`KIT_PATHS`、ドリフト検出、移行手順をまとめて設計してください。
+`package.json`、`pipelines/`、`.gitignore`、この`maintainer-docs/`はwrapperへの自動適用対象ではありません。対象を広げる場合は、`cli/commands/kit.js`の`KIT_PATHS`、ドリフト検出、移行手順をまとめて設計してください。

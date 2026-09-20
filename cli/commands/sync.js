@@ -475,8 +475,42 @@ async function run(ctx) {
     }
     // Re-read: the agent clears the paths it actually finished, so a partial
     // run must still show the remainder rather than the list we handed it.
-    const afterManifest = inventory.readManifest(repoRoot);
-    const pending = afterManifest?.checkpoint?.pendingPaths?.length ?? pendingPaths.length;
+    let afterManifest = null;
+    let afterReadError = null;
+    try { afterManifest = inventory.readManifest(repoRoot); }
+    catch (e) { afterReadError = e; }
+    const observedPendingPaths = afterManifest?.checkpoint?.pendingPaths;
+    const actualSourceSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
+    agentResult = agentMod.assessWikiProgress(agentResult, pendingPaths, observedPendingPaths, {
+      expectedTargetSha: targetSha,
+      actualTargetSha: afterReadError ? targetSha : afterManifest?.knowledgeSha,
+      actualSourceSha,
+    });
+    if (afterReadError) {
+      agentResult = { ...agentResult, reason: `Wiki manifest could not be read after Claude exited: ${afterReadError.message}` };
+    }
+
+    let structuredOk = true;
+    if (agentResult.checkpointInvalid) {
+      const canRestore = actualSourceSha === targetSha
+        && (!afterManifest || afterManifest.knowledgeSha === targetSha);
+      if (canRestore) {
+        manifest.checkpoint = { ...manifest.checkpoint, pendingPaths: [...pendingPaths] };
+        inventory.writeManifest(repoRoot, manifest);
+        afterManifest = manifest;
+        agentResult = { ...agentResult, checkpointRestored: true };
+      } else {
+        structuredOk = false;
+      }
+    }
+
+    const afterPendingPaths = afterManifest?.checkpoint?.pendingPaths;
+    const pending = Array.isArray(afterPendingPaths) ? afterPendingPaths.length : pendingPaths.length;
+    const publicationBlocked = !!agentResult.checkpointInvalid;
+    agentMod.renderWikiProgress(agentResult, {
+      human: !flags.json,
+      resumeCommand: 'aidev knowledge build --refresh --agent',
+    });
 
     const prBranch = syncBranchName(config, targetSha);
     const diffCounts = {
@@ -485,7 +519,13 @@ async function run(ctx) {
     };
     let pr = { attempted: false };
 
-    if (flags['no-pr']) {
+    if (publicationBlocked) {
+      if (!flags.json) {
+        ui.fail('wrapper publication was skipped because the post-agent target/checkpoint is invalid.');
+        ui.dim('    Re-run the knowledge build after resolving the reported state; no branch or PR was created.');
+      }
+      pr = { attempted: false, blocked: true, reason: agentResult.reason };
+    } else if (flags['no-pr']) {
       ui.info(`--no-pr: changes are in the working tree only. Branch would have been ${prBranch}.`);
       pr = { attempted: false, reason: '--no-pr' };
     } else if (!config.sync.auto_pr) {
@@ -539,14 +579,15 @@ async function run(ctx) {
       ui.dim('    Merging is always a human decision.');
     }
 
+    const commandOk = structuredOk && !(agentResult.ran && !agentResult.ok);
     if (flags.json) {
-      ui.json({ ok: true, targetSha, originalSha, opKey, streamId, branch: prBranch,
+      ui.json({ ok: commandOk, structuredOk, targetSha, originalSha, opKey, streamId, branch: prBranch,
         pendingPages: pending, shards: shards.length, diff: diffCounts, pr, agent: agentResult });
     }
-    // The sync itself succeeded — src/ is bumped, the Wiki is consistent and the
-    // PR is open. A failed agent only means prose is still owed, so it is
-    // reported through the exit code without unwinding any of that.
-    return agentResult.ran && !agentResult.ok ? EXIT.GENERAL : EXIT.OK;
+    // The sync itself succeeded — src/ is bumped and the structured Wiki is
+    // consistent. A failed or incomplete agent only means prose is still owed,
+    // so it is reported through the exit code without unwinding any of that.
+    return commandOk ? EXIT.OK : EXIT.GENERAL;
   } catch (e) {
     // Leave the lease in place: the repository is mid-bump, and an operator
     // must choose --resume or --abort. Silently releasing would strand writes.

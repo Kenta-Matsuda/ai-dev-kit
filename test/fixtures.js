@@ -62,15 +62,18 @@ function writeStaticAssets(root, { hooks = false, settings = true } = {}) {
   }, null, 2)}\n`);
   // `hooks: true` wires the kit's hooks the way a real settings.json does, plus
   // a team-owned hook that eject must leave alone.
+  const kitHook = (name) => ({
+    type: 'command', command: 'node',
+    args: ['${CLAUDE_PROJECT_DIR}/cli/bin/aidev.js', 'hook', name],
+  });
   const settingsDoc = hooks ? {
     hooks: {
       PreToolUse: [
-        { matcher: 'Write|Edit|MultiEdit|Bash',
-          hooks: [{ type: 'command', command: 'aidev hook guard-write' }] },
+        { matcher: 'Write|Edit|MultiEdit|Bash', hooks: [kitHook('guard-write')] },
       ],
       SessionStart: [
         { matcher: '*', hooks: [
-          { type: 'command', command: 'aidev hook session-start' },
+          kitHook('session-start'),
           { type: 'command', command: 'echo team-owned-hook' },
         ] },
       ],

@@ -234,7 +234,7 @@ function run() {
       aidev(['eject', '--yes', '--keep-assets'], { cwd: fx.root });
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       const all = JSON.stringify(s);
-      ok(!/aidev hook/.test(all), `no kit hooks remain: ${all}`);
+      ok(!/aidev(?:\.js)?/.test(all), `no kit hooks remain: ${all}`);
       ok(/team-owned-hook/.test(all), 'the team\'s own hook survives');
     } finally { fx.cleanup(); }
   });
@@ -248,7 +248,7 @@ function run() {
       aidev(['eject', '--yes', '--keep-assets'], { cwd: fx.root });
       ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy gone');
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
-      ok(!/aidev hook/.test(JSON.stringify(s)), 'and no hook is left to consult it');
+      ok(!/aidev(?:\.js)?/.test(JSON.stringify(s)), 'and no hook is left to consult it');
     } finally { fx.cleanup(); }
   });
 

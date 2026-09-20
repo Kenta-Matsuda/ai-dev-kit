@@ -14,10 +14,11 @@ aidev <command> --help
 | command | subcommand | 主な責務 |
 | --- | --- | --- |
 | `init` | — | `aidev.yaml`、`.claude/**`、`.aidev-lock`の初期化。policy/Wikiは案内のみ |
-| `update` | — | `upstream`からkit管理対象を取り込み、`.claude/`再実体化とlock更新 |
+| `update` | — | CLI専用checkoutを`origin`からfast-forward-onlyでself-update |
+| `kit` | `apply` | wrapperの`upstream`からkit管理対象を取り込み、`.claude/`再実体化とlock更新 |
 | `check` | — | static drift、policy、3SHA、pending prose等の判定 |
 | `doctor` | — | Node/Git、repo形状、PAT環境変数、proxy、3SHA等の診断 |
-| `plan` | — | init/update/syncの概算・差分確認 |
+| `plan` | — | init/kit apply/syncの概算・差分確認 |
 | `sync` | — | PKG tracking branchへの追従、inventory更新、任意agent、任意wrapper PR |
 | `knowledge` | `build`, `status` | structured Wiki生成、任意prose agent、状態表示 |
 | `permission` | `configure`, `reconfigure`, `show` | policy候補生成、承認配置、表示 |
@@ -58,6 +59,7 @@ aidev <command> --help
 --agent --agent-name <name> --agent-timeout <ms> --agent-model <model>
 ```
 
+- Claude Code 2.1.259以上が必要です。launcherは起動前にversionを検査し、古い場合はWiki agentを開始せずexit 1にします。
 - `--agent`または`--agent-name`を指定した場合だけprose agentを起動します。`--agent-timeout` / `--agent-model`だけでは起動しません。
 - `--scope`はgeneration targetsだけを狭めます。repository evidenceは`knowledge.evidence`のままで、scope外のコードも根拠として調査できます。
 - `--scope`外のgeneration targetはmanifest checkpointへdeferされます。
@@ -65,7 +67,9 @@ aidev <command> --help
 - supporting evidenceだけが変わった場合は、依存を取りこぼさないため全generation targetをqueueします。
 - `--refresh` / `--resume`は既存`checkpoint.pendingPaths`も再投入します。
 - 手編集ページは通常停止し、破棄には`--force`が必要です。
-- structured write完了後にagentが失敗した場合、checkpointを残してexit 1です。
+- agentへ渡す自然言語promptはstdin経由です。Windowsでもshellの単語分割でpromptや後続optionを破壊しません。
+- 実行中は経過時間とcheckpoint件数を定期表示します。
+- structured write完了後にagent processが失敗した場合、exit 0でもqueueしたtargetが1件も完了しなかった場合、またはmanifest/checkpoint/target SHAが不正になった場合は、Claudeの診断を表示してcheckpointを失ったものと推測せずexit 1です。一部だけ完了した場合も残件を表示してexit 1です。JSONでは`ok: false`、`structuredOk: true`として構造化更新の成功とprose未完了を区別します。
 
 ### `aidev sync`
 
@@ -93,10 +97,18 @@ configure|reconfigure|show
 ### `aidev update`
 
 ```text
---remote <name> --ref <ref> --dry-run --force --json
+--dry-run --json
 ```
 
-既定は`upstream/main`です。dirty worktreeは通常拒否します。`--dry-run`でもfetchします。現在の取込対象は`templates/claude-assets`、`CLAUDE.md`、`.mcp.json`、`cli`、`scripts`です。
+実行中CLIのentrypointから専用ai-dev-kit checkoutを解決し、固定の`origin/main`をfetchしてcheckout全体をfast-forwardします。cwdのwrapper、その`origin`、wrapper worktreeは参照・更新しません。dirty、`main`以外のbranch、detached HEAD、non-fast-forward、Git top-level不一致、またはwrapperを導入元にしたlauncherは安全側で拒否します。更新済みコードが使われるのは次回の`aidev`起動からです。
+
+### `aidev kit apply`
+
+```text
+apply --remote <name> --ref <ref> --dry-run --force --json
+```
+
+現在のwrapperへ中央kitの管理対象を適用する明示コマンドです。既定はwrapperの`upstream/main`で、dirty worktreeは通常拒否します。現在の取込対象は`templates/claude-assets`、`CLAUDE.md`、`.mcp.json`、`cli`、`scripts`です。
 
 ## 終了code
 
@@ -120,7 +132,8 @@ entrypointは`AidevError`を次の公開codeへ変換します。
 
 本CLIの`--dry-run`は基本的に「作業ツリーの管理対象を書き換えない」という意味です。完全な副作用ゼロではありません。
 
-- `update --dry-run`: upstreamをfetchし、remote-tracking refが更新され得る
+- `update --dry-run`: CLI専用checkoutのoriginをfetchし、remote-tracking refが更新され得る
+- `kit apply --dry-run`: wrapperのupstreamをfetchし、remote-tracking refが更新され得る
 - `sync --dry-run`: `src`のoriginをfetchする
 - `plan` / state確認: remote確認cacheを更新し得る
 

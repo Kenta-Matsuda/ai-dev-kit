@@ -1,0 +1,19 @@
+:project-name: ai-dev-kit
+:command-name: aidev
+:node-min-version: 20
+:default-branch: main
+:default-pat-env: AZURE_DEVOPS_PAT
+:aidev-version: 0.1.0
+:guide-source-dir: docs/user-guide
+:guide-output: build/docs/ai-dev-kit-user-guide.html
+:appendix-caption: 付録
+:chapter-label:
+:figure-caption: 図
+:table-caption: 表
+:example-caption: 例
+:note-caption: 注記
+:tip-caption: ヒント
+:important-caption: 重要
+:warning-caption: 警告
+:caution-caption: 注意
+:last-update-label!:

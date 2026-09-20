@@ -31,10 +31,10 @@ function aidev(args, { cwd, env = {} } = {}) {
 }
 
 /** Feed a hook its payload through --input, as the hook harness does. */
-function hook(name, payload, cwd) {
+function hook(name, payload, cwd, env = {}) {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-hook-')), 'input.json');
   fs.writeFileSync(f, JSON.stringify(payload), 'utf8');
-  const r = aidev(['hook', name, '--input', f], { cwd });
+  const r = aidev(['hook', name, '--input', f], { cwd, env });
   try { fs.rmSync(path.dirname(f), { recursive: true, force: true }); } catch { /* best effort */ }
   return r;
 }
@@ -331,6 +331,18 @@ function run() {
         tool_input: { file_path: path.join(fx.root, 'src', 'api', 'auth.ts'), content: 'x' },
       }, fx.root);
       ok(/deny/i.test(r.stdout), `denied: ${r.stdout}`);
+    } finally { fx.cleanup(); }
+  });
+
+  test('guard-write uses CLAUDE_PROJECT_DIR when the session cwd is inside the PKG', () => {
+    const fx = makeRepo();
+    try {
+      const r = hook('guard-write', {
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(fx.root, 'src', 'api', 'auth.ts'), content: 'x' },
+      }, fx.pkgDir, { CLAUDE_PROJECT_DIR: fx.root });
+      eq(r.code, EXIT.OK, `hook failed from nested cwd: ${r.stderr}`);
+      ok(/deny/i.test(r.stdout), `wrapper policy was not applied: ${r.stdout}`);
     } finally { fx.cleanup(); }
   });
 

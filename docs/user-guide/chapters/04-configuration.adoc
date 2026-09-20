@@ -1,0 +1,453 @@
+[[configuration]]
+== 設定リファレンス
+
+wrapper固有の設定はrepository rootの`aidev.yaml`に記述します。schema versionは1です。設定はGit管理し、credential値は環境変数から解決します。
+
+[[configuration-complete-example]]
+=== 完全な設定例
+
+[source,yaml]
+----
+version: 1
+
+package:
+  name: my-pkg
+  include:
+    - "src/src/**"
+    - "src/docs/**"
+  exclude:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/generated/**"
+
+secrets_paths:
+  - "src/.env*"
+  - "src/**/secrets/**"
+
+azure_devops:
+  organization: my-org
+  project: my-project
+  repository: my-pkg
+  wrapper_repository: my-pkg-ai-dev
+  auth_env: AZURE_DEVOPS_PAT
+  triage:
+    labels:
+      - ai-ready
+    area_path: "my-project\\my-team"
+
+sync:
+  tracking_branch: main
+  auto_pr: true
+  wrapper_pr:
+    target_branch: main
+    reviewers:
+      - reviewer@example.com
+  remote_check_timeout_ms: 3000
+  remote_check_ttl_minutes: 60
+  lease_ttl_minutes: 120
+
+task:
+  state_backend: azure_devops
+  cache_dir: .aidev/tasks
+  lease_ttl_minutes: 120
+  retention_days: 90
+  max_concurrent: 3
+
+knowledge:
+  max_files_per_dir: 20
+  subagent_concurrency: 4
+  inventory_shard_size: 2000
+  agent_timeout_ms: 1800000
+  evidence:
+    include:
+      - "src/**"
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/generated/**"
+
+model:
+  agent: sonnet
+
+self_evolution:
+  enabled: true
+  cadence: weekly
+
+quality_gates:
+  lint: npm run lint
+  test: npm test
+----
+
+[[configuration-top-level]]
+=== top-level項目
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`version`
+|integer
+|いいえ
+|schema versionです。既定値と唯一の対応値は`1`です。
+
+|`package`
+|mapping
+|はい
+|対象PKGとgeneration targetsを定義します。
+
+|`secrets_paths`
+|string array
+|いいえ
+|secretを含み得るpath globです。evidenceから除外され、policyのprotectedにも追加されます。
+
+|`azure_devops`
+|mapping
+|はい
+|organization、project、repository、認証環境変数名を定義します。
+
+|`sync`
+|mapping
+|いいえ
+|tracking branch、PR、remote確認、sync leaseを設定します。
+
+|`task`
+|mapping
+|いいえ
+|task cacheとleaseの設定です。task orchestration全体は部分実装です。
+
+|`knowledge`
+|mapping
+|いいえ
+|inventory、agent、repository evidenceを設定します。
+
+|`model`
+|mapping
+|いいえ
+|CLIが起動するagentのmodelを設定します。
+
+|`self_evolution`
+|mapping
+|いいえ
+|観測journalの設定です。中央kit PRの自動作成は未実装です。
+
+|`quality_gates`
+|mapping
+|いいえ
+|名前からshell commandへの対応です。`src/`で実行されます。
+|===
+
+[[configuration-package]]
+=== `package`
+
+[cols="2,1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |既定値 |説明
+
+|`package.name`
+|string
+|はい
+|なし
+|PKGの表示名です。空文字は許可されません。
+
+|`package.include`
+|string array
+|いいえ
+|`[]`
+|generation targetに含めるwrapper root基準のglobです。空配列は対象を制限しません。
+
+|`package.exclude`
+|string array
+|いいえ
+|`[]`
+|generation targetから除外するglobです。依存物、生成物、巨大なvendor treeなどを指定します。
+|===
+
+`package.include`はagentが読める全範囲ではありません。記述根拠はxref:configuration-knowledge-evidence[`knowledge.evidence`]で独立して定義します。
+
+[[configuration-secrets]]
+=== `secrets_paths`
+
+`secrets_paths`には、secretそのものではなくpath globだけを記述します。
+
+[source,yaml]
+----
+secrets_paths:
+  - "src/.env*"
+  - "src/config/private/**"
+  - "src/**/*.pem"
+----
+
+この設定には次の効果があります。
+
+* repository evidenceから除外します。
+* Wiki生成時にmask対象として扱います。
+* policy candidateの`protected`へ追加します。
+
+[WARNING]
+====
+`secrets_paths`は任意processからの完全な読み取りsandboxではありません。OSのcredential分離、最小権限PAT、Claude Code側deny、レビューを併用してください。
+====
+
+[[configuration-azure-devops]]
+=== `azure_devops`
+
+[cols="2,1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |既定値 |説明
+
+|`organization`
+|string
+|はい
+|なし
+|Azure DevOps organization名です。
+
+|`project`
+|string
+|はい
+|なし
+|project名です。
+
+|`repository`
+|string
+|はい
+|なし
+|対象PKG repository名です。
+
+|`wrapper_repository`
+|string/null
+|いいえ
+|`null`
+|wrapper repository名です。自動PR作成に必要です。
+
+|`auth_env`
+|string
+|いいえ
+|`AZURE_DEVOPS_PAT`
+|PAT値を格納する環境変数の名前です。
+
+|`triage.labels`
+|string array
+|いいえ
+|`[]`
+|将来のWork Item opt-inに利用するmetadataです。設定してもissue-to-pr全体は有効になりません。
+
+|`triage.area_path`
+|string/null
+|いいえ
+|`null`
+|将来のWork Item triage用area pathです。
+|===
+
+`pat`、`token`、`password`、`secret`というkeyは拒否されます。また、credentialらしい長い値を他keyへ埋め込んだ場合もvalidatorが拒否します。
+
+[[configuration-sync]]
+=== `sync`
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |既定値 |説明
+
+|`tracking_branch`
+|string
+|`main`
+|PKGで追跡するbranchです。
+
+|`auto_pr`
+|boolean
+|`true`
+|条件が揃った場合にwrapper PRを作成します。falseの場合はworktreeまたはlocal branchまでです。
+
+|`wrapper_pr.target_branch`
+|string
+|`main`
+|wrapper PRのtarget branchです。
+
+|`wrapper_pr.reviewers`
+|string array
+|`[]`
+|wrapper PRへ設定するreviewerです。
+
+|`remote_check_timeout_ms`
+|integer 100..60000
+|`3000`
+|remote状態確認のtimeoutです。
+
+|`remote_check_ttl_minutes`
+|integer 0..10080
+|`60`
+|remote state cacheのTTLです。0は常に再確認する構成に使用できます。
+
+|`lease_ttl_minutes`
+|integer 1..10080
+|`120`
+|sync leaseの有効時間です。
+|===
+
+[[configuration-task]]
+=== `task`
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |既定値 |説明
+
+|`state_backend`
+|`azure_devops`または`local`
+|`azure_devops`
+|設計上のstate backendです。現行の公開task操作はlocal cacheに依存し、完成したbackend abstractionではありません。
+
+|`cache_dir`
+|string
+|`.aidev/tasks`
+|Git管理外のtask JSON保存先です。
+
+|`lease_ttl_minutes`
+|integer 1..10080
+|`120`
+|work leaseの有効時間です。
+
+|`retention_days`
+|integer 1..3650
+|`90`
+|task metadataの保持期間設定です。
+
+|`max_concurrent`
+|integer 1..100
+|`3`
+|同時task数の設定です。
+|===
+
+[NOTE]
+====
+公開CLIにはWork Itemからtask cacheとwork leaseを初期作成するcommandがありません。既存task JSONに対する`list/show/resume/advance/abandon`だけを、部分実装として扱ってください。
+====
+
+[[configuration-knowledge]]
+=== `knowledge`
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |既定値 |説明
+
+|`max_files_per_dir`
+|integer 1..1000
+|`20`
+|Wikiページ構造を作る際のディレクトリ当たり目安です。
+
+|`subagent_concurrency`
+|integer 1..64
+|`4`
+|prose生成時のsubagent concurrencyです。
+
+|`inventory_shard_size`
+|integer 1..100000
+|`2000`
+|inventory shard当たりのrecord数です。
+
+|`agent_timeout_ms`
+|integer 10000..7200000
+|`1800000`
+|CLIが起動するknowledge agentのtimeoutです。既定は30分です。
+|===
+
+[[configuration-knowledge-evidence]]
+==== `knowledge.evidence`
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |既定値 |説明
+
+|`include`
+|string array
+|`["src/**"]`
+|agentが記述根拠として調査できるtracked pathです。
+
+|`exclude`
+|string array
+|`package.exclude`
+|evidenceから除外するglobです。省略時は`package.exclude`を継承します。明示した場合は継承ではなく置換です。
+|===
+
+[source,yaml]
+----
+knowledge:
+  evidence:
+    include: ["src/**"]
+    exclude:
+      - "**/node_modules/**"
+      - "**/generated/**"
+----
+
+`secrets_paths`はこのscopeから常に除外します。docs-onlyのgeneration targetでも、evidenceを`src/**`に保つことで、実装やtestと照合できます。
+
+[[configuration-model]]
+=== `model`
+
+`model.agent`はCLIが`--agent`で起動するClaude Code processの既定modelです。既定は`sonnet`です。対話sessionのmodelは制御しません。
+
+agent modelの優先順位は次のとおりです。
+
+. commandの`--agent-model`
+. `aidev.yaml`の`model.agent`
+. kit既定値`sonnet`
+
+空文字を明示した場合は`--model`をprocessへ渡さず、Claude Code自身の解決に任せます。
+
+対話sessionはClaude Codeの設定優先順位に従います。個人設定はGit管理外の`.claude/settings.local.json`へ記述します。
+
+[source,json]
+----
+{ "model": "opus" }
+----
+
+[[configuration-self-evolution]]
+=== `self_evolution`
+
+[cols="2,1,1,4",options="header"]
+|===
+|項目 |型 |既定値 |説明
+
+|`enabled`
+|boolean
+|`true`
+|Stop hookによるlocal観測journalを有効にします。
+
+|`cadence`
+|string
+|`weekly`
+|将来の集約cadence metadataです。
+|===
+
+現行実装は`.aidev/cache/evolution-journal.json`へ観測を記録するところまでです。中央kitのbranch作成、PR作成、auto mergeは行いません。
+
+[[configuration-quality-gates]]
+=== `quality_gates`
+
+任意の名前を、`src/`で実行するshell commandへ対応付けます。
+
+[source,yaml]
+----
+quality_gates:
+  lint: npm run lint
+  unit: npm test
+  typecheck: npm run typecheck
+----
+
+PostToolUseのquality gate hookは、設定された全commandを各120秒上限で実行します。編集path別にgateを選別しないため、大規模PKGでは保存・編集ごとの実行時間に注意してください。実在し、非対話で終了するcommandだけを設定します。
+
+[[configuration-paths]]
+=== globとpathの規則
+
+* pathはwrapper root基準で、通常`src/`から始めます。
+* `src/`の配置名は固定です。
+* `include`と`exclude`の重複時はexcludeを優先します。
+* secretの可能性があるpathは、generation targetから外すだけでなく`secrets_paths`にも指定します。
+* evidenceはtarget commitのGit tracked filesから選ばれます。untracked fileを根拠として扱いません。
+
+[[configuration-validation]]
+=== validation上の注意
+
+* schema version 1以外は拒否されます。
+* required fieldの欠落、型違い、範囲外のintegerは拒否されます。
+* `model: sonnet`のようなscalar形式は拒否されます。`model.agent`として記述します。
+* credential keyとcredentialらしい値は拒否されます。
+* 未知keyは機能を増やさず、正規化時に保持されない場合があります。typoが常に明示エラーになるとは限らないため、このリファレンスと`aidev doctor`で確認してください。

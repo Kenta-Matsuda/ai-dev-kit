@@ -1,0 +1,44 @@
+= ai-dev-kit User Guide sources
+
+このディレクトリは、`ai-dev-kit User Guide`のAsciiDocソースです。利用者向けの導入、設定、運用、CLI、セキュリティ、CI/CD、障害対応と、保守者向け情報を単一HTMLへまとめます。
+
+== Quick start
+
+repository rootで実行します。
+
+[source,bash]
+----
+npm ci
+npm run docs:check
+----
+
+生成物:
+
+[source,text]
+----
+build/docs/ai-dev-kit-user-guide.html
+----
+
+PowerShellで開く場合:
+
+[source,powershell]
+----
+Invoke-Item .\build\docs\ai-dev-kit-user-guide.html
+----
+
+== Source layout
+
+* `index.adoc`: document attributeとchapter include順
+* `_attributes.adoc`: 共通attributeと日本語caption
+* `chapters/`: User Guide本文
+* `appendices/`: 環境変数、実装状況、build手順
+* `assets/user-guide.css`: HTMLへ埋め込むstyle
+* `scripts/build-docs.js`: buildと構造validation
+
+== Editing
+
+各chapterには一意の明示IDを付け、内部linkは`xref:<id>[label]`を使用します。command、path、identifierはmonospace、複数行exampleはsource blockで記述します。
+
+実装済み・部分実装・設計のみを混同せず、CLI optionは`cli/commands/*.js`の`FLAGS`、設定defaultは`cli/lib/config.js`、終了codeは`cli/lib/errors.js`を正本にしてください。
+
+詳細はlink:appendices/c-document-build.adoc[文書ビルド付録]を参照してください。生成HTMLは直接編集せず、AsciiDoc sourceを更新して再buildします。

@@ -1,0 +1,133 @@
+[[overview]]
+== 概要
+
+{project-name}は、既存のパッケージ（以降「PKG」）を直接変更せず、チーム共通のClaude Code実行環境を構築・運用するためのセットアップキットです。中央の{project-name}を土台にした *wrapper repository* を作り、対象PKGを`src/` Git submoduleとして組み込みます。
+
+このガイドは、{project-name} {aidev-version}の利用者、導入管理者、CI管理者、保守者を対象にしています。実際に到達できるCLI機能を基準とし、将来設計はxref:implementation-status[実装状況と既知の制約]で明確に区別します。
+
+[[overview-benefits]]
+=== 導入によって得られるもの
+
+[cols="1,3",options="header"]
+|===
+|目的 |提供される機能
+
+|Claude Code設定の統一
+|共通のAgents、Skills、hooks、MCP設定を`.claude/`、`CLAUDE.md`、`.mcp.json`として配布します。
+
+|PKGごとの安全設定
+|読み取り対象、生成対象、秘密領域、書き込み可能範囲を`aidev.yaml`と承認済みpolicyで管理します。
+
+|AI向け知識の共有
+|対象PKGのソース、テスト、設定、CI、文書を根拠にしたLLM Wikiをwrapper側の`knowledge/`へ生成します。
+
+|PKG更新への追従
+|`src/`の更新、Wikiの再計算、同期branchのpush、wrapper PR作成を`aidev sync`で一連の処理として実行します。
+
+|構成ドリフトの検出
+|`aidev check`が共通設定、policy、PKGとWikiの対象SHA、生成ページの手編集を検査します。
+
+|チームとCIでの再現
+|レビュー済み設定と生成物をGit管理し、開発者とAzure Pipelinesで同じ検査を実行できます。
+|===
+
+[[overview-fit]]
+=== 利用に適した環境
+
+次の条件を満たすチームでの利用を想定しています。
+
+* Claude Codeを利用する。
+* ソース管理、Work Item、CIにAzure DevOpsを利用する。
+* 対象PKGとAI実行環境を別repositoryにし、PKGを`src/` submoduleとして参照できる。
+* AIが作成したPRと同期PRを人間がレビューし、自動マージしない。
+* hooksだけをセキュリティ境界とせず、最小権限の認証、必須CI、branch policyを併用できる。
+
+[[overview-out-of-scope]]
+=== 対象外または未完成の範囲
+
+[WARNING]
+====
+Agent定義や設定項目が存在しても、公開CLIから完結して利用できるとは限りません。特に`issue-to-pr`、端末間のtask復元、background refresh、自己改善PRは、現時点でエンドツーエンド機能ではありません。
+====
+
+次の用途は対象外、または部分実装です。
+
+* Claude Code以外のAIツールとの互換レイヤー
+* 既存`.claude/`設定との自動マージ
+* 完全なprocess sandbox、または利用者が上書きできないmanaged settingsの配布
+* Work Item取得からPKG PR、同期PRまでを自動完結する`issue-to-pr`
+* 別端末でAzure DevOpsだけからtask cacheを再構築する処理
+* Stop hookが記録したqueueの常駐consumer
+* 自己改善案を中央kitのbranchやPRへ自動変換する処理
+* workflowの実token数・金額上限、および破壊操作前承認の強制
+
+現在利用しやすい範囲は、環境初期化、共通設定配布、policy生成・承認、Wiki生成、整合性チェック、PKG追従、同期PR、CIです。
+
+[[overview-reader-paths]]
+=== 読み方
+
+[cols="1,3",options="header"]
+|===
+|目的 |読む章
+
+|初めて導入する
+|xref:concepts[アーキテクチャと主要概念]を確認し、xref:getting-started[利用開始]を順番に実行します。
+
+|既存wrapperを日常利用する
+|xref:operations[日常運用]、xref:knowledge[LLM Wiki]、xref:troubleshooting[トラブルシューティング]を参照します。
+
+|安全性を評価する
+|xref:security[権限とセキュリティ]とxref:implementation-status[実装状況と既知の制約]を確認します。
+
+|自動化する
+|xref:automation[Workflow、Task、CI/CD]とxref:environment-reference[環境変数リファレンス]を参照します。
+
+|コマンドを調べる
+|xref:cli-reference[CLIリファレンス]を参照し、実際の導入版では`aidev <command> --help`も確認します。
+
+|kit自体を変更する
+|xref:maintenance[保守者ガイド]とxref:document-build[このガイドのビルド]を参照します。
+|===
+
+[[overview-terms]]
+=== 用語
+
+[cols="1,3",options="header"]
+|===
+|用語 |意味
+
+|中央kit
+|チームが保守する{project-name}の中央repositoryです。
+
+|CLI専用checkout
+|`aidev` launcherが参照する、中央kitの固定checkoutです。wrapperとは別に保持します。
+
+|wrapper repository
+|Claude Codeを起動する作業rootです。共通設定、PKG submodule、生成Wikiを保持します。
+
+|PKG
+|AI作業の対象となる既存repositoryです。wrapperの`src/`にsubmoduleとして配置します。
+
+|static asset
+|同じkit commitを適用したwrapper間でbyte-identicalにする`.claude/**`、`CLAUDE.md`、`.mcp.json`です。
+
+|generation target
+|Wikiページを生成・更新する起点です。`package.include`と`package.exclude`で決まります。
+
+|repository evidence
+|Wiki本文を検証するためにagentが調査できるtracked fileです。`knowledge.evidence`で決まります。
+
+|3SHA
+|`remoteSha`、`submoduleSha`、`knowledgeSha`の組み合わせです。
+
+|lease
+|限定された書き込みを一定時間だけ許可するローカル状態です。work leaseとsync leaseがあります。
+|===
+
+[[overview-conventions]]
+=== 表記上の注意
+
+* `<org>`、`<project>`、`<repository>`、`<your-pat>`は、利用環境の値に置き換えるplaceholderです。
+* コマンド例の`main`は既定値です。実際のtracking branchが異なる場合は`aidev.yaml`に合わせます。
+* `aidev check`は製品CLI、`npm run check`はkit保守用test scriptです。両者を混同しないでください。
+* `NOTE`は補足、`TIP`は推奨、`WARNING`は障害や誤解の可能性、`CAUTION`はデータ損失や権限リスクを示します。

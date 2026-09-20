@@ -24,7 +24,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { AidevError } = require('./errors');
 const cfgMod = require('./config');
 const ui = require('./ui');
@@ -35,11 +35,53 @@ const DEFAULT_AGENT = 'knowledge-builder';
 /** Beyond this, the task goes in a file rather than on the command line. */
 const MAX_INLINE_PROMPT_BYTES = 8192;
 
+/** How often a human-mode run reports that Claude is still working. */
+const HEARTBEAT_MS = 15000;
+
+/** Maximum Claude result text retained for a failure diagnostic. */
+const RESULT_SUMMARY_CHARS = 1600;
+
+/** First Claude Code release supporting every launcher/hook option we use. */
+const MIN_CLAUDE_VERSION = '2.1.259';
+
 /** Grace period between SIGTERM and SIGKILL when a run overruns. */
 const KILL_GRACE_MS = 5000;
 
 /** `claude` reports SIGTERM as this, which is how a timeout surfaces. */
 const EXIT_SIGTERM = 143;
+
+/** Remove terminal control bytes and bound an agent's final message. */
+function summarizeResult(value, maxChars = RESULT_SUMMARY_CHARS) {
+  if (value == null) return '';
+  let text;
+  try { text = typeof value === 'string' ? value : JSON.stringify(value); }
+  catch { text = String(value); }
+  text = text
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .trim();
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+}
+
+/** Render a duration without implying sub-second precision. */
+function formatDuration(durationMs) {
+  const seconds = Math.max(0, Math.round(Number(durationMs || 0) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** Build a shell-free cmd.exe invocation for a legacy .cmd/.bat shim. */
+function windowsScriptSpec(script, source, env) {
+  const comspec = env.ComSpec || env.COMSPEC || process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+  return {
+    ok: true,
+    bin: comspec,
+    argvPrefix: ['/d', '/s', '/c', script],
+    shell: false,
+    killTree: true,
+    source,
+  };
+}
 
 /**
  * Locate the Claude Code executable.
@@ -48,6 +90,11 @@ const EXIT_SIGTERM = 143;
  * must never spawn the real binary, which would cost money and need a network.
  * A `.js` stub is run through the current Node so the tests stay portable to
  * platforms where a shebang means nothing.
+ *
+ * On Windows, prefer the native executable returned by `where.exe`. Spawning a
+ * bare command with `shell: true` corrupts multi-line argv and can reduce an
+ * entire prompt to its first word. Legacy `.cmd` installs are launched through
+ * an explicit cmd.exe argv with the natural-language prompt still on stdin.
  */
 function resolveBinary(env = process.env) {
   const override = env.AIDEV_CLAUDE_BIN;
@@ -55,11 +102,87 @@ function resolveBinary(env = process.env) {
     if (!fs.existsSync(override)) {
       return { ok: false, reason: `AIDEV_CLAUDE_BIN points at ${override}, which does not exist` };
     }
-    return override.endsWith('.js')
-      ? { ok: true, bin: process.execPath, argvPrefix: [override], source: 'AIDEV_CLAUDE_BIN' }
-      : { ok: true, bin: override, argvPrefix: [], source: 'AIDEV_CLAUDE_BIN' };
+    if (override.endsWith('.js')) {
+      return {
+        ok: true, bin: process.execPath, argvPrefix: [override], shell: false,
+        killTree: process.platform === 'win32', skipVersionCheck: true,
+        source: 'AIDEV_CLAUDE_BIN',
+      };
+    }
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(override)) {
+      return windowsScriptSpec(override, 'AIDEV_CLAUDE_BIN', env);
+    }
+    return {
+      ok: true, bin: override, argvPrefix: [], shell: false,
+      killTree: process.platform === 'win32', source: 'AIDEV_CLAUDE_BIN',
+    };
   }
-  return { ok: true, bin: 'claude', argvPrefix: [], source: 'PATH' };
+
+  if (process.platform === 'win32') {
+    try {
+      const found = spawnSync('where.exe', ['claude'], {
+        encoding: 'utf8', env: { ...env }, windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const candidate = found.status === 0
+        ? String(found.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean)
+        : null;
+      if (candidate) {
+        if (/\.(cmd|bat)$/i.test(candidate)) {
+          return windowsScriptSpec(candidate, `PATH (${candidate})`, env);
+        }
+        return {
+          ok: true, bin: candidate, argvPrefix: [], shell: false, killTree: true,
+          source: `PATH (${candidate})`,
+        };
+      }
+    } catch { /* spawn below produces the ordinary missing-binary diagnostic */ }
+  }
+
+  return {
+    ok: true, bin: 'claude', argvPrefix: [], shell: false,
+    killTree: false, source: 'PATH',
+  };
+}
+
+/** Compare a parsed semantic version with the launcher feature floor. */
+function versionAtLeast(actual, minimum = MIN_CLAUDE_VERSION) {
+  const parse = (value) => String(value).split('.').map((part) => Number(part));
+  const a = parse(actual);
+  const b = parse(minimum);
+  if (a.length < 3 || b.length < 3 || [...a, ...b].some((n) => !Number.isInteger(n))) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return true;
+}
+
+/** Refuse a Claude Code version that cannot honour our permission contract. */
+function checkClaudeVersion(resolved, env) {
+  if (resolved.skipVersionCheck) return { ok: true, skipped: true };
+  try {
+    const checked = spawnSync(resolved.bin, [...resolved.argvPrefix, '--version'], {
+      encoding: 'utf8', env: { ...env }, windowsHide: true,
+      shell: false, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const text = `${checked.stdout || ''}\n${checked.stderr || ''}`.trim();
+    if (checked.error && checked.error.code === 'ENOENT') {
+      return { ok: false, missing: true, reason: `${resolved.bin} was not found on PATH` };
+    }
+    const match = /\b(\d+\.\d+\.\d+)\b/.exec(text);
+    if (checked.status !== 0 || !match) {
+      return { ok: false, reason: `could not determine the Claude Code version (${summarizeResult(text) || `exit ${checked.status}`})` };
+    }
+    if (!versionAtLeast(match[1])) {
+      return {
+        ok: false,
+        reason: `Claude Code ${match[1]} is too old; ${MIN_CLAUDE_VERSION} or newer is required`,
+      };
+    }
+    return { ok: true, version: match[1] };
+  } catch (e) {
+    return { ok: false, reason: `could not check the Claude Code version: ${e.message}` };
+  }
 }
 
 /**
@@ -208,14 +331,15 @@ function prepareTask(repoRoot, {
 /**
  * Assemble argv for a one-shot agent run.
  *
- * Ordering is not cosmetic: `--allowedTools`, `--disallowedTools` and `--tools`
- * are variadic in the Claude CLI, so a positional prompt placed after any of
- * them would be swallowed as one of their values. Keeping `-p <prompt>` first
- * makes that class of bug impossible regardless of what is appended later.
+ * The prompt is deliberately absent: it is written to stdin as text. Passing a
+ * multi-line natural-language prompt through cmd.exe caused Windows to split it
+ * at the first space and reinterpret the rest, including `--agent`, as shell
+ * input. Only fixed flags and already-validated identifiers reach argv now.
  */
-function buildArgv({ agent, prompt, model = null }) {
+function buildArgv({ agent, model = null }) {
   const argv = [
-    '-p', prompt,
+    '-p',
+    '--input-format', 'text',
     '--agent', agent,
   ];
   // Omitted entirely rather than passed empty when no model is configured.
@@ -226,10 +350,13 @@ function buildArgv({ agent, prompt, model = null }) {
   if (model) argv.push('--model', model);
   argv.push(
     '--output-format', 'json',
-    // Unattended: anything that would prompt is denied rather than hanging
-    // forever on a question nobody is present to answer. Deliberately not
-    // `bypassPermissions`, which would also disable the kit's own guard.
-    '--permission-mode', 'dontAsk',
+    // Wiki generation must edit files without an interactive approval dialog.
+    // acceptEdits grants that narrow class while the project deny rules and
+    // PreToolUse guard remain active; this intentionally is not bypass mode.
+    '--permission-mode', 'acceptEdits',
+    // Any operation acceptEdits does not cover is denied rather than hanging a
+    // headless process waiting for a host that does not exist.
+    '--permission-prompts', 'none',
   );
   return argv;
 }
@@ -237,32 +364,45 @@ function buildArgv({ agent, prompt, model = null }) {
 /**
  * Run one agent to completion.
  *
- * Never rejects: every failure — missing binary, non-zero exit, timeout,
- * unparseable output — comes back as a structured result so the caller can
- * render it in human or JSON mode and choose the exit code.
+ * Never rejects: every failure — missing binary, non-zero exit, timeout or an
+ * invalid JSON protocol response — comes back as a structured result so the
+ * caller can render it and choose the exit code.
  */
-function runAgent({ repoRoot, agent, prompt, timeoutMs, model = null, env = process.env }) {
+function runAgent({
+  repoRoot,
+  agent,
+  prompt,
+  timeoutMs,
+  model = null,
+  env = process.env,
+  onProgress = null,
+}) {
   return new Promise((resolve) => {
     const resolved = resolveBinary(env);
     if (!resolved.ok) {
       resolve({ ok: false, skipped: true, reason: resolved.reason });
       return;
     }
+    const compatibility = checkClaudeVersion(resolved, env);
+    if (!compatibility.ok) {
+      resolve({
+        ok: false,
+        skipped: !!compatibility.missing,
+        incompatible: !compatibility.missing,
+        reason: compatibility.reason,
+      });
+      return;
+    }
 
-    const argv = [...resolved.argvPrefix, ...buildArgv({ agent, prompt, model })];
+    const argv = [...resolved.argvPrefix, ...buildArgv({ agent, model })];
+    const startedAt = Date.now();
     let child;
     try {
       child = spawn(resolved.bin, argv, {
         cwd: repoRoot,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        // A shell is needed for exactly one reason: on Windows, a bare `claude`
-        // has to become `claude.cmd`, and only cmd.exe knows that. An absolute
-        // path needs no such help, and routing one through a shell is actively
-        // harmful — Node does not quote the executable when `shell` is set, so
-        // `C:\Program Files\nodejs\node.exe` is split at the space and cmd
-        // answers `'C:\Program' is not recognized`. Everywhere else argv goes
-        // straight to execve with no word splitting at all.
-        shell: process.platform === 'win32' && !/[\\/]/.test(resolved.bin),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: !!resolved.shell,
+        windowsHide: true,
         env: { ...env },
       });
     } catch (e) {
@@ -277,16 +417,35 @@ function runAgent({ repoRoot, agent, prompt, timeoutMs, model = null, env = proc
 
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
+    // A process that exits before consuming stdin may close the pipe. That is
+    // reported by its exit/result, not as an unhandled EPIPE in this parent.
+    child.stdin.on('error', () => {});
+    child.stdin.end(String(prompt == null ? '' : prompt), 'utf8');
+
+    const heartbeat = typeof onProgress === 'function' ? setInterval(() => {
+      try { onProgress({ elapsedMs: Date.now() - startedAt }); } catch { /* diagnostics must not stop Claude */ }
+    }, HEARTBEAT_MS) : null;
 
     const deadline = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
-      // A wedged agent may ignore SIGTERM; escalate rather than hang the CLI.
+      if (process.platform === 'win32' && resolved.killTree && child.pid) {
+        // Killing only cmd.exe (or even the native parent) can leave Claude's
+        // descendants running, spending budget and writing after this command
+        // has returned. taskkill /T terminates the complete process tree.
+        const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
+          stdio: 'ignore', windowsHide: true, shell: false,
+        });
+        killer.on('error', () => child.kill('SIGTERM'));
+      } else {
+        child.kill('SIGTERM');
+      }
+      // Last-resort escalation if process-tree termination itself fails.
       killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
     }, timeoutMs) : null;
 
     const cleanup = () => {
       if (deadline) clearTimeout(deadline);
+      if (heartbeat) clearInterval(heartbeat);
       if (killTimer) clearTimeout(killTimer);
     };
 
@@ -302,19 +461,18 @@ function runAgent({ repoRoot, agent, prompt, timeoutMs, model = null, env = proc
 
     child.on('close', (code, signal) => {
       cleanup();
+      const durationMs = Date.now() - startedAt;
       const exitCode = code == null ? (signal ? EXIT_SIGTERM : 1) : code;
 
       if (timedOut || exitCode === EXIT_SIGTERM) {
         resolve({
-          ok: false, timedOut: true, exitCode,
+          ok: false, timedOut: true, exitCode, durationMs,
           reason: `the agent exceeded its ${Math.round(timeoutMs / 1000)}s budget and was stopped`,
           stderr: stderr.trim(),
         });
         return;
       }
 
-      // `--output-format json` prints one object; parse it when we can, but a
-      // zero exit with unreadable stdout is still a success for our purposes.
       let payload = null;
       const trimmed = stdout.trim();
       if (trimmed) {
@@ -323,7 +481,7 @@ function runAgent({ repoRoot, agent, prompt, timeoutMs, model = null, env = proc
 
       if (exitCode !== 0 || (payload && payload.is_error)) {
         resolve({
-          ok: false, exitCode,
+          ok: false, exitCode, durationMs,
           reason: (payload && payload.result) || stderr.trim() || `the agent exited ${exitCode}`,
           stderr: stderr.trim(),
           costUsd: payload ? payload.total_cost_usd : undefined,
@@ -331,14 +489,127 @@ function runAgent({ repoRoot, agent, prompt, timeoutMs, model = null, env = proc
         return;
       }
 
+      // `--output-format json` is a protocol contract. Treating arbitrary text
+      // as success is how an early shell/CLI failure can masquerade as a build.
+      if (!payload) {
+        resolve({
+          ok: false, exitCode, durationMs,
+          reason: 'Claude exited 0 but did not return the requested JSON result',
+          stderr: stderr.trim(),
+          result: summarizeResult(trimmed),
+        });
+        return;
+      }
+
       resolve({
-        ok: true, exitCode,
-        result: payload ? payload.result : trimmed,
-        costUsd: payload ? payload.total_cost_usd : undefined,
-        sessionId: payload ? payload.session_id : undefined,
+        ok: true, exitCode, durationMs,
+        result: payload.result,
+        costUsd: payload.total_cost_usd,
+        sessionId: payload.session_id,
+        permissionDenials: Array.isArray(payload.permission_denials)
+          ? payload.permission_denials.length : 0,
       });
     });
   });
+}
+
+/** Count how many paths from this invocation remain in the checkpoint. */
+function queuedProgress(repoRoot, paths) {
+  try {
+    const manifest = cfgMod.readJsonIfExists(path.join(repoRoot, 'knowledge', 'manifest.json'));
+    const pendingPaths = manifest?.checkpoint?.pendingPaths;
+    if (!Array.isArray(pendingPaths)) return null;
+    const remainingSet = new Set(pendingPaths);
+    const remaining = paths.filter((p) => remainingSet.has(p)).length;
+    return { completed: paths.length - remaining, remaining };
+  } catch { return null; }
+}
+
+/**
+ * Convert process success into Wiki-domain success.
+ *
+ * Claude can exit 0 after asking a clarification question or refusing a tool.
+ * A requested Wiki run is complete only when its own queued source paths have
+ * actually disappeared from a valid checkpoint for the expected target SHA.
+ */
+function assessWikiProgress(agentResult, paths, checkpointPaths, {
+  expectedTargetSha = null,
+  actualTargetSha = null,
+  actualSourceSha = null,
+} = {}) {
+  if (!agentResult.ran) return agentResult;
+  const manifestMismatch = expectedTargetSha != null && actualTargetSha !== expectedTargetSha;
+  const sourceMismatch = expectedTargetSha != null && actualSourceSha !== expectedTargetSha;
+  if (!Array.isArray(checkpointPaths) || manifestMismatch || sourceMismatch) {
+    let reason = 'Wiki manifest checkpoint is missing or invalid after Claude exited';
+    if (manifestMismatch) {
+      reason = `Wiki manifest target changed during generation (expected ${expectedTargetSha}, got ${actualTargetSha || 'missing'})`;
+    } else if (sourceMismatch) {
+      reason = `PKG checkout changed during generation (expected ${expectedTargetSha}, got ${actualSourceSha || 'missing'})`;
+    }
+    return {
+      ...agentResult,
+      ok: false,
+      checkpointInvalid: true,
+      targetMismatch: manifestMismatch || sourceMismatch,
+      total: paths.length,
+      completed: 0,
+      remaining: paths.length,
+      reason,
+    };
+  }
+
+  const remainingSet = new Set(checkpointPaths);
+  const remaining = paths.filter((p) => remainingSet.has(p)).length;
+  const completed = paths.length - remaining;
+  const assessed = { ...agentResult, total: paths.length, completed, remaining };
+
+  if (!agentResult.ok || remaining === 0) return assessed;
+  const noProgress = completed === 0;
+  return {
+    ...assessed,
+    ok: false,
+    noProgress,
+    partial: !noProgress,
+    reason: noProgress
+      ? `Claude exited successfully but completed none of the ${paths.length} queued generation targets`
+      : `Claude completed ${completed} of ${paths.length} queued generation targets`,
+  };
+}
+
+/** Show the domain result after a command has re-read the checkpoint. */
+function renderWikiProgress(result, {
+  human = true,
+  resumeCommand = 'aidev knowledge build --refresh --agent',
+} = {}) {
+  if (!human || !result.ran) return;
+  if (result.ok) {
+    ui.ok(`${result.agent} completed ${result.completed}/${result.total} queued generation target(s)`
+      + (result.costUsd != null ? ` ($${Number(result.costUsd).toFixed(4)})` : ''));
+    return;
+  }
+  if (!result.checkpointInvalid && !result.noProgress && !result.partial) {
+    return; // subprocess failure was already rendered
+  }
+
+  if (result.checkpointInvalid) {
+    ui.fail(`${result.agent} left the Wiki checkpoint invalid: ${result.reason}.`);
+    if (result.checkpointRestored) {
+      ui.dim('    The pre-agent queue was restored so the next --refresh run cannot lose work.');
+    }
+  } else if (result.noProgress) {
+    ui.fail(`${result.agent} made no Wiki progress: 0/${result.total} generation targets completed.`);
+  } else {
+    ui.warn(`${result.agent} made partial Wiki progress: ${result.completed}/${result.total} completed, ${result.remaining} remain.`);
+  }
+  if (result.resultSummary) {
+    ui.dim('    Claude result:');
+    for (const line of result.resultSummary.split('\n').slice(0, 12)) ui.dim(`      ${line}`);
+  }
+  if (result.permissionDenials > 0) {
+    ui.warn(`    Claude reported ${result.permissionDenials} permission denial(s).`);
+  }
+  ui.dim(`    Resume with "${resumeCommand}" after correcting the reported cause.`);
 }
 
 /**
@@ -396,11 +667,10 @@ function resolveOptions(flags, config, { defaultAgent = DEFAULT_AGENT } = {}) {
 }
 
 /**
- * Run the Wiki agent and report it, in whichever mode the caller is in.
+ * Run the Wiki agent and report the subprocess result.
  *
- * Returns `{ ran, ok, ... }` for the caller's JSON payload. A skip is not a
- * failure: the structured write already succeeded, so a machine without Claude
- * Code installed still gets a usable manifest and a clear next step.
+ * The caller must then re-read the checkpoint and call `assessWikiProgress`:
+ * process exit 0 alone does not prove that any Wiki target was completed.
  */
 async function runWikiAgent({
   repoRoot,
@@ -429,12 +699,23 @@ async function runWikiAgent({
     ui.out('');
     ui.info(`running the ${opts.agent} agent for ${paths.length} generation target(s)…`);
     ui.dim(`    repository evidence: ${evidencePaths.length} tracked, non-secret file(s)`);
-    ui.dim(`    model: ${opts.model || "Claude Code's own default (no --model passed)"}`);
+    ui.dim(`    requested model: ${opts.model || "Claude Code's own default (no --model passed)"}`);
     if (taskFile) ui.dim(`    generation/evidence plan: ${taskFile}`);
   }
 
   const res = await runAgent({
-    repoRoot, agent: opts.agent, prompt, timeoutMs: opts.timeoutMs, model: opts.model,
+    repoRoot,
+    agent: opts.agent,
+    prompt,
+    timeoutMs: opts.timeoutMs,
+    model: opts.model,
+    onProgress: human ? ({ elapsedMs }) => {
+      const progress = queuedProgress(repoRoot, paths);
+      const checkpoint = progress
+        ? `; checkpoint ${progress.completed}/${paths.length} complete`
+        : '';
+      ui.dim(`    Claude is still running (${formatDuration(elapsedMs)} elapsed${checkpoint})…`);
+    } : null,
   });
 
   if (res.skipped) {
@@ -449,7 +730,8 @@ async function runWikiAgent({
 
   if (!res.ok) {
     if (human) {
-      ui.fail(`the ${opts.agent} agent failed: ${res.reason}`);
+      ui.fail(`the ${opts.agent} agent process failed: ${res.reason}`);
+      if (res.result) for (const l of res.result.split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       if (res.stderr) for (const l of res.stderr.split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       ui.dim(res.timedOut
         ? '    Raise --agent-timeout, or resume with "aidev knowledge build --refresh --agent".'
@@ -457,22 +739,25 @@ async function runWikiAgent({
     }
     return {
       ran: true, ok: false, agent: opts.agent, model: opts.model, reason: res.reason,
-      exitCode: res.exitCode, timedOut: !!res.timedOut,
+      resultSummary: summarizeResult(res.result),
+      exitCode: res.exitCode, timedOut: !!res.timedOut, durationMs: res.durationMs,
     };
   }
 
   if (human) {
-    ui.ok(`the ${opts.agent} agent finished`
-      + (res.costUsd != null ? ` ($${Number(res.costUsd).toFixed(4)})` : ''));
+    ui.info(`Claude process exited 0 after ${formatDuration(res.durationMs)}; validating the Wiki checkpoint…`);
   }
   return {
     ran: true, ok: true, agent: opts.agent, model: opts.model,
-    costUsd: res.costUsd, sessionId: res.sessionId,
+    costUsd: res.costUsd, sessionId: res.sessionId, durationMs: res.durationMs,
+    permissionDenials: res.permissionDenials,
+    resultSummary: summarizeResult(res.result),
   };
 }
 
 module.exports = {
-  DEFAULT_AGENT, MAX_INLINE_PROMPT_BYTES, EXIT_SIGTERM, AGENT_FLAGS,
-  resolveBinary, assertAgentName, buildPrompt, buildArgv, prepareTask, writeTaskFile, runAgent,
-  resolveOptions, runWikiAgent,
+  DEFAULT_AGENT, MAX_INLINE_PROMPT_BYTES, HEARTBEAT_MS, MIN_CLAUDE_VERSION, EXIT_SIGTERM, AGENT_FLAGS,
+  resolveBinary, versionAtLeast, checkClaudeVersion, assertAgentName,
+  buildPrompt, buildArgv, prepareTask, writeTaskFile, runAgent,
+  assessWikiProgress, renderWikiProgress, resolveOptions, runWikiAgent,
 };

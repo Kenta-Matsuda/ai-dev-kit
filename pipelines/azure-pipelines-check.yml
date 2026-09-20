@@ -36,21 +36,17 @@ steps:
     inputs:
       versionSpec: $(NODE_VERSION)
 
-  - script: ./scripts/install.sh
-    displayName: 'Install aidev CLI'
-
-  - script: |
-      set -euo pipefail
-      export PATH="$HOME/.local/bin:$PATH"
-      aidev --version
-    displayName: 'Verify CLI'
+  # CI executes the CLI version committed in the wrapper. The installer is for
+  # a developer's dedicated ai-dev-kit checkout and intentionally rejects a
+  # wrapper checkout.
+  - script: node ./cli/bin/aidev.js --version
+    displayName: 'Verify wrapper CLI'
 
   # Runtime, tooling and connectivity. Advisory: doctor reports environment
   # facts (a missing PAT, a proxy) that are not the PR author's fault.
   - script: |
       set -euo pipefail
-      export PATH="$HOME/.local/bin:$PATH"
-      aidev doctor
+      node ./cli/bin/aidev.js doctor
     displayName: 'aidev doctor'
     continueOnError: true
 
@@ -60,14 +56,12 @@ steps:
   # the exit code tells the author which of the four problems they have.
   - script: |
       set -euo pipefail
-      export PATH="$HOME/.local/bin:$PATH"
-      aidev check
+      node ./cli/bin/aidev.js check
     displayName: 'aidev check (required)'
 
   - script: |
       set -euo pipefail
-      export PATH="$HOME/.local/bin:$PATH"
-      aidev check --json > "$(Build.ArtifactStagingDirectory)/aidev-check.json" || true
+      node ./cli/bin/aidev.js check --json > "$(Build.ArtifactStagingDirectory)/aidev-check.json" || true
     displayName: 'Capture check report'
     condition: always()
 

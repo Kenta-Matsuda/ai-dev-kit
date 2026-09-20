@@ -74,7 +74,7 @@ function run(ctx) {
   add('remote origin', remoteList.includes('origin') ? 'ok' : 'warn',
     remoteList.includes('origin') ? 'present' : 'missing (the PKG-specific wrapper repo)');
   add('remote upstream', remoteList.includes('upstream') ? 'ok' : 'warn',
-    remoteList.includes('upstream') ? 'present' : 'missing — "aidev update" needs it to pull the central kit');
+    remoteList.includes('upstream') ? 'present' : 'missing — "aidev kit apply" needs it to pull central assets');
 
   // --- policy ---------------------------------------------------------------
   try {

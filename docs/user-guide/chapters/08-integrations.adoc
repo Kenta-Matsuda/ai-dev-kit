@@ -1,0 +1,209 @@
+[[integrations]]
+== Agents、Skills、hooks、MCP
+
+`aidev init`と`aidev kit apply`は、中央kitの`templates/claude-assets/`をwrapperの`.claude/`へ実体化します。これらは同じkit commitを使うwrapper間で共通のstatic assetです。
+
+[[integrations-agents]]
+=== 同梱Agents
+
+すべてのAgent定義は`model: inherit`で、起動元のmodel設定を継承します。
+
+[cols="1,2,3",options="header"]
+|===
+|Agent |用途 |現在の接続状況
+
+|`knowledge-builder`
+|PKGのsource、test、設定、CI、文書を横断調査し、Wiki proseを生成します。
+|`knowledge build --agent`と`sync --agent`から実際に起動されます。
+
+|`agents-creator`
+|追加Agentの目的、権限、入力、出力、失敗条件の設計を支援します。
+|Claude Codeの対話から明示的に利用します。
+
+|`issue-to-pr`
+|Work ItemからPKG PRとwrapper同期PRへ進む目標フローを定義します。
+|定義とstate helperの一部だけです。Work Item入口、task/work lease作成、端末間復元を含むE2E接続は未完成です。
+
+|`workflow-creator`
+|custom workflowを設計するための指針を提供します。
+|現行`aidev workflow new`はAgentを起動せず、固定の`workflow.yaml`と`steps.js` scaffoldを生成します。
+
+|`permission-setting`
+|安全なpolicy設計の観点を提供します。
+|現行`permission configure/reconfigure`はAgentを起動せず、`aidev.yaml`からcandidateを機械生成します。
+|===
+
+Agent promptは将来像を含む場合があります。利用可能性の判断はxref:implementation-status[実装状況]とCLI実装を優先してください。
+
+[[integrations-skills]]
+=== 同梱Skills
+
+Skillsは標準手順を共有するための指示であり、権限制御ではありません。
+
+[cols="1,2,3",options="header"]
+|===
+|分類 |Skill |目的
+
+|調査・計画
+|`repository-discovery`
+|変更前にrepository構造、実行経路、規約、test方法を確認します。
+
+|調査・計画
+|`change-planning`
+|要求を変更単位、依存関係、検証条件へ分解します。
+
+|調査・計画
+|`knowledge-usage`
+|生成Wikiを入口にしつつ、重要事項をsourceで再確認します。
+
+|実装品質
+|`test-and-verify`
+|変更に合ったtargeted test、lint、build、smoke testを選びます。
+
+|実装品質
+|`code-review`
+|正しさ、regression、security、保守性の観点でdiffをreviewします。
+
+|実装品質
+|`secure-coding`
+|外部入力、credential、injection、最小権限を扱います。
+
+|開発運用
+|`azure-devops`
+|Work Item、repository、PR、pipelineを安全に操作する手順です。
+
+|開発運用
+|`commit-and-pr`
+|review可能なcommitとPRを作成し、自動mergeを避けます。
+
+|開発運用
+|`submodule-sync`
+|3SHA、sync lease、resume/abortを考慮してPKGを追従します。
+
+|開発運用
+|`failure-triage`
+|失敗を再現し、stateとlogを保全して安全に復旧します。
+|===
+
+[[integrations-hooks]]
+=== Claude hooks
+
+`.claude/settings.json`はClaude Code eventから内部commandを呼びます。
+
+[cols="1,2,3",options="header"]
+|===
+|event |command |動作
+
+|SessionStart
+|`aidev hook session-start`
+|local 3SHA、remote cache、lease、cached taskを確認し、注意事項をsession contextへ追加します。
+
+|PreToolUse
+|`aidev hook guard-write`
+|Write、Edit、MultiEdit、NotebookEdit、Bashの対象pathを抽出し、policy、3SHA、leaseに基づいて許可または拒否します。
+
+|PostToolUse
+|`aidev hook quality-gate`
+|`quality_gates`に設定されたcommandを`src/`で実行します。
+
+|Stop
+|`aidev hook session-stop`
+|必要に応じてpending refreshとself-evolutionのlocal journalを記録します。
+|===
+
+hook commandはClaude CodeからJSON stdinを受け取る内部interfaceです。通常の手作業入口には使用しません。
+
+==== guard-writeのfail-closed動作
+
+write対象をparseできない場合は、安全側に倒して拒否します。ただしBashは任意process、subshell、scriptを起動できるため、command textからすべての副作用を抽出できません。hookはsandboxではありません。
+
+==== quality gate
+
+設定された全gateを各120秒上限で実行します。編集されたfile種別による絞り込みは行わないため、頻繁な編集で高コストなtestが毎回走らないよう、gate構成を調整します。watch modeや対話commandは設定しません。
+
+==== Stop hookの範囲
+
+Stop hookは`.aidev/cache/pending-refresh.json`と、必要に応じて`evolution-journal.json`を記録します。それらを非同期に消費するmanaged runnerは未実装です。記録されたことを「Wiki更新が完了した」と解釈しないでください。
+
+[[integrations-model]]
+=== modelの解決
+
+==== CLIが起動するAgent
+
+`knowledge build --agent`や`sync --agent`のmodelは次の順です。
+
+. `--agent-model`
+. `aidev.yaml`の`model.agent`
+. kit既定`sonnet`
+
+[source,bash]
+----
+aidev knowledge build --agent --agent-model opus
+----
+
+==== 対話Claude Code
+
+対話sessionはClaude Code自身の設定解決に従います。kitの`.claude/settings.json`には共有既定値があり、各開発者はGit管理外の`.claude/settings.local.json`で上書きできます。
+
+[source,json]
+----
+{ "model": "opus" }
+----
+
+`aidev.yaml`の`model.agent`は対話sessionを変更しません。
+
+[[integrations-mcp]]
+=== Azure DevOps MCP
+
+`.mcp.json`は`aidev mcp azure-devops`だけを起動し、wrapper固有値を実行時に解決します。
+
+解決元は次のとおりです。
+
+* organization: `aidev.yaml`の`azure_devops.organization`
+* default project: `azure_devops.project`
+* credential: `azure_devops.auth_env`が指す環境変数
+* server package: 固定版`@azure-devops/mcp@2.10.0`
+
+内部では概ね次のprocessをstdio serverとして起動します。
+
+[source,text]
+----
+npx -y @azure-devops/mcp@2.10.0 <organization> --authentication pat
+----
+
+PATはcommand lineへ載せず、child processの`PERSONAL_ACCESS_TOKEN`として渡します。default projectは`ADO_MCP_DEFAULT_PROJECT`として渡します。
+
+設定解決だけを確認する場合は次を使用します。
+
+[source,bash]
+----
+aidev mcp azure-devops --dry-run
+aidev mcp azure-devops --json
+----
+
+`--json`はserverを起動せず、解決結果を表示します。secret値は表示しません。
+
+MCP接続には次が必要です。
+
+* PATが現在のenvironmentに存在する。
+* `npx`を利用できる。
+* npm registry、proxy、証明書設定が正しい。
+* PATに必要最小限のAzure DevOps scopeがある。
+
+MCP responseも信頼できない外部データとして扱い、重要なID、SHA、PR stateを再確認します。
+
+[[integrations-static-update]]
+=== static assetを更新した後
+
+中央kit更新をCLI専用checkoutへ取り込んだだけでは、既存wrapperの`.claude/`は変わりません。
+
+[source,bash]
+----
+aidev update
+# wrapperへ移動
+aidev kit apply --dry-run
+aidev kit apply
+aidev check
+----
+
+差分をreview・commitし、Claude Codeを再起動します。wrapperの`.claude/**`、`CLAUDE.md`、`.mcp.json`を直接編集しないでください。

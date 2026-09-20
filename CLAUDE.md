@@ -30,7 +30,7 @@ Wikiは**正本ではなく派生情報**です。記述には根拠ファイル
 | --- | --- |
 | `aidev.yaml`, `workflows/` | 書き込み可 |
 | `src/**` | **通常read-only**。issue-to-pr が作業リースを持つ場合のみ、許可パスに限り可 |
-| `knowledge/**` | `aidev sync` のsyncリース保持中のみ可。手編集しない |
+| `knowledge/**` | CLIから起動されたknowledge-builder、またはsyncリース保持中のみ可。手編集しない |
 | `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（中央kit由来） |
 | `.aidev/policy.yaml`, `.aidev/leases/**`, `.aidev-lock` | **常に禁止**（CLIのみが配置） |
 | `secrets_paths` 該当 | **常に禁止**（リースがあっても） |
@@ -38,8 +38,10 @@ Wikiは**正本ではなく派生情報**です。記述には根拠ファイル
 **権限ファイルを自分で書き換えようとしないでください。** 権限の変更が必要だと判断したら、
 `aidev permission reconfigure` をユーザーが対話的に実行する必要がある旨を伝えます。
 
-`knowledge/**` を直接編集しないでください。Wikiは `aidev sync` / `aidev knowledge build` の
-生成物です。手編集は `selfHashes` 不一致として検出され、次の生成で失われます。
+`knowledge/**` を直接編集しないでください。Wikiは `aidev sync` / `aidev knowledge build --agent` が
+起動するknowledge-builderの生成物です。CLIは構造化manifestを確定してsyncリースを解放した後、
+checkpointに記録された範囲だけをknowledge-builderへ渡すため、その実行中は通常policyで書き込めます。
+手編集は `selfHashes` 不一致として検出され、次の生成で失われます。
 内容が誤っている場合は、生成元（ソースのコメントや構造）側を直します。
 
 ---
