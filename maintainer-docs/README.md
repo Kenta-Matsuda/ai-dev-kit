@@ -32,7 +32,7 @@
 | 初期化 | `cli/commands/init.js` |
 | kit assetとlock | `cli/lib/assets.js`、`cli/commands/update.js` |
 | 3SHA | `cli/lib/state.js` |
-| Wiki manifest / inventory | `cli/lib/inventory.js`、`cli/commands/knowledge.js` |
+| Wiki manifest / inventory / evidence scope | `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/commands/knowledge.js` |
 | syncとwrapper PR | `cli/commands/sync.js`、`cli/lib/ado.js`、`cli/lib/leases.js` |
 | policy評価 | `cli/lib/policy.js`、`cli/commands/permission.js` |
 | hooks | `cli/commands/hook.js`、`templates/claude-assets/settings.json` |

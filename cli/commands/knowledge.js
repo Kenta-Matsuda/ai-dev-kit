@@ -17,6 +17,7 @@ const cfgMod = require('../lib/config');
 const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
 const inventory = require('../lib/inventory');
+const knowledgeScope = require('../lib/knowledge-scope');
 const leases = require('../lib/leases');
 const pathsMod = require('../lib/paths');
 const agentMod = require('../lib/agent');
@@ -48,10 +49,11 @@ function status(ctx, config) {
     ['submoduleSha', stateMod.short(st.submoduleSha)],
     ['knowledgeSha', stateMod.short(st.knowledgeSha)],
     ['generatedAt', manifest?.generatedAt || '-'],
-    ['files', records.length],
+    ['generation targets', records.length],
+    ['evidence files', manifest?.evidence?.trackedFiles ?? '-'],
     ['shards', manifest?.inventoryShards?.length ?? 0],
     ['masked files', manifest?.stats?.maskedFiles ?? 0],
-    ['pending pages', manifest?.checkpoint?.pendingPaths?.length ?? 0],
+    ['pending targets', manifest?.checkpoint?.pendingPaths?.length ?? 0],
   ]);
   ui.out('');
   ui.out(stateMod.formatSummary(st));
@@ -77,12 +79,15 @@ async function build(ctx, config) {
   if (!targetSha) throw new AidevError('could not determine the submodule SHA');
 
   const existing = inventory.readManifest(repoRoot);
-  const oldRecords = flags.refresh || flags.resume ? inventory.readInventory(repoRoot, existing) : [];
+  const resuming = !!(flags.refresh || flags.resume);
+  const oldRecords = resuming ? inventory.readInventory(repoRoot, existing) : [];
   const newRecords = inventory.scanPackage(repoRoot, config) || [];
+  const evidenceRecords = knowledgeScope.scanEvidence(repoRoot, config) || [];
+  const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
+  const supportingEvidenceChanged = knowledgeScope.evidenceChanged(existing?.evidence, evidenceState);
 
-  // --scope narrows the work; it must narrow what is *written* too, or the
-  // out-of-scope files would have fresh blobs recorded without fresh prose and
-  // the next build would see them as unchanged — stale prose, silently.
+  // --scope narrows generation only. Repository evidence deliberately remains
+  // broad so even a docs-only scoped run can verify claims against source code.
   let scope = null;
   if (flags.scope) {
     scope = pathsMod.normalizeRel(flags.scope);
@@ -91,24 +96,47 @@ async function build(ctx, config) {
   const inScope = (p) => scope === null || p === scope || p.startsWith(`${scope}/`);
   const scoped = newRecords.filter((r) => inScope(r.path));
   if (scope !== null && scoped.length === 0) {
-    throw new AidevError(`--scope ${flags.scope} matched no files in package.include`);
+    throw new AidevError(`--scope ${flags.scope} matched no files in generation targets (package.include)`);
   }
 
   const diff = inventory.diffInventory(oldRecords, newRecords);
-  const pending = [...diff.added, ...diff.modified].map((r) => r.path).filter(inScope);
-  const deferred = [...diff.added, ...diff.modified].map((r) => r.path).filter((p) => !inScope(p));
+  const currentTargets = new Set(newRecords.map((record) => record.path));
+  const generationSet = new Set(
+    [...diff.added, ...diff.modified].map((record) => record.path));
+
+  // A failed/partial agent owns this queue. Merge it back on refresh instead of
+  // losing it merely because its target blob is now recorded as unchanged.
+  if (resuming) {
+    for (const pendingPath of existing?.checkpoint?.pendingPaths || []) {
+      if (currentTargets.has(pendingPath)) generationSet.add(pendingPath);
+    }
+  }
+
+  // We do not yet store page-level evidence dependencies. If supporting code,
+  // tests, config or CI changes, refreshing every generation target is the only
+  // safe alternative to silently retaining prose based on stale evidence.
+  if (supportingEvidenceChanged) {
+    for (const record of newRecords) generationSet.add(record.path);
+  }
+
+  const generationPaths = [...generationSet].sort();
+  const pending = generationPaths.filter(inScope);
+  const deferred = generationPaths.filter((p) => !inScope(p));
 
   if (human) {
     ui.heading(`aidev knowledge build${flags['dry-run'] ? ' (dry run)' : ''}`);
     ui.table([
       ['target', stateMod.short(targetSha)],
-      ['files in scope', `${scoped.length}${scope === null ? '' : ` of ${newRecords.length}`}`],
+      ['generation targets', `${scoped.length}${scope === null ? '' : ` of ${newRecords.length}`}`],
+      ['repository evidence', `${evidenceState.trackedFiles} tracked files`],
+      ['supporting evidence', `${evidenceState.supportingFiles} outside generation targets`],
+      ['evidence changed', supportingEvidenceChanged ? 'yes — refresh targets' : 'no'],
       ['added', diff.added.length],
       ['modified', diff.modified.length],
       ['removed', diff.removed.length],
       ['renamed (free)', diff.renamed.length],
       ['unchanged', diff.unchanged.length],
-      ['masked', newRecords.filter((r) => r.masked).length],
+      ['masked targets', newRecords.filter((r) => r.masked).length],
       ['queued now', pending.length],
       ...(deferred.length > 0 ? [['deferred (out of scope)', deferred.length]] : []),
     ]);
@@ -127,8 +155,18 @@ async function build(ctx, config) {
   }
 
   if (flags['dry-run']) {
-    if (flags.json) ui.json({ ok: true, dryRun: true, targetSha, pending, deferred, handEdits });
-    else {
+    if (flags.json) {
+      ui.json({
+        ok: true,
+        dryRun: true,
+        targetSha,
+        pending,
+        deferred,
+        evidence: evidenceState,
+        evidenceChanged: supportingEvidenceChanged,
+        handEdits,
+      });
+    } else {
       if (handEdits.length > 0) {
         ui.warn(`${handEdits.length} hand-edited page(s) would block this build; --force would discard them:`);
         for (const h of handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
@@ -136,7 +174,7 @@ async function build(ctx, config) {
       ui.ok('dry run complete; nothing was written.');
       if (flags.agent || flags['agent-name'] != null) {
         const opts = agentMod.resolveOptions(flags, config);
-        ui.dim(`    would then run the ${opts.agent} agent for ${pending.length} page(s).`);
+        ui.dim(`    would then run the ${opts.agent} agent for ${pending.length} generation target(s).`);
       }
     }
     return EXIT.OK;
@@ -205,7 +243,9 @@ async function build(ctx, config) {
       files: records.length,
       pages: new Set(records.flatMap((r) => Object.keys(r.selfHashes || {}))).size,
       maskedFiles: records.filter((r) => r.masked).length,
+      evidenceFiles: evidenceState.trackedFiles,
     };
+    manifest.evidence = evidenceState;
     manifest.checkpoint = { completedShards: shards.length, pendingPaths: [...pending, ...deferred] };
     inventory.writeManifest(repoRoot, manifest);
 
@@ -233,13 +273,14 @@ async function build(ctx, config) {
   if (human) {
     ui.ok(`manifest and ${shards.length} shard(s) written for ${stateMod.short(targetSha)}`);
     if (pending.length > 0) {
-      ui.info(`${pending.length} page(s) queued for the knowledge-builder agent:`);
+      ui.info(`${pending.length} generation target(s) queued for the knowledge-builder agent:`);
       for (const p of pending.slice(0, 20)) ui.dim(`    ${p}`);
       if (pending.length > 20) ui.dim(`    … and ${pending.length - 20} more`);
-      ui.dim('    Prose generation runs as an agent task; the checkpoint above lets it resume.');
-    } else ui.ok('no pages in scope need regeneration.');
+      ui.dim(`    The agent can research ${evidenceState.trackedFiles} tracked, non-secret file(s) across the PKG repository.`);
+      ui.dim('    Prose generation runs as an agent task; the checkpoint lets it resume.');
+    } else ui.ok('no generation targets in scope need regeneration.');
     if (deferred.length > 0) {
-      ui.warn(`${deferred.length} changed file(s) outside --scope were left for a later build.`);
+      ui.warn(`${deferred.length} generation target(s) outside --scope were left for a later build.`);
     }
   }
 
@@ -253,10 +294,17 @@ async function build(ctx, config) {
   if (pending.length > 0) {
     agentResult = await agentMod.runWikiAgent({
       repoRoot, config, flags, targetSha,
-      // Only in-scope paths: the manifest checkpoint merges pending and
-      // deferred, so passing it verbatim would break the --scope promise.
+      // Only in-scope generation targets are writable. Evidence intentionally
+      // remains repository-wide so scoped docs can still be code-verified.
       paths: pending,
-      scope, human,
+      scope,
+      evidence: {
+        paths: evidenceRecords.map((record) => record.path),
+        include: evidenceState.include,
+        exclude: evidenceState.exclude,
+        secretsPaths: config.secrets_paths,
+      },
+      human,
     });
   } else {
     // Still validate the agent flags even with nothing to do. Otherwise a typo
@@ -276,14 +324,22 @@ async function build(ctx, config) {
   const after = inventory.readManifest(repoRoot);
   const remaining = after?.checkpoint?.pendingPaths?.length ?? pending.length;
   if (human && agentResult.ran && agentResult.ok) {
-    if (remaining === 0) ui.ok('all queued pages are generated.');
-    else ui.warn(`${remaining} page(s) still pending — re-run with --refresh to continue.`);
+    if (remaining === 0) ui.ok('all queued generation targets are complete.');
+    else ui.warn(`${remaining} generation target(s) still pending — re-run with --refresh --agent to continue.`);
   }
 
   if (!human) {
     ui.json({
-      ok: true, targetSha, files: records.length, shards: shards.length,
-      pending, deferred, remaining, agent: agentResult,
+      ok: true,
+      targetSha,
+      files: records.length,
+      generationTargets: records.length,
+      evidenceFiles: evidenceState.trackedFiles,
+      shards: shards.length,
+      pending,
+      deferred,
+      remaining,
+      agent: agentResult,
     });
   }
   // A failed agent is reported but does not discard the structured write; the

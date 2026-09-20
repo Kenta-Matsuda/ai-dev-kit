@@ -20,8 +20,8 @@
 | `aidev doctor` | 実装済み | local runtime、repo、PAT有無、proxy、3SHA | Claude/npxの検査、ADO API認証試験はない |
 | `aidev update` | 実装済み | 限定KIT_PATHSのfetch/checkout、`.claude`再生成 | package/pipeline/gitignore/maintainer docsは対象外 |
 | permission candidate / approval | 実装済み | configから機械生成、human approve、weakening検出 | `permission-setting` agentとの対話生成ではない |
-| structured Wiki | 実装済み | scan、mask、blob diff、inventory、manifest、checkpoint | prose意味品質は担当しない |
-| prose Wiki agent | 実装済み（opt-in） | `--agent`でknowledge-builder起動、timeout/model指定 | `claude`なしではskip。costは外部管理 |
+| structured Wiki | 実装済み | generation target inventory、repository evidence走査/fingerprint、mask、blob diff、manifest、checkpoint | page単位evidence dependency graphはなく、supporting evidence変更時は全target refresh |
+| prose Wiki agent | 実装済み（opt-in） | `--agent`でPKG全体のtracked・非secret evidenceを渡してknowledge-builder起動、timeout/model指定 | `claude`なしではskip。意味品質とcostは外部管理 |
 | 3SHA / sync lease | 実装済み | local/remote判定、TTL lease、resume/abort | hand-edit扱いがknowledge buildとsyncで不統一 |
 | `aidev sync` | 実装済み | fetch、bump、structured Wiki、任意agent、commit/push/PR | ADO/PAT/push失敗時はmanual completionが必要 |
 | wrapper PR dedup | 実装済み | stream marker検索、同branch更新、旧PR注記 | 新targetでは旧PRを自動closeしない |
@@ -110,6 +110,10 @@ cacheに保持するのはID、branch、SHA、状態、履歴など導出・検�
 ### pending proseのseverity
 
 structured inventoryがtarget SHAへ進んだ時点で3SHAは一致し、`pendingPaths`はwarningです。これによりleaseを解放しsyncを完了できますが、prose完全性を必須にしたいCIでは`--agent`と`check --strict`が必要です。strictはremote aheadなど他warningもexit 2へします。
+
+### repository evidenceの再生成粒度
+
+`knowledge.evidence`はgeneration targetsから独立してPKG全体を調査できますが、現時点のinventoryは「どのpageがどのsupporting evidenceへ依存したか」を記録しません。そのためgeneration target外のcode/test/config/CIが1件でも変わると、stale proseを避ける側へ倒して全generation targetをqueueします。大規模PKGでcostを下げる将来改善はpage単位dependency graphであり、evidence範囲をdocsだけへ戻して回避してはいけません。
 
 ### update coverage
 

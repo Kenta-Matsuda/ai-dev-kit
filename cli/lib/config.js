@@ -66,6 +66,9 @@ const DEFAULTS = Object.freeze({
     max_files_per_dir: 20,
     subagent_concurrency: 4,
     inventory_shard_size: 2000,
+    evidence: {
+      include: Object.freeze(['src/**']),
+    },
     // Wiki generation on a large package is measured in minutes, not seconds;
     // a short default would turn a working run into a truncated one.
     agent_timeout_ms: 1800000,
@@ -322,6 +325,25 @@ function validateConfig(raw, source = CONFIG_NAME) {
         DEFAULTS.knowledge.inventory_shard_size, { min: 1, max: 100000 }),
       agent_timeout_ms: asInt(knowledge.agent_timeout_ms, 'knowledge.agent_timeout_ms',
         DEFAULTS.knowledge.agent_timeout_ms, { min: 10000, max: 7200000 }),
+      // Generation targets remain package.include. Evidence is independently
+      // repository-wide by default so a docs-only target set is still checked
+      // against source code, tests, configuration and CI.
+      evidence: (() => {
+        if (knowledge.evidence != null &&
+            (typeof knowledge.evidence !== 'object' || Array.isArray(knowledge.evidence))) {
+          throw new AidevError(`${source}: knowledge.evidence must be a mapping`);
+        }
+        const evidence = knowledge.evidence || {};
+        return {
+          include: evidence.include == null
+            ? [...DEFAULTS.knowledge.evidence.include]
+            : asArray(evidence.include, 'knowledge.evidence.include'),
+          // Omission inherits package.exclude; an explicit list is independent.
+          exclude: evidence.exclude == null
+            ? asArray(pkg.exclude, 'package.exclude')
+            : asArray(evidence.exclude, 'knowledge.evidence.exclude'),
+        };
+      })(),
     },
     model: {
       agent: asModel(model.agent, 'model.agent', DEFAULTS.model.agent),

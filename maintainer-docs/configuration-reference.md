@@ -56,6 +56,9 @@ knowledge:
   max_files_per_dir: 20
   subagent_concurrency: 4
   inventory_shard_size: 2000
+  evidence:
+    include: ["src/**"]
+    # exclude省略時はpackage.excludeを継承
   agent_timeout_ms: 1800000
 
 model:
@@ -82,21 +85,21 @@ quality_gates:
 | `azure_devops.project` | string | project |
 | `azure_devops.repository` | string | 対象PKG repository |
 
-`package.include`が空でもschema上は通りますが、Wiki対象がなくなるため、実用上はPKGに合うglobを必ず設定します。
+`package.include`が空の場合はinclude制限なしとして扱われ、`package.exclude`に一致しない全tracked fileがgeneration targetになります。対象を意図的に絞る場合はPKGに合うglobを必ず設定します。
 
 ## `package`
 
 | key | 型 | 既定 | 説明 |
 | --- | --- | --- | --- |
 | `name` | string | 必須 | PKG名 |
-| `include` | string[] | `init`では`src/src/**`, `src/docs/**` | inventoryへ含めるpath |
-| `exclude` | string[] | `init`では依存物・生成物・vendor | `include`から除外するpath |
+| `include` | string[] | `init`では`src/src/**`, `src/docs/**` | Wikiページを生成・更新する起点（generation targets）。空配列はinclude制限なし |
+| `exclude` | string[] | `init`では依存物・生成物・vendor | generation targetsから除外するpath |
 
-pathはラッパーリポジトリroot基準です。対象PKGが`src/`にあるため、通常は`src/`から始まります。
+pathはラッパーリポジトリroot基準です。対象PKGが`src/`にあるため、通常は`src/`から始まります。`package.include`はknowledge-builderの調査可能範囲ではありません。調査範囲は`knowledge.evidence`で独立に指定します。
 
 ## `secrets_paths`
 
-AIに読み書きさせず、Wikiでも内容をマスクするglobの配列です。policy候補を作ると、各項目は`protected`へ追加されます。
+knowledge-builderのevidence inventoryから除外し、Wikiでも内容をマスクするglobの配列です。policy候補を作ると、各項目は`protected`へ追加されます。他のagentや任意のBashに対する完全なread sandboxではないため、OS・Claude Code側のcredential分離も維持してください。
 
 設定変更後はpolicyを再生成してください。
 
@@ -154,10 +157,16 @@ aidev permission reconfigure --approve
 | --- | --- | --- | --- |
 | `max_files_per_dir` | integer | `20` | 1〜1000。agentがページ構造を決める目安 |
 | `subagent_concurrency` | integer | `4` | 1〜64。knowledge-builder用設定 |
-| `inventory_shard_size` | integer | `2000` | 1〜100000 records/shard |
+| `inventory_shard_size` | integer | `2000` | 1〜100000 generation-target records/shard |
+| `evidence.include` | string[] | `["src/**"]` | knowledge-builderが根拠として調査できるtracked path。空配列はinclude制限なし |
+| `evidence.exclude` | string[] | `package.exclude`を継承 | evidenceから除外するpath。明示した場合は独立したlistとして扱う |
 | `agent_timeout_ms` | integer | `1800000` | 10000〜7200000ms |
 
-構造化inventoryはCLIが生成します。prose本文は`--agent`指定時だけknowledge-builderが生成します。
+構造化inventoryはgeneration targetsについてCLIが生成します。prose本文は`--agent`指定時だけknowledge-builderが生成します。CLIは別途、target commitに存在するevidenceの正確なtracked path一覧を作り、`secrets_paths`該当を除いてagentへ渡します。したがってgeneration targetsが`src/docs/**`だけでも、既定では`src/**`配下の実装、テスト、設定、CIを調査できます。
+
+`--scope`が制限するのはgeneration targetsだけで、evidenceは狭まりません。supporting evidence（generation target外のevidence）のpath/blobとscope設定からfingerprintを作り、`manifest.evidence`へ保存します。fingerprintが変わった場合、ページ単位の依存関係が未記録でもstale proseを残さないよう、全generation targetを保守的にqueueします。
+
+既存設定に`knowledge.evidence`がなくても既定値が適用されます。独自の`evidence.exclude`を書くと`package.exclude`の継承ではなく置換になるため、依存物・生成物の除外を必要に応じて再掲してください。
 
 ## `model`
 

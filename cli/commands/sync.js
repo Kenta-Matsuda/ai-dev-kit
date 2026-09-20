@@ -26,6 +26,7 @@ const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
 const leases = require('../lib/leases');
 const inventory = require('../lib/inventory');
+const knowledgeScope = require('../lib/knowledge-scope');
 const assets = require('../lib/assets');
 const ado = require('../lib/ado');
 const agentMod = require('../lib/agent');
@@ -91,7 +92,7 @@ function prDescription({ streamId, opKey, targetSha, branch, diff, pending }) {
     `- renamed: ${diff.renamed}`,
     '',
     pending > 0
-      ? `> ⚠️ ${pending} Wiki page(s) still need prose regeneration (\`aidev knowledge build --refresh\`).`
+      ? `> ⚠️ ${pending} Wiki generation target(s) still need prose regeneration (\`aidev knowledge build --refresh --agent\`).`
       : '> The Wiki is regenerated and the three SHAs agree.',
     '',
     '**Merging is a human decision — this PR is never auto-completed.**',
@@ -284,13 +285,32 @@ async function run(ctx) {
   }
 
   // ---- 2. compute the change set before touching anything -----------------
-  const oldRecords = inventory.readInventory(repoRoot);
+  const previousManifest = inventory.readManifest(repoRoot);
+  const oldRecords = inventory.readInventory(repoRoot, previousManifest);
   const newRecords = inventory.scanPackage(repoRoot, config, { ref: targetSha }) || [];
+  const evidenceRecords = knowledgeScope.scanEvidence(repoRoot, config, { ref: targetSha }) || [];
+  const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
+  const supportingEvidenceChanged = knowledgeScope.evidenceChanged(previousManifest?.evidence, evidenceState);
   const diff = inventory.diffInventory(oldRecords, newRecords);
+
+  const currentTargets = new Set(newRecords.map((record) => record.path));
+  const generationSet = new Set(
+    [...diff.added, ...diff.modified].map((record) => record.path));
+  for (const pendingPath of previousManifest?.checkpoint?.pendingPaths || []) {
+    if (currentTargets.has(pendingPath)) generationSet.add(pendingPath);
+  }
+  if (supportingEvidenceChanged) {
+    for (const record of newRecords) generationSet.add(record.path);
+  }
+  const generationPaths = [...generationSet].sort();
+
   ui.out('');
-  ui.info(`change set: +${diff.added.length} ~${diff.modified.length} -${diff.removed.length} →${diff.renamed.length} (=${diff.unchanged.length})`);
-  if (!diff.needsGeneration && diff.renamed.length > 0) {
-    ui.dim('    renames only — no LLM calls required.');
+  ui.info(`generation target changes: +${diff.added.length} ~${diff.modified.length} -${diff.removed.length} →${diff.renamed.length} (=${diff.unchanged.length})`);
+  ui.info(`repository evidence: ${evidenceState.trackedFiles} tracked files (${evidenceState.supportingFiles} outside generation targets)`);
+  if (supportingEvidenceChanged) {
+    ui.dim('    supporting code/config/test/CI changed (or has no prior fingerprint); all generation targets are queued.');
+  } else if (generationPaths.length === 0 && diff.renamed.length > 0) {
+    ui.dim('    generation-target renames only — no LLM calls required.');
   }
 
   const handEdits = inventory.detectHandEdits(repoRoot, oldRecords);
@@ -306,7 +326,8 @@ async function run(ctx) {
     if (flags.json) {
       ui.json({ ok: true, dryRun: true, targetSha, originalSha, opKey, streamId,
         diff: { added: diff.added.length, modified: diff.modified.length, removed: diff.removed.length,
-          renamed: diff.renamed.length, unchanged: diff.unchanged.length }, handEdits });
+          renamed: diff.renamed.length, unchanged: diff.unchanged.length },
+        generationPaths, evidence: evidenceState, evidenceChanged: supportingEvidenceChanged, handEdits });
     } else ui.ok('dry run complete; nothing was written.');
     return EXIT.OK;
   }
@@ -381,7 +402,7 @@ async function run(ctx) {
       for (const s of orphans.skipped) ui.warn(`kept ${s.page}: ${s.reason}`);
     }
 
-    const manifest = inventory.readManifest(repoRoot) || inventory.emptyManifest();
+    const manifest = previousManifest || inventory.emptyManifest();
     manifest.schemaVersion = inventory.SCHEMA_VERSION;
     manifest.knowledgeSha = targetSha;
     manifest.kitCommit = gitMod.headSha(repoRoot);
@@ -391,11 +412,15 @@ async function run(ctx) {
       files: records.length,
       pages: new Set(records.flatMap((r) => Object.keys(r.selfHashes || {}))).size,
       maskedFiles: records.filter((r) => r.masked).length,
+      evidenceFiles: evidenceState.trackedFiles,
     };
-    // Pages the builder still owes; `aidev knowledge build --refresh` drains it.
+    manifest.evidence = evidenceState;
+    // Generation targets the builder still owes. Supporting evidence changes
+    // conservatively enqueue all targets because page-level dependencies are
+    // not known yet; a docs-only target set therefore still follows code.
     manifest.checkpoint = {
       completedShards: shards.length,
-      pendingPaths: [...diff.added, ...diff.modified].map((r) => r.path),
+      pendingPaths: generationPaths,
       // An index that listed a now-deleted page still links to it, so the
       // parents of every removed page owe a rewrite too.
       staleIndexes: orphans.staleIndexes,
@@ -404,7 +429,7 @@ async function run(ctx) {
     ui.ok(`inventory rewritten (${records.length} files, ${shards.length} shard(s))`);
 
     if (manifest.checkpoint.pendingPaths.length > 0) {
-      ui.warn(`${manifest.checkpoint.pendingPaths.length} page(s) still need prose regeneration — run "aidev knowledge build --refresh".`);
+      ui.warn(`${manifest.checkpoint.pendingPaths.length} generation target(s) still need prose regeneration — run "aidev knowledge build --refresh --agent".`);
     }
     if (orphans.staleIndexes.length > 0) {
       ui.warn(`${orphans.staleIndexes.length} parent index(es) still link to removed pages — the same refresh rewrites them.`);
@@ -434,7 +459,18 @@ async function run(ctx) {
     let agentResult = { ran: false };
     if (pendingPaths.length > 0) {
       agentResult = await agentMod.runWikiAgent({
-        repoRoot, config, flags, targetSha, paths: pendingPaths, human: !flags.json,
+        repoRoot,
+        config,
+        flags,
+        targetSha,
+        paths: pendingPaths,
+        evidence: {
+          paths: evidenceRecords.map((record) => record.path),
+          include: evidenceState.include,
+          exclude: evidenceState.exclude,
+          secretsPaths: config.secrets_paths,
+        },
+        human: !flags.json,
       });
     }
     // Re-read: the agent clears the paths it actually finished, so a partial

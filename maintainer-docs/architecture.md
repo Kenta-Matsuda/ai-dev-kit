@@ -172,8 +172,8 @@ LLM Wikiは正本ではなく、`src`から再生成できる派生情報です�
 
 | 担当 | 責務 |
 | --- | --- |
-| CLI | source走査、mask、blob hash、diff、inventory shard、manifest、checkpoint |
-| knowledge-builder | source理解、prose page、index、page hash、pending path消化 |
+| CLI | generation-target走査、evidence走査、mask、blob hash、diff/fingerprint、inventory shard、manifest、checkpoint |
+| knowledge-builder | evidence全体からsourceを理解・検証し、prose page、index、page hash、pending targetを消化 |
 
 ### manifest schema v2の例
 
@@ -184,7 +184,19 @@ LLM Wikiは正本ではなく、`src`から再生成できる派生情報です�
   "kitCommit": "3d7e40b...",
   "generatedAt": "2026-09-14T11:02:00Z",
   "inventoryShards": ["inventory/00.json"],
-  "stats": { "files": 3184, "pages": 612, "maskedFiles": 7 },
+  "stats": {
+    "files": 55,
+    "pages": 42,
+    "maskedFiles": 0,
+    "evidenceFiles": 3184
+  },
+  "evidence": {
+    "include": ["src/**"],
+    "exclude": ["**/node_modules/**", "**/generated/**"],
+    "trackedFiles": 3184,
+    "supportingFiles": 3129,
+    "fingerprint": "sha256:7788..."
+  },
   "checkpoint": {
     "completedShards": 1,
     "pendingPaths": [],
@@ -207,9 +219,13 @@ LLM Wikiは正本ではなく、`src`から再生成できる派生情報です�
 }
 ```
 
-blob hashにより、旧commit objectがなくても現在treeとの差分を計算できます。同一blob・別pathはrename候補、旧recordのみは削除、新recordのみは追加です。`selfHashes`は生成pageの手編集検出に使います。
+generation-target inventoryのblob hashにより、旧commit objectがなくても現在treeとの差分を計算できます。同一blob・別pathはrename候補、旧recordのみは削除、新recordのみは追加です。`selfHashes`は生成pageの手編集検出に使います。
 
-inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootには必ず`knowledge/index.md`を置き、初回はCLIがstubを作成します。実際のprose構造はagentが維持します。
+調査対象は別の`knowledge.evidence` scopeです。CLIはtarget commitを`git ls-tree`で走査し、scopeに一致するtracked fileから`secrets_paths`を除いた正確なpath一覧をagent planへ渡します。generation targetsは「どのページを更新するか」、evidenceは「記述を何から検証するか」であり、`--scope`は前者だけに適用します。
+
+`manifest.evidence.fingerprint`はgeneration target外のsupporting evidenceのpath/blob、include/exclude、secret patternから計算します。fingerprintが変わった場合、ページ単位の依存graphがなくてもstale proseを残さないため、全generation targetを保守的にqueueします。target自身の変更は従来どおりinventory diffで増分queueします。
+
+inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootには必ず`knowledge/index.md`を置き、初回はCLIがstubを作成します。実際のprose構造はagentが維持します。大きいagent planはgitignore済み`knowledge/.cache/agent-task-*.json`へ保存され、`generationTargets`と`evidence.paths`を別配列で保持します。
 
 ### hand edit
 
@@ -223,6 +239,10 @@ inventoryは`knowledge.inventory_shard_size`ごとに分割します。rootに�
 | force-push / non-fast-forward | blob inventoryで差分を再計算し、自動mergeせずPR提示 |
 | 旧commitがGC済み | old commitではなくinventory blobとtreeを比較 |
 | renameのみ | 同一blobを利用し、不要なLLM再生成を避ける |
+| generation target外のsource変更 | evidence fingerprint差分で全generation targetを保守的に再queue |
+| docs-only generation target | `src/**` evidenceを別途渡し、実装・test・config・CIを横断調査 |
+| `--scope`付きbuild | generation targetだけ絞り、repository evidenceは維持 |
+| agent中断・失敗 | 既存`pendingPaths`を`--refresh`時に再queue |
 | source削除 | orphan pageを削除し、parent indexをstaleへ記録 |
 | excludeだけの変更 | prose対象なしでknowledge SHAを前進可能 |
 | secret path変更 | 本文を読まずmasked recordとして扱う |
@@ -318,7 +338,7 @@ CLI起動agent:
 - config / policy: `cli/lib/config.js`、`cli/lib/policy.js`
 - state: `cli/lib/state.js`
 - lease: `cli/lib/leases.js`
-- inventory: `cli/lib/inventory.js`
+- generation inventory / evidence scope: `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`
 - sync: `cli/commands/sync.js`
 - hooks: `cli/commands/hook.js`
 - workflow: `cli/commands/workflow.js`

@@ -595,13 +595,21 @@ function run() {
     eq(lastJson(r.out).remaining, 0, 'the drained checkpoint was not re-read');
   }));
 
-  test('--scope keeps out-of-scope paths out of the agent prompt', () => withRepo(({ root, stub, argvOut }) => {
+  test('--scope narrows generation targets but preserves repository evidence', () => withRepo(({ root, stub, argvOut }) => {
     aidev(root, ['knowledge', 'build', '--agent', '--scope', 'src/docs'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     ok(fs.existsSync(argvOut), 'the scoped run never started an agent');
     const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
     const prompt = argv[argv.indexOf('-p') + 1];
-    ok(!/src\/src\/api/.test(prompt), `deferred paths leaked into a scoped run:\n${prompt}`);
+    const generationStart = prompt.indexOf('Generation targets');
+    const evidenceStart = prompt.indexOf('Repository evidence');
+    const generationSection = prompt.slice(generationStart, evidenceStart);
+    ok(!/src\/src\/api/.test(generationSection),
+      `deferred paths leaked into the generation queue:\n${generationSection}`);
+    ok(/src\/src\/api/.test(prompt.slice(evidenceStart)),
+      `source code disappeared from repository evidence:\n${prompt}`);
+    ok(prompt.includes('does not limit repository research'),
+      'the scoped prompt does not explain that evidence stays repository-wide');
   }));
 
   test('a hung agent is killed at the deadline rather than hanging the CLI', () => withRepo(({ root, stub, argvOut }) => {

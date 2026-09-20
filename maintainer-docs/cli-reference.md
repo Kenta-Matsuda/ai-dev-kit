@@ -58,8 +58,12 @@ aidev <command> --help
 --agent --agent-name <name> --agent-timeout <ms> --agent-model <model>
 ```
 
-- `--agent`またはagent関連指定がある場合だけprose agentを起動します。
-- `--scope`外の変更はmanifest checkpointへdeferされます。
+- `--agent`または`--agent-name`を指定した場合だけprose agentを起動します。`--agent-timeout` / `--agent-model`だけでは起動しません。
+- `--scope`はgeneration targetsだけを狭めます。repository evidenceは`knowledge.evidence`のままで、scope外のコードも根拠として調査できます。
+- `--scope`外のgeneration targetはmanifest checkpointへdeferされます。
+- CLI表示のqueueはagentが調査できる全ファイルではなく、今回更新するgeneration targetです。tracked・非secret evidence件数は別表示されます。
+- supporting evidenceだけが変わった場合は、依存を取りこぼさないため全generation targetをqueueします。
+- `--refresh` / `--resume`は既存`checkpoint.pendingPaths`も再投入します。
 - 手編集ページは通常停止し、破棄には`--force`が必要です。
 - structured write完了後にagentが失敗した場合、checkpointを残してexit 1です。
 

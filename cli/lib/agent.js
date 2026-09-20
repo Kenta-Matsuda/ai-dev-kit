@@ -83,65 +83,126 @@ function assertAgentName(name) {
 /**
  * Build the prompt for a Wiki generation run.
  *
- * `paths` must already be narrowed to this run's scope. The manifest stores
- * pending and deferred paths in one list, so handing the agent the raw
- * checkpoint would quietly break the promise `--scope` makes.
+ * Generation targets and repository evidence are deliberately separate. A
+ * scoped or documentation-only build still receives the full evidence list so
+ * the agent can verify prose against implementation.
  */
-function buildPrompt({ targetSha, paths, taskFile = null, scope = null }) {
+function buildPrompt({
+  targetSha,
+  paths = [],
+  taskFile = null,
+  scope = null,
+  evidencePaths = [],
+  evidenceInclude = ['src/**'],
+  evidenceExclude = [],
+  secretsPaths = [],
+}) {
   const lines = [
     'Generate the LLM Wiki prose for this package, following the knowledge-builder contract.',
     '',
     `Target submodule SHA: ${targetSha}`,
   ];
-  if (scope) lines.push(`Scope: ${scope} (do not regenerate anything outside it)`);
+  if (scope) {
+    lines.push(
+      `Generation scope: ${scope}`,
+      'This scope limits what may be regenerated; it does not limit repository research.');
+  }
   lines.push('');
 
   if (taskFile) {
     lines.push(
-      `The ${paths.length} path(s) to document are listed in: ${taskFile}`,
-      'Read that file first; it is a JSON array of package-relative paths.');
-  } else if (paths.length > 0) {
-    lines.push(`Document these ${paths.length} path(s):`, ...paths.map((p) => `  - ${p}`));
+      `The complete generation plan is in: ${taskFile}`,
+      'Read that file first. It is a JSON object with separate generationTargets and',
+      'evidence.paths arrays; evidence paths are tracked, non-secret files at the target SHA.');
   } else {
-    lines.push('No specific paths were queued; refresh the index pages only.');
+    if (paths.length > 0) {
+      lines.push(
+        `Generation targets (${paths.length}; update Wiki pages for these source paths):`,
+        ...paths.map((p) => `  - ${p}`));
+    } else {
+      lines.push('Generation targets: none; refresh index pages only.');
+    }
+
+    lines.push(
+      '',
+      `Repository evidence (${evidencePaths.length} tracked, non-secret files; research only):`,
+      `  include: ${JSON.stringify(evidenceInclude)}`,
+      `  exclude: ${JSON.stringify(evidenceExclude)}`);
+    if (evidencePaths.length > 0) lines.push(...evidencePaths.map((p) => `  - ${p}`));
+    else lines.push('  - No exact evidence paths were supplied; discover files from the include/exclude globs.');
   }
 
   lines.push(
     '',
+    `Secret patterns (never read): ${JSON.stringify(secretsPaths)}`,
+    '',
     'Rules:',
+    '  - Generation targets are an update queue, NOT the research boundary.',
+    '  - Before writing, traverse the evidence inventory and inspect relevant source code,',
+    '    tests, configuration, CI and documentation. Never summarize Markdown alone.',
+    '  - Trace documented behavior into implementation and tests; prefer code when they conflict.',
+    '  - Read PKG files only from evidence.paths. You may also read aidev.yaml and knowledge/**',
+    '    as control/generated data. Never read secrets_paths.',
     '  - Write only inside knowledge/**. Never write src/**, .claude/**, or any policy file.',
-    '  - Do not read files matched by secrets_paths; record them masked.',
     '  - Cite the source file (and line, where possible) behind each statement.',
     '  - Mark inference as 推測 and unknowns as 未確認. Do not invent detail to fill a gap.',
-    '  - When a page is written, remove its path from checkpoint.pendingPaths in',
-    '    knowledge/manifest.json, and update selfHashes for what you wrote.',
-    '    Leave paths you did not finish in place so the run can resume.');
+    '  - For each completed generation target, update its inventory pages/selfHashes first,',
+    '    then remove that exact source path from checkpoint.pendingPaths in',
+    '    knowledge/manifest.json. Leave unfinished and deferred target paths in place.');
   return lines.join('\n');
 }
 
-/**
- * Persist the task list when it is too large to pass on the command line.
- *
- * `knowledge/.cache/` is gitignored, which is what makes it safe to drop a
- * generated work list there. Returns the repo-relative path, or null when the
- * prompt fits inline.
- */
-function writeTaskFile(repoRoot, targetSha, paths) {
+function taskDocument({
+  targetSha,
+  paths,
+  scope,
+  evidencePaths,
+  evidenceInclude,
+  evidenceExclude,
+  secretsPaths,
+}) {
+  return {
+    schemaVersion: 1,
+    targetSha,
+    generationScope: scope,
+    generationTargets: paths,
+    evidence: {
+      include: evidenceInclude,
+      exclude: evidenceExclude,
+      paths: evidencePaths,
+      excludedSecretPatterns: secretsPaths,
+    },
+  };
+}
+
+/** Persist an oversized generation/evidence plan in the gitignored cache. */
+function writeTaskFile(repoRoot, targetSha, task) {
   const rel = path.join('knowledge', '.cache', `agent-task-${String(targetSha).slice(0, 12)}.json`);
   const full = path.join(repoRoot, rel);
   fs.mkdirSync(path.dirname(full), { recursive: true });
-  cfgMod.writeJsonAtomic(full, paths);
+  cfgMod.writeJsonAtomic(full, task);
   return rel.split(path.sep).join('/');
 }
 
-/** Compose the prompt, spilling to a task file only when it would be oversized. */
-function prepareTask(repoRoot, { targetSha, paths, scope = null }) {
-  const inline = buildPrompt({ targetSha, paths, scope });
+/** Compose the prompt, spilling the combined plan when it would be oversized. */
+function prepareTask(repoRoot, {
+  targetSha,
+  paths,
+  scope = null,
+  evidencePaths = [],
+  evidenceInclude = ['src/**'],
+  evidenceExclude = [],
+  secretsPaths = [],
+}) {
+  const plan = {
+    targetSha, paths, scope, evidencePaths, evidenceInclude, evidenceExclude, secretsPaths,
+  };
+  const inline = buildPrompt(plan);
   if (Buffer.byteLength(inline, 'utf8') <= MAX_INLINE_PROMPT_BYTES) {
     return { prompt: inline, taskFile: null };
   }
-  const taskFile = writeTaskFile(repoRoot, targetSha, paths);
-  return { prompt: buildPrompt({ targetSha, paths, taskFile, scope }), taskFile };
+  const taskFile = writeTaskFile(repoRoot, targetSha, taskDocument(plan));
+  return { prompt: buildPrompt({ ...plan, taskFile }), taskFile };
 }
 
 /**
@@ -341,16 +402,35 @@ function resolveOptions(flags, config, { defaultAgent = DEFAULT_AGENT } = {}) {
  * failure: the structured write already succeeded, so a machine without Claude
  * Code installed still gets a usable manifest and a clear next step.
  */
-async function runWikiAgent({ repoRoot, config, flags, targetSha, paths, scope = null, human = true }) {
+async function runWikiAgent({
+  repoRoot,
+  config,
+  flags,
+  targetSha,
+  paths,
+  scope = null,
+  evidence = {},
+  human = true,
+}) {
   const opts = resolveOptions(flags, config);
   if (!opts.enabled) return { ran: false, reason: 'not requested (pass --agent to run it)' };
 
-  const { prompt, taskFile } = prepareTask(repoRoot, { targetSha, paths, scope });
+  const evidencePaths = evidence.paths || [];
+  const { prompt, taskFile } = prepareTask(repoRoot, {
+    targetSha,
+    paths,
+    scope,
+    evidencePaths,
+    evidenceInclude: evidence.include || ['src/**'],
+    evidenceExclude: evidence.exclude || [],
+    secretsPaths: evidence.secretsPaths || config?.secrets_paths || [],
+  });
   if (human) {
     ui.out('');
-    ui.info(`running the ${opts.agent} agent for ${paths.length} page(s)…`);
+    ui.info(`running the ${opts.agent} agent for ${paths.length} generation target(s)…`);
+    ui.dim(`    repository evidence: ${evidencePaths.length} tracked, non-secret file(s)`);
     ui.dim(`    model: ${opts.model || "Claude Code's own default (no --model passed)"}`);
-    if (taskFile) ui.dim(`    task list: ${taskFile}`);
+    if (taskFile) ui.dim(`    generation/evidence plan: ${taskFile}`);
   }
 
   const res = await runAgent({
@@ -372,8 +452,8 @@ async function runWikiAgent({ repoRoot, config, flags, targetSha, paths, scope =
       ui.fail(`the ${opts.agent} agent failed: ${res.reason}`);
       if (res.stderr) for (const l of res.stderr.split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       ui.dim(res.timedOut
-        ? '    Raise --agent-timeout, or resume with "aidev knowledge build --refresh".'
-        : '    The checkpoint is intact; resume with "aidev knowledge build --refresh".');
+        ? '    Raise --agent-timeout, or resume with "aidev knowledge build --refresh --agent".'
+        : '    The checkpoint is intact; resume with "aidev knowledge build --refresh --agent".');
     }
     return {
       ran: true, ok: false, agent: opts.agent, model: opts.model, reason: res.reason,

@@ -59,7 +59,7 @@ PKGのソース履歴は既存リポジトリに残ります。ラッパーリ�
 
 | Agent | 現在の使い方 |
 | --- | --- |
-| `knowledge-builder` | `knowledge build --agent`と`sync --agent`から起動し、Wikiのproseを生成 |
+| `knowledge-builder` | `knowledge build --agent`と`sync --agent`から起動し、PKG全体のコード・テスト・設定・文書を横断調査してWiki proseを生成 |
 | `agents-creator` | Claude Codeの対話から、追加Agentの設計・作成を支援 |
 | `issue-to-pr` | Work Item対応の定義を同梱。ただしCLIとのエンドツーエンド接続は未完成 |
 | `workflow-creator` | workflow設計用の定義を同梱。現在の`workflow new`自体は固定scaffoldを生成 |
@@ -209,6 +209,12 @@ sync:
   tracking_branch: main
   auto_pr: true
 
+knowledge:
+  # Wikiの生成対象はpackage.include。調査根拠はPKG全体から集める。
+  evidence:
+    include: ["src/**"]
+    # exclude省略時はpackage.excludeを継承
+
 model:
   agent: sonnet
 
@@ -218,13 +224,14 @@ quality_gates:
   test: npm test
 ```
 
-- `package.include`: AI向けWikiで追跡するPKG内のパス
-- `package.exclude`: 生成物、依存物など追跡しないパス
-- `secrets_paths`: AIに読ませず、Wikiでもマスクする領域
+- `package.include`: Wikiを生成・更新する起点（generation targets）。調査範囲そのものではない
+- `package.exclude`: generation targetsから除外する生成物・依存物など
+- `knowledge.evidence`: knowledge-builderが根拠として横断調査するPKG内のtracked path。既定は`src/**`で、`exclude`省略時は`package.exclude`を継承
+- `secrets_paths`: evidenceから除外し、Wikiでもマスクする領域
 - `azure_devops.auth_env`: PATの値ではなく、PATを入れる環境変数名
 - `quality_gates`: `src/`内で実行できる実在コマンドだけを指定
 
-初期値の`src/src/**`や`src/docs/**`が自分のPKG構成に合わない場合は、Wiki生成前に修正してください。全項目は[設定リファレンス](maintainer-docs/configuration-reference.md)にあります。
+初期値の`src/src/**`や`src/docs/**`が自分のPKG構成に合わない場合は、Wiki生成前にgeneration targetsを修正してください。`knowledge.evidence.include`は通常`src/**`のままにし、生成物などを追加で除外したい場合だけ`knowledge.evidence.exclude`を明示します。全項目は[設定リファレンス](maintainer-docs/configuration-reference.md)にあります。
 
 ### 7. 書き込みpolicyを生成・承認する
 
@@ -247,15 +254,21 @@ aidev permission show
 aidev knowledge build --agent
 ```
 
-`--agent`を付けた場合だけ、`knowledge-builder`がprose本文を生成します。課金と実行時間を伴うため既定では無効です。
+`--agent`を付けた場合だけ、`knowledge-builder`がprose本文を生成します。課金と実行時間を伴うため既定では無効です。knowledge-builderはgeneration targetsだけを要約するのではなく、`knowledge.evidence`に含まれるソースコード、テスト、設定、CI、文書を横断して記述を検証します。
 
 ```bash
 aidev knowledge build             # manifest / inventoryなど構造化部分のみ
-aidev knowledge status            # SHA、未生成ページ、手編集を確認
+aidev knowledge status            # SHA、未完了target、手編集を確認
 aidev knowledge build --refresh --agent  # 中断後や差分の続き
 ```
 
-`claude`コマンドが見つからない場合、構造化部分までは生成されますがproseは残ります。`knowledge status`で`pending pages`を確認してください。
+CLIの`generation targets`とqueue一覧は「今回ページを更新する起点」です。agentが調査できる全ファイル一覧ではありません。`repository evidence`にはtarget commitのtracked・非secretファイル数が別表示され、大きいリポジトリではgeneration targetsとevidence pathが`knowledge/.cache/agent-task-*.json`へ別配列で渡されます。`--scope`はgeneration targetsだけを狭め、evidenceは狭めません。
+
+生成対象外のsupporting evidence（たとえば実装コード）だけが変わった場合も、依存ページを取りこぼさないようgeneration targets全体が保守的に再queueされます。中断したpending targetも`--refresh`で再投入されます。
+
+既存ラッパーへ新しいknowledge-builder指示を反映するには中央kit更新後に`aidev update`を実行し、Claude Codeを再起動してください。`knowledge.evidence`を未記載でも既定の`src/**`が使われます。
+
+`claude`コマンドが見つからない場合、構造化部分までは生成されますがproseは残ります。`knowledge status`で`pending targets`を確認してください。
 
 ### 9. 環境を確認する
 
@@ -508,7 +521,7 @@ branch policyでは、少なくとも`.claude/**`、`.aidev/**`、`.aidev-lock`�
 | `check`がexit 2 | kit管理ファイルが`.aidev-lock`と不一致。`aidev update --dry-run`で差分を確認 |
 | `check`がexit 3 | `aidev permission show`を実行し、未配置なら候補生成・承認を行う |
 | `check`がexit 4 | `src`と`knowledge/manifest.json`のSHAが不一致。`aidev sync`、または中断中なら`--resume` / `--abort` |
-| `pending pages`が残る | `aidev knowledge build --refresh --agent`を実行し、Claude Codeの利用可否も確認 |
+| `pending targets`が残る | `aidev knowledge build --refresh --agent`を実行し、Claude Codeの利用可否も確認 |
 | `sync lease is present` | 前回の対象SHAと作業ツリーを確認して`aidev sync --resume`または`--abort` |
 | 同期PRが作られない | `sync.auto_pr`、`wrapper_repository`、PAT環境変数、originへのpush権限を確認。生成差分は作業ツリーやlocal branchに残る |
 | MCPが接続できない | PATの期限・scope、`npx`、npm registry、proxy、証明書を確認 |
