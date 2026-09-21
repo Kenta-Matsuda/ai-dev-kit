@@ -9,18 +9,23 @@
  *   3. Consistency error + no sync lease   → deny everything
  *   4. Consistency error + sync lease      → allow knowledge/** only
  *   5. writable paths                      → allow (Wiki, workflows, aidev.yaml)
- *   6. read_only paths                     → deny
- *   7. otherwise                           → allow
+ *   6. per-agent grant                     → allow when the CLI started this
+ *                                            agent (AIDEV_AGENT) and the policy's
+ *                                            agents.<name>.writable covers the path
+ *                                            (and the branch, when one is required)
+ *   7. read_only paths                     → deny
+ *   8. otherwise                           → allow
  *
- * Rule 2 sitting above the sync lease is what makes the lease incapable of
- * widening into the kit's own control surface. PKG source is read-only for
- * every agent; a team that wants an agent to edit it lists the paths under
- * `writable` in the policy.
+ * Rule 2 sitting above everything else is what makes neither the sync lease
+ * nor a per-agent grant capable of widening into the kit's own control
+ * surface. The agent name comes from the CLI's own environment for the child
+ * process, never from anything the agent writes, so it cannot be claimed.
  */
 
 const pathsMod = require('./paths');
 const leasesMod = require('./leases');
 const stateMod = require('./state');
+const gitMod = require('./git');
 const { ALWAYS_PROTECTED, DEFAULT_POLICY_SCOPES } = require('./config');
 
 const DECISION = { ALLOW: 'allow', DENY: 'deny' };
@@ -41,6 +46,7 @@ function deny(reason, extra = {}) {
  */
 function decide(repoRoot, targetPath, {
   config = null, policy = null, state = null, now = Date.now(),
+  agent = process.env.AIDEV_AGENT || null,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
   if (rel == null) {
@@ -105,11 +111,40 @@ function decide(repoRoot, targetPath, {
   }
 
   // ---- 6. read-only regions ------------------------------------------------
+  // ---- 6. per-agent grant --------------------------------------------------
+  // Only for an agent the CLI started: AIDEV_AGENT is set in that child's
+  // environment by agent.runAgent and inherited by the hook. A grant may be
+  // tied to a branch, so that issue-to-pr can only edit on its own branch.
+  const grant = agent && pol.agents ? pol.agents[agent] : null;
+  if (grant) {
+    const gHit = pathsMod.firstMatch(grant.writable, rel);
+    if (gHit) {
+      if (grant.branch) {
+        let branch = null;
+        try { branch = gitMod.currentBranch(repoRoot); } catch { branch = null; }
+        if (!branch || !pathsMod.matchesAny([grant.branch], branch)) {
+          return deny(
+            `"${rel}" is writable for agent ${agent} only on branch ${grant.branch} (current: ${branch || 'detached HEAD'})`,
+            { rule: 'agent-branch', path: rel, pattern: gHit, agent });
+        }
+      }
+      return allow(
+        `agent ${agent} may write "${rel}" (policy agents.${agent}.writable: ${gHit}${grant.branch ? `, branch ${grant.branch}` : ''})`,
+        { rule: 'agent-writable', path: rel, pattern: gHit, agent });
+    }
+  }
+
+  // ---- 7. read-only regions ------------------------------------------------
   const roHit = pathsMod.firstMatch(pol.read_only, rel);
   if (roHit) {
+    const hint = agent
+      ? (grant
+        ? `agent ${agent} is granted ${grant.writable.join(', ')}, which does not cover this path`
+        : `agent ${agent} has no grant in .aidev/policy.yaml (agents.${agent}.writable)`)
+      : 'this session was not started by the CLI as a named agent; grants in policy agents.<name> apply only then';
     return deny(
-      `"${rel}" is read-only (${roHit}). ` +
-      'PKG source is not written by agents; to allow it, list the paths under writable in .aidev/policy.yaml.',
+      `"${rel}" is read-only (${roHit}). PKG source is not written by agents by default; ${hint}. ` +
+      'A team allows it by listing paths under writable, or per agent under agents.<name>.writable, in .aidev/policy.yaml.',
       { rule: 'read-only', path: rel, pattern: roHit });
   }
 

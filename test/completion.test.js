@@ -326,42 +326,76 @@ function run() {
   }
 
   // ---------------------------------------------------- hooks: session-stop
-  suite('hooks: session-stop self-evolution journal');
+  suite('hooks: session-stop asks a kit developer session to reflect');
+
+  /** A Claude Code transcript with n tool calls and the given output tokens. */
+  function writeTranscript(root, { toolCalls = 0, outputTokens = 0 } = {}) {
+    const p = path.join(root, 'transcript.jsonl');
+    const lines = [];
+    const t0 = Date.now() - 600000;
+    for (let i = 0; i < Math.max(1, toolCalls); i++) {
+      lines.push(JSON.stringify({ type: 'assistant', timestamp: new Date(t0 + i * 1000).toISOString(), message: {
+        role: 'assistant', usage: { input_tokens: 100, output_tokens: i === 0 ? outputTokens : 0 },
+        content: i < toolCalls ? [{ type: 'tool_use', name: 'Read', input: {} }] : [{ type: 'text', text: 'done' }],
+      } }));
+      if (i < toolCalls) lines.push(JSON.stringify({ type: 'user', timestamp: new Date(t0 + i * 1000 + 500).toISOString(), message: {
+        role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } }));
+    }
+    fs.writeFileSync(p, `${lines.join('\n')}\n`, 'utf8');
+    return p;
+  }
 
   {
     const fx = makeRepo();
     try {
-      const journal = path.join(fx.root, '.aidev', 'cache', 'evolution-journal.json');
+      const dev = { AIDEV_KIT_DEVELOPER: '1' };
+      const payload = (extra = {}) => JSON.stringify({ session_id: 'sess-1', transcript_path: writeTranscript(fx.root, extra.metrics || {}), ...extra.input });
 
-      test('a clean session records no observation', () => {
-        const r = aidev(fx.root, ['hook', 'session-stop'], { input: '{}' });
+      test('on an ordinary machine the hook does nothing', () => {
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: payload({ metrics: { toolCalls: 99 } }) });
         eq(r.code, 0, `exit ${r.code}: ${r.out}`);
         const j = lastJson(r.out);
-        ok(j && j.evolution && j.evolution.enabled, 'self-evolution should be enabled by default');
-        ok(!j.evolution.recorded, 'a healthy session is not a signal');
+        ok(j && j.ok && /not a kit developer/.test(j.skipped), r.out);
+        ok(!fs.existsSync(path.join(fx.root, '.aidev', 'cache', 'evolution')), 'nothing written on a user machine');
       });
 
-      test('a stale sync lease is recorded as a signal, and the journal never stores prompts, responses or diffs', () => {
-        fs.writeFileSync(path.join(fx.root, '.aidev', 'sync.lock'), `${JSON.stringify({
-          kind: 'sync', targetSha: 'a'.repeat(40), acquiredAt: new Date(Date.now() - 86400000).toISOString(), ttlMinutes: 1,
-        })}\n`, 'utf8');
-        const r = aidev(fx.root, ['hook', 'session-stop'], { input: '{}' });
-        eq(r.code, 0, `exit ${r.code}: ${r.out}`);
-        fs.rmSync(path.join(fx.root, '.aidev', 'sync.lock'), { force: true });
-        ok(fs.existsSync(journal), 'no journal was written');
-        const raw = fs.readFileSync(journal, 'utf8');
-        const doc = JSON.parse(raw);
-        for (const o of doc.observations) {
-          eq(Object.keys(o).sort(), ['at', 'signals'], 'unexpected fields in an observation');
-        }
-      });
-
-      test('disabling self_evolution stops the recording', () => {
-        const cfg = path.join(fx.root, 'aidev.yaml');
-        fs.appendFileSync(cfg, 'self_evolution:\n  enabled: false\n', 'utf8');
-        const r = aidev(fx.root, ['hook', 'session-stop'], { input: '{}' });
+      test('a small session on a developer machine is let go', () => {
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: payload({ metrics: { toolCalls: 3, outputTokens: 500 } }), env: dev });
         const j = lastJson(r.out);
-        ok(j && j.evolution && j.evolution.enabled === false, `not disabled: ${r.out}`);
+        ok(j && j.ok && j.belowThreshold, r.out);
+        eq(j.metrics.toolCalls, 3);
+      });
+
+      test('a session that did real work is blocked once with reflection instructions', () => {
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: payload({ metrics: { toolCalls: 40, outputTokens: 100 } }), env: dev });
+        const j = lastJson(r.out);
+        eq(j.decision, 'block', r.out);
+        ok(/\.aidev\/cache\/evolution\/sess-1\.md/.test(j.reason), 'names the reflection file');
+        ok(/40 tool calls/.test(j.reason), 'carries the facts');
+        ok(/Do NOT copy prompts/.test(j.reason), 'forbids copying content');
+        eq(j.metrics.toolCalls, 40);
+      });
+
+      test('while the block is being answered the hook does not block again', () => {
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: payload({ metrics: { toolCalls: 40 }, input: { stop_hook_active: true } }), env: dev });
+        const j = lastJson(r.out);
+        ok(j && j.ok && !j.decision, r.out);
+      });
+
+      test('once the reflection exists the session may stop', () => {
+        const file = path.join(fx.root, '.aidev', 'cache', 'evolution', 'sess-1.md');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, '# session sess-1\n## 事実\n- x\n', 'utf8');
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: payload({ metrics: { toolCalls: 40 } }), env: dev });
+        const j = lastJson(r.out);
+        ok(j && j.ok && j.reflected, r.out);
+        eq(j.evolveLaunched, false, 'no auto run without --auto');
+      });
+
+      test('an unreadable transcript never blocks the session', () => {
+        const r = aidev(fx.root, ['hook', 'session-stop'], { input: JSON.stringify({ session_id: 'sess-2', transcript_path: path.join(fx.root, 'missing.jsonl') }), env: dev });
+        const j = lastJson(r.out);
+        ok(j && j.ok && /transcript/.test(j.skipped), r.out);
       });
     } finally { fx.cleanup(); }
   }

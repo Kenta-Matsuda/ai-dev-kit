@@ -248,9 +248,72 @@ function run() {
       const d = decide(fx, 'src/api/auth.ts');
       eq(d.decision, 'deny');
       eq(d.rule, 'read-only');
-      ok(/list the paths under writable/.test(d.reason), d.reason);
+      ok(/listing paths under writable/.test(d.reason), d.reason);
       eq(decide(fx, '.aidev/knowledge/x.md').rule, 'writable');
       eq(decide(fx, 'aidev.yaml').rule, 'writable');
+    } finally { fx.cleanup(); }
+  });
+
+  suite('policy: per-agent grants');
+
+  const GRANT = { 'issue-to-pr': { writable: ['src/**'], branch: null } };
+  const withGrant = (fx, agents = GRANT) => ({ ...ctx(fx), policy: { ...cfg.loadPolicy(fx.root), agents } });
+
+  test('a granted agent started by the CLI may write inside its grant, nobody else may', () => {
+    const fx = makeRepo();
+    try {
+      const d = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: 'issue-to-pr' });
+      eq(d.decision, 'allow', d.reason);
+      eq(d.rule, 'agent-writable');
+      eq(policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: 'knowledge-builder' }).rule, 'read-only', 'another agent');
+      const anon = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: null });
+      eq(anon.rule, 'read-only', 'an interactive session');
+      ok(/not started by the CLI as a named agent/.test(anon.reason), anon.reason);
+      const outside = policy.decide(fx.root, 'docs/readme.md', { ...withGrant(fx), agent: 'issue-to-pr' });
+      eq(outside.rule, 'read-only', 'outside the grant');
+      ok(/does not cover this path/.test(outside.reason), outside.reason);
+    } finally { fx.cleanup(); }
+  });
+
+  test('a grant never reaches protected paths or secrets', () => {
+    const fx = makeRepo();
+    try {
+      const wide = { 'issue-to-pr': { writable: ['**'], branch: null } };
+      eq(policy.decide(fx.root, 'config/secrets/key.pem', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'secrets');
+      eq(policy.decide(fx.root, '.claude/settings.json', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'protected');
+      eq(policy.decide(fx.root, '.aidev/policy.yaml', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'protected');
+    } finally { fx.cleanup(); }
+  });
+
+  test('a branch condition is enforced against the checkout', () => {
+    const fx = makeRepo();
+    try {
+      const scoped = { 'issue-to-pr': { writable: ['src/**'], branch: 'aidev/issue-*' } };
+      const onMain = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' });
+      eq(onMain.decision, 'deny');
+      eq(onMain.rule, 'agent-branch');
+      git(['checkout', '-q', '-b', 'aidev/issue-42'], fx.root);
+      const onBranch = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' });
+      eq(onBranch.decision, 'allow', onBranch.reason);
+      git(['checkout', '-q', '--detach'], fx.root);
+      eq(policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' }).rule, 'agent-branch', 'detached HEAD');
+    } finally { fx.cleanup(); }
+  });
+
+  test('the policy file validates agents and the CLI passes AIDEV_AGENT to the hook', () => {
+    const fx = makeRepo();
+    try {
+      fs.appendFileSync(path.join(fx.root, '.aidev', 'policy.yaml'), 'agents:\n  issue-to-pr:\n    writable: ["src/**"]\n    branch: "aidev/issue-*"\n', 'utf8');
+      const pol = cfg.loadPolicy(fx.root);
+      eq(pol.agents, { 'issue-to-pr': { writable: ['src/**'], branch: 'aidev/issue-*' } });
+      // The hook reads the agent from the environment the CLI set for the child.
+      const withEnv = policy.decide(fx.root, 'src/x.ts', { config: cfg.loadConfig(fx.root), policy: pol });
+      eq(withEnv.rule, 'read-only', 'no AIDEV_AGENT in this process');
+      process.env.AIDEV_AGENT = 'issue-to-pr';
+      try {
+        git(['checkout', '-q', '-b', 'aidev/issue-7'], fx.root);
+        eq(policy.decide(fx.root, 'src/x.ts', { config: cfg.loadConfig(fx.root), policy: pol }).rule, 'agent-writable');
+      } finally { delete process.env.AIDEV_AGENT; }
     } finally { fx.cleanup(); }
   });
 

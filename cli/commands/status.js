@@ -33,7 +33,7 @@ function inspect(repoRoot, config, { checkRemote = true, installRoot = assets.DE
   let policy = { ok: false, error: null, present: false };
   try {
     const pol = cfgMod.loadPolicy(repoRoot, { required: true });
-    policy = { ok: true, present: true, protectedCount: pol.protected.length, writable: pol.writable };
+    policy = { ok: true, present: true, protectedCount: pol.protected.length, writable: pol.writable, agents: pol.agents || {} };
   } catch (e) { policy = { ok: false, present: false, error: e.message }; }
   const manifest = inventory.readManifest(repoRoot);
   const records = inventory.readInventory(repoRoot, manifest);
@@ -115,7 +115,9 @@ function run(ctx) {
   ui.table([
     ['Wiki', r.manifest ? `${r.manifest.stats?.pages ?? 0} page(s) for ${r.records.length} target(s)${st.pendingPages ? `, ${st.pendingPages} pending` : ''}` : 'not generated'],
     ['tool config', configLine],
-    ['policy', r.policy.ok ? `placed (${r.policy.protectedCount} protected paths)` : 'missing — run "aidev permission configure --approve"'],
+    ['policy', r.policy.ok
+      ? `placed (${r.policy.protectedCount} protected paths${Object.keys(r.policy.agents).length ? `; agent grants: ${Object.entries(r.policy.agents).map(([n, g]) => `${n} → ${g.writable.join(', ')}${g.branch ? ` on ${g.branch}` : ''}`).join('; ')}` : ''})`
+      : 'missing — run "aidev permission configure --approve"'],
   ]);
   if (r.handEdits.length > 0) {
     ui.warn(`${r.handEdits.length} Wiki page(s) edited by hand since generation:`);

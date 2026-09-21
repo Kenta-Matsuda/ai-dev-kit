@@ -103,7 +103,6 @@ const DEFAULTS = Object.freeze({
     // agent's orientation less often.
     agent_batch_size: 20,
   },
-  self_evolution: { enabled: true, cadence: 'weekly' },
 });
 
 function readTextIfExists(p) {
@@ -329,7 +328,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
   const sync = mapping(raw.sync, 'sync');
   const pr = mapping(sync.pr, 'sync.pr');
   const knowledge = mapping(raw.knowledge, 'knowledge');
-  const eve = mapping(raw.self_evolution, 'self_evolution');
   const gates = mapping(raw.quality_gates, 'quality_gates');
 
   const cfg = {
@@ -396,10 +394,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
             : asArray(evidence.exclude, 'knowledge.evidence.exclude'),
         };
       })(),
-    },
-    self_evolution: {
-      enabled: asBool(eve.enabled, 'self_evolution.enabled', DEFAULTS.self_evolution.enabled),
-      cadence: asString(eve.cadence, 'self_evolution.cadence', DEFAULTS.self_evolution.cadence),
     },
     quality_gates: {},
   };
@@ -472,12 +466,28 @@ function validatePolicy(raw, source = POLICY_REL) {
   const protectedList = asArray(raw.protected, 'protected');
   const merged = [...ALWAYS_PROTECTED];
   for (const p of protectedList) if (!merged.includes(p)) merged.push(p);
+
+  // Per-agent grants: `agents.<name>: { writable: [globs], branch?: glob }`.
+  // Only an agent the CLI started (it sets AIDEV_AGENT in the child's
+  // environment) can claim one; protected paths and secrets stay above it.
+  if (raw.agents != null && (typeof raw.agents !== 'object' || Array.isArray(raw.agents))) {
+    throw new AidevError(`${source}: agents must be a mapping`);
+  }
+  const agents = {};
+  for (const [name, v] of Object.entries(raw.agents || {})) {
+    if (!toolsMod.AGENT_NAME_RE.test(name)) throw new AidevError(`${source}: agents has an invalid agent name ${JSON.stringify(name)}`);
+    if (v == null || typeof v !== 'object' || Array.isArray(v)) throw new AidevError(`${source}: agents.${name} must be a mapping`);
+    const writable = asArray(v.writable, `agents.${name}.writable`);
+    if (writable.length === 0) throw new AidevError(`${source}: agents.${name}.writable must list at least one path`);
+    agents[name] = { writable, branch: asString(v.branch, `agents.${name}.branch`, null) };
+  }
   return {
     version,
     protected: merged,
     read_only: asArray(raw.read_only, 'read_only'),
     writable_during_sync: asArray(raw.writable_during_sync, 'writable_during_sync'),
     writable: asArray(raw.writable, 'writable'),
+    agents,
   };
 }
 

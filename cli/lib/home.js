@@ -94,6 +94,37 @@ function listPackages(env = process.env) {
   return { present, missing };
 }
 
+// --------------------------------------------------------- kit developer
+
+const DEVELOPER_REL = 'developer.json';
+
+function developerPath(env = process.env) { return path.join(home(env), DEVELOPER_REL); }
+
+/**
+ * Is this machine a kit developer's? Only then does the Stop hook ask a
+ * session to reflect on itself and `aidev evolve` turn reflections into a
+ * kit PR. The marker lives here, outside every PKG, so nothing distributed
+ * to a PKG team can switch it on. `AIDEV_KIT_DEVELOPER=1` is the same switch
+ * for environments without a writable home.
+ */
+function readDeveloper(env = process.env) {
+  if (env.AIDEV_KIT_DEVELOPER === '1') return { enabled: true, autoEvolve: false, source: 'AIDEV_KIT_DEVELOPER' };
+  const doc = readJsonIfExists(developerPath(env));
+  if (!doc || doc.enabled !== true) return { enabled: false, autoEvolve: false, source: null };
+  return { enabled: true, autoEvolve: doc.autoEvolve === true, source: DEVELOPER_REL, enabledAt: doc.enabledAt || null };
+}
+
+function isKitDeveloper(env = process.env) { return readDeveloper(env).enabled; }
+
+function setDeveloper({ enabled, autoEvolve = false }, env = process.env) {
+  const file = developerPath(env);
+  if (!enabled) { try { fs.unlinkSync(file); } catch { /* absent */ } return { enabled: false, autoEvolve: false }; }
+  const doc = { schemaVersion: 1, enabled: true, autoEvolve: !!autoEvolve, enabledAt: nowIso() };
+  fs.mkdirSync(home(env), { recursive: true });
+  writeJsonAtomic(file, doc);
+  return doc;
+}
+
 // ------------------------------------------------------------ update check
 
 const UPDATE_CACHE_REL = path.join('cache', 'update-check.json');
@@ -137,5 +168,6 @@ function checkForUpdate(installRoot, { env = process.env, force = false, now = D
 module.exports = {
   home, defaultHome, registryPath, readRegistry, writeRegistry,
   registerPackage, unregisterPackage, listPackages,
+  developerPath, readDeveloper, isKitDeveloper, setDeveloper,
   checkForUpdate, UPDATE_CHECK_TTL_MS,
 };

@@ -32,7 +32,7 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 | --- | --- |
 | `aidev.yaml`, `.aidev/workflows/**` | 書き込み可 |
 | `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge build` から起動）のみ。手編集しない |
-| PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
+| PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable`、または agent ごとの `agents.<name>.writable`（CLI が起動した agent にだけ効く）に足したパスだけ可 |
 | `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（ai-dev-kit 由来。`aidev update` が更新する） |
 | `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `AGENTS.md`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |
 | `.aidev/policy.yaml`, `.aidev/sync.lock`, `.aidev/materialized.json` | **常に禁止**（CLI のみが配置） |

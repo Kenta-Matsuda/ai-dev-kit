@@ -16,7 +16,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 | --- | --- |
 | 入力 | Work Item ID、`aidev.yaml`（`hosting` / `package`）、`.aidev/knowledge/` |
 | 出力 | ブランチ `aidev/issue-<id>` 上の実装と、PKG の PR |
-| 必要権限 | PKG ソースへの書き込み。**チームが `.aidev/policy.yaml` の `writable` に足したパスだけ**書けます |
+| 必要権限 | PKG ソースへの書き込み。**チームが `.aidev/policy.yaml` の `agents.issue-to-pr.writable`（この agent 専用）か `writable` に足したパスだけ**書けます。agent 専用の許可は `aidev agent run issue-to-pr` で起動されたときにだけ効きます |
 | 前提 | ユーザーがこの Work Item の処理を明示的に指示している |
 
 ---
@@ -47,7 +47,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 
 | 拒否の理由 | 対処 |
 | --- | --- |
-| `is read-only` | そのパスは `writable` に無い。必要なパスを示してユーザー（チーム）に policy の更新を相談する |
+| `is read-only` | そのパスはこの agent に許可されていない。必要なパスを示し、`.aidev/policy.yaml` の `agents.issue-to-pr.writable` への追加をユーザー（チーム）に相談する |
 | `is protected` / `secrets_paths` | 設計どおり。触らない |
 | `Wiki consistency error` | `aidev knowledge build` が必要。ユーザーに報告する |
 

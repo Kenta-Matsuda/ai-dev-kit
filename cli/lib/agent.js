@@ -385,12 +385,26 @@ function runAgent({
   label = null,
   env = process.env,
   onProgress = null,
+  // An agent definition to inline into the prompt instead of selecting it by
+  // name (for runs outside a PKG, where no agents tree exists). The tool then
+  // receives no agent flag.
+  definition = null,
+  // Extra tool arguments appended verbatim (caller checks the tool supports them).
+  extraArgv = [],
 }) {
   return new Promise((resolve) => {
     let adapter;
     try { adapter = toolsMod.getTool(tool); } catch (e) {
       resolve({ ok: false, skipped: true, tool, reason: e.message });
       return;
+    }
+    const namedAgent = definition ? null : agent;
+    if (definition) {
+      prompt = [
+        `# Agent: ${agent}`, '',
+        `You are acting as the ai-dev-kit agent "${agent}". Follow its definition below, then the task.`,
+        '', '---', String(definition).trim(), '---', '', '# Task', '', String(prompt == null ? '' : prompt), '',
+      ].join('\n');
     }
     const resolved = toolsMod.resolveBinary(adapter, env);
     if (!resolved.ok) {
@@ -412,7 +426,7 @@ function runAgent({
     let promptFile = null;
     if (adapter.prompt === 'file') {
       try {
-        promptFile = writePromptFile(repoRoot, installRoot, { tool, agent, prompt, label });
+        promptFile = writePromptFile(repoRoot, installRoot, { tool, agent: namedAgent, prompt, label });
         promptArg = toolsMod.filePointerPrompt(promptFile);
       } catch (e) {
         resolve({ ok: false, tool, reason: `could not write the prompt file: ${e.message}` });
@@ -420,7 +434,7 @@ function runAgent({
       }
     }
 
-    const argv = [...resolved.argvPrefix, ...buildArgv({ tool, agent, model, promptArg })];
+    const argv = [...resolved.argvPrefix, ...buildArgv({ tool, agent: namedAgent, model, promptArg }), ...extraArgv];
     const startedAt = Date.now();
     let child;
     try {
@@ -429,7 +443,9 @@ function runAgent({
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: !!resolved.shell,
         windowsHide: true,
-        env: { ...env },
+        // The hook the tool runs inherits this environment, which is how the
+        // write guard learns which agent the CLI started (policy agents.<name>).
+        env: { ...env, AIDEV_AGENT: String(agent || '') },
       });
     } catch (e) {
       resolve({ ok: false, skipped: true, tool, reason: `could not start ${resolved.bin}: ${e.message}` });

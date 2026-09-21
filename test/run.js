@@ -19,6 +19,7 @@ const suites = [
   './completion.test.js',
   './knowledge-agent.test.js',
   './agent.test.js',
+  './evolve.test.js',
   // Last: this one checks the kit's own shipped files rather than a fixture,
   // so a failure here means the repository is incomplete, not that logic broke.
   './assets.test.js',

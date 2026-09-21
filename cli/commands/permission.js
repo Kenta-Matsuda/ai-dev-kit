@@ -46,6 +46,8 @@ function buildCandidate(config) {
     read_only: [...cfgMod.DEFAULT_POLICY_SCOPES.read_only],
     writable_during_sync: [...cfgMod.DEFAULT_POLICY_SCOPES.writable_during_sync],
     writable: [...cfgMod.DEFAULT_POLICY_SCOPES.writable],
+    // Per-agent grants are the team's decision; the candidate never proposes any.
+    agents: {},
   };
 }
 
@@ -76,6 +78,17 @@ function renderCandidate(config, policy) {
     'writable:',
     ...policy.writable.map((p) => `  - "${p}"`),
     '',
+    '# agent ごとの追加許可。CLI が起動した agent（aidev agent run、knowledge build、workflow の',
+    '# ctx.agent）にだけ効く。branch を書くと、その glob に一致するブランチ上でだけ有効。',
+    '# protected と secrets_paths はここに書いても書けない。',
+    ...(Object.keys(policy.agents || {}).length === 0
+      ? ['# agents:', '#   issue-to-pr:', '#     writable: ["src/**", "tests/**"]', '#     branch: "aidev/issue-*"']
+      : ['agents:', ...Object.entries(policy.agents).flatMap(([name, g]) => [
+        `  ${name}:`,
+        `    writable: [${g.writable.map((p) => `"${p}"`).join(', ')}]`,
+        ...(g.branch ? [`    branch: "${g.branch}"`] : []),
+      ])]),
+    '',
   ].join('\n');
 }
 
@@ -105,6 +118,10 @@ function show(ctx) {
     if (!entries || entries.length === 0) ui.dim('    (none)');
     else for (const e of entries) ui.out(`    • ${e}`);
   }
+  ui.out('\n  agents (grants for agents the CLI starts):');
+  const grants = Object.entries(policy.agents || {});
+  if (grants.length === 0) ui.dim('    (none)');
+  else for (const [name, g] of grants) ui.out(`    • ${name}: ${g.writable.join(', ')}${g.branch ? ` (branch ${g.branch})` : ''}`);
   ui.out('');
   return exists ? EXIT.OK : EXIT.PERMISSION;
 }
@@ -143,7 +160,29 @@ function detectWeakening(current, candidate) {
     if (nextWritable.has(p) && !nowWritable.has(p)) losses.push({ section: 'writable_during_sync', path: p, kind: 'escalated-to-writable' });
   }
 
+  // A per-agent grant that appears, widens, or drops its branch condition is
+  // protection given up too: it lets an agent write what nobody could before.
+  const nowAgents = current.agents || {};
+  for (const [name, g] of Object.entries(candidate.agents || {})) {
+    const before = nowAgents[name];
+    const beforePaths = set(before && before.writable);
+    for (const p of g.writable || []) {
+      if (!beforePaths.has(p)) losses.push({ section: `agents.${name}`, path: p, kind: 'agent-grant' });
+    }
+    if (before && before.branch && !g.branch) losses.push({ section: `agents.${name}`, path: before.branch, kind: 'branch-condition-removed' });
+  }
+
   return { weakening: losses.length > 0, losses };
+}
+
+/** One line per lost protection, for both the candidate and the refusal output. */
+function describeLoss(l) {
+  switch (l.kind) {
+    case 'escalated-to-writable': return `${l.path} — moves from ${l.section} to unconditionally writable`;
+    case 'agent-grant': return `${l.path} — newly writable for an agent (${l.section})`;
+    case 'branch-condition-removed': return `${l.section} — no longer limited to branch ${l.path}`;
+    default: return `${l.path} — removed from ${l.section}`;
+  }
 }
 
 function configure(ctx, { reconfigure = false } = {}) {
@@ -182,11 +221,7 @@ function configure(ctx, { reconfigure = false } = {}) {
     if (weakened.weakening && !flags.force) {
       ui.fail('this candidate weakens the policy in force; it was NOT placed.');
       ui.out('');
-      for (const l of weakened.losses) {
-        ui.out(l.kind === 'escalated-to-writable'
-          ? `  • ${l.path} — moves from ${l.section} to unconditionally writable`
-          : `  • ${l.path} — removed from ${l.section}`);
-      }
+      for (const l of weakened.losses) ui.out(`  • ${describeLoss(l)}`);
       ui.out('');
       ui.info('Review the difference, then re-run with --force if every loss above is intended:');
       ui.dim(`    git diff --no-index ${cfgMod.POLICY_REL} ${CANDIDATE_REL}`);
@@ -226,11 +261,7 @@ function configure(ctx, { reconfigure = false } = {}) {
   if (weakened.weakening) {
     ui.out('');
     ui.warn(`this candidate would give up ${weakened.losses.length} protection(s):`);
-    for (const l of weakened.losses) {
-      ui.dim(l.kind === 'escalated-to-writable'
-        ? `    • ${l.path} — ${l.section} → writable`
-        : `    • ${l.path} — removed from ${l.section}`);
-    }
+    for (const l of weakened.losses) ui.dim(`    • ${describeLoss(l)}`);
     ui.dim('    Approving this requires --force as well.');
   }
   ui.out('');

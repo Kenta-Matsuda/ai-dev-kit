@@ -120,7 +120,10 @@ const REGISTRY = Object.freeze({
     id: 'claude', label: 'Claude Code', bin: 'claude', envBin: 'AIDEV_CLAUDE_BIN',
     minVersion: '2.1.259', verified: true, prompt: 'stdin', namedAgents: true,
     argv({ agent, model }) {
-      const argv = ['-p', '--input-format', 'text', '--agent', agent];
+      // No --agent when the definition is inlined into the prompt (agents the
+      // kit runs outside a PKG, where no .claude/agents/ tree exists).
+      const argv = ['-p', '--input-format', 'text'];
+      if (agent) argv.push('--agent', agent);
       // Omitted entirely rather than passed empty when no model is configured:
       // `--model` sits above the developer's own settings.local.json, so passing
       // one unconditionally would override a choice nobody made.

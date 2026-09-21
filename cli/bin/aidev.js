@@ -20,7 +20,7 @@ const ui = require('../lib/ui');
 const COMMANDS = [
   'init', 'status', 'check', 'knowledge', 'sync',
   'agent', 'permission', 'workflow', 'apply',
-  'update', 'doctor', 'eject', 'uninstall',
+  'update', 'doctor', 'eject', 'uninstall', 'evolve',
   'hook', 'mcp',
 ];
 
@@ -30,6 +30,7 @@ const SUBCOMMANDS = {
   agent: ['list', 'show', 'run'],
   permission: ['configure', 'reconfigure', 'show'],
   workflow: ['new', 'approve', 'run', 'list'],
+  evolve: ['enable', 'disable', 'status', 'run'],
   hook: ['session-start', 'guard-write', 'quality-gate', 'session-stop'],
   mcp: ['azure-devops'],
 };
@@ -65,6 +66,7 @@ function usage() {
   const groups = [
     ['in a package clone', ['init', 'status', 'check', 'knowledge', 'sync', 'agent', 'permission', 'workflow', 'apply']],
     ['this machine', ['update', 'doctor', 'eject', 'uninstall']],
+    ['ai-dev-kit developers', ['evolve']],
     ['called by tools', ['hook', 'mcp']],
   ];
   for (const [title, names] of groups) {

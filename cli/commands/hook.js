@@ -20,6 +20,7 @@ const cfgMod = require('../lib/config');
 const policyMod = require('../lib/policy');
 const stateMod = require('../lib/state');
 const leases = require('../lib/leases');
+const home = require('../lib/home');
 const ui = require('../lib/ui');
 
 const FLAGS = { input: 'string' };
@@ -216,100 +217,139 @@ function qualityGate(ctx, input) {
 // ---------------------------------------------------------------- session-stop
 
 /**
- * Record what should happen next. Deliberately does not start generation:
- * a Stop hook has no time budget for it, and the README specifies async
- * submission to the managed runner instead.
+ * Self-evolution, step one: ask the session to reflect on itself.
+ *
+ * Only on a kit developer's machine (`home.readDeveloper`), and only once per
+ * session that did real work. A Stop hook fires after every response; when a
+ * session crosses the thresholds below and has not yet written its
+ * reflection, the hook answers `decision: "block"` with instructions, and the
+ * same session — the one that holds the context of what it just did — writes
+ * where it wasted time or tokens and what the kit could change. The next Stop
+ * sees the file and lets the session end.
+ *
+ * On every other machine this hook does nothing at all: no journal, no cost.
+ * The reflection carries aggregate facts and proposals, never prompts,
+ * responses, diffs or secrets; the instructions say so explicitly.
  */
-function sessionStop(ctx) {
-  const { repoRoot } = ctx;
-  let config = null;
-  try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
-  if (!config) { ui.json({ ok: true, queued: false }); return EXIT.OK; }
 
-  const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
-  const queueDir = path.join(repoRoot, '.aidev', 'cache');
-  const entry = {
-    queuedAt: new Date().toISOString(),
-    baseSha: st.baseSha,
-    knowledgeSha: st.knowledgeSha,
-    severity: st.severity,
-    // The runner fixes the SHA at submission time and discards the result if
-    // the target moved, so record it explicitly rather than re-reading later.
-    action: st.severity === stateMod.SEVERITY.ERROR ? 'knowledge-refresh' : 'none',
-  };
-  try {
-    fs.mkdirSync(queueDir, { recursive: true });
-    cfgMod.writeJsonAtomic(path.join(queueDir, 'pending-refresh.json'), entry);
-  } catch { /* the queue is best-effort */ }
+const REFLECT_MIN_TOOL_CALLS = 30;
+const REFLECT_MIN_OUTPUT_TOKENS = 20000;
+const REFLECTION_DIR_REL = '.aidev/cache/evolution';
 
-  const evolution = recordEvolutionObservation(repoRoot, config);
-
-  ui.json({ ok: true, queued: entry.action !== 'none', action: entry.action, evolution });
-  return EXIT.OK;
+function reflectionPath(repoRoot, sessionId) {
+  const safe = String(sessionId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+  return path.join(repoRoot, ...REFLECTION_DIR_REL.split('/'), `${safe}.md`);
 }
 
 /**
- * Append one session observation to the self-evolution journal.
- *
- * Observations are *recorded*, never acted on: the README requires improvements
- * to be raised as a reviewed PR against the central kit, because the static
- * files are shared byte-identically by every PKG on that kit commit, and
- * rewriting `.claude/**` locally would make `aidev check` exit 2 anyway.
- *
- * Only aggregate facts are written — SHAs, severity, counts. No prompts, no
- * responses, no diffs, no work-item text: the journal must never become a place
- * where a secret can land.
+ * Aggregate a Claude Code transcript (JSONL). Defensive: any malformed line
+ * is skipped, and an unreadable file yields { ok: false }.
  */
-function recordEvolutionObservation(repoRoot, config) {
-  if (!config.self_evolution?.enabled) return { enabled: false };
-
-  const file = path.join(repoRoot, '.aidev', 'cache', 'evolution-journal.json');
-  let journal = cfgMod.readJsonIfExists(file);
-  if (!journal || !Array.isArray(journal.observations)) {
-    journal = { schemaVersion: 1, cadence: config.self_evolution.cadence, observations: [] };
-  }
-
-  const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
-  const staleWiki = st.severity === stateMod.SEVERITY.ERROR;
-  const syncLease = leases.readSyncLease(repoRoot);
-
-  // Signals worth a human's attention, in the terms the README asks for:
-  // evidence of rework, wasted calls or friction — not "the session ended".
-  const signals = [];
-  if (staleWiki) signals.push('session ended with the Wiki out of step with the PKG');
-  if (syncLease && !leases.evaluateLease(syncLease).valid) signals.push('a stale sync lease was left behind');
-
-  if (signals.length === 0) {
-    return { enabled: true, recorded: false, cadence: journal.cadence };
-  }
-
-  journal.cadence = config.self_evolution.cadence;
-  journal.observations.push({ at: new Date().toISOString(), signals });
-  // Bounded: this is a rolling window for weekly aggregation, not an archive.
-  if (journal.observations.length > 200) {
-    journal.observations = journal.observations.slice(-200);
-  }
-  journal.due = isAggregationDue(journal);
-
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    cfgMod.writeJsonAtomic(file, journal);
-  } catch { return { enabled: true, recorded: false }; }
-
-  return {
-    enabled: true, recorded: true, signals: signals.length,
-    observations: journal.observations.length, due: journal.due,
-    cadence: journal.cadence,
+function summarizeTranscript(transcriptPath) {
+  let text;
+  try { text = fs.readFileSync(transcriptPath, 'utf8'); } catch { return { ok: false }; }
+  const m = {
+    ok: true, turns: 0, toolCalls: 0, toolErrors: 0, denials: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0,
+    firstAt: null, lastAt: null, toolCounts: {},
   };
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const ts = obj.timestamp ? Date.parse(obj.timestamp) : NaN;
+    if (Number.isFinite(ts)) { if (m.firstAt == null || ts < m.firstAt) m.firstAt = ts; if (m.lastAt == null || ts > m.lastAt) m.lastAt = ts; }
+    const msg = obj.message;
+    if (!msg || typeof msg !== 'object') continue;
+    const content = Array.isArray(msg.content) ? msg.content : [];
+    if (obj.type === 'assistant') {
+      m.turns++;
+      const u = msg.usage || {};
+      m.inputTokens += Number(u.input_tokens) || 0;
+      m.outputTokens += Number(u.output_tokens) || 0;
+      m.cacheReadTokens += Number(u.cache_read_input_tokens) || 0;
+      m.cacheCreateTokens += Number(u.cache_creation_input_tokens) || 0;
+      for (const c of content) {
+        if (c && c.type === 'tool_use') { m.toolCalls++; m.toolCounts[c.name || '?'] = (m.toolCounts[c.name || '?'] || 0) + 1; }
+      }
+    } else if (obj.type === 'user') {
+      for (const c of content) {
+        if (!c || c.type !== 'tool_result') continue;
+        if (c.is_error) m.toolErrors++;
+        const body = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '');
+        if (/ai-dev-kit:.*(blocked|denied|read-only|protected)/.test(body) || /"permissionDecision"\s*:\s*"deny"/.test(body)) m.denials++;
+      }
+    }
+  }
+  m.elapsedMs = m.firstAt != null && m.lastAt != null ? m.lastAt - m.firstAt : null;
+  return m;
 }
 
-/** Whether enough time has passed to raise an aggregated central-kit PR. */
-function isAggregationDue(journal) {
-  const windowDays = journal.cadence === 'daily' ? 1 : journal.cadence === 'monthly' ? 30 : 7;
-  const first = journal.observations[0];
-  if (!first) return false;
-  const age = Date.now() - Date.parse(first.at);
-  return Number.isFinite(age) && age >= windowDays * 24 * 60 * 60 * 1000;
+function reflectionInstructions(m, rel, sessionId, config) {
+  const minutes = m.elapsedMs != null ? Math.round(m.elapsedMs / 60000) : null;
+  const top = Object.entries(m.toolCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k} ${v}`).join(', ');
+  return [
+    'ai-dev-kit self-evolution (kit developer machine): before stopping, reflect on this session once.',
+    `Facts from the transcript: ${m.toolCalls} tool calls (${top || 'none'}), ${m.toolErrors} tool errors, ${m.denials} permission denials,`,
+    `${m.outputTokens} output tokens, ${m.inputTokens} input tokens (${m.cacheReadTokens} cache reads)${minutes != null ? `, ${minutes} min elapsed` : ''}.`,
+    `Write the file ${rel} with exactly these sections and nothing else, then stop:`,
+    `# session ${sessionId} / ${config && config.package ? config.package.name : 'unknown'} / claude / ${new Date().toISOString().slice(0, 10)}`,
+    '## 事実 — the numbers above and which stage of the work consumed the most calls or tokens',
+    '## 無駄と原因 — what was wasted (repeated reads, retries, denied writes, re-orientation) and the cause: agent instructions, a skill, a hook, a default value',
+    '## kit への提案 — concrete changes to the kit templates (name the file under templates/<tool>/) that would have avoided the waste',
+    '## 提案しないこと — findings specific to this package that do not belong in the kit',
+    'Rules: aggregate facts and proposals only. Do NOT copy prompts, responses, diffs, file contents, work item text or anything secret into the file.',
+    'Do not change any other file. If you have nothing worth proposing, still write the file with "特になし" under 提案.',
+  ].join('\n');
+}
+
+function sessionStop(ctx, input) {
+  const { repoRoot } = ctx;
+  try {
+    const dev = home.readDeveloper();
+    if (!dev.enabled) { ui.json({ ok: true, skipped: 'not a kit developer machine' }); return EXIT.OK; }
+    const sessionId = input && input.session_id;
+    if (!sessionId || (input && input.stop_hook_active)) { ui.json({ ok: true }); return EXIT.OK; }
+    let config = null;
+    try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
+    if (!config) { ui.json({ ok: true, skipped: 'not a package' }); return EXIT.OK; }
+
+    const file = reflectionPath(repoRoot, sessionId);
+    const rel = path.relative(repoRoot, file).replace(/\\/g, '/');
+    if (fs.existsSync(file)) {
+      // Reflection written. With --auto, hand it to `aidev evolve run` once,
+      // detached: a Stop hook has no budget to wait for an agent.
+      let launched = false;
+      const marker = `${file}.evolve-launched`;
+      if (dev.autoEvolve && !fs.existsSync(marker)) {
+        try {
+          fs.writeFileSync(marker, new Date().toISOString(), 'utf8');
+          const child = require('child_process').spawn(process.execPath,
+            [path.join(ctx.installRoot, 'cli', 'bin', 'aidev.js'), 'evolve', 'run', '--json'],
+            { cwd: repoRoot, detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1' } });
+          child.unref();
+          launched = true;
+        } catch { launched = false; }
+      }
+      ui.json({ ok: true, reflected: true, file: rel, evolveLaunched: launched });
+      return EXIT.OK;
+    }
+
+    const m = summarizeTranscript(input.transcript_path || '');
+    if (!m.ok) { ui.json({ ok: true, skipped: 'transcript unavailable' }); return EXIT.OK; }
+    const metrics = { toolCalls: m.toolCalls, outputTokens: m.outputTokens, inputTokens: m.inputTokens, toolErrors: m.toolErrors, denials: m.denials, elapsedMs: m.elapsedMs };
+    if (m.toolCalls < REFLECT_MIN_TOOL_CALLS && m.outputTokens < REFLECT_MIN_OUTPUT_TOKENS) {
+      ui.json({ ok: true, belowThreshold: true, metrics });
+      return EXIT.OK;
+    }
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch { /* the session writes it */ }
+    ui.json({ decision: 'block', reason: reflectionInstructions(m, rel, sessionId, config), metrics });
+    return EXIT.OK;
+  } catch (e) {
+    // A Stop hook must never fail the session.
+    ui.json({ ok: true, skipped: `session-stop failed: ${e.message}` });
+    return EXIT.OK;
+  }
 }
 
 const HOOKS = {
@@ -338,6 +378,7 @@ function run(ctx) {
 }
 
 module.exports = {
-  run, FLAGS, HOOKS, targetsFrom, parseInput,
+  run, FLAGS, HOOKS, targetsFrom, parseInput, summarizeTranscript, reflectionPath,
+  REFLECTION_DIR_REL, REFLECT_MIN_TOOL_CALLS, REFLECT_MIN_OUTPUT_TOKENS,
   summary: 'hooksからのみ呼ばれる内部サブコマンド',
 };

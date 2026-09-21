@@ -48,6 +48,7 @@ function writeToolStub(root, name = 'fake-tool.js') {
 const fs = require('fs');
 const argv = process.argv.slice(2);
 if (process.env.STUB_ARGV_OUT) fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.stringify(argv, null, 2));
+if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_AGENT: process.env.AIDEV_AGENT || null }));
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; });
@@ -225,6 +226,14 @@ function run() {
         ok(a.includes('--model') && a[a.indexOf('--model') + 1] === 'sonnet', 'tools.agent_model reaches argv');
         eq(fs.readFileSync(promptOut, 'utf8'), 'triage item 42', 'the task is the joined arguments, on stdin');
         eq(j.promptFile, null);
+      });
+
+      test('the started agent is named to the hook through AIDEV_AGENT', () => {
+        reset();
+        const envOut = path.join(fx.root, 'env.json');
+        const r = aidev(fx.root, ['agent', 'run', 'issue-to-pr', 'x', '--json'], { env: env({ STUB_ENV_OUT: envOut }) });
+        eq(r.code, 0, r.out);
+        eq(JSON.parse(fs.readFileSync(envOut, 'utf8')).AIDEV_AGENT, 'issue-to-pr');
       });
 
       test('run through Copilot: prompt file named on argv, plain-text result', () => {

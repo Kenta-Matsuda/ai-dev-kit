@@ -168,7 +168,6 @@ function run() {
     eq(c.tools.default, ['claude']);
     eq(c.tools.agent, 'claude');
     eq(c.tools.agent_model, 'sonnet');
-    eq(c.self_evolution.enabled, true);
   });
 
   test('azure_devops and model.agent aliases are derived from hosting and tools', () => {
