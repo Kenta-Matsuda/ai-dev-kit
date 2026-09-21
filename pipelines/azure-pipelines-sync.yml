@@ -6,7 +6,7 @@
 # stale forever without this pipeline.
 #
 # Bot permissions, deliberately minimal:
-#   - push branches named ai/wiki-* on this package
+#   - push branches named aidev/wiki-* on this package
 #   - create pull requests on this package
 # NOT push to the default branch. This pipeline opens a PR; a human merges it.
 #
@@ -38,7 +38,7 @@ variables:
 steps:
   - checkout: self
     fetchDepth: 0
-    # The bot's token must reach `git push` for the ai/wiki-* branch.
+    # The bot's token must reach `git push` for the aidev/wiki-* branch.
     persistCredentials: true
 
   - task: NodeTool@0

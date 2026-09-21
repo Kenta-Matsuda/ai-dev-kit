@@ -10,7 +10,7 @@
  * worktree checked out at the target commit (.aidev/cache/sync-worktree/):
  *
  *   lease → worktree at target → diff → rewrite inventory → (agent) → commit on
- *   ai/wiki-<sha> → push → PR → remove worktree → release
+ *   aidev/wiki-<sha> → push → PR → remove worktree → release
  *
  * The committed Wiki reaches everyone through the usual PR and `git pull`.
  */
@@ -39,7 +39,7 @@ const FLAGS = {
 const FLAG_HELP = {
   to: 'sync to this commit (must be reachable from the fetched tracking branch) instead of its tip',
   'dry-run': 'fetch and show what would change; write nothing',
-  'no-pr': 'commit on the local ai/wiki-<sha> branch but do not push or open a PR',
+  'no-pr': 'commit on the local aidev/wiki-<sha> branch but do not push or open a PR',
   resume: 'continue a sync that stopped and left its lease behind',
   abort: 'discard a stopped sync: remove its worktree and release the lease',
   'check-only': 'only report whether the tracking branch moved',
@@ -65,7 +65,7 @@ function syncStreamId(config) {
 }
 
 function syncBranchName(config, targetSha) {
-  return `ai/wiki-${String(targetSha).slice(0, 12)}`;
+  return `aidev/wiki-${String(targetSha).slice(0, 12)}`;
 }
 
 const STREAM_MARKER = '<!-- aidev:sync-stream ';

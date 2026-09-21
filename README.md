@@ -54,7 +54,7 @@ claude
 ## 日常
 
 - `aidev status` — 状態を 1 画面で確認（`⚠️ … run "aidev sync"` なら `aidev sync`）
-- `aidev sync` — tracking branch に追従して Wiki を更新し、`ai/wiki-<sha>` の PR を作る
+- `aidev sync` — tracking branch に追従して Wiki を更新し、`aidev/wiki-<sha>` の PR を作る
 - `aidev update` — kit 本体（CLI とテンプレート）を更新
 - `aidev apply` — 新しいテンプレートを PKG に取り込む（編集済みはマージ。差分をコミット）
 - `aidev check` — CI 用。0=ok / 2=drift / 3=権限 / 4=Wiki

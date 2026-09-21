@@ -17,7 +17,7 @@ aidev sync [options]
 . tracking branch に既に最新の Wiki がコミットされていれば、何もせず終わります（`git pull` で受け取れます）。
 . 作業ロック（sync lease）を取り、一時 worktree `.aidev/cache/sync-worktree/` に target を checkout します。**あなたの checkout は変更しません。**
 . worktree の中で inventory / manifest を書き直し、knowledge-builder agent が変更分の本文を書きます（`--no-agent` なら本文は後回し）。
-. `ai/wiki-<sha>` ブランチにコミットして push し、PR を開きます（Azure DevOps で token があるとき）。
+. `aidev/wiki-<sha>` ブランチにコミットして push し、PR を開きます（Azure DevOps で token があるとき）。
 . worktree を消し、ロックを解放します。
 
 途中で失敗するとロックと worktree が残ります。`--resume` で続き、`--abort` で捨てます。
@@ -37,7 +37,7 @@ PR はマージしません。`generic` hosting では push まで行い、PR �
 |fetch して何が変わるかを表示し、何も書かない
 
 |`--no-pr`
-|ローカルの `ai/wiki-<sha>` ブランチにコミットするだけで、push と PR はしない
+|ローカルの `aidev/wiki-<sha>` ブランチにコミットするだけで、push と PR はしない
 
 |`--resume`
 |途中で止まった sync を続ける
@@ -97,7 +97,7 @@ aidev sync
   tracking branch  origin/main
   target           9f8e7d6
   wiki describes   1a2b3c4
-  sync branch      ai/wiki-9f8e7d6c5b4a
+  sync branch      aidev/wiki-9f8e7d6c5b4a
 
 ℹ generation target changes: +2 ~5 -0 →1 (=155)
 ✓ acquired sync lease (ttl 120m)
@@ -105,7 +105,7 @@ aidev sync
 ✓ inventory rewritten (162 targets, 1 shard(s))
 ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
 ✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
-✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ pushed aidev/wiki-9f8e7d6c5b4a
 ✓ opened pull request !123 https://dev.azure.com/contoso/Platform/_git/demo-pkg/pullrequest/123
     Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
 ✓ sync lease released

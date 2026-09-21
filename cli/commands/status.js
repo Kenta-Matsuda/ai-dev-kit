@@ -41,8 +41,8 @@ function inspect(repoRoot, config, { checkRemote = true, installRoot = assets.DE
   const inconsistencies = inventory.validateInventoryConsistency(records);
   const syncLease = leases.readSyncLease(repoRoot);
   const wikiBranch = st.trackingSha
-    ? gitMod.revParse(repoRoot, `ai/wiki-${String(st.trackingSha).slice(0, 12)}`)
-      || gitMod.revParse(repoRoot, `origin/ai/wiki-${String(st.trackingSha).slice(0, 12)}`)
+    ? gitMod.revParse(repoRoot, `aidev/wiki-${String(st.trackingSha).slice(0, 12)}`)
+      || gitMod.revParse(repoRoot, `origin/aidev/wiki-${String(st.trackingSha).slice(0, 12)}`)
     : null;
   return {
     state: st, config: configState, policy, manifest, records, handEdits, inconsistencies,
@@ -109,7 +109,7 @@ function run(ctx) {
   ui.out('');
   ui.out(stateMod.formatSummary(st));
   if (r.wikiBranchForTracking && st.trackingSha !== st.knowledgeSha) {
-    ui.dim(`    a Wiki for ${stateMod.short(st.trackingSha)} already exists on branch ai/wiki-${String(st.trackingSha).slice(0, 12)} (waiting for merge).`);
+    ui.dim(`    a Wiki for ${stateMod.short(st.trackingSha)} already exists on branch aidev/wiki-${String(st.trackingSha).slice(0, 12)} (waiting for merge).`);
   }
   ui.out('');
   ui.table([

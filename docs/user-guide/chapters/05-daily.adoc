@@ -64,12 +64,12 @@ sync は次のことをします。**あなたの checkout は触りません。
 . `origin/main` を fetch し、先端を target にします。
 . 一時 worktree（`.aidev/cache/sync-worktree/`）に target を checkout します。
 . 変更のあったページだけ knowledge-builder が書き直します。
-. `ai/wiki-<sha>` ブランチにコミットして push し、PR を開きます。
+. `aidev/wiki-<sha>` ブランチにコミットして push し、PR を開きます。
 
 [source,text]
 ----
 ✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
-✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ pushed aidev/wiki-9f8e7d6c5b4a
 ✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
     Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
 ✓ sync lease released

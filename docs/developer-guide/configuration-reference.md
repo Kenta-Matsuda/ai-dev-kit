@@ -160,7 +160,7 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 | `remote_check_ttl_minutes` | int | `60` | 0〜10080 | remote確認cacheのTTL。0でcacheしない |
 | `lease_ttl_minutes` | int | `120` | 1〜10080 | sync leaseのTTL |
 
-`auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`ai/wiki-<sha12>` branchに残ります。
+`auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`aidev/wiki-<sha12>` branchに残ります。
 
 
 ### `self_evolution`

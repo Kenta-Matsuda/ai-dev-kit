@@ -5,8 +5,6 @@
  * Each suite here pins down something that previously either did nothing or
  * actively failed:
  *
- *   - `aidev task advance` with no id (the form the nightly pipeline runs)
- *   - `aidev task resume` moving a task rather than only describing it
  *   - the permission weakening check that gates --approve
  *   - orphaned Wiki page removal (README scenario 7)
  *   - the session-start summary and the self-evolution journal at session-stop
@@ -872,7 +870,7 @@ function run() {
       eq(j.agent.ran, true);
       eq(j.agent.ok, true);
       eq(j.targetSha, targetSha, 'sync did not follow origin/main to the new commit');
-      ok(String(j.branch).startsWith('ai/wiki-'), `unexpected sync branch: ${j.branch}`);
+      ok(String(j.branch).startsWith('aidev/wiki-'), `unexpected sync branch: ${j.branch}`);
       eq(j.committed, true, 'the regenerated Wiki was not committed');
       eq(j.pushed, false, '--no-pr must not push');
       eq(j.pendingPages, 0, 'targets remained queued after a drained run');

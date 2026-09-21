@@ -24,7 +24,7 @@
 | structured Wiki | 実装済み | generation target inventory、evidence走査とfingerprint、mask、blob diff、manifest v3、checkpoint、orphan削除（syncのみ） | page単位のevidence依存graphがなく、supporting evidence変更時は全target再queue。`knowledge build`はorphan pageを削除しない |
 | prose Wiki agent | 実装済み（既定で起動、`--no-agent`で省略） | survey + batch起動、完了報告からCLIがhash / inventory / checkpointを更新、中断後は同じcommandで再開、Windows process tree kill、version検査、toolは`tools.agent` / `tools.agents.knowledge-builder` / `--agent-tool` | tool実行fileなしではskip。意味品質とcostは外部管理。完了報告protocolはclaude以外で実機未検証 |
 | 3SHA / sync lease | 実装済み | merge-base基準、source-tree比較、TTL lease、`--resume` / `--abort` | — |
-| `aidev sync` | 実装済み | fetch、no-op判定、一時worktree、inventory更新、任意agent、`ai/wiki-<sha12>` commit/push、Azure DevOps PR作成/更新/superseded注記 | `generic` hostingとtoken不在ではPR手動。旧PRの自動closeなし |
+| `aidev sync` | 実装済み | fetch、no-op判定、一時worktree、inventory更新、任意agent、`aidev/wiki-<sha12>` commit/push、Azure DevOps PR作成/更新/superseded注記 | `generic` hostingとtoken不在ではPR手動。旧PRの自動closeなし |
 | Azure Pipelines例 | 実装済み | check pipeline、scheduled sync pipeline（`--no-agent`） | — |
 | Claude hooks | 部分実装 | SessionStart summary、guard-write（fail-closed）、quality-gate（PKG file編集時のみ）、Stop journal/queue記録 | queueを消費するrunnerなし。sandboxではない |
 | workflow scaffold / approval / run | 部分実装 | JS scaffold、content hash承認、iteration / time / same-failure / allowlist、resume、`agent:`定義と`ctx.agent()`（tool / model / timeout、残り時間で打ち切り、報告costの合計で`max_usd`停止） | token計測なし。USDはtoolが報告した分だけ（claude）。destructive前human gateなし。creator agent未接続 |

@@ -60,7 +60,7 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 
 ### `aidev status`
 
-一画面の状態表示。`--json --no-remote`。`aidev.yaml`が無ければexit 1（ejected repositoryはその旨を表示）。それ以外はexit 0。表示: package / hosting / tools / kit、tool config（適用commit、customised数、conflict、hooks欠落、`apply`の案内）、`formatSummary`、tracking先端のWikiが`ai/wiki-<sha12>` branch（localまたはorigin）に既にあるかの注記、Wiki統計、tool config（matches / DRIFT / not recorded）、policy、手編集page、inventory不整合、sync lease。
+一画面の状態表示。`--json --no-remote`。`aidev.yaml`が無ければexit 1（ejected repositoryはその旨を表示）。それ以外はexit 0。表示: package / hosting / tools / kit、tool config（適用commit、customised数、conflict、hooks欠落、`apply`の案内）、`formatSummary`、tracking先端のWikiが`aidev/wiki-<sha12>` branch（localまたはorigin）に既にあるかの注記、Wiki統計、tool config（matches / DRIFT / not recorded）、policy、手編集page、inventory不整合、sync lease。
 
 `status.inspect(repoRoot, config, {checkRemote})`が`check`と共有する検査本体です。
 

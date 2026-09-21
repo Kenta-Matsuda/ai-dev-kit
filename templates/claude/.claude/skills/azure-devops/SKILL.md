@@ -46,9 +46,9 @@ Work Item・リンクされたPR・同期PRメタデータです。
 
 | 用途 | 名前 |
 | --- | --- |
-| issue-to-pr | `ai/wi-<id>` |
+| issue-to-pr | `aidev/wi-<id>` |
 | 通常の機能開発 | `feature/<name>` |
-| Wiki同期 | `ai/wiki-<sha12>`（`aidev sync` が生成。同期ストリームIDで既存PRを再利用） |
+| Wiki同期 | `aidev/wiki-<sha12>`（`aidev sync` が生成。同期ストリームIDで既存PRを再利用） |
 
 既定ブランチへ直接pushしません。force-push・履歴改変は**実行前に必ず確認**を取ります。
 
@@ -56,7 +56,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 
 作成は**品質ゲート通過後**です（[[test-and-verify]]）。本文の規約は [[commit-and-pr]]。
 
-- **自動マージ禁止**。PKG PR・Wiki PR（`ai/wiki-<sha>`）とも人間がマージします
+- **自動マージ禁止**。PKG PR・Wiki PR（`aidev/wiki-<sha>`）とも人間がマージします
 - `completionOptions` で auto-complete を設定しない
 - PR本文・コミットメッセージに秘密情報を含めない
 - 既存のオープンPRがあれば**新規作成せず更新**する（重複PRを作らない）

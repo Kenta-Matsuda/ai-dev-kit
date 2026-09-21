@@ -34,7 +34,7 @@ aidev sync --check-only    # 判定だけ。何も書き換えない（まずこ
 aidev sync --dry-run       # 差分だけ表示
 aidev sync --to <sha>      # 特定SHAへ（追跡ブランチから到達可能なものだけ）
 aidev sync --no-agent      # 構造（inventory / manifest）だけ更新し、本文は後回しにする
-aidev sync --no-pr         # ローカルの ai/wiki-<sha> ブランチにコミットするだけ（push・PRなし）
+aidev sync --no-pr         # ローカルの aidev/wiki-<sha> ブランチにコミットするだけ（push・PRなし）
 aidev sync --resume        # 中断したsyncを再開
 aidev sync --abort         # 中断したsyncの作業ツリーを破棄し、リースを解放
 ```
@@ -53,7 +53,7 @@ aidev sync --abort         # 中断したsyncの作業ツリーを破棄し、�
 6. worktree 内で inventory / manifest を書き換え、knowledge-builder が
    影響範囲のWikiページだけ再生成する（--no-agent なら本文は後回し）
 7. 整合性の検証（worktree 内で 3SHA を再計算し、ERROR なら停止）
-8. .aidev/knowledge/ をブランチ ai/wiki-<sha12> にコミット → push → Wiki PR
+8. .aidev/knowledge/ をブランチ aidev/wiki-<sha12> にコミット → push → Wiki PR
 9. worktree を削除し、リース解放
 10. 【人間】Wiki PRをマージ → 全員が git pull でWikiを受け取る
 ```
@@ -95,7 +95,7 @@ syncが途中で落ちると、**リースと worktree が残ったまま**に�
 - `.aidev/sync.lock` を手で消す（CLIだけが置きます。消すとリースの意味が消える）
 - `.aidev/cache/sync-worktree/` の中で作業する（一時領域。`--abort` で消える）
 - exit 4 のまま作業を続ける（Wikiが信用できない状態）
-- Wiki PR（`ai/wiki-<sha>`）を自動マージする
+- Wiki PR（`aidev/wiki-<sha>`）を自動マージする
 
 ## 状態が壊れて見えたら
 

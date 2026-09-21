@@ -302,7 +302,7 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 
 ## 7. `aidev sync`
 
-利用者のcheckoutには触れません。処理はすべて一時worktreeで行い、結果は`ai/wiki-<sha12>` branchのcommitとPRとして共有されます。
+利用者のcheckoutには触れません。処理はすべて一時worktreeで行い、結果は`aidev/wiki-<sha12>` branchのcommitとPRとして共有されます。
 
 ```text
  1. origin/<tracking_branch> をfetchし、先端（または --to で指定した到達可能なcommit）をtargetに決定
@@ -315,7 +315,7 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
  7. worktree内でinventory shard / manifest を書き直し、orphan pageを削除、.aidev/.gitignoreを確保
  8. worktree内で computeState（ERRORなら失敗）
  9. --no-agent でなければ worktree を cwd として knowledge-builder を batch 起動し、完了報告を取り込む
-10. worktree内で ai/wiki-<sha12> を checkout -B し、.aidev/knowledge と .aidev/.gitignore だけを stage して commit
+10. worktree内で aidev/wiki-<sha12> を checkout -B し、.aidev/knowledge と .aidev/.gitignore だけを stage して commit
 11. --no-pr でなければ push --force-with-lease --set-upstream origin <branch>
 12. sync.auto_pr が true、hosting が azure-devops、auth env が設定済みならPRを作成/更新。それ以外は手動作成を案内
 13. worktreeを削除し、leaseを解放

@@ -17,7 +17,7 @@ Fetches `origin/main`, updates the Wiki to match its tip, and turns the result i
 . If the latest Wiki is already committed on the tracking branch, it does nothing (`git pull` brings it to you).
 . It takes a work lock (sync lease) and checks the target out into a temporary worktree at `.aidev/cache/sync-worktree/`. **Your own checkout is not changed.**
 . Inside the worktree it rewrites the inventory and manifest, and the knowledge-builder agent writes the prose for what changed (`--no-agent` leaves the prose for later).
-. It commits on the `ai/wiki-<sha>` branch, pushes, and opens a PR (on Azure DevOps with a token).
+. It commits on the `aidev/wiki-<sha>` branch, pushes, and opens a PR (on Azure DevOps with a token).
 . It removes the worktree and releases the lock.
 
 If it fails halfway, the lock and worktree stay behind. `--resume` continues, `--abort` discards them.
@@ -37,7 +37,7 @@ It does not merge the PR. With `generic` hosting it pushes and you open the PR b
 |Fetch and show what would change; write nothing
 
 |`--no-pr`
-|Commit on the local `ai/wiki-<sha>` branch but do not push or open a PR
+|Commit on the local `aidev/wiki-<sha>` branch but do not push or open a PR
 
 |`--resume`
 |Continue a sync that stopped halfway
@@ -97,7 +97,7 @@ aidev sync
   tracking branch  origin/main
   target           9f8e7d6
   wiki describes   1a2b3c4
-  sync branch      ai/wiki-9f8e7d6c5b4a
+  sync branch      aidev/wiki-9f8e7d6c5b4a
 
 ℹ generation target changes: +2 ~5 -0 →1 (=155)
 ✓ acquired sync lease (ttl 120m)
@@ -105,7 +105,7 @@ aidev sync
 ✓ inventory rewritten (162 targets, 1 shard(s))
 ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
 ✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
-✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ pushed aidev/wiki-9f8e7d6c5b4a
 ✓ opened pull request !123 https://dev.azure.com/contoso/Platform/_git/demo-pkg/pullrequest/123
     Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
 ✓ sync lease released

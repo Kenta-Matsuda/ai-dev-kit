@@ -761,11 +761,11 @@ function run() {
       ok(d.diff.added >= 1, `sees the added file: ${JSON.stringify(d.diff)}`);
       eq(fs.readFileSync(manifestPath(fx.root), 'utf8'), before, 'manifest untouched');
       ok(!fs.existsSync(syncLockPath(fx.root)), 'no lease');
-      ok(!git(['branch', '--list', `ai/wiki-${newSha.slice(0, 12)}`], fx.root), 'no branch created');
+      ok(!git(['branch', '--list', `aidev/wiki-${newSha.slice(0, 12)}`], fx.root), 'no branch created');
     } finally { fx.cleanup(); }
   });
 
-  test('sync --no-pr commits the Wiki on ai/wiki-<sha> without touching the checkout', () => {
+  test('sync --no-pr commits the Wiki on aidev/wiki-<sha> without touching the checkout', () => {
     const fx = makeRepo();
     try {
       const newSha = advancePkg(fx);
@@ -775,7 +775,7 @@ function run() {
       const d = JSON.parse(r.stdout);
       eq(d.ok, true, 'ok');
       eq(d.targetSha, newSha, 'target is the new tip');
-      const branch = `ai/wiki-${newSha.slice(0, 12)}`;
+      const branch = `aidev/wiki-${newSha.slice(0, 12)}`;
       eq(d.branch, branch, 'branch name');
       eq(d.committed, true, 'committed');
       eq(d.pushed, false, '--no-pr does not push');
@@ -806,7 +806,7 @@ function run() {
       eq(d.pushed, true, 'pushed');
       eq(d.pr.ok, false, `no PR API on generic hosting: ${JSON.stringify(d.pr)}`);
       ok(/by hand/.test(d.pr.reason), `tells the human to open it: ${d.pr.reason}`);
-      const branch = `ai/wiki-${newSha.slice(0, 12)}`;
+      const branch = `aidev/wiki-${newSha.slice(0, 12)}`;
       ok(git(['ls-remote', '--heads', 'origin', branch], fx.root).includes(branch), 'branch is on origin');
       ok(!fs.existsSync(syncLockPath(fx.root)), 'lease released');
       ok(!fs.existsSync(worktreePath(fx.root)), 'worktree removed');

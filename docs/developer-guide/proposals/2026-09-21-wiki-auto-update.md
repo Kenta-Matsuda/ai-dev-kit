@@ -26,7 +26,7 @@
 ## 現状（0.3.0）
 
 - `aidev knowledge build` は feature ブランチの HEAD ではなく **main との merge-base** を対象にする。「Wiki は main のコミットだけを説明する」前提で作られている。
-- 追従は `aidev sync` だけが行う。一時 worktree に main の先端を取り出し、`ai/wiki-<sha12>` ブランチにコミットして別 PR を出す。開発者の checkout もブランチも触らない。
+- 追従は `aidev sync` だけが行う。一時 worktree に main の先端を取り出し、`aidev/wiki-<sha12>` ブランチにコミットして別 PR を出す。開発者の checkout もブランチも触らない。
 - hook は Stop 時に `.aidev/cache/pending-refresh.json` へメモを書くだけで、それを読む仕組みが無い。
 - 差分更新の機構は既に CLI にある。inventory の blob ハッシュで追加 / 変更 / 削除 / rename を判定し、rename は再生成せず、削除で不要になったページは CLI が消す。エージェントには変更された対象と読んでよい範囲だけを渡す。
 
@@ -76,7 +76,7 @@ claude 以外のツール（copilot / codex / kiro）ではサブエージェン
 4. **`aidev knowledge update` を新設する。** `build` と `sync` を統合。フラグは `--full`、`--scope`、`--no-agent`、`--no-commit`、`--dry-run`、`--branch`（C 用）、`--force`（手編集ページの上書き）。
 5. **hook を追加する。** PostToolUse（Bash）での HEAD 変化検出と plan 呼び出し、Stop での再検査と停止拒否。既存の `pending-refresh.json` は廃止。
 6. **自動コミット。** `.aidev/knowledge/` と `.aidev/.gitignore` だけを stage し、固定メッセージ（例: `aidev: update Wiki for <sha12>`）でコミットする。CLI が行うコミットであり、エージェントにコミット権限を与えるものではない。
-7. **ブランチ接頭辞** `ai/wiki-` → `aidev/wiki-`。
+7. **ブランチ接頭辞** `aidev/wiki-` → `aidev/wiki-`。
 8. **知識 skill / CLAUDE.md テンプレート**に「hook が求めたら knowledge-builder をサブエージェントで起動する」手順を書く。
 9. `state.test.js`、`knowledge` / `sync` のテスト、hook のテスト（stub agent）を書き換える。
 

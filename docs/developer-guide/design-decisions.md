@@ -20,7 +20,7 @@
 
 ### D2: LLM WikiはPKG repositoryの`.aidev/knowledge/`にcommitする
 
-**判断**: 専用のknowledge repositoryやorphan branchは作らず、WikiをPKG repositoryに置きます。共有は`ai/wiki-<sha12>` branchのPRと人間のmergeで行います。
+**判断**: 専用のknowledge repositoryやorphan branchは作らず、WikiをPKG repositoryに置きます。共有は`aidev/wiki-<sha12>` branchのPRと人間のmergeで行います。
 
 **理由**: 「同じWiki」をチームで保つにはgitで共有する必要があり、PKG自身に置けばrepository数が増えず、Wikiとsourceが同じcommit履歴で追えます。`sync`が「targetにcommit済みのWikiがtargetを説明しているか」をno-op判定に使えるのもこの配置だからです。
 
@@ -100,11 +100,11 @@
 
 ### D11: `sync`は一時worktreeで行い、利用者のcheckoutに触れない
 
-**判断**: `sync`は`.aidev/cache/sync-worktree/`にtarget commitのdetached worktreeを作り、そこでinventory・agent・commitを行い、`ai/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。
+**判断**: `sync`は`.aidev/cache/sync-worktree/`にtarget commitのdetached worktreeを作り、そこでinventory・agent・commitを行い、`aidev/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。
 
 **理由**: wrapper方式では`src`をbumpして戻す必要があり、失敗時の復旧（`originalSha`へ戻す）が複雑でした。worktreeなら利用者の未commit変更やbranchに影響せず、失敗してもworktreeを消せば元どおりです。commit対象が`.aidev/knowledge`と`.aidev/.gitignore`に限られるのも、worktree内で`git add`する範囲を絞れるからです。
 
-**トレードオフ**: 結果はPRのmerge後に`git pull`しないと手元に来ません。`status`はtracking先端のWikiが`ai/wiki-*` branchに既にあることを注記します。
+**トレードオフ**: 結果はPRのmerge後に`git pull`しないと手元に来ません。`status`はtracking先端のWikiが`aidev/wiki-*` branchに既にあることを注記します。
 
 ### D12: Wikiの構造化状態はCLIが持ち、agentは完了報告だけを書く
 

@@ -15,7 +15,7 @@ CIを赤いまま放置する文化を作ります。
 
 | 用途 | 形式 |
 | --- | --- |
-| issue-to-pr | `ai/wi-<id>` |
+| issue-to-pr | `aidev/wi-<id>` |
 | 通常の機能開発 | `feature/<name>` |
 | 修正 | `fix/<name>` |
 
@@ -77,7 +77,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 
 ## マージ
 
-> 🔴 **自動マージは禁止です。** PKG PR・Wiki PR（`ai/wiki-<sha>`）とも人間がマージします。
+> 🔴 **自動マージは禁止です。** PKG PR・Wiki PR（`aidev/wiki-<sha>`）とも人間がマージします。
 
 - auto-complete / `completionOptions` を設定しない
 - 自分でマージしない。レビュー依頼までが範囲です
