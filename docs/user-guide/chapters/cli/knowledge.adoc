@@ -23,7 +23,7 @@ aidev knowledge status [options]
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -72,7 +72,7 @@ aidev knowledge status [options]
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

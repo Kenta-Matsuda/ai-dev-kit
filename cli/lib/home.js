@@ -3,7 +3,7 @@
  * `AIDEV_HOME`: the per-machine area the CLI keeps outside any PKG.
  *
  *   registry.json   every PKG clone `aidev init` has set up on this machine,
- *                   so `aidev update --all` can bring them all forward
+ *                   so `aidev update` can list which still carry older templates
  *   cache/          the update check and other best-effort caches
  *
  * The kit checkout that provides the running CLI is *not* here: the installer

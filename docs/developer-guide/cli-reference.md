@@ -9,7 +9,7 @@
 - optionは各commandの`FLAGS`で宣言され、未知のoptionはエラー（exit 1）。`--flag=value`形式も可。boolean flagに`=true|false`以外の値は不可。`--`以降はpositional
 - subcommandを持つcommand（`knowledge`、`permission`、`task`、`workflow`、`hook`、`mcp`）はsubcommand必須
 - repo rootは`git.findRepoRoot(cwd)`（`aidev.yaml`または`.aidev/`を上へ探索）。`hook`だけは`CLAUDE_PROJECT_DIR`を起点にする
-- `hook`・`mcp`・`update`以外は実行前にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`または`--json`で抑止）、新しければ警告し、TTYなら先に`update --kit-only`するか尋ねる
+- `hook`・`mcp`・`update`以外は実行前にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`または`--json`で抑止）、新しければ警告し、TTYなら先に`update`するか尋ねる（PKGへの適用は別途`apply`）
 - `AidevError`は`ui.fail`でstderrへ出し、`code`をexit codeにする。それ以外の例外は`internal error`としてexit 1、`AIDEV_DEBUG=1`でstack traceを出す
 
 ### 終了code（`cli/lib/errors.js`）
@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | `0` | success | 正常、またはwarningのみ |
 | `1` | general | 実行エラー、agent失敗、`status`が未初期化、`doctor`のfail、`workflow run`未完了 |
-| `2` | drift | tool configがrecordと不一致、`init` / `update`のconflict、`check --strict`のwarning昇格 |
+| `2` | drift | tool configのrecord欠落、`apply`のconflict（新規・未解消）、`.claude/settings.json`のkit hooks欠落、`init`初回の既存file衝突、`check --strict`のwarning昇格 |
 | `3` | permission | policy欠落・不正、弱体化を`--force`なしで承認、`permission show`でpolicy不在 |
 | `4` | knowledge | Wiki欠落・manifest破損、inventory不整合、期限切れsync lease、`sync --check-only`でERROR |
 
@@ -45,10 +45,10 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 --dry-run --yes --force --json
 --name <v> --include <globs> --exclude <globs> --secrets <globs>
 --hosting <azure-devops|generic> --org <v> --project <v> --repository <v>
---tracking-branch <v> --tools <list> --agent-model <v> --approve
+--tracking-branch <v> --tools <list> --agent-model <v> --approve --wiki --no-wiki
 ```
 
-処理順: 前提確認（git repo、commitあり、repo root）→ eject marker削除 → `aidev.yaml`作成/維持 → `.aidev/.gitignore` → template実体化 → `.aidev/materialized.json` → registry登録 → auth envの有無表示 → policy（既存なら維持、無ければ候補を表示し`--approve`または対話でyesなら配置、否なら`.aidev/policy.candidate.yaml`）→ Wiki有無 → 次の手順の案内。
+処理順: 前提確認（git repo、commitあり、repo root）→ eject marker削除 → `aidev.yaml`作成/維持 → `.aidev/.gitignore` → template適用（lockが無いとき、または`--force`。lockがあれば`inspectConfig`で報告のみ） → `.aidev/materialized.json` → registry登録 → auth envの有無表示 → policy（既存なら維持、無ければ候補を表示し`--approve`または対話でyesなら配置、否なら`.aidev/policy.candidate.yaml`）→ Wiki（完成済みなら維持。無い/未完了なら`knowledge.build`を同一processで実行。初回は既定yes、設定ありWiki無し=チームのPR未マージは既定no、未完了は再開。TTYでは質問、`--wiki`/`--no-wiki`で省略）→ 次の手順の案内。exit codeはWiki buildの結果に従う（agent失敗・途中終了はexit 1、`aidev init`再実行で続行）。
 
 - hostingはorigin URL（`dev.azure.com`、`*.visualstudio.com`、`ssh.dev.azure.com`）から推測し、それ以外は`generic`
 - `package.include`は`src lib app apps packages services api cmd pkg internal core docs doc`のうちtreeにあるものを`<dir>/**`で提案し、無ければ`**`
@@ -66,7 +66,7 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 
 ### `aidev check`
 
-CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、または`aidev.yaml`が無ければ「対象外」としてexit 0。判定順は drift（`materialized.json`欠落または不一致 → 2）→ policy（欠落・不正 → 3）→ Wiki（ERROR severity、inventory不整合、期限切れsync lease → 4）→ `--strict`かつWARN → 2。最初の問題のcodeを返します。JSONには`problems[]`、`severity`、3SHA、`handEdits`を含みます。
+CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、または`aidev.yaml`が無ければ「対象外」としてexit 0。判定順は tool config（`materialized.json`欠落、未解消conflict marker、kit hooks欠落 → 2。teamの編集は通る）→ policy（欠落・不正 → 3）→ Wiki（ERROR severity、inventory不整合、期限切れsync lease → 4）→ `--strict`かつWARN → 2。最初の問題のcodeを返します。JSONには`problems[]`、`severity`、3SHA、`handEdits`を含みます。
 
 ### `aidev knowledge build|status`
 
@@ -113,7 +113,7 @@ CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、ま�
 --json --dry-run --tool <tool> --model <model> --timeout <ms> --prompt-file <path>
 ```
 
-- `list`: `tools.listBundledAgents(installRoot)`（`templates/claude-assets/agents/*.md`のfrontmatter）と、`config.agentSettings`で決まる各agentのtool / model。`aidev.yaml`が無ければkit既定（claude）で表示
+- `list`: `tools.listBundledAgents(installRoot)`（`templates/claude/.claude/agents/*.md`のfrontmatter）と、`config.agentSettings`で決まる各agentのtool / model。`aidev.yaml`が無ければkit既定（claude）で表示
 - `show <name>`: 説明、定義file、tool、model、実際のcommand line（`previewCommand`: `tools.resolveBinary` + `agent.buildArgv`。`prompt: 'file'`のtoolはpointer文の位置をplaceholderで示す）。`verified: false`のtoolは警告
 - `run <name> [task...]`: `aidev.yaml`必須。task は引数の結合 > `--prompt-file` > 非TTYのstdin。tool / modelは`--tool` / `--model` > `tools.agents.<name>` > `tools.agent` / `tools.agent_model`。`tools.default`に無いtool、registryに無いtool、同梱に無いagentはspawn前にexit 1。`--dry-run`はcommand lineを表示して起動しない。`agent.runAgent`の結果を人間向け / JSON（`{ok, agent, tool, model, timeoutMs, result, reason, skipped, timedOut, exitCode, durationMs, costUsd, permissionDenials, promptFile}`）で返し、失敗・skip・timeoutはexit 1
 - exit: 0 / 1
@@ -160,10 +160,18 @@ CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、ま�
 ### `aidev update`
 
 ```text
---dry-run --json --kit-only --all --force
+--dry-run --json
 ```
 
-kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新し、`--kit-only`でなければ現在のPKG（`aidev.yaml`がある場合）または`--all`でregistryの全PKGへtemplateを再適用します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。conflictがあればexit 2（`--force`でkit版に置換）。PKG側の変更はcommitしません。
+kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。PKGには触れません。更新後、registryのcloneのうちlockの`kitCommit`が現在と違うものを一覧し、`aidev apply`を案内します。JSONは`{ok, dryRun, kit: {updated, from, to, versionFrom, versionTo}, packagesBehind: [{path, name, applied}]}`。
+
+### `aidev apply`
+
+```text
+--dry-run --json --force
+```
+
+`aidev.yaml`必須。`tools.default`の各toolの`templates/<tool>/`を`assets.applyTemplates`でPKGに適用します（architecture.md §2の判定表）。結果を`created / updated / merged / kept / resolved / pruned / retired / unchanged / conflicts`で表示し、lockと`.aidev/.gitignore`を書き、registryを更新します。conflictが1つでもあればexit 2（新規のmarker、または前回のmarkerが未解消）。`--force`は全fileをkit版にし、conflictも消します。`--dry-run`は何も書きません（lockも）。JSONは各分類のpath配列と`conflicts: [{path, reason}]`。
 
 ### `aidev doctor`
 
@@ -177,7 +185,17 @@ kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新し�
 
 kit管理を解除します。既にejected（marker あり）なら`--force`なしでexit 0。`aidev.yaml` / `materialized.json` / `policy.yaml`のどれも無ければ`--force`なしで拒否。有効なsync lease / work leaseがあれば`--force`なしで拒否。
 
-順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`leases/`、`cache/`、`tasks/`を削除 → `--keep-assets`でなければ`.claude/**`、`CLAUDE.md`、`.mcp.json`を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
+順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`leases/`、`cache/`、`tasks/`を削除 → `--keep-assets`でなければkit所有file（lockに記録されたfileと現在のtemplateが置くfile。teamが追加したfileは含まない）を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
+
+### `aidev uninstall`
+
+```text
+--yes --dry-run --json
+```
+
+installerが置いたものをこの端末から消します。順序: bin directory（`AIDEV_BIN_DIR`、既定はWindows `%LOCALAPPDATA%ai-dev-kitin`、POSIX `~/.local/bin`）の`aidev.cmd` / `aidev.ps1` / `aidev`のうち"Generated by ai-dev-kit"を含むものを削除 → Windowsではuser PATHからbin directoryを除去（PowerShell経由、best-effort、entryがあるときだけ書く） → `AIDEV_HOME`の`registry.json`と`cache/`を削除 → 空になったbin directoryと`AIDEV_HOME`を削除。`--yes`なしでは一覧を表示してexit 1。消すものが無くてもexit 0。
+
+削除しないもの: kit checkout（`installRoot`。実行中のprocessの居場所で、Windowsでは内側からの削除が不安定）と登録済みPKG内のkit所有file（commit済みでteam共有）。どちらも消すcommandを表示します。PKG向けには`aidev eject --yes`と、`assets.listStaticFiles`を`collapsePaths`で「kit所有fileしか無いdirectory」まで畳んだ`git rm -r -q -- …`（`.aidev`と`aidev.yaml`を含む。ejectと違いWikiも消える）を出します。
 
 ## 内部command
 
@@ -198,3 +216,4 @@ kit管理を解除します。既にejected（marker あり）なら`--force`な
 ## 削除されたcommand
 
 `aidev plan`と`aidev kit apply`は0.2.0に存在せず、`aidev plan`は「unknown command」です。wrapper repositoryへkit管理対象を取り込む操作は`aidev update`のtemplate再適用に置き換わりました。
+

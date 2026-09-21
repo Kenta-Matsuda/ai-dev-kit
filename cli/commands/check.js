@@ -52,20 +52,26 @@ function run(ctx) {
   }
 
   const config = cfgMod.loadConfig(repoRoot);
-  const r = inspect(repoRoot, config, { checkRemote: !flags['no-remote'] });
+  const r = inspect(repoRoot, config, { checkRemote: !flags['no-remote'], installRoot: ctx.installRoot });
 
-  // --- tool configuration drift (exit 2) -------------------------------------
-  if (r.drift.noLock) {
+  // --- tool configuration (exit 2) --------------------------------------------
+  // Local edits are the team's business and never fail the check. What fails
+  // it is a tree nobody should merge: unresolved conflict markers, or the
+  // kit's hooks removed from settings.json (the one edit that switches the
+  // runtime guard off).
+  if (r.config.noLock) {
     problems.push({ code: EXIT.DRIFT, message: `${cfgMod.LOCK_NAME} is missing — run "aidev init".` });
-  } else if (!r.drift.ok) {
-    const parts = [];
-    if (r.drift.modified.length) parts.push(`${r.drift.modified.length} modified`);
-    if (r.drift.missing.length) parts.push(`${r.drift.missing.length} missing`);
-    if (r.drift.extra.length) parts.push(`${r.drift.extra.length} untracked`);
+  } else if (r.config.conflicts.length > 0) {
     problems.push({
       code: EXIT.DRIFT,
-      message: `kit-owned files differ from ${cfgMod.LOCK_NAME} (${parts.join(', ')}). ` +
-        'Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.',
+      message: `${r.config.conflicts.length} tool configuration file(s) carry unresolved conflict markers. ` +
+        'Resolve them and run "aidev apply" to record the result.',
+    });
+  } else if (r.config.hooksMissing.length > 0) {
+    problems.push({
+      code: EXIT.DRIFT,
+      message: `the kit's hooks are missing from .claude/settings.json (${r.config.hooksMissing.join(', ')}). ` +
+        'Restore them or run "aidev apply --force".',
     });
   }
 
@@ -99,7 +105,9 @@ function run(ctx) {
       ['tracking', stateMod.short(st.trackingSha)],
       ['base', stateMod.short(st.baseSha)],
       ['knowledge', stateMod.short(st.knowledgeSha)],
-      ['tool config', r.drift.noLock ? 'not recorded' : (r.drift.ok ? 'matches the kit' : 'DRIFT')],
+      ['tool config', r.config.noLock ? 'not recorded'
+        : (r.config.conflicts.length ? 'CONFLICTS' : (r.config.hooksMissing.length ? 'HOOKS MISSING'
+          : `ok${r.config.customised.length ? ` (${r.config.customised.length} customised)` : ''}${r.config.outdated ? ', newer kit templates available (aidev apply)' : ''}`))],
       ['policy', r.policy.ok ? 'valid' : 'INVALID'],
     ]);
     if (r.handEdits.length > 0) {
@@ -113,9 +121,8 @@ function run(ctx) {
       ui.ok('environment is consistent.');
     } else {
       for (const p of problems) ui.fail(`[exit ${p.code}] ${p.message}`);
-      for (const m of r.drift.modified.slice(0, 10)) ui.dim(`    modified: ${m.path}`);
-      for (const m of r.drift.missing.slice(0, 10)) ui.dim(`    missing:  ${m}`);
-      for (const m of r.drift.extra.slice(0, 10)) ui.dim(`    untracked: ${m}`);
+      for (const m of r.config.conflicts.slice(0, 10)) ui.dim(`    conflict: ${m}`);
+      for (const m of r.config.hooksMissing.slice(0, 10)) ui.dim(`    missing hook: ${m}`);
     }
   }
   return problems.length === 0 ? EXIT.OK : problems[0].code;

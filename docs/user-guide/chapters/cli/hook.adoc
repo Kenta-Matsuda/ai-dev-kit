@@ -17,7 +17,7 @@ aidev hook session-stop
 
 配布される `.claude/settings.json` から Claude Code が起動します。stdin で hook の入力（JSON）を受け取り、stdout に判定（JSON）を返します。動作を確かめたいときは `--input <file>` で入力ファイルを渡せます。
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |サブコマンド |動作
 

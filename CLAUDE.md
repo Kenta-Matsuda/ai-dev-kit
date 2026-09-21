@@ -6,7 +6,7 @@ PKG へ配布される `CLAUDE.md` は `templates/root/CLAUDE.md` です。こ�
 
 ## 作業の進め方
 
-1. `maintainer-docs/architecture.md` で設計を確認してから変更する
+1. `docs/developer-guide/architecture.md` で設計を確認してから変更する
 2. `npm run check`（全モジュールのロード確認 + テスト）を通す
 3. docs を変更したら `npm run docs:check`（AsciiDoc のビルド検証）を通す
 4. テストは実 `claude` を起動しない。エージェント実行は `AIDEV_CLAUDE_BIN` のスタブで検証する
@@ -16,7 +16,7 @@ PKG へ配布される `CLAUDE.md` は `templates/root/CLAUDE.md` です。こ�
 - CLI が書く権限ファイル（`.aidev/policy.yaml` など）をエージェントが書く経路を作らない
 - PR は人間がマージする。自動マージを実装しない
 - 秘密情報（PAT・トークン・鍵）をコミット・ログ・テストフィクスチャに含めない
-- ユーザーガイドには実装済みの挙動だけを書く。設計中のものは `maintainer-docs/proposals/` に置く
+- ユーザーガイドには実装済みの挙動だけを書く。設計中のものは `docs/developer-guide/proposals/` に置く
 
 ## 推測を事実として報告しない
 

@@ -15,6 +15,7 @@ const suites = [
   './inventory.test.js',
   './cli.test.js',
   './eject.test.js',
+  './uninstall.test.js',
   './completion.test.js',
   './knowledge-agent.test.js',
   './agent.test.js',

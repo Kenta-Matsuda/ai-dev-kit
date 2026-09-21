@@ -35,8 +35,8 @@ The files {project-name} places in a package clone, and whether they are committ
 |`aidev permission … --approve`, `aidev init`
 
 |`.aidev/materialized.json`
-|Hashes of the distributed files, used to detect drift
-|`aidev init` / `aidev update`
+|The tool-configuration record: the kit commit applied, per file the template hash and the hash at apply time, and unresolved conflicts. `aidev apply` merges against it and `aidev check` judges by it
+|`aidev init` / `aidev apply`
 
 |`.aidev/knowledge/index.md`, `overview.md`, pages
 |The LLM Wiki
@@ -61,7 +61,7 @@ The files {project-name} places in a package clone, and whether they are committ
 
 Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Path |Contents
 
@@ -85,4 +85,4 @@ Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aide
 
 === On this machine (AIDEV_HOME)
 
-Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from.
+Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both.

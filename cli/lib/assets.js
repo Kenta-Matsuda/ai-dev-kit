@@ -1,26 +1,37 @@
 'use strict';
 /**
- * Materialised tool configuration and drift detection.
+ * Applying the kit's tool templates to a PKG, and inspecting the result.
  *
- * The kit ships templates; `aidev init` and `aidev update` copy them into the
- * PKG clone, where they are committed like any other file so the whole team
- * shares one setup. Which files are written depends on `tools.default` in
- * aidev.yaml: Claude Code's tree (`.claude/**`, `CLAUDE.md`, `.mcp.json`) is
- * copied verbatim from `templates/`; every other tool's files are derived
- * from the same templates by its adapter in `tools.js`, so one edit to a
- * bundled agent reaches every configured tool on the next update.
+ * Each supported AI tool has a template tree in the kit checkout,
+ * `templates/<tool>/`, laid out exactly as it lands in the PKG root. `aidev
+ * init` copies the trees of the tools listed in `tools.default`; `aidev apply`
+ * brings a PKG up to the templates of the kit that is installed now. Every
+ * file that lands is committed in the PKG like any other file, so the whole
+ * team shares one setup through git.
  *
- * `.aidev/materialized.json` records the kit commit, the tool list and a hash
- * per file, and `aidev check` fails with exit 2 when the working tree
- * disagrees.
+ * The team may edit those copies. `apply` therefore behaves like a merge, not
+ * a copy:
  *
- * This is layer 3 of the permission design: an agent that deletes the hooks
- * from settings.json slips past the runtime guard, but the edit stays in the
- * file, so the drift check catches it and the branch policy stops the merge.
+ *   - untouched since the last apply → replaced with the new template
+ *   - edited, kit unchanged            → the edit is kept
+ *   - edited, kit changed              → 3-way merge (base = the template the
+ *                                         last apply used, read from the kit's
+ *                                         git history); a conflict is written
+ *                                         with git-style markers and reported,
+ *                                         and the PKG team resolves it
+ *   - kit stopped shipping it          → removed if untouched, kept if edited
+ *
+ * `.aidev/materialized.json` (the "lock") remembers, per file, the template
+ * hash that was applied (`kit`) and the hash of what was written or accepted
+ * (`file`), plus the list of files still in conflict. That is what tells the
+ * next apply which case it is in, and what lets `aidev check` refuse a tree
+ * with unresolved conflicts or with the kit's hooks removed.
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { sha256, writeJsonAtomic, writeFileAtomic, loadLock, lockPath, loadConfig } = require('./config');
 const toolsMod = require('./tools');
 const pathsMod = require('./paths');
@@ -28,28 +39,20 @@ const pathsMod = require('./paths');
 /** The tool list assumed when neither aidev.yaml nor the lock names one. */
 const DEFAULT_TOOLS = Object.freeze(['claude']);
 
-/** Roots (in the PKG clone) whose contents are kit-owned for Claude Code. */
-const STATIC_ROOTS = Object.freeze(['.claude', 'CLAUDE.md', '.mcp.json']);
-
-/** Files inside a static root that are personal, not kit-owned. */
+/** Files inside a template tree's destination that are personal, never kit-owned. */
 const STATIC_EXCLUDE = Object.freeze(['.claude/settings.local.json']);
-
-/**
- * Template trees in the kit checkout and where each lands in the PKG.
- * `templates/claude-assets/**` becomes `.claude/**`; `templates/root/**` lands
- * at the PKG root (CLAUDE.md, .mcp.json).
- */
-const TEMPLATE_SETS = Object.freeze([
-  { src: 'templates/claude-assets', dest: '.claude' },
-  { src: 'templates/root', dest: '' },
-]);
-
-/** Kept for callers that only care about the Claude tree. */
-const TEMPLATE_ROOT = TEMPLATE_SETS[0].src;
-const TEMPLATE_DEST = TEMPLATE_SETS[0].dest;
 
 /** The kit checkout that provides the running CLI. */
 const DEFAULT_INSTALL_ROOT = path.resolve(__dirname, '..', '..');
+
+/** Lock schema written by this version. */
+const LOCK_SCHEMA = 4;
+
+/** git-style conflict markers, as `git merge-file` writes them. */
+const CONFLICT_RE = /^(<{7}|={7}|>{7})( |\r?$)/m;
+
+/** Hook commands the kit wires into Claude Code; `check` refuses a settings.json without them. */
+const KIT_HOOK_RE = /"aidev hook (session-start|guard-write|quality-gate|session-stop)"/g;
 
 /** A validated, de-duplicated tool list; unknown ids are dropped, empty means the default. */
 function normalizeTools(tools) {
@@ -59,7 +62,7 @@ function normalizeTools(tools) {
 
 /**
  * The tools this PKG is set up for: aidev.yaml first (the team's intent),
- * then the lock (what was last written), then the default.
+ * then the lock (what was last applied), then the default.
  */
 function configuredTools(repoRoot) {
   try {
@@ -81,142 +84,285 @@ function walk(dir, base, out) {
   }
 }
 
-/**
- * Every kit-owned file currently present in the PKG, repo-relative and sorted.
- * Claude Code's roots are walked (the kit owns the whole tree); the other
- * tools own exactly the files their adapter derives, so a team's own files
- * next to them (say, another `.github/agents/*.agent.md`) are left alone.
- */
-function listStaticFiles(repoRoot, { tools = DEFAULT_TOOLS, installRoot = DEFAULT_INSTALL_ROOT } = {}) {
-  const out = [];
-  const list = normalizeTools(tools);
-  if (list.includes('claude')) {
-    for (const root of STATIC_ROOTS) {
-      const full = path.join(repoRoot, root);
-      let st;
-      try { st = fs.statSync(full); } catch { continue; }
-      if (st.isDirectory()) {
-        const found = [];
-        walk(full, repoRoot, found);
-        out.push(...found.filter((rel) => !pathsMod.matchesAny(STATIC_EXCLUDE, rel)));
-      } else if (st.isFile()) out.push(pathsMod.normalizeRel(root));
-    }
-  }
-  for (const id of list) {
-    if (id === 'claude') continue;
-    for (const { dest } of toolsMod.deriveAssets(id, installRoot)) {
-      if (fs.existsSync(path.join(repoRoot, ...dest.split('/')))) out.push(dest);
-    }
-  }
-  return [...new Set(out)].sort();
+function abs(repoRoot, rel) { return path.join(repoRoot, ...rel.split('/')); }
+
+function readIfExists(full) {
+  try { return fs.readFileSync(full); } catch { return null; }
 }
 
 /**
- * Every file to materialise, as { src (absolute or null), dest (repo-relative),
- * contents (Buffer or null), tool } entries. Claude's trees are copied
- * shape-for-shape, so no per-file mapping exists to drift; derived files carry
- * their bytes directly.
+ * Every template file of the listed tools, as { src (absolute), dest
+ * (repo-relative, posix), tool }. A template tree is copied shape-for-shape,
+ * so there is no mapping table to drift.
  */
 function listTemplateFiles(installRoot = DEFAULT_INSTALL_ROOT, { tools = DEFAULT_TOOLS } = {}) {
   const pairs = [];
-  const list = normalizeTools(tools);
-  if (list.includes('claude')) {
-    for (const set of TEMPLATE_SETS) {
-      const base = path.join(installRoot, ...set.src.split('/'));
-      let st;
-      try { st = fs.statSync(base); } catch { continue; }
-      if (!st.isDirectory()) continue;
-      const found = [];
-      walk(base, base, found);
-      for (const rel of found) {
-        const dest = set.dest ? `${set.dest}/${rel}` : rel;
-        if (pathsMod.matchesAny(STATIC_EXCLUDE, dest)) continue;
-        pairs.push({ src: path.join(base, ...rel.split('/')), dest, contents: null, tool: 'claude' });
-      }
-    }
-  }
-  for (const id of list) {
-    if (id === 'claude') continue;
-    for (const d of toolsMod.deriveAssets(id, installRoot)) {
-      pairs.push({ src: null, dest: d.dest, contents: d.contents, tool: id });
+  for (const id of normalizeTools(tools)) {
+    const base = path.join(installRoot, ...toolsMod.templateDir(id).split('/'));
+    let st;
+    try { st = fs.statSync(base); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    const found = [];
+    walk(base, base, found);
+    for (const rel of found) {
+      if (pathsMod.matchesAny(STATIC_EXCLUDE, rel)) continue;
+      pairs.push({ src: path.join(base, ...rel.split('/')), dest: rel, tool: id });
     }
   }
   return pairs.sort((a, b) => (a.dest < b.dest ? -1 : 1));
 }
 
 /**
- * Copy the templates into the PKG.
- *
- * A destination that already matches is left alone, so re-running is a no-op.
- * A destination that differs is a *conflict*, not an overwrite, unless the
- * lock proves nobody touched it since the kit generated it (then it is simply
- * the previous kit version and is replaced). `--force` takes the kit's version
- * regardless. Stale files are pruned only when the lock proves the kit put
- * them there — which is also how a tool removed from `tools.default` has its
- * files taken back out.
+ * Every kit-owned file currently present in the PKG, repo-relative and sorted:
+ * what the lock recorded plus what the current templates would place. A file
+ * the team added next to them is not listed.
  */
-function materializeStaticAssets(repoRoot, {
-  installRoot = DEFAULT_INSTALL_ROOT, dryRun = false, force = false, tools = DEFAULT_TOOLS,
+function listStaticFiles(repoRoot, { tools = null, installRoot = DEFAULT_INSTALL_ROOT } = {}) {
+  const lock = loadLock(repoRoot);
+  const list = normalizeTools(tools || (lock && lock.tools) || DEFAULT_TOOLS);
+  const out = new Set();
+  for (const { dest } of listTemplateFiles(installRoot, { tools: list })) {
+    if (fs.existsSync(abs(repoRoot, dest))) out.add(dest);
+  }
+  for (const rel of Object.keys((lock && lock.files) || {})) {
+    if (!pathsMod.matchesAny(STATIC_EXCLUDE, rel) && fs.existsSync(abs(repoRoot, rel))) out.add(rel);
+  }
+  return [...out].sort();
+}
+
+/** Lock entries were plain hash strings before schema 4; read both forms. */
+function lockEntry(files, rel) {
+  const e = files ? files[rel] : undefined;
+  if (e == null) return null;
+  if (typeof e === 'string') return { kit: null, file: e };
+  return { kit: e.kit || null, file: e.file || null };
+}
+
+function hashOf(buf) { return `sha256:${sha256(buf)}`; }
+
+function hasConflictMarkers(buf) {
+  return CONFLICT_RE.test(buf.toString('utf8'));
+}
+
+/**
+ * The template a previous apply used, read from the kit's git history at the
+ * commit the lock recorded. Null when unavailable (not a git checkout, a
+ * shallow clone, or the file did not exist there).
+ */
+function readTemplateAt(installRoot, kitCommit, tool, rel) {
+  if (!kitCommit || !/^[0-9a-f]{7,40}$/i.test(String(kitCommit))) return null;
+  const spec = `${kitCommit}:${toolsMod.templateDir(tool)}/${rel}`;
+  try {
+    return execFileSync('git', ['show', spec], {
+      cwd: installRoot, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch { return null; }
+}
+
+/**
+ * Three-way merge through `git merge-file`. Returns { status, content } with
+ * status `clean`, `conflict` (content carries markers) or `error`.
+ */
+function mergeFile({ ours, base, theirs, labels }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-merge-'));
+  const files = ['ours', 'base', 'theirs'].map((n) => path.join(dir, n));
+  try {
+    fs.writeFileSync(files[0], ours);
+    fs.writeFileSync(files[1], base);
+    fs.writeFileSync(files[2], theirs);
+    const args = ['merge-file', '-p',
+      '-L', labels.ours, '-L', labels.base, '-L', labels.theirs,
+      files[0], files[1], files[2]];
+    let status = 0;
+    let out;
+    try {
+      out = execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 });
+    } catch (e) {
+      status = typeof e.status === 'number' ? e.status : -1;
+      out = e.stdout;
+    }
+    // git merge-file exits with the number of conflicts (0 = clean); a real
+    // failure is negative, which Node reports as 255 or similar.
+    if (status === 0) return { status: 'clean', content: out };
+    if (status > 0 && status < 128 && out && out.length > 0) return { status: 'conflict', content: out };
+    return { status: 'error', content: null };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+/**
+ * Bring the PKG's tool configuration up to the templates of `installRoot`.
+ *
+ * Per template file, decided from the lock (see the module comment):
+ *   created      the file did not exist
+ *   unchanged    already identical to the template
+ *   updated      untouched since the last apply; replaced (or --force)
+ *   kept         edited locally while the kit did not change it; left alone
+ *   merged       edited locally and the kit changed it; merged cleanly
+ *   conflicts    the merge conflicted (markers written), or it could not be
+ *                merged (no record, or no base in the kit history) and the
+ *                file was left alone
+ *   resolved     a previous conflict whose markers are gone; now recorded
+ *   pruned       no longer shipped and untouched; removed
+ *   retired      no longer shipped but edited; left in place, dropped from the lock
+ *
+ * Writes the lock unless `dryRun`. Never throws for a per-file problem.
+ */
+function applyTemplates(repoRoot, {
+  installRoot = DEFAULT_INSTALL_ROOT, dryRun = false, force = false,
+  tools = DEFAULT_TOOLS, kitCommit = null, kitVersion = null,
 } = {}) {
   const list = normalizeTools(tools);
   const pairs = listTemplateFiles(installRoot, { tools: list });
   const result = {
-    ok: true, templateRoot: TEMPLATE_ROOT, installRoot, tools: list, noTemplates: pairs.length === 0,
-    created: [], updated: [], unchanged: [], conflicts: [], pruned: [],
+    ok: true, installRoot, tools: list, kitCommit, noTemplates: pairs.length === 0,
+    created: [], unchanged: [], updated: [], kept: [], merged: [], conflicts: [],
+    resolved: [], pruned: [], retired: [], lock: null,
   };
   if (result.noTemplates) return result;
 
   const lock = loadLock(repoRoot);
-  const locked = (lock && lock.files) || {};
+  const files = (lock && lock.files) || {};
+  const previousConflicts = new Set((lock && lock.conflicts) || []);
+  const newFiles = {};
+  const newConflicts = [];
+  const shortKit = (sha) => (sha ? String(sha).slice(0, 7) : 'unknown');
 
-  for (const { src, dest, contents: derived } of pairs) {
-    let contents = derived;
-    if (contents == null) {
-      try { contents = fs.readFileSync(src); } catch (e) {
-        result.ok = false;
-        result.conflicts.push({ path: dest, reason: `template ${src} is unreadable: ${e.message}` });
+  for (const { src, dest, tool } of pairs) {
+    let template;
+    try { template = fs.readFileSync(src); } catch (e) {
+      result.ok = false;
+      result.conflicts.push({ path: dest, reason: `template ${src} is unreadable: ${e.message}` });
+      continue;
+    }
+    const kitHash = hashOf(template);
+    const full = abs(repoRoot, dest);
+    const current = readIfExists(full);
+    let entry = lockEntry(files, dest);
+
+    // A file left in conflict last time: still marked → still in conflict;
+    // markers gone → the team resolved it, and the result is now theirs.
+    if (previousConflicts.has(dest) && current !== null) {
+      if (hasConflictMarkers(current)) {
+        result.conflicts.push({ path: dest, reason: 'conflict markers from the previous apply are still present' });
+        newConflicts.push(dest);
+        newFiles[dest] = { kit: entry ? entry.kit : kitHash, file: hashOf(current) };
         continue;
       }
-    }
-    const full = path.join(repoRoot, ...dest.split('/'));
-    let current = null;
-    try { current = fs.readFileSync(full); } catch { current = null; }
-
-    if (current !== null && current.equals(contents)) { result.unchanged.push(dest); continue; }
-
-    if (current !== null) {
-      const untouched = locked[dest] === `sha256:${sha256(current)}`;
-      if (!untouched && !force) {
-        result.ok = false;
-        result.conflicts.push({
-          path: dest,
-          reason: locked[dest] == null
-            ? 'differs from the kit copy and is not recorded in .aidev/materialized.json'
-            : 'has been edited locally',
-        });
-        continue;
-      }
+      result.resolved.push(dest);
+      entry = { kit: entry ? entry.kit : kitHash, file: hashOf(current) };
     }
 
-    const bucket = current === null ? result.created : result.updated;
-    bucket.push(dest);
-    if (!dryRun) writeFileAtomic(full, contents);
+    if (current === null) {
+      result.created.push(dest);
+      if (!dryRun) writeFileAtomic(full, template);
+      newFiles[dest] = { kit: kitHash, file: kitHash };
+      continue;
+    }
+    if (current.equals(template)) {
+      result.unchanged.push(dest);
+      newFiles[dest] = { kit: kitHash, file: kitHash };
+      continue;
+    }
+    const currentHash = hashOf(current);
+    // Pristine = still exactly the template a previous apply placed (for a
+    // pre-schema-4 lock, the hash it recorded). Anything else is a local edit.
+    const pristine = !!entry && (entry.kit ? entry.kit === currentHash : entry.file === currentHash);
+
+    if (force || pristine) {
+      // The copy is simply the previous generation (or --force): replaced
+      // without ceremony.
+      result.updated.push(dest);
+      if (!dryRun) writeFileAtomic(full, template);
+      newFiles[dest] = { kit: kitHash, file: kitHash };
+      continue;
+    }
+
+    // Edited locally.
+    if (entry && entry.kit === kitHash) {
+      result.kept.push(dest);
+      newFiles[dest] = { kit: kitHash, file: currentHash };
+      continue;
+    }
+    if (!entry || !entry.kit) {
+      result.ok = false;
+      result.conflicts.push({
+        path: dest,
+        reason: entry
+          ? 'edited locally and the record has no template hash to merge from; re-run with --force or send the change to ai-dev-kit'
+          : 'exists and differs from the template, but was not placed by the kit; move it aside or re-run with --force',
+      });
+      newFiles[dest] = entry || { kit: null, file: currentHash };
+      continue;
+    }
+    const base = readTemplateAt(installRoot, lock && lock.kitCommit, tool, dest);
+    if (!base || hashOf(base) !== entry.kit) {
+      result.ok = false;
+      result.conflicts.push({
+        path: dest,
+        reason: `edited locally and the template it was based on (kit ${shortKit(lock && lock.kitCommit)}) is not in the kit checkout's history; resolve by hand or re-run with --force`,
+      });
+      newFiles[dest] = entry;
+      continue;
+    }
+    const merged = mergeFile({
+      ours: current, base, theirs: template,
+      labels: {
+        ours: `${dest} (this package)`,
+        base: `kit ${shortKit(lock && lock.kitCommit)}`,
+        theirs: `kit ${shortKit(kitCommit)}`,
+      },
+    });
+    if (merged.status === 'clean') {
+      result.merged.push(dest);
+      if (!dryRun) writeFileAtomic(full, merged.content);
+      newFiles[dest] = { kit: kitHash, file: hashOf(merged.content) };
+    } else if (merged.status === 'conflict') {
+      result.ok = false;
+      result.conflicts.push({ path: dest, reason: 'the kit and this package changed the same lines; conflict markers were written' });
+      newConflicts.push(dest);
+      if (!dryRun) writeFileAtomic(full, merged.content);
+      newFiles[dest] = { kit: kitHash, file: hashOf(merged.content) };
+    } else {
+      result.ok = false;
+      result.conflicts.push({ path: dest, reason: 'git merge-file failed; resolve by hand or re-run with --force' });
+      newFiles[dest] = entry;
+    }
   }
 
-  // Files the last materialisation produced that the kit no longer ships (or
-  // that belong to a tool the PKG no longer lists).
-  if (lock && lock.files) {
-    const wanted = new Set(pairs.map((p) => p.dest));
-    for (const rel of Object.keys(lock.files)) {
-      if (wanted.has(rel) || pathsMod.matchesAny(STATIC_EXCLUDE, rel)) continue;
-      const full = path.join(repoRoot, ...rel.split('/'));
-      if (!fs.existsSync(full)) continue;
+  // Files a previous apply placed that the templates no longer contain (the
+  // kit stopped shipping them, or their tool left tools.default).
+  const wanted = new Set(pairs.map((p) => p.dest));
+  for (const rel of Object.keys(files)) {
+    if (wanted.has(rel) || pathsMod.matchesAny(STATIC_EXCLUDE, rel)) continue;
+    const full = abs(repoRoot, rel);
+    const current = readIfExists(full);
+    if (current === null) continue;
+    const entry = lockEntry(files, rel);
+    const currentHash = hashOf(current);
+    const pristine = !!entry && (entry.kit ? entry.kit === currentHash : entry.file === currentHash);
+    if (pristine) {
       result.pruned.push(rel);
       if (!dryRun) { try { fs.rmSync(full, { force: true }); } catch { /* keep */ } }
+    } else {
+      result.retired.push(rel);
     }
   }
 
-  if (!dryRun) pruneToolDirs(repoRoot);
+  result.lock = {
+    schemaVersion: LOCK_SCHEMA,
+    kitCommit,
+    kitVersion,
+    tools: list,
+    appliedAt: new Date().toISOString(),
+    files: newFiles,
+    conflicts: newConflicts,
+  };
+  if (!dryRun) {
+    pruneToolDirs(repoRoot);
+    writeLock(repoRoot, result.lock);
+  }
   return result;
 }
 
@@ -234,13 +380,13 @@ function pruneEmptyDirs(dir) {
 
 /**
  * Tidy every tool's config directories: subdirectories emptied by a prune go,
- * and a derived tool's own directory goes too once it is empty (the kit
- * created it). `.claude/` itself is kept, as before.
+ * and a non-Claude tool's own directory goes too once it is empty (the kit
+ * created it). `.claude/` itself is kept.
  */
 function pruneToolDirs(repoRoot) {
   for (const id of toolsMod.TOOL_IDS) {
     for (const rel of toolsMod.getTool(id).configDirs) {
-      const full = path.join(repoRoot, ...rel.split('/'));
+      const full = abs(repoRoot, rel);
       pruneEmptyDirs(full);
       if (id === 'claude') continue;
       try { if (fs.existsSync(full) && fs.readdirSync(full).length === 0) fs.rmdirSync(full); } catch { /* keep */ }
@@ -248,27 +394,22 @@ function pruneToolDirs(repoRoot) {
   }
 }
 
-/** { "<rel>": "sha256:<hex>" } for the current working tree. */
-function hashStaticFiles(repoRoot, opts = {}) {
-  const map = {};
-  for (const rel of listStaticFiles(repoRoot, opts)) {
-    try { map[rel] = `sha256:${sha256(fs.readFileSync(path.join(repoRoot, ...rel.split('/'))))}`; } catch { /* unreadable */ }
-  }
-  return map;
-}
-
+/**
+ * Record the files currently on disk as applied, without changing them. Used
+ * by tests and by `init` on a clone whose files came from git without a lock.
+ */
 function buildLock(repoRoot, {
   kitCommit = null, kitVersion = null, tools = DEFAULT_TOOLS, installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const list = normalizeTools(tools);
-  return {
-    schemaVersion: 3,
-    kitCommit,
-    kitVersion,
-    tools: list,
-    appliedAt: new Date().toISOString(),
-    files: hashStaticFiles(repoRoot, { tools: list, installRoot }),
-  };
+  const files = {};
+  for (const { src, dest } of listTemplateFiles(installRoot, { tools: list })) {
+    const current = readIfExists(abs(repoRoot, dest));
+    if (current === null) continue;
+    const template = readIfExists(src);
+    files[dest] = { kit: template ? hashOf(template) : null, file: hashOf(current) };
+  }
+  return { schemaVersion: LOCK_SCHEMA, kitCommit, kitVersion, tools: list, appliedAt: new Date().toISOString(), files, conflicts: [] };
 }
 
 function writeLock(repoRoot, lock) {
@@ -276,40 +417,62 @@ function writeLock(repoRoot, lock) {
   return lock;
 }
 
+/** Hook commands present in the template's settings.json but absent from the PKG's. */
+function missingHooks(repoRoot, installRoot) {
+  const rel = '.claude/settings.json';
+  const tpl = readIfExists(path.join(installRoot, ...toolsMod.templateDir('claude').split('/'), ...rel.split('/')));
+  const cur = readIfExists(abs(repoRoot, rel));
+  if (!tpl || !cur) return [];
+  const wanted = new Set((tpl.toString('utf8').match(KIT_HOOK_RE) || []).map((m) => m.slice(1, -1)));
+  const have = new Set((cur.toString('utf8').match(KIT_HOOK_RE) || []).map((m) => m.slice(1, -1)));
+  return [...wanted].filter((h) => !have.has(h)).sort();
+}
+
 /**
- * Compare the working tree against .aidev/materialized.json.
- * Returns { ok, missing, modified, extra, lock } — `extra` being kit-owned
- * files present on disk that the lock does not know about. The tool list
- * defaults to the one recorded in the lock, so a caller without aidev.yaml
- * still checks the right files.
+ * How the PKG's tool configuration relates to the lock and to the installed kit.
+ *
+ *   noLock       nothing recorded; run init/apply
+ *   conflicts    files still carrying conflict markers (or listed as unresolved)
+ *   hooksMissing kit hooks removed from .claude/settings.json (claude only)
+ *   missing      recorded files absent from disk
+ *   customised   files edited since the last apply (allowed; informational)
+ *   outdated     the lock was written by another kit commit than the installed one
+ *
+ * `ok` is false only for noLock, conflicts or hooksMissing: those are the
+ * states `aidev check` refuses.
  */
-function detectDrift(repoRoot, { tools = null, installRoot = DEFAULT_INSTALL_ROOT } = {}) {
+function inspectConfig(repoRoot, { tools = null, installRoot = DEFAULT_INSTALL_ROOT, kitCommit = null } = {}) {
   const lock = loadLock(repoRoot);
   if (!lock || typeof lock.files !== 'object' || lock.files == null) {
-    return { ok: false, noLock: true, missing: [], modified: [], extra: [], lock: null };
+    return { ok: false, noLock: true, lock: null, conflicts: [], hooksMissing: [], missing: [], customised: [], outdated: false, tools: normalizeTools(tools) };
   }
   const list = normalizeTools(tools || lock.tools || DEFAULT_TOOLS);
-  const current = hashStaticFiles(repoRoot, { tools: list, installRoot });
+  const conflicts = [];
   const missing = [];
-  const modified = [];
-  const extra = [];
-  for (const [rel, expected] of Object.entries(lock.files)) {
-    const actual = current[rel];
-    if (actual == null) missing.push(rel);
-    else if (actual !== expected) modified.push({ path: rel, expected, actual });
+  const customised = [];
+  const listed = new Set(lock.conflicts || []);
+  for (const rel of Object.keys(lock.files)) {
+    if (pathsMod.matchesAny(STATIC_EXCLUDE, rel)) continue;
+    const current = readIfExists(abs(repoRoot, rel));
+    if (current === null) { missing.push(rel); continue; }
+    if (listed.has(rel) || hasConflictMarkers(current)) { conflicts.push(rel); continue; }
+    const entry = lockEntry(lock.files, rel);
+    const currentHash = hashOf(current);
+    const pristine = !!entry && (entry.kit ? entry.kit === currentHash : entry.file === currentHash);
+    if (!pristine) customised.push(rel);
   }
-  for (const rel of Object.keys(current)) {
-    if (!(rel in lock.files)) extra.push(rel);
-  }
+  const hooksMissing = list.includes('claude') ? missingHooks(repoRoot, installRoot) : [];
+  const outdated = !!(kitCommit && lock.kitCommit && lock.kitCommit !== kitCommit);
   return {
-    ok: missing.length === 0 && modified.length === 0 && extra.length === 0,
-    noLock: false, missing, modified, extra, lock, tools: list,
+    ok: conflicts.length === 0 && hooksMissing.length === 0,
+    noLock: false, lock, tools: list,
+    conflicts: conflicts.sort(), hooksMissing, missing: missing.sort(), customised: customised.sort(), outdated,
   };
 }
 
 module.exports = {
-  DEFAULT_TOOLS, STATIC_ROOTS, STATIC_EXCLUDE, TEMPLATE_SETS, TEMPLATE_ROOT, TEMPLATE_DEST, DEFAULT_INSTALL_ROOT,
-  normalizeTools, configuredTools,
-  listStaticFiles, hashStaticFiles, buildLock, writeLock, detectDrift,
-  listTemplateFiles, materializeStaticAssets,
+  DEFAULT_TOOLS, STATIC_EXCLUDE, DEFAULT_INSTALL_ROOT, LOCK_SCHEMA, CONFLICT_RE,
+  normalizeTools, configuredTools, listTemplateFiles, listStaticFiles,
+  hasConflictMarkers, readTemplateAt, mergeFile, applyTemplates,
+  buildLock, writeLock, missingHooks, inspectConfig,
 };

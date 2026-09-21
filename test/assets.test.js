@@ -88,6 +88,30 @@ function withTempKit(fn) {
   }
 }
 
+/**
+ * Like withTempKit, but the kit copy is a git repository: `commit(msg)` commits
+ * the current templates and returns the SHA, which apply then uses as the
+ * kit commit (and, later, as the merge base for edited files).
+ */
+function withGitKit(fn) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-gitkit-'));
+  const installRoot = path.join(base, 'kit');
+  const repoRoot = path.join(base, 'repo');
+  const git = (args) => execFileSync('git', args, {
+    cwd: installRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@e.x', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@e.x' },
+  }).toString().trim();
+  try {
+    copyDir(path.join(ROOT, 'templates'), path.join(installRoot, 'templates'));
+    fs.mkdirSync(repoRoot, { recursive: true });
+    git(['init', '-q', '-b', 'main']);
+    const commit = (msg) => { git(['add', '-A']); git(['commit', '-q', '--allow-empty', '-m', msg]); return git(['rev-parse', 'HEAD']); };
+    return fn(repoRoot, installRoot, commit);
+  } finally {
+    try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
 const readIfExists = (rel) => {
   const p = path.join(ROOT, ...rel.split('/'));
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
@@ -111,9 +135,11 @@ function listMd(dir) {
   return fs.readdirSync(full).filter((f) => f.endsWith('.md')).sort();
 }
 
-const ROOT_TEMPLATES = 'templates/root';
-const CLAUDE_TEMPLATES = assets.TEMPLATE_ROOT; // templates/claude-assets
+const ROOT_TEMPLATES = 'templates/claude';
+const CLAUDE_TEMPLATES = 'templates/claude/.claude';
 const tpl = (installRoot, rel) => path.join(installRoot, ...CLAUDE_TEMPLATES.split('/'), ...rel.split('/'));
+const toolsMod = require('../cli/lib/tools');
+const pathsMod = require('../cli/lib/paths');
 
 function run() {
   // ---------------------------------------------------------------- .mcp.json
@@ -281,10 +307,10 @@ function run() {
     ok(!/submodule/i.test(text), 'no longer talks about a submodule');
   });
 
-  test('kit-owned files are tracked for drift detection once materialised', () => {
+  test('kit-owned files are tracked once applied', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      const tracked = assets.listStaticFiles(repoRoot);
+      assets.applyTemplates(repoRoot, { installRoot });
+      const tracked = assets.listStaticFiles(repoRoot, { installRoot });
       for (const rel of ['CLAUDE.md', '.mcp.json', '.claude/settings.json']) {
         ok(tracked.includes(rel), `${rel} was materialised but is not tracked as a static asset`);
       }
@@ -293,9 +319,9 @@ function run() {
 
   test('personal settings are never tracked', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.applyTemplates(repoRoot, { installRoot });
       fs.writeFileSync(path.join(repoRoot, '.claude', 'settings.local.json'), '{"mine":true}\n');
-      ok(!assets.listStaticFiles(repoRoot).includes('.claude/settings.local.json'),
+      ok(!assets.listStaticFiles(repoRoot, { installRoot }).includes('.claude/settings.local.json'),
         'settings.local.json is personal and must stay out of the lock');
     });
   });
@@ -424,15 +450,16 @@ function run() {
   // The templates above are only a promise; these tests are the delivery. Every
   // assertion in this suite is about the tree `aidev init` actually produces,
   // because that is the copy the hooks and the guard read.
-  suite('assets: materialisation');
+  suite('assets: template trees and apply');
 
   const templatePairs = assets.listTemplateFiles(ROOT);
   const ROOT_FILES = ['CLAUDE.md', '.mcp.json'];
 
-  test('every template maps to .claude/ or one of the two root files', () => {
+  test('every Claude template lands under .claude/ or as one of the two root files', () => {
     ok(templatePairs.length > 0, 'no templates were discovered');
-    for (const { src, dest } of templatePairs) {
+    for (const { src, dest, tool } of templatePairs) {
       ok(path.isAbsolute(src), `${dest}: src is not absolute (${src})`);
+      eq(tool, 'claude');
       ok(dest.startsWith('.claude/') || ROOT_FILES.includes(dest), `${dest} lands somewhere unexpected`);
     }
   });
@@ -441,12 +468,24 @@ function run() {
     const dests = templatePairs.map((p) => p.dest);
     ok(dests.includes('.claude/settings.json'), 'settings.json is not materialised');
     for (const f of ROOT_FILES) ok(dests.includes(f), `${f} is not materialised`);
+    for (const a of AGENTS) ok(dests.includes(`.claude/agents/${a}.md`), `agent ${a} is not materialised`);
+    for (const s of SKILLS) ok(dests.includes(`.claude/skills/${s}/SKILL.md`), `skill ${s} is not materialised`);
+  });
+
+  test('every tool has its own template tree, and each tree stays inside its config globs', () => {
+    for (const id of toolsMod.TOOL_IDS) {
+      const pairs = assets.listTemplateFiles(ROOT, { tools: [id] });
+      ok(pairs.length > 0, `templates/${id} is empty`);
+      for (const { dest } of pairs) {
+        ok(pathsMod.matchesAny(layout.TOOL_CONFIG_GLOBS[id], dest), `${dest} (${id}) is outside the tool's config globs`);
+      }
+    }
+    // The non-Claude trees carry every bundled agent so `--agent <name>` resolves there too.
     for (const a of AGENTS) {
-      ok(dests.includes(`.claude/agents/${a}.md`), `agent ${a} is not materialised`);
+      ok(fs.existsSync(path.join(ROOT, 'templates', 'copilot', '.github', 'agents', `${a}.agent.md`)), `copilot lacks ${a}`);
+      ok(fs.existsSync(path.join(ROOT, 'templates', 'kiro', '.kiro', 'agents', `${a}.json`)), `kiro lacks ${a}`);
     }
-    for (const s of SKILLS) {
-      ok(dests.includes(`.claude/skills/${s}/SKILL.md`), `skill ${s} is not materialised`);
-    }
+    ok(fs.existsSync(path.join(ROOT, 'templates', 'codex', 'AGENTS.md')), 'codex lacks AGENTS.md');
   });
 
   test('the running CLI reads its templates from its own checkout by default', () => {
@@ -454,148 +493,256 @@ function run() {
     eq(assets.listTemplateFiles().map((p) => p.dest), templatePairs.map((p) => p.dest), 'same set');
   });
 
-  test('materialising a fresh repo writes every template byte-identically', () => {
+  test('applying to a fresh repo writes every template byte-identically and records it', () => {
     withTempKit((repoRoot, installRoot) => {
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
-      ok(r.ok, `materialisation reported conflicts: ${JSON.stringify(r.conflicts)}`);
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'abc' });
+      ok(r.ok, `apply reported conflicts: ${JSON.stringify(r.conflicts)}`);
       eq(r.unchanged.length, 0, 'a fresh repo should have nothing already current');
       ok(r.created.length >= 17, `expected at least 17 files, got ${r.created.length}`);
       eq(r.created.length, templatePairs.length, 'one file per template');
-
       for (const { src, dest } of assets.listTemplateFiles(installRoot)) {
-        const want = fs.readFileSync(src);
-        const got = fs.readFileSync(path.join(repoRoot, ...dest.split('/')));
-        ok(want.equals(got), `${dest} does not match its template`);
+        ok(fs.readFileSync(src).equals(fs.readFileSync(path.join(repoRoot, ...dest.split('/')))), `${dest} does not match its template`);
       }
+      const lockFile = path.join(repoRoot, '.aidev', 'materialized.json');
+      ok(fs.existsSync(lockFile), 'lock written at .aidev/materialized.json');
+      eq(path.resolve(cfgMod.lockPath(repoRoot)), path.resolve(lockFile), 'cfg.lockPath agrees');
+      const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+      eq(lock.schemaVersion, assets.LOCK_SCHEMA);
+      eq(lock.kitCommit, 'abc', 'records the kit commit');
+      eq(lock.tools, ['claude']);
+      eq(lock.conflicts, []);
+      for (const { dest } of templatePairs) {
+        ok(lock.files[dest] && lock.files[dest].kit === lock.files[dest].file, `${dest} absent from the lock or not recorded as pristine`);
+      }
+      const insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: 'abc' });
+      ok(insp.ok && insp.customised.length === 0 && !insp.outdated, `a fresh apply is not clean: ${JSON.stringify(insp)}`);
     });
   });
 
-  test('materialising twice changes nothing the second time', () => {
+  test('applying twice changes nothing the second time', () => {
     withTempKit((repoRoot, installRoot) => {
-      const first = assets.materializeStaticAssets(repoRoot, { installRoot });
-      const second = assets.materializeStaticAssets(repoRoot, { installRoot });
+      const first = assets.applyTemplates(repoRoot, { installRoot });
+      const second = assets.applyTemplates(repoRoot, { installRoot });
       eq(second.created.length, 0, 'the second run created files');
       eq(second.updated.length, 0, 'the second run rewrote files');
       eq(second.unchanged.length, first.created.length, 'not every file was recognised as current');
     });
   });
 
-  // Overwriting silently would destroy the only copy of the edit; the design
-  // routes kit-owned changes through a PR to the kit instead.
-  test('a hand-edited kit file is a conflict, not an overwrite', () => {
+  test('--dry-run writes nothing, not even the lock', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      const target = path.join(repoRoot, '.claude', 'settings.json');
-      fs.writeFileSync(target, '{"hooks":{}}\n');
-
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
-      ok(!r.ok, 'a divergent file was accepted');
-      eq(r.conflicts.length, 1, JSON.stringify(r.conflicts));
-      eq(r.conflicts[0].path, '.claude/settings.json');
-      eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'the local edit was destroyed anyway');
-
-      const forced = assets.materializeStaticAssets(repoRoot, { installRoot, force: true });
-      ok(forced.ok, 'force did not resolve the conflict');
-      eq(forced.updated.length, 1, 'force did not rewrite the file');
-      const want = fs.readFileSync(tpl(installRoot, 'settings.json'));
-      ok(want.equals(fs.readFileSync(target)), 'force left the file unlike the template');
-    });
-  });
-
-  test('--dry-run writes nothing', () => {
-    withTempKit((repoRoot, installRoot) => {
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot, dryRun: true });
+      const r = assets.applyTemplates(repoRoot, { installRoot, dryRun: true });
       ok(r.created.length > 0, 'dry run reported no work');
       ok(!fs.existsSync(path.join(repoRoot, '.claude', 'settings.json')), 'a dry run wrote a file');
       ok(!fs.existsSync(path.join(repoRoot, 'CLAUDE.md')), 'a dry run wrote a root file');
+      ok(!fs.existsSync(path.join(repoRoot, '.aidev', 'materialized.json')), 'a dry run wrote the lock');
     });
   });
 
-  // This is the `aidev update` path. After a newer kit lands, the generated file
-  // differs from the new template simply because it is the previous generation.
-  // Treating that as a conflict would make every routine update demand --force,
-  // which trains people to pass it and defeats the check entirely.
-  test('the untouched previous generation is replaced without --force', () => {
+  // The routine update path: a newer kit ships a changed file and nobody
+  // touched the copy. It is replaced without ceremony.
+  test('an untouched file is replaced when the kit ships a new version', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
-
-      // The kit ships a new version of the file; nobody touched the copy on disk.
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
       const t = tpl(installRoot, 'settings.json');
       const bumped = `${fs.readFileSync(t, 'utf8').trimEnd()}\n`.replace('"deny"', '"deny" ');
       fs.writeFileSync(t, bumped);
 
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'two' });
       ok(r.ok, `a routine update was reported as a conflict: ${JSON.stringify(r.conflicts)}`);
       eq(r.updated, ['.claude/settings.json']);
       eq(fs.readFileSync(path.join(repoRoot, '.claude', 'settings.json'), 'utf8'), bumped);
     });
   });
 
-  test('a local edit is still a conflict even when the kit also moved', () => {
+  // The team owns its copies: an edit is kept, reported as customised, and
+  // never fails the inspection.
+  test('a local edit is kept while the kit does not change the file', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
+      const dest = path.join(repoRoot, 'CLAUDE.md');
+      fs.appendFileSync(dest, '\n## Team notes\n\n- ours\n');
 
-      // Both sides changed: the lock no longer matches what is on disk.
-      const t = tpl(installRoot, 'settings.json');
-      fs.writeFileSync(t, `${fs.readFileSync(t, 'utf8').trimEnd()}\n\n`);
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
+      ok(r.ok, JSON.stringify(r.conflicts));
+      eq(r.kept, ['CLAUDE.md']);
+      ok(fs.readFileSync(dest, 'utf8').includes('- ours'), 'the edit was destroyed');
+      const insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: 'one' });
+      ok(insp.ok, 'a customised file must not fail the inspection');
+      eq(insp.customised, ['CLAUDE.md']);
+      eq(insp.conflicts, []);
+    });
+  });
+
+  test('--force takes the kit version of an edited file', () => {
+    withTempKit((repoRoot, installRoot) => {
+      assets.applyTemplates(repoRoot, { installRoot });
+      const target = path.join(repoRoot, '.claude', 'settings.json');
+      fs.writeFileSync(target, '{"hooks":{}}\n');
+      const forced = assets.applyTemplates(repoRoot, { installRoot, force: true });
+      ok(forced.ok, 'force reported a conflict');
+      eq(forced.updated, ['.claude/settings.json']);
+      ok(fs.readFileSync(tpl(installRoot, 'settings.json')).equals(fs.readFileSync(target)), 'force left the file unlike the template');
+    });
+  });
+
+  test('a file that exists before the first apply and differs is a conflict, not an overwrite', () => {
+    withTempKit((repoRoot, installRoot) => {
+      const target = path.join(repoRoot, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, '{"hooks":{}}\n');
+      const r = assets.applyTemplates(repoRoot, { installRoot });
+      ok(!r.ok, 'a pre-existing divergent file was accepted');
+      eq(r.conflicts.map((c) => c.path), ['.claude/settings.json']);
+      eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'the file was overwritten');
+      ok(!assets.hasConflictMarkers(fs.readFileSync(target)), 'markers were written although nothing could be merged');
+    });
+  });
+
+  // The design centre: both sides changed. With the kit's history at hand the
+  // previous template is the merge base; disjoint hunks merge, overlapping
+  // ones are written as git-style conflicts for the team to resolve.
+  test('an edited file is merged three ways when the kit changes it too', () => {
+    withGitKit((repoRoot, installRoot, commit) => {
+      const one = commit('one');
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: one });
+      const dest = path.join(repoRoot, 'CLAUDE.md');
+      fs.appendFileSync(dest, '\n## Team notes\n\n- ours\n');
+
+      const t = tpl(installRoot, '../CLAUDE.md');
+      fs.writeFileSync(t, fs.readFileSync(t, 'utf8').replace('# CLAUDE.md — ai-dev-kit', '# CLAUDE.md — ai-dev-kit (v2)'));
+      const two = commit('two');
+
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: two });
+      ok(r.ok, `expected a clean merge: ${JSON.stringify(r.conflicts)}`);
+      eq(r.merged, ['CLAUDE.md']);
+      const text = fs.readFileSync(dest, 'utf8');
+      ok(text.includes('(v2)'), 'the kit change is missing after the merge');
+      ok(text.includes('- ours'), 'the local edit is missing after the merge');
+      ok(!assets.hasConflictMarkers(Buffer.from(text)), 'markers in a clean merge');
+      eq(assets.inspectConfig(repoRoot, { installRoot, kitCommit: two }).customised, ['CLAUDE.md']);
+    });
+  });
+
+  test('overlapping changes leave conflict markers, fail the inspection, and are recorded until resolved', () => {
+    withGitKit((repoRoot, installRoot, commit) => {
+      const one = commit('one');
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: one });
+      const dest = path.join(repoRoot, 'CLAUDE.md');
+      fs.appendFileSync(dest, '\n- ours\n');
+      const t = tpl(installRoot, '../CLAUDE.md');
+      fs.appendFileSync(t, '\n- kit\n');
+      const two = commit('two');
+
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: two });
+      ok(!r.ok, 'an overlapping change merged cleanly?');
+      eq(r.conflicts.map((c) => c.path), ['CLAUDE.md']);
+      const text = fs.readFileSync(dest, 'utf8');
+      ok(assets.hasConflictMarkers(Buffer.from(text)), 'no markers were written');
+      ok(text.includes('<<<<<<< CLAUDE.md (this package)') && text.includes(`>>>>>>> kit ${two.slice(0, 7)}`), text.slice(-300));
+      eq(JSON.parse(fs.readFileSync(path.join(repoRoot, '.aidev', 'materialized.json'), 'utf8')).conflicts, ['CLAUDE.md']);
+      let insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: two });
+      ok(!insp.ok && insp.conflicts.length === 1, 'the inspection passed with markers present');
+
+      // Still marked → still a conflict; apply leaves the file alone.
+      const again = assets.applyTemplates(repoRoot, { installRoot, kitCommit: two });
+      eq(again.conflicts.map((c) => c.path), ['CLAUDE.md']);
+      eq(fs.readFileSync(dest, 'utf8'), text, 'apply rewrote a file the team is resolving');
+
+      // Resolved (markers removed) → recorded, inspection clean, edit kept.
+      fs.writeFileSync(dest, text.replace(/<<<<<<<[^\n]*\n/, '').replace(/=======\n/, '').replace(/>>>>>>>[^\n]*\n/, ''));
+      const done = assets.applyTemplates(repoRoot, { installRoot, kitCommit: two });
+      ok(done.ok, JSON.stringify(done.conflicts));
+      eq(done.resolved, ['CLAUDE.md']);
+      insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: two });
+      ok(insp.ok, 'still failing after resolution');
+      eq(insp.customised, ['CLAUDE.md']);
+      ok(fs.readFileSync(dest, 'utf8').includes('- ours') && fs.readFileSync(dest, 'utf8').includes('- kit'), 'the resolution was lost');
+    });
+  });
+
+  test('without the base in the kit history, an edited-and-changed file is a conflict left untouched', () => {
+    withTempKit((repoRoot, installRoot) => {
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
       const dest = path.join(repoRoot, '.claude', 'settings.json');
       fs.writeFileSync(dest, '{"hooks":{}}\n');
-
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
+      const t = tpl(installRoot, 'settings.json');
+      fs.writeFileSync(t, `${fs.readFileSync(t, 'utf8').trimEnd()}\n\n`);
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'two' });
       ok(!r.ok, 'a local edit was silently overwritten');
       eq(r.conflicts.length, 1, JSON.stringify(r.conflicts));
-      eq(r.conflicts[0].reason, 'has been edited locally');
+      ok(/not in the kit checkout's history/.test(r.conflicts[0].reason), r.conflicts[0].reason);
       eq(fs.readFileSync(dest, 'utf8'), '{"hooks":{}}\n', 'the edit was destroyed');
     });
   });
 
-  // A file the kit stops shipping has to disappear, or it lingers as `extra` in
-  // every later drift check. Only lock-known files qualify: the lock is the
-  // evidence that the file was ours to delete.
-  test('a file the kit no longer ships is pruned; a team file is not', () => {
+  // A file the kit stops shipping has to disappear if it is still the kit's
+  // copy, and must stay if the team changed it. Only lock-known files qualify.
+  test('a retired file is pruned when pristine and kept when edited; a team file is untouched', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
+      const retiredTpl = tpl(installRoot, 'agents/retired.md');
+      const editedTpl = tpl(installRoot, 'agents/edited.md');
+      fs.writeFileSync(retiredTpl, '# was shipped once\n');
+      fs.writeFileSync(editedTpl, '# was shipped once\n');
+      assets.applyTemplates(repoRoot, { installRoot });
       const retired = path.join(repoRoot, '.claude', 'agents', 'retired.md');
+      const edited = path.join(repoRoot, '.claude', 'agents', 'edited.md');
       const teamOwned = path.join(repoRoot, '.claude', 'agents', 'team-owned.md');
-
-      // Order is the whole test: only what exists when the lock is written is
-      // recorded as kit-generated, so the team file added afterwards is not.
-      fs.writeFileSync(retired, '# was shipped once\n');
-      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
+      fs.appendFileSync(edited, 'team change\n');
       fs.writeFileSync(teamOwned, '# never shipped\n');
+      fs.rmSync(retiredTpl); fs.rmSync(editedTpl);
 
-      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
-      ok(r.pruned.includes('.claude/agents/retired.md'), `retired.md was not pruned: ${r.pruned}`);
+      const r = assets.applyTemplates(repoRoot, { installRoot });
+      eq(r.pruned, ['.claude/agents/retired.md']);
+      eq(r.retired, ['.claude/agents/edited.md']);
       ok(!fs.existsSync(retired), 'retired.md is still on disk');
+      ok(fs.existsSync(edited), 'an edited retired file was deleted');
       ok(fs.existsSync(teamOwned), 'a team-owned file was deleted');
+      ok(!assets.listStaticFiles(repoRoot, { installRoot }).includes('.claude/agents/team-owned.md'), 'a team file is listed as kit-owned');
+      ok(!('.claude/agents/edited.md' in r.lock.files), 'a retired file stayed in the lock');
     });
   });
 
-  test('personal settings are never overwritten or pruned', () => {
+  test('personal settings are never overwritten, pruned or recorded', () => {
     withTempKit((repoRoot, installRoot) => {
       const local = path.join(repoRoot, '.claude', 'settings.local.json');
       fs.mkdirSync(path.dirname(local), { recursive: true });
       fs.writeFileSync(local, '{"mine":true}\n');
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
-      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.applyTemplates(repoRoot, { installRoot });
+      const r = assets.applyTemplates(repoRoot, { installRoot });
       eq(fs.readFileSync(local, 'utf8'), '{"mine":true}\n', 'settings.local.json was touched');
+      ok(!('.claude/settings.local.json' in r.lock.files), 'personal settings recorded in the lock');
+      ok(!assets.listStaticFiles(repoRoot, { installRoot }).includes('.claude/settings.local.json'));
     });
   });
 
-  test('the lock records every materialised file under .aidev/materialized.json', () => {
+  test('removing the kit hooks from settings.json fails the inspection; other edits do not', () => {
     withTempKit((repoRoot, installRoot) => {
-      assets.materializeStaticAssets(repoRoot, { installRoot });
-      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: 'abc' }));
-      const lockFile = path.join(repoRoot, '.aidev', 'materialized.json');
-      ok(fs.existsSync(lockFile), 'lock written at .aidev/materialized.json');
-      eq(path.resolve(cfgMod.lockPath(repoRoot)), path.resolve(lockFile), 'cfg.lockPath agrees');
-      const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
-      eq(lock.kitCommit, 'abc', 'records the kit commit');
-      for (const { dest } of templatePairs) ok(lock.files[dest], `${dest} absent from the lock`);
-      ok(assets.detectDrift(repoRoot).ok, 'a fresh materialisation has no drift');
+      assets.applyTemplates(repoRoot, { installRoot });
+      const target = path.join(repoRoot, '.claude', 'settings.json');
+      const doc = JSON.parse(fs.readFileSync(target, 'utf8'));
+      doc.permissions.deny.push('Edit(team/**)');
+      fs.writeFileSync(target, `${JSON.stringify(doc, null, 2)}\n`);
+      ok(assets.inspectConfig(repoRoot, { installRoot }).ok, 'an added deny rule failed the inspection');
+
+      delete doc.hooks.PreToolUse;
+      fs.writeFileSync(target, `${JSON.stringify(doc, null, 2)}\n`);
+      const insp = assets.inspectConfig(repoRoot, { installRoot });
+      ok(!insp.ok, 'removing the guard passed');
+      eq(insp.hooksMissing, ['aidev hook guard-write']);
+    });
+  });
+
+  test('a lock written by an older kit commit is reported as outdated, and a missing file as missing', () => {
+    withTempKit((repoRoot, installRoot) => {
+      assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
+      fs.rmSync(path.join(repoRoot, '.mcp.json'));
+      const insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: 'two' });
+      ok(insp.ok, 'missing or outdated must not fail the inspection');
+      eq(insp.missing, ['.mcp.json']);
+      eq(insp.outdated, true);
+      const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'two' });
+      eq(r.created, ['.mcp.json'], 'apply did not restore the missing file');
     });
   });
 
@@ -641,7 +788,7 @@ function run() {
       const lock = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'materialized.json'), 'utf8'));
       ok(lock.files['.claude/settings.json'], 'settings.json is absent from .aidev/materialized.json');
       ok(lock.files['CLAUDE.md'], 'CLAUDE.md is absent from the record');
-      ok(assets.detectDrift(fx.root).ok, 'a freshly initialised repo already reports drift');
+      ok(assets.inspectConfig(fx.root).ok, 'a freshly initialised repo already fails the tool-config inspection');
 
       // Runtime state stays out of git.
       eq(fs.readFileSync(path.join(fx.root, '.aidev', '.gitignore'), 'utf8'), layout.AIDEV_GITIGNORE, '.aidev/.gitignore');
@@ -722,15 +869,17 @@ function run() {
       eq(j.firstTime, false, 'no longer first time');
       const step = j.steps.find((s) => s.step === 'tool config');
       ok(step, `no tool config step reported: ${r.out}`);
-      eq(step.created, 0, 'the second init recreated files');
-      eq(step.updated, 0, 'the second init rewrote files');
-      ok(step.unchanged > 0, 'the second init saw no current files');
+      // The files and the record came from git the second time: init reports
+      // and leaves them alone (taking newer templates is "aidev apply").
+      eq(step.action, 'keep', `the second init touched the tool config: ${JSON.stringify(step)}`);
+      eq(step.conflicts, 0);
       eq(fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8'), cfgBefore, 'aidev.yaml was not rewritten');
     } finally { fx.cleanup(); }
   });
 
-  // init must not be a way to launder an edit to a kit-owned file.
-  test('init refuses to overwrite a divergent kit file without --force', () => {
+  // The team owns its copies once placed: a later init leaves an edit alone
+  // and only reports; the kit's hooks removed is the one edit it warns about.
+  test('a later init leaves an edited tool file alone; apply --force restores it', () => {
     const fx = makeRepo(BARE);
     try {
       eq(aidev(['init', '--yes'], fx.root).code, 0);
@@ -738,12 +887,28 @@ function run() {
       fs.writeFileSync(target, '{"hooks":{}}\n');
 
       const r = aidev(['init', '--yes'], fx.root);
-      eq(r.code, 2, `expected exit 2 (drift), got ${r.code}: ${r.out}`);
-      eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the edit anyway');
+      eq(r.code, 0, `init failed on an edited file: ${r.out}`);
+      eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the edit');
+      ok(/hooks are missing/.test(r.out), `init did not warn about the missing hooks: ${r.out}`);
+      eq(aidev(['check', '--no-remote'], fx.root).code, 2, 'check must refuse a settings.json without the kit hooks');
 
-      eq(aidev(['init', '--yes', '--force'], fx.root).code, 0, 'init --force did not recover');
+      eq(aidev(['apply', '--force'], fx.root).code, 0, 'apply --force did not recover');
       ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not restore the hooks');
-      ok(assets.detectDrift(fx.root).ok, 'the record was refreshed after --force');
+      ok(assets.inspectConfig(fx.root).ok, 'the record was not refreshed after --force');
+    } finally { fx.cleanup(); }
+  });
+
+  test('a pre-existing divergent file stops the first init with exit 2 and is not overwritten', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const target = path.join(fx.root, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, '{"hooks":{}}\n');
+      const r = aidev(['init', '--yes'], fx.root);
+      eq(r.code, 2, `expected exit 2, got ${r.code}: ${r.out}`);
+      eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the file');
+      eq(aidev(['init', '--yes', '--force'], fx.root).code, 0, 'init --force did not recover');
+      ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not place the kit version');
     } finally { fx.cleanup(); }
   });
 
@@ -789,7 +954,7 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  // The registry is what `aidev update --all` walks; a clone that init never
+  // The registry is what `aidev update` reports on; a clone that init never
   // registered would silently miss every kit update.
   test('a registered clone is listed as present while it exists', () => {
     const fx = makeRepo(BARE);

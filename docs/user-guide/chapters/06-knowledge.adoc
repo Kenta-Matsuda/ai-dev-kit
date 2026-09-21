@@ -3,14 +3,14 @@
 
 LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向けに説明する Markdown ページ群です。`.aidev/knowledge/` にコミットし、チームで共有します。
 
-* 生成するのは `aidev knowledge build` と `aidev sync` です。どちらも knowledge-builder agent（Claude Code）を起動して本文を書きます。
+* 初回は `aidev init` が生成します。コードが進んだら `aidev sync` が追従し、作り直したいときは `aidev knowledge build` を使います。いずれも knowledge-builder agent（Claude Code）を起動して本文を書きます。
 * Wiki は正本ではありません。各記述は根拠ファイルへのリンクを持ち、Claude はリンク先で確認します。
 * Wiki が無い間、AI の書き込みはすべて止まります。
 
 [[knowledge-files]]
 === 何が生成されるか
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |パス |内容
 
@@ -65,7 +65,7 @@ LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向け
 
 再開は常に **同じコマンド** です。終わった分は保存されています。
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |表示 |すること
 

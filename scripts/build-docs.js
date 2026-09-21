@@ -58,9 +58,11 @@ const REQUIRED_IDS = [
   'cli-permission',
   'cli-task',
   'cli-workflow',
+  'cli-apply',
   'cli-update',
   'cli-doctor',
   'cli-eject',
+  'cli-uninstall',
   'cli-hook',
   'cli-mcp',
   // Appendices

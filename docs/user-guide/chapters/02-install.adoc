@@ -69,6 +69,16 @@ export AZURE_DEVOPS_PAT="<your-pat>"
 +
 恒久化するにはユーザー環境変数かシェルの profile に設定します（xref:environment-reference[環境変数]）。
 
+=== アンインストール
+
+[source,bash]
+----
+aidev uninstall --dry-run   # 消すものを確認する
+aidev uninstall --yes
+----
+
+起動スクリプトと `AIDEV_HOME` を消します。kit の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
+
 === 次のステップ
 
 * PKG に初めて導入する → xref:setup-owner[導入担当者の手順]

@@ -41,7 +41,7 @@ aidev init
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[環境変数を設定] して、ターミナルを開き直します。
 * `✗ N kit-owned file(s) differ from the kit copy` → あなたの clone の `.claude/` などが配布版と違います。`git status` で確認し、意図した変更でなければ `aidev init --force` で戻します。
-* `ℹ next: "aidev knowledge build"` → Wiki がまだマージされていません。導入担当者に確認します。
+* `the LLM Wiki is not in this clone yet …` と聞かれたら → Enter（`N`）で断ります。導入担当者の PR がマージされてから `git pull` します。
 
 . 状態を確認します。
 +

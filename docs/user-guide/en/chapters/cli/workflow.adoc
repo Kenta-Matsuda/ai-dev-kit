@@ -25,7 +25,7 @@ It does not open pull requests.
 
 === Subcommands
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Subcommand |What it does
 
@@ -44,7 +44,7 @@ It does not open pull requests.
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -69,7 +69,7 @@ It does not open pull requests.
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

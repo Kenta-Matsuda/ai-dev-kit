@@ -13,7 +13,7 @@ aidev status
 
 2 行目の記号と文で、次にすることが決まります。
 
-[cols="3,2",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |表示 |すること
 
@@ -41,7 +41,7 @@ aidev status
 
 その他の表示は xref:troubleshooting-status[トラブルシューティング] を見てください。
 
-続く行では、`tool config` が `matches the kit` か、`policy` が `placed` かを確認します。`DRIFT` なら誰かが `.claude/` などを手編集したか kit が古い印です（xref:daily-update[kit の更新]）。`policy missing` は `aidev permission configure --approve` で解決します。
+続く行では、`tool config` と `policy` を確認します。`tool config` は `applied from kit <sha>` で始まり、チームが編集したファイル数（`customised`）や、新しいテンプレートがあること（`newer templates available: "aidev apply"`）を添えます。`CONFLICTS` なら `aidev apply` の衝突が未解消、`kit hooks missing` なら `.claude/settings.json` から hooks が消えています（xref:daily-apply[aidev apply]）。`policy missing` は `aidev permission configure --approve` で解決します。
 
 === Wiki の使われ方
 
@@ -92,29 +92,48 @@ PR をレビューしてマージします。マージ後、各メンバーは `
   Update now, before running this command? (y/N):
 ----
 
-`y` で kit だけを先に更新します。PKG 内の配布ファイル（`.claude/` など）も更新するには、PKG のルートで実行します。
+`y` で kit（CLI とテンプレート）を更新します。PKG のファイルはこの時点では変わりません。
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
+ℹ 1 package(s) on this machine still carry templates from an older kit:
+    C:\work\demo-pkg (applied 499f940)
+    Run "aidev apply" in each when convenient; it merges the new templates with your edits.
+----
+
+[[daily-apply]]
+=== aidev apply — 新しいテンプレートを PKG に取り込む
+
+kit を更新したら、都合のよいときに PKG のルートで実行します。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは kit 側の変更とマージされます。
 
 [source,bash]
 ----
-aidev update
+aidev apply
 ----
 
 [source,text]
 ----
-✓ updated ai-dev-kit 0.2.0 → 0.2.1 (9491efe → e0aa66c)
-✓ demo-pkg: updated 3 file(s)
+✓ applied 3 change(s) for claude
     ~ .claude/agents/knowledge-builder.md
-    ~ .claude/skills/knowledge-usage/SKILL.md
-    ~ CLAUDE.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
     Review with "git diff", then commit so your team receives the update.
 ----
 
 差分を確認し、コミットして PR にします。マージ後、他のメンバーは `git pull` だけで同じ状態になります。
 
-* `✗ … file(s) were edited locally and were not replaced` → 手編集されたファイルがあります。変更を kit への PR に送るか、`aidev update --force` で配布版に置き換えます。
-* 端末に登録された全 PKG をまとめて更新するには `aidev update --all` です。
+同じ箇所をチームと kit の両方が変えていた場合は、git と同じ衝突マーカーがファイルに書かれ、終了コード 2 で止まります。
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+----
+
+マーカーを解消して内容を確定したら、もう一度 `aidev apply` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを kit 版に戻したいときは `aidev apply --force` です。
 
 === 関連
 
 * xref:knowledge[LLM Wiki] — 生成の仕組みと再開
-* xref:cli-status[aidev status]、xref:cli-sync[aidev sync]、xref:cli-update[aidev update]
+* xref:cli-status[aidev status]、xref:cli-sync[aidev sync]、xref:cli-update[aidev update]、xref:cli-apply[aidev apply]

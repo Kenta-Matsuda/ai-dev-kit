@@ -1,0 +1,107 @@
+[[cli-apply]]
+== aidev apply
+
+Applies the installed kit's latest templates to this package's AI tool configuration.
+
+=== Synopsis
+
+[source,text]
+----
+aidev apply [--dry-run] [--force] [--json]
+----
+
+=== Description
+
+Takes the templates of the kit installed on this machine (the one `aidev update` brought forward) and applies them to the package, for every tool in `tools.default` of `aidev.yaml`. The team may have edited the files `aidev init` placed; `apply` behaves as a **merge**, not a copy.
+
+[%autowidth.stretch,options="header"]
+|===
+|State of the file |What apply does
+
+|Untouched since the last apply
+|Replaced with the new template
+
+|Edited, and the kit did not change it
+|Kept as it is
+
+|Edited, and the kit changed it too
+|Merged three ways against the template the previous apply used. If the same lines changed, git-style conflict markers are written and the command stops with exit code 2
+
+|No longer shipped by the kit
+|Removed if untouched, kept if edited
+
+|A tool added to `tools.default`
+|Its files are placed for the first time
+|===
+
+The package team resolves conflicted files. Once the markers are gone and the content is settled, run `aidev apply` again: files without markers are recorded as resolved and `aidev check` passes again. Until then `aidev apply` leaves those files alone and `aidev check` returns exit code 2.
+
+The result is an ordinary diff in the package. Review it with `git diff`, commit, and open a pull request; after the merge the team only needs `git pull`.
+
+The merge base is the template at the kit commit of the previous apply. When the kit clone lacks that history (a shallow clone, for instance) the file cannot be merged; it is reported as a conflict and left alone, to be fixed by hand or replaced with `--force`.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--dry-run`
+|Show what would change; write nothing (not even the record)
+
+|`--force`
+|Take the kit version of every file, discarding local edits and conflicts
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Applied, or already current
+
+|1
+|No `aidev.yaml`, or the kit has no templates
+
+|2
+|Conflicts remain (new ones, or markers from a previous apply not yet resolved)
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev apply --dry-run
+aidev apply
+----
+
+[source,text]
+----
+aidev apply
+✓ applied 3 change(s) for claude
+    ~ .claude/agents/knowledge-builder.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
+    2 file(s) with local edits kept as they are
+    Review with "git diff", then commit so your team receives the update.
+----
+
+With a conflict (exit code 2):
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+    Resolve the conflict markers (or keep your version / take the kit's), then run "aidev apply" again
+    to record the result. "aidev apply --force" takes the kit version of every file instead.
+----
+
+=== See also
+
+* xref:cli-update[aidev update] — updating the kit itself
+* xref:daily-update[Everyday use: updating and applying the kit]

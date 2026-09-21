@@ -3,14 +3,14 @@
 
 The LLM Wiki is a set of Markdown pages that explain the structure of the PKG's code and the role of each file, written for the AI. It lives in `.aidev/knowledge/`, is committed, and is shared by the team.
 
-* `aidev knowledge build` and `aidev sync` generate it. Both start the knowledge-builder agent (Claude Code) to write the prose.
+* `aidev init` builds it the first time, `aidev sync` keeps it up to date as the code moves, and `aidev knowledge build` rebuilds it on demand. All of them start the knowledge-builder agent (Claude Code) to write the prose.
 * The Wiki is not the source of truth. Every statement links to the file it came from, and Claude checks that file.
 * While there is no Wiki, every write by the AI is blocked.
 
 [[knowledge-files]]
 === What is generated
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Path |Contents
 
@@ -65,7 +65,7 @@ Even if the targets are only `docs/**`, the agent still reads the code and tests
 
 To resume, always run the **same command**. Finished work is saved.
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Message |What to do
 

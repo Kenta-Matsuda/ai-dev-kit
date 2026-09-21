@@ -6,7 +6,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-install]]
 === Installation
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -29,7 +29,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-status]]
 === Output of aidev status / aidev check
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -45,8 +45,11 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`⚠️ N page(s) still await prose regeneration`
 |Run `aidev knowledge build`.
 
-|`tool config  DRIFT`
-|Check with `git diff`. If the change was not intended, `aidev update` restores the distributed version. If it was intended, send it as a PR to the kit.
+|`tool config  CONFLICTS in N file(s)`
+|An `aidev apply` conflict is unresolved. Resolve the markers (`<<<<<<<` / `=======` / `>>>>>>>`) in those files, run `aidev apply` to update the record, and commit.
+
+|`tool config  kit hooks missing from .claude/settings.json`
+|The kit's hooks are gone. Restore them by hand or take the kit version with `aidev apply --force`.
 
 |`tool config  not recorded — run "aidev init"`
 |Run `aidev init`.
@@ -72,8 +75,8 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Exit code |Message |What to do
 
 |2
-|`kit-owned files differ from .aidev/materialized.json`
-|Restore the distributed version with `aidev update`, or send the change as a PR to the kit.
+|`tool configuration file(s) carry unresolved conflict markers` / `the kit's hooks are missing`
+|Resolve the conflict markers and run `aidev apply`, or take the kit version with `aidev apply --force`. The team's own edits never cause exit 2.
 
 |2
 |`.aidev/materialized.json is missing`
@@ -103,7 +106,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-agent]]
 === Wiki generation
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -114,7 +117,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Run the same command again. If it keeps happening, add `--agent-batch-size 10`.
 
 |`✗ knowledge-builder made no Wiki progress: 0/N`
-|Read the `Claude result:` lines that follow. If they mention `permission denial(s)`, run `aidev update` to restore the distributed `.claude/settings.json`.
+|Read the `Claude Code result:` lines that follow. If they mention `permission denial(s)`, review the deny rules in `.claude/settings.json` and, if needed, take the kit version with `aidev apply --force`.
 
 |`⚠ N completion report(s) were rejected`
 |Run the same command again. If it persists, use `--full`.
@@ -132,7 +135,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-sync]]
 === aidev sync
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -161,7 +164,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-permission]]
 === Denied writes
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -177,25 +180,29 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`policy could not be evaluated (…); write blocked`
 |Check with `aidev permission show` and replace the policy with `aidev permission reconfigure --approve`.
 
-|`reconfigure --approve` stops with `this candidate weakens the policy in force`
+|`reconfigure --approve` stops with +
+`this candidate weakens the policy in force`
 |Compare with `git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml`. If the change is intended, add `--force`.
 |===
 
 [[troubleshooting-update]]
 === After a kit update
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
-|The `kit` line of `aidev status` says `run "aidev update"`
-|Run `aidev update` in the PKG, commit the diff and open a PR.
+|The `tool config` line of `aidev status` says `newer templates available: "aidev apply"`
+|When convenient, run `aidev apply` in the PKG, commit the diff and open a PR.
 
 |`aidev check` now exits with 2
-|`git pull`. If it is still 2, run `aidev update` and commit the diff.
+|`git pull`. If it is still 2, look at `aidev status` to see whether conflict markers or missing hooks are the cause, fix that, and run `aidev apply`.
 
-|`✗ … file(s) were edited locally and were not replaced`
-|Take the distributed version with `aidev update --force`, or send the change as a PR to the kit.
+|`✗ N file(s) need your attention` / `conflict markers were written`
+|The team's edit and the kit's change touch the same lines. Resolve the markers, run `aidev apply`, and commit. If the kit version is fine, run `aidev apply --force`.
+
+|`edited locally and the template it was based on … is not in the kit checkout's history`
+|The kit clone lacks the previous commit (a shallow clone, for instance). Run `git fetch --unshallow` in the kit clone, fix the file by hand, or run `aidev apply --force`.
 
 |`✗ the kit checkout has diverged from origin/main`
 |The kit clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
@@ -204,7 +211,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 [[troubleshooting-windows]]
 === Windows
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
@@ -214,7 +221,8 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |The hooks cannot find `aidev`
 |Start `claude` from a new terminal. The installer has already added the launcher to PATH.
 
-|Questions such as `Place this policy now?` do not appear and the command ends
+|Questions such as `Place this policy now?` do not appear +
+and the command ends
 |stdin is not a terminal (some IDE terminals, pipes). Run in a normal terminal, or pass the values with `--yes` / `--approve`.
 
 |`spawnSync git ETIMEDOUT`

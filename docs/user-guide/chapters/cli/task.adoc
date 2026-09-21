@@ -27,7 +27,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === サブコマンド
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |サブコマンド |動作
 
@@ -49,7 +49,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -71,7 +71,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

@@ -20,7 +20,7 @@ aidev mcp azure-devops [--dry-run | --json]
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

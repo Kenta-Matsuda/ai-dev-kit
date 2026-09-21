@@ -214,7 +214,7 @@ function run() {
       home.registerPackage(fx.root, { name: 'my-pkg' }, HOME_ENV);
       ok(registered(fx.root), 'registered first');
       eq(aidev(['eject', '--yes'], { cwd: fx.root }).code, EXIT.OK, 'exit');
-      ok(!registered(fx.root), 'no longer in the registry, so "aidev update --all" skips it');
+      ok(!registered(fx.root), 'no longer in the registry, so "aidev update" stops listing it');
     } finally { fx.cleanup(); }
   });
 

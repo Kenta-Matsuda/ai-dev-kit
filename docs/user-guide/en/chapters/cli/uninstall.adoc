@@ -1,0 +1,68 @@
+[[cli-uninstall]]
+== aidev uninstall
+
+Removes the `aidev` command from this machine.
+
+=== Synopsis
+
+[source,text]
+----
+aidev uninstall --dry-run
+aidev uninstall --yes [--json]
+----
+
+=== Description
+
+Removes what the installer placed: ① the launcher (Windows: `aidev.cmd` and `aidev.ps1`, POSIX: `aidev`; only the ones the installer generated), ② on Windows, the launcher directory that the installer added to your user PATH, ③ `registry.json` and `cache/` in `AIDEV_HOME`.
+
+It shows what it keeps, with the command to remove each item:
+
+* The kit clone. `aidev` runs from it, so run the `Remove-Item` / `rm -rf` shown afterwards, by hand.
+* The files the kit placed in each registered package. They are committed and shared with the team, so removing them is a team change that goes through a PR. Either run xref:cli-eject[`aidev eject --yes`] there first (keeps the Wiki and `aidev.yaml`), or run the `git rm` shown in that package clone (removes the Wiki too).
+
+There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With nothing left to remove it still exits 0.
+
+To install again, run the installer from a kit clone (xref:install[Install aidev on your machine]).
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--yes`
+|Run; you have confirmed
+
+|`--dry-run`
+|Show what would be removed and the commands for what is kept; write nothing
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Removed. Nothing left to remove. `--dry-run`
+
+|1
+|`--yes` missing
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev uninstall --dry-run
+aidev uninstall --yes
+rm -rf ~/ai-dev-kit            # the command shown for the kit clone
+----
+
+=== See also
+
+* xref:cli-eject[aidev eject] — take a package out of kit management
+* xref:install[Install aidev on your machine]

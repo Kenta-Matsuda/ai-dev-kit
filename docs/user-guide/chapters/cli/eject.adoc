@@ -23,7 +23,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -45,7 +45,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

@@ -434,6 +434,21 @@ table.tableblock p {
   margin: 0.18rem 0 0.42rem;
 }
 
+/*
+ * Key/description tables ([%autowidth.stretch] in the sources): the first
+ * column takes exactly the width of its content and never wraps, so a command
+ * or message stays on one line; every remaining pixel goes to the description.
+ */
+table.tableblock.fit-content th:first-child,
+table.tableblock.fit-content td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+table.tableblock.fit-content td:first-child code {
+  white-space: nowrap;
+}
+
 .admonitionblock {
   width: 100%;
   margin: 1.35rem 0 1.55rem;

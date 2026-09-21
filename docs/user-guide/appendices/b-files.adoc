@@ -35,8 +35,8 @@
 |`aidev permission … --approve`、`aidev init`
 
 |`.aidev/materialized.json`
-|配布ファイルのハッシュ。drift の判定に使う
-|`aidev init` / `aidev update`
+|ツール設定の記録。適用した kit のコミットと、ファイルごとのテンプレートのハッシュと適用時のハッシュ、未解消の衝突。`aidev apply` がマージの基準に、`aidev check` が判定に使う
+|`aidev init` / `aidev apply`
 
 |`.aidev/knowledge/index.md`, `overview.md`, ページ
 |LLM Wiki
@@ -61,7 +61,7 @@
 
 `.aidev/.gitignore` が除外します。消しても次のコマンドで作り直されます。
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |パス |内容
 
@@ -85,4 +85,4 @@
 
 === 端末側（AIDEV_HOME）
 
-`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（kit 更新の確認結果）を置きます。kit 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。
+`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（kit 更新の確認結果）を置きます。kit 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。`aidev uninstall` がどちらも消します。

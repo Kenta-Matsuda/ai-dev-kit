@@ -9,9 +9,9 @@
 ```text
 <pkg clone>/
 ├─ aidev.yaml                     PKG固有設定（schema v2）
-├─ CLAUDE.md                      templates/root から実体化（kit所有）
-├─ .mcp.json                      templates/root から実体化（kit所有）
-├─ .claude/                       templates/claude-assets から実体化（kit所有）
+├─ CLAUDE.md                      templates/claude から適用（kit配布、teamが編集可）
+├─ .mcp.json                      templates/claude から適用（同上）
+├─ .claude/                       templates/claude/.claude から適用（同上）
 │  ├─ settings.json               hooks / deny / ask
 │  ├─ agents/  skills/
 │  └─ settings.local.json         個人設定。kit所有ではなくdrift検出から除外
@@ -19,7 +19,7 @@
    ├─ .gitignore                  CLIが書く。runtime stateをgitから外す
    ├─ policy.yaml                 承認済みpolicy（CLIだけが配置）
    ├─ policy.candidate.yaml       承認待ちの候補（一時）
-   ├─ materialized.json           実体化したkit所有fileのhash record
+   ├─ materialized.json           適用したtemplateとfileのhash record、未解消conflict（applyのmerge基準）
    ├─ ejected.json                aidev eject の marker（通常は存在しない）
    ├─ knowledge/                  LLM Wiki（manifest.json, inventory/, index.md, overview.md, pages）
    │  └─ .cache/                  agent plan、完了報告 done/（ignored）
@@ -43,68 +43,75 @@ path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml
 | launcher | `scripts/install.ps1`が`%LOCALAPPDATA%\ai-dev-kit\bin\aidev.cmd` / `.ps1`、`scripts/install.sh`が`~/.local/bin/aidev`を作る（`AIDEV_BIN_DIR`で変更可） |
 | `AIDEV_HOME` | 既定はWindows `%LOCALAPPDATA%\ai-dev-kit`、POSIX `$XDG_DATA_HOME/ai-dev-kit`（未設定なら`~/.local/share/ai-dev-kit`）。`registry.json`と`cache/update-check.json`を置く |
 
-`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`update`が登録し、`eject`が削除します。`update --all`はここに載っていてかつ`aidev.yaml`が存在するcloneだけを対象にします。
+`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`update`が登録し、`eject`が削除します。`uninstall`は`registry.json`と`cache/`ごと消します（PKG側には触れず、kit所有fileを消す`git rm`を表示するだけ）。`update`はここに載っているcloneのうちlockの`kitCommit`が現在のkitと違うものを「`aidev apply`が必要」として一覧します（適用はしません）。
 
-## 2. tool configの実体化とdrift
+## 2. tool configのtemplate、apply、記録
 
 ### template → PKG
 
-`assets.TEMPLATE_SETS`が対応を定義します。
+toolごとに`templates/<tool>/`があり、PKG rootにそのまま重なるtreeです（`tools.templateDir(id)`）。対応表はありません。
 
-| kit checkout | PKG |
+| tool | template tree（PKGでの位置と同じ） |
 | --- | --- |
-| `templates/claude-assets/**` | `.claude/**` |
-| `templates/root/**` | repository root（現在`CLAUDE.md`、`.mcp.json`） |
+| `claude` | `templates/claude/.claude/**`、`templates/claude/CLAUDE.md`、`templates/claude/.mcp.json` |
+| `copilot` | `templates/copilot/.github/copilot-instructions.md`、`.github/agents/<agent>.agent.md`、`.github/skills/<skill>/**` |
+| `codex` | `templates/codex/AGENTS.md` |
+| `kiro` | `templates/kiro/.kiro/steering/ai-dev-kit.md`、`.kiro/agents/<agent>.json` |
 
-これはclaude用のcopyです。`aidev.yaml`の`tools.default`に他のtoolがあれば、`tools.deriveAssets(tool, installRoot)`が同じtemplateから次を生成します（`layout.TOOL_CONFIG_GLOBS`がkit所有pathの正本）。
+treeはkit保守者が手で揃えます（toolごとの差はtemplateから生成できないため）。claude以外のtreeは実機未検証で、fileの先頭にその旨を書いています。`layout.TOOL_CONFIG_GLOBS`がkit所有pathの正本で、`isKitManaged` / `ALWAYS_PROTECTED` / `settings.json`のdeny listはこれに従います。`.claude/settings.local.json`は個人設定で常に除外です（`STATIC_EXCLUDE`）。
 
-| tool | 生成file |
+### apply（`assets.applyTemplates`）
+
+`aidev init`（初回、lockが無いとき、または`--force`）と`aidev apply`が呼びます。`aidev update`はkit checkoutを進めるだけでPKGには触れません。適用はcopyではなくmergeです。file単位の判定:
+
+| 状態 | 結果 |
 | --- | --- |
-| `copilot` | `.github/copilot-instructions.md`（`templates/root/CLAUDE.md`に生成headerを付けたもの）、`.github/agents/<agent>.agent.md`（frontmatterは`name` / `description`、本文はそのまま）、`.github/skills/<skill>/**`（copy） |
-| `codex` | `AGENTS.md`（同上） |
-| `kiro` | `.kiro/steering/ai-dev-kit.md`、`.kiro/agents/<agent>.json`（`{name, description, prompt}`） |
+| 無い | `created` |
+| templateと同一 | `unchanged` |
+| 前回適用したtemplateのまま（`pristine`: hashがlockの`kit`と一致） | `updated`（新templateで置換） |
+| 編集済み、kitは不変（lockの`kit`が新templateのhashと一致） | `kept`（そのまま。lockの`file`を更新） |
+| 編集済み、kitも変更 | 3-way merge。base = lockの`kitCommit`にあったtemplate（kit checkoutの`git show <sha>:templates/<tool>/<rel>`）。cleanなら`merged`、同一箇所ならgit merge-fileのmarker付きで書き`conflicts`、baseが履歴に無ければ触らず`conflicts` |
+| lockに無く、templateと違う（初回に既存fileがある） | 触らず`conflicts`（`--force`でkit版） |
+| 前回のconflict、markerが残っている | 触らず`conflicts` |
+| 前回のconflict、markerが消えた | `resolved`（現在の内容を記録） |
+| templateから消えた（kitが配布をやめた、toolが`tools.default`から外れた） | pristineなら`pruned`、編集済みなら`retired`（残してlockから外す） |
 
-derived toolのkit所有fileは「生成したその名前のfileだけ」です。`.github/agents/`にteamが置いた別のagentはdriftにも削除対象にもなりません。`materialized.json`（`schemaVersion: 3`）は`tools`にtool一覧を記録し、`detectDrift`はcallerがtoolを渡さなければlockの`tools`を使います。
+`--force`は全fileをkit版にします。`--dry-run`はfileもlockも書きません。空になったtool directoryは`pruneToolDirs`が消します（`.claude/`自体は残す）。
 
-`materializeStaticAssets(repoRoot, { installRoot, dryRun, force, tools })`はtemplateを1 fileずつ比較します。
-
-- 既に同一 → `unchanged`
-- 存在しない → `created`
-- 内容が違い、`.aidev/materialized.json`の記録hashと現在fileが一致（＝kitが置いたまま誰も触っていない）→ `updated`（前のkit版を置換）
-- 内容が違い、記録がないか記録と現在fileが違う → `conflicts`（`--force`でのみ置換）
-- 記録にあるがtemplateにもう無い → `pruned`（kitが置いたと証明できるfileだけ削除）
-
-conflictが1件でもあれば`ok: false`で、`init`と`update`はexit 2にします。`.claude/settings.local.json`は`STATIC_EXCLUDE`で対象外です。
-
-### `.aidev/materialized.json`
+### `.aidev/materialized.json`（schemaVersion 4）
 
 ```json
 {
-  "schemaVersion": 2,
-  "kitCommit": "3d7e40b…",
-  "kitVersion": "0.2.0",
-  "appliedAt": "2026-09-21T09:00:00.000Z",
-  "files": { ".claude/settings.json": "sha256:…", "CLAUDE.md": "sha256:…" }
+  "schemaVersion": 4,
+  "kitCommit": "<kit checkoutのHEAD>",
+  "kitVersion": "0.4.0",
+  "tools": ["claude", "copilot"],
+  "appliedAt": "...",
+  "files": { "<rel>": { "kit": "sha256:<適用したtemplate>", "file": "sha256:<書いた/受け入れた内容>" } },
+  "conflicts": ["<rel>", "..."]
 }
 ```
 
-`files`は`STATIC_ROOTS`（`.claude`、`CLAUDE.md`、`.mcp.json`）配下に実際に存在するfileのhashです。`detectDrift`はこれと作業treeを比べ、`missing` / `modified` / `extra`（recordにないkit所有file）を返します。recordが無ければ`noLock`。`aidev check`は`noLock`と不一致をexit 2にします。`init`は`kitVersion`を記録しますが、`update`の`buildLock`呼び出しは`kitCommit`だけを渡すため`kitVersion`は`null`になります。
+schema 3以前の`files: { rel: "sha256:…" }`は`kit: null, file: <hash>`として読みます。`inspectConfig`は次を返し、`status`と`check`が使います。
 
-### 実行時解決
+| field | 意味 | `check` |
+| --- | --- | --- |
+| `noLock` | 記録が無い | exit 2 |
+| `conflicts` | lockの`conflicts`に載っている、またはmarkerがあるfile | exit 2 |
+| `hooksMissing` | `.claude/settings.json`にtemplateの`aidev hook …`の一部が無い（claudeのみ） | exit 2 |
+| `missing` | 記録にあるがdiskに無い | 情報（`apply`が復元） |
+| `customised` | pristineでないfile（teamの編集） | 情報 |
+| `outdated` | lockの`kitCommit`が現在のkitと違う | 情報（「`aidev apply`で取り込める」） |
 
-`.claude/settings.json`と`.mcp.json`にPKG固有値は入りません。同じkit commitを適用したPKGでこれらはbyte-identicalです。
-
-- hooksは文字列形式`{"type":"command","command":"aidev hook <name>"}`で、PATH上の`aidev`を呼ぶ。設定は実行時に`aidev.yaml`と`.aidev/policy.yaml`から読む
-- MCPは`aidev mcp azure-devops`だけを起動し、organization / projectを`aidev.yaml`、PATを`hosting.auth_env`の環境変数から読む
-- CLIが起動するagentのtoolとmodelは`tools.agent` / `tools.agent_model`、agent単位の`tools.agents.<name>`、CLI flagの順で解決する（`cli/lib/tools.js`のregistryにあるtoolだけ）
+teamの編集はdriftではありません。`check`が止めるのは「merge前に誰かが見るべき状態」（未解消conflict、hooks欠落）だけです。
 
 ## 3. 編集権限の層
 
 | 層 | 実体 | 位置付け |
 | --- | --- | --- |
-| 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev permission *`・`aidev eject`をask |
+| 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev permission *`・`aidev eject`・`aidev uninstall`をask |
 | 実行時guard | `aidev hook guard-write` | path、policy、整合性、leaseを評価して`permissionDecision`を返す |
-| drift検出 | `aidev check`（exit 2）+ branch policy | hooksを消した編集そのものをmerge前に止める |
+| 制御面の検査 | `aidev check`（exit 2）+ branch policy | hooksを消した編集と未解消のconflict markerをmerge前に止める（teamの他の編集は止めない） |
 | 行動指示 | `CLAUDE.md`、Agents / Skills | 補助。強制境界ではない |
 | 認証scope | tokenの権限 | server側で最も強い強制力 |
 
@@ -188,7 +195,7 @@ remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.
 
 ### `aidev check`の変換
 
-`check`は`status.inspect`と同じ検査を行い、drift（exit 2）→ policy（exit 3）→ Wiki（exit 4）の順で最初の問題のcodeを返します。exit 4はERROR severity、inventory不整合（同じpageに異なるhash）、期限切れsync leaseです。`--strict`は他に問題が無いときWARNをexit 2へ昇格します。`.aidev/ejected.json`がある、または`aidev.yaml`が無いrepositoryはexit 0です。
+`check`は`status.inspect`と同じ検査を行い、tool config（record欠落・未解消conflict・kit hooks欠落 → exit 2）→ policy（exit 3）→ Wiki（exit 4）の順で最初の問題のcodeを返します。exit 4はERROR severity、inventory不整合（同じpageに異なるhash）、期限切れsync leaseです。`--strict`は他に問題が無いときWARNをexit 2へ昇格します。`.aidev/ejected.json`がある、または`aidev.yaml`が無いrepositoryはexit 0です。
 
 ## 5. lease
 
@@ -379,16 +386,13 @@ Stop hookはWiki更新を起動しません。pending refresh queueを消費す�
 
 ## 10. Azure DevOps MCP
 
-`templates/root/.mcp.json`は`aidev mcp azure-devops`だけを起動します。CLIは`aidev.yaml`を読み、`npx -y @azure-devops/mcp@2.10.0 <organization> --authentication pat`をstdioで起動します。`ADO_MCP_DEFAULT_PROJECT`にproject、`PERSONAL_ACCESS_TOKEN`に`aidev:<pat>`のbase64を子processの環境だけで渡し、argvにも出力にも載せません。`hosting.type`が`generic`のときは`config.azure_devops`が`null`なので起動できません。
+`templates/claude/.mcp.json`は`aidev mcp azure-devops`だけを起動します。CLIは`aidev.yaml`を読み、`npx -y @azure-devops/mcp@2.10.0 <organization> --authentication pat`をstdioで起動します。`ADO_MCP_DEFAULT_PROJECT`にproject、`PERSONAL_ACCESS_TOKEN`に`aidev:<pat>`のbase64を子processの環境だけで渡し、argvにも出力にも載せません。`hosting.type`が`generic`のときは`config.azure_devops`が`null`なので起動できません。
 
 ## 11. update と version通知
 
-`aidev update`は2段です。
+`aidev update`はkit checkoutだけを進めます（`selfUpdate`: 未commit変更なし・`main` branch上を確認し、`origin/main`をfetchして`merge --ff-only`。divergeは拒否）。PKGには触れず、registryのcloneのうちlockの`kitCommit`が古いものを一覧して`aidev apply`を案内します。PKGへの適用（`aidev apply`）を分けているのは、teamの編集とのmergeやconflict解消に時間をかけられるようにするためです。
 
-1. `selfUpdate`: kit checkoutが未commit変更なし・`main` branch上であることを確認し、`origin/main`をfetchして`merge --ff-only`。divergeしていれば拒否。`--kit-only`はここまで
-2. `applyToPackage`: 現在のPKG（`aidev.yaml`がある場合）または`--all`でregistryの全PKGへ`materializeStaticAssets`を再適用し、`.aidev/.gitignore`と`materialized.json`を書き直し、registryを更新する。conflictがあればexit 2
-
-更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `mcp` / `update`以外のcommandで`home.checkForUpdate`を呼び（`--json`と`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`と比べて新しければ警告を出し、TTYなら「今updateするか」を尋ねて`update --kit-only`を実行します。結果は`AIDEV_HOME/cache/update-check.json`に24時間cacheされ、確認失敗はcacheしません。
+更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `mcp` / `update`以外のcommandで`home.checkForUpdate`を呼び（`--json`と`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`と比べて新しければ警告を出し、TTYなら「今updateするか」を尋ねて`update`を実行します。結果は`AIDEV_HOME/cache/update-check.json`に24時間cacheされ、確認失敗はcacheしません。
 
 ## 12. model解決
 
@@ -412,13 +416,13 @@ CLI起動agent（aidev knowledge build, aidev sync, aidev agent run, workflow ct
 
 - 配置: `cli/lib/layout.js`（`TOOL_CONFIG_GLOBS`を含む）、`cli/lib/home.js`
 - tool adapter: `cli/lib/tools.js`、`cli/commands/agent.js`
-- tool config: `cli/lib/assets.js`（claudeはtemplateをcopy、他toolは`tools.deriveAssets`で生成。lockの`tools`にtool一覧を記録し、`tools.default`から外れたtoolのfileはpruneする）
+- tool config: `cli/lib/assets.js`（`templates/<tool>/`のtreeを`applyTemplates`で適用。3-way merge、conflict marker、lock schema 4、`inspectConfig`）、`cli/commands/apply.js`
 - config / policy: `cli/lib/config.js`、`cli/lib/policy.js`、`cli/lib/paths.js`
 - state: `cli/lib/state.js`、`cli/lib/git.js`
 - lease: `cli/lib/leases.js`
 - Wiki: `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/lib/agent.js`、`cli/commands/knowledge.js`
 - sync: `cli/commands/sync.js`、`cli/lib/ado.js`
-- hooks: `cli/commands/hook.js`、`templates/claude-assets/settings.json`
+- hooks: `cli/commands/hook.js`、`templates/claude/.claude/settings.json`
 - workflow: `cli/commands/workflow.js`
-- MCP: `cli/commands/mcp.js`、`templates/root/.mcp.json`
+- MCP: `cli/commands/mcp.js`、`templates/claude/.mcp.json`
 - update: `cli/commands/update.js`、`cli/bin/aidev.js`

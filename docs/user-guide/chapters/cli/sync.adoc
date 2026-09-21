@@ -26,7 +26,7 @@ PR はマージしません。`generic` hosting では push まで行い、PR �
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -57,13 +57,18 @@ PR はマージしません。`generic` hosting では push まで行い、PR �
 |`--no-agent`
 |inventory と manifest だけ更新し、本文は後回しにする
 
-|`--agent-name <name>`, `--agent-tool <tool>`, `--agent-timeout <ms>`, `--agent-model <model>`, `--agent-batch-size <n>`, `--survey`, `--no-survey`
+|`--agent-name <name>` +
+`--agent-tool <tool>` +
+`--agent-timeout <ms>` +
+`--agent-model <model>` +
+`--agent-batch-size <n>` +
+`--survey`, `--no-survey`
 |xref:cli-knowledge[aidev knowledge] と同じ
 |===
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

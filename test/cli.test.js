@@ -67,7 +67,7 @@ function run() {
     const r = aidev(['--help']);
     eq(r.code, EXIT.OK, 'exit');
     for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'permission', 'task', 'workflow',
-      'update', 'doctor', 'eject', 'hook', 'mcp']) {
+      'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
       ok(new RegExp(`^\\s+${c}\\b`, 'm').test(r.stdout), `help mentions ${c}`);
     }
   });
@@ -132,19 +132,21 @@ function run() {
     ok(!r.stdout.includes('--refresh'), 'does not advertise the no-op --refresh');
   });
 
-  test('update --help documents the self-update and re-apply flags', () => {
+  test('update --help documents the self-update flags only; applying is a separate command', () => {
     const r = aidev(['update', '--help']);
     eq(r.code, EXIT.OK, 'exit');
-    for (const f of ['--all', '--kit-only', '--dry-run', '--force', '--json']) {
-      ok(r.stdout.includes(f), `lists ${f}`);
-    }
+    for (const f of ['--dry-run', '--json']) ok(r.stdout.includes(f), `lists ${f}`);
+    for (const f of ['--all', '--kit-only', '--force']) ok(!r.stdout.includes(f), `still advertises ${f}`);
+    const a = aidev(['apply', '--help']);
+    eq(a.code, EXIT.OK, 'apply --help exit');
+    for (const f of ['--dry-run', '--force', '--json']) ok(a.stdout.includes(f), `apply lists ${f}`);
   });
 
   test('every command answers --help without needing a repository', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-bare-'));
     try {
-      for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'permission', 'task', 'workflow',
-        'update', 'doctor', 'eject', 'hook', 'mcp']) {
+      for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'task', 'workflow',
+        'apply', 'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
         const r = aidev([c, '--help'], { cwd: dir });
         eq(r.code, EXIT.OK, `${c} --help exit: ${r.stderr}`);
         ok(r.stdout.includes(`aidev ${c}`), `${c} --help names itself`);
@@ -219,11 +221,26 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('a kit-owned file edited by hand is drift (exit 2)', () => {
-    const fx = makeRepo();
+  test('a tool file edited by the team is not drift (exit 0); the kit hooks removed is (exit 2)', () => {
+    const fx = makeRepo({ realTemplates: true });
     try {
-      write(path.join(fx.root, 'CLAUDE.md'), '# edited behind the kit\n');
-      eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.DRIFT, 'exit 2');
+      write(path.join(fx.root, 'CLAUDE.md'), '# edited by the team\n');
+      eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'a customised file must pass');
+      const settings = path.join(fx.root, '.claude', 'settings.json');
+      write(settings, fs.readFileSync(settings, 'utf8').replace('"aidev hook guard-write"', '"echo nope"'));
+      const r = aidev(['check', '--no-remote'], { cwd: fx.root });
+      eq(r.code, EXIT.DRIFT, 'exit 2');
+      ok(/guard-write/.test(r.stderr), `names the missing hook: ${r.stderr}`);
+    } finally { fx.cleanup(); }
+  });
+
+  test('unresolved conflict markers in a tool file are drift (exit 2)', () => {
+    const fx = makeRepo({ realTemplates: true });
+    try {
+      write(path.join(fx.root, 'CLAUDE.md'), '<<<<<<< CLAUDE.md (this package)\nours\n=======\nkit\n>>>>>>> kit abc1234\n');
+      const r = aidev(['check', '--no-remote'], { cwd: fx.root });
+      eq(r.code, EXIT.DRIFT, 'exit 2');
+      ok(/conflict/.test(r.stderr), `names the conflict: ${r.stderr}`);
     } finally { fx.cleanup(); }
   });
 
@@ -286,8 +303,8 @@ function run() {
       const m = readManifest(fx.root);
       m.knowledgeSha = 'not-a-sha';
       writeManifest(fx.root, m);
-      // Break a kit-owned file so both conditions genuinely hold at once.
-      write(path.join(fx.root, 'CLAUDE.md'), '# edited behind the kit\n');
+      // Remove the kit hooks so both conditions genuinely hold at once.
+      write(path.join(fx.root, '.claude', 'settings.json'), '{"hooks":{}}\n');
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.DRIFT, 'drift wins');
     } finally { fx.cleanup(); }
   });
@@ -333,7 +350,7 @@ function run() {
       eq(d.package, 'my-pkg', 'package name');
       eq(d.hosting, 'azure-devops', 'hosting');
       ok(d.state && d.state.severity, 'has state');
-      eq(d.drift.ok, true, 'no drift on a fresh fixture');
+      eq(d.toolConfig.ok, true, 'the tool configuration of a fresh fixture passes');
       eq(d.policy.ok, true, 'policy valid');
     } finally { fx.cleanup(); }
   });

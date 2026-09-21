@@ -75,20 +75,23 @@ function kitHook(name) {
  */
 function writeStaticAssets(root, { hooks = false, realTemplates = false } = {}) {
   if (realTemplates) {
-    copyDir(path.join(KIT_ROOT, 'templates', 'claude-assets'), path.join(root, '.claude'));
-    copyDir(path.join(KIT_ROOT, 'templates', 'root'), root);
+    copyDir(path.join(KIT_ROOT, 'templates', 'claude'), root);
     return;
   }
   write(path.join(root, 'CLAUDE.md'), '# test package instructions\n');
   write(path.join(root, '.mcp.json'), `${JSON.stringify({
     mcpServers: { 'azure-devops': { command: 'aidev', args: ['mcp', 'azure-devops'] } },
   }, null, 2)}\n`);
-  const settingsDoc = hooks ? {
+  // The four kit hooks are always wired: `aidev check` refuses a settings.json
+  // without them. `hooks: true` adds the team-owned hook eject must preserve.
+  const settingsDoc = {
     hooks: {
+      SessionStart: [{ matcher: '*', hooks: [kitHook('session-start'), ...(hooks ? [{ type: 'command', command: 'echo team-owned-hook' }] : [])] }],
       PreToolUse: [{ matcher: 'Write|Edit|MultiEdit|Bash', hooks: [kitHook('guard-write')] }],
-      SessionStart: [{ matcher: '*', hooks: [kitHook('session-start'), { type: 'command', command: 'echo team-owned-hook' }] }],
+      PostToolUse: [{ matcher: 'Write|Edit|MultiEdit', hooks: [kitHook('quality-gate')] }],
+      Stop: [{ hooks: [kitHook('session-stop')] }],
     },
-  } : { hooks: {} };
+  };
   write(path.join(root, '.claude', 'settings.json'), `${JSON.stringify(settingsDoc, null, 2)}\n`);
 }
 

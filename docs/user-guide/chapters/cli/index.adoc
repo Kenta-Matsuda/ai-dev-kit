@@ -21,7 +21,7 @@ aidev <command> [subcommand] [options] [arguments]
 [[cli-common-options]]
 === 共通オプション
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -43,7 +43,7 @@ aidev <command> [subcommand] [options] [arguments]
 [[cli-exit-codes]]
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |意味
 
@@ -54,7 +54,7 @@ aidev <command> [subcommand] [options] [arguments]
 |一般エラー（不正なオプション、設定不備、ネットワーク失敗、agent の失敗など）
 
 |2
-|drift: 配布したファイル（`.claude/**`、`CLAUDE.md`、`.mcp.json`、他ツール用に生成した設定）が記録と違う
+|drift: ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev apply` の衝突マーカーが未解消、または `.claude/settings.json` から kit の hooks が消えている
 
 |3
 |permission: policy が無い・壊れている、または承認を拒否した
@@ -67,7 +67,7 @@ aidev <command> [subcommand] [options] [arguments]
 === コマンド一覧
 
 .PKG の clone の中で使う
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コマンド |要約
 
@@ -97,25 +97,31 @@ aidev <command> [subcommand] [options] [arguments]
 
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |承認済みスクリプトを作る・実行する
+
+|xref:cli-apply[`aidev apply`]
+|kit の最新テンプレートをこの PKG に適用する（編集済みはマージ）
 |===
 
 .この端末に対して使う
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コマンド |要約
 
 |xref:cli-update[`aidev update`]
-|kit を更新し、PKG の配布ファイルを再適用する
+|kit 本体（CLI とテンプレート）を更新する。PKG への適用は `aidev apply`
 
 |xref:cli-doctor[`aidev doctor`]
 |端末と PKG の実行環境を診断する
 
 |xref:cli-eject[`aidev eject`]
 |kit の管理から外す
+
+|xref:cli-uninstall[`aidev uninstall`]
+|この端末から `aidev` を消す
 |===
 
 .ツールから呼ばれる
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コマンド |要約
 
@@ -144,11 +150,15 @@ include::task.adoc[]
 
 include::workflow.adoc[]
 
+include::apply.adoc[]
+
 include::update.adoc[]
 
 include::doctor.adoc[]
 
 include::eject.adoc[]
+
+include::uninstall.adoc[]
 
 include::hook.adoc[]
 

@@ -19,8 +19,8 @@ const ui = require('../lib/ui');
 
 const COMMANDS = [
   'init', 'status', 'check', 'knowledge', 'sync',
-  'agent', 'permission', 'task', 'workflow',
-  'update', 'doctor', 'eject',
+  'agent', 'permission', 'task', 'workflow', 'apply',
+  'update', 'doctor', 'eject', 'uninstall',
   'hook', 'mcp',
 ];
 
@@ -36,7 +36,7 @@ const SUBCOMMANDS = {
 };
 
 /** Commands that run from tools or pipelines: never prompt, never nag. */
-const QUIET_COMMANDS = new Set(['hook', 'mcp', 'update']);
+const QUIET_COMMANDS = new Set(['hook', 'mcp', 'update', 'uninstall']);
 
 const INSTALL_ROOT = path.resolve(__dirname, '..', '..');
 const VERSION = readVersion();
@@ -64,8 +64,8 @@ function usage() {
   ui.out('  usage: aidev <command> [subcommand] [options]');
   ui.out('');
   const groups = [
-    ['in a package clone', ['init', 'status', 'check', 'knowledge', 'sync', 'agent', 'permission', 'task', 'workflow']],
-    ['this machine', ['update', 'doctor', 'eject']],
+    ['in a package clone', ['init', 'status', 'check', 'knowledge', 'sync', 'agent', 'permission', 'task', 'workflow', 'apply']],
+    ['this machine', ['update', 'doctor', 'eject', 'uninstall']],
     ['called by tools', ['hook', 'mcp']],
   ];
   for (const [title, names] of groups) {
@@ -125,8 +125,9 @@ async function updateNotice(name, flags) {
   rl.close();
   if (!/^y(es)?$/i.test(answer)) return;
   const upd = loadCommand('update');
-  await upd.run({ installRoot: INSTALL_ROOT, repoRoot: null, flags: { 'kit-only': true }, positionals: [], version: VERSION });
-  ui.dim('  (the updated CLI takes effect on the next command; continuing with the current one)');
+  await upd.run({ installRoot: INSTALL_ROOT, repoRoot: null, flags: {}, positionals: [], version: VERSION });
+  ui.dim('  (the updated CLI takes effect on the next command; continuing with the current one.');
+  ui.dim('   New templates reach a package only through "aidev apply", when you choose to run it.)');
 }
 
 async function main(argv) {

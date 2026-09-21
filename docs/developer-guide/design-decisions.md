@@ -6,7 +6,7 @@
 
 ### D1: tool設定はPKG cloneへ実体化し、PKG repositoryへcommitする
 
-**判断**: `.claude/**`、`CLAUDE.md`、`.mcp.json`をkitのtemplateからPKG cloneへコピーし、他のfileと同様にcommitします。`.aidev/materialized.json`にkit commitとfileごとのhashを記録し、`aidev check`が不一致をdrift（exit 2）として検出します。`aidev update`が新しいtemplateを再適用し、利用者がそのdiffをcommitします。
+**判断**: toolごとの`templates/<tool>/`をPKG cloneへコピーし、他のfileと同様にcommitします。PKG teamはそのcopyを編集してよく、`.aidev/materialized.json`に適用したtemplateのhashとfileのhashを記録します。`aidev update`はkit本体だけを更新し、`aidev apply`（teamが好きなときに実行）が新templateを3-way mergeで取り込み、衝突はgit同様のmarkerを書いてteamに解消を委ねます。`aidev check`は未解消conflictとkit hooksの欠落だけをexit 2にし、teamの編集は止めません。
 
 **理由**: 各AI toolはproject rootの設定fileを読む前提で作られており、toolを問わず動く最も単純な方法です。commitすることでチーム全員が同じ設定を`git pull`で受け取り、CI（`aidev check`）が同じfileを検査できます。
 

@@ -8,7 +8,7 @@
 
 kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 kit の URL に変えて使います。CI は kit を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |ファイル |用途
 
@@ -21,7 +21,7 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 
 `aidev check` の終了コードが CI の契約です。
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |終了コード |意味
 
@@ -50,7 +50,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 人間がマージするのは `PKG_PR_OPEN`（コードの PR）と `WIKI_PR_OPEN`（Wiki の PR）の 2 回です。
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コマンド |動作
 

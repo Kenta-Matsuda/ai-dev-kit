@@ -20,7 +20,7 @@ In a package whose `hosting.type` is not `azure-devops` it fails to start (nothi
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

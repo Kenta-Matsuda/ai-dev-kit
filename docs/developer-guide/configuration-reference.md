@@ -264,7 +264,7 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 
 | file | 書き手 | 形 |
 | --- | --- | --- |
-| `.aidev/materialized.json` | `init`、`update` | `{schemaVersion: 2, kitCommit, kitVersion, appliedAt, files: {rel: "sha256:…"}}` |
+| `.aidev/materialized.json` | `init`、`apply` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
 | `.aidev/ejected.json` | `eject` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
 | `.aidev/sync.lock` | `sync`、`knowledge build`（一時） | sync lease（`architecture.md` §5） |

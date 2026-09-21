@@ -1,4 +1,4 @@
-# ai-dev-kit maintainer documentation
+# ai-dev-kit developer guide
 
 このディレクトリは、**ai-dev-kit本体（CLI・template・同梱Agents/Skills）を設計・実装・レビュー・リリースする人**のための資料です。
 
@@ -35,7 +35,7 @@
 | `AIDEV_HOME`（registry、update check cache） | `cli/lib/home.js` |
 | `aidev.yaml` / policy schema、既定値 | `cli/lib/config.js` |
 | 初期化 | `cli/commands/init.js` |
-| tool configの実体化・drift | `cli/lib/assets.js`、`templates/claude-assets/`、`templates/root/` |
+| tool configの適用・検査 | `cli/lib/assets.js`、`cli/commands/apply.js`、`templates/<tool>/` |
 | self-updateとtemplate再適用 | `cli/commands/update.js` |
 | 3SHA | `cli/lib/state.js`、`cli/lib/git.js` |
 | Wiki manifest / inventory / 完了報告 | `cli/lib/inventory.js` |
@@ -45,12 +45,13 @@
 | sync（worktree、branch、PR） | `cli/commands/sync.js`、`cli/lib/ado.js` |
 | lease | `cli/lib/leases.js` |
 | policy評価 | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
-| hooks | `cli/commands/hook.js`、`templates/claude-assets/settings.json` |
+| hooks | `cli/commands/hook.js`、`templates/claude/.claude/settings.json` |
 | task状態機械 | `cli/commands/task.js` |
 | workflow | `cli/commands/workflow.js` |
 | eject | `cli/commands/eject.js` |
+| uninstall | `cli/commands/uninstall.js` |
 | MCP launcher | `cli/commands/mcp.js`、`templates/root/.mcp.json` |
-| 同梱Agents / Skills | `templates/claude-assets/agents/`、`templates/claude-assets/skills/` |
+| 同梱Agents / Skills | `templates/claude/.claude/agents/`、`templates/claude/.claude/skills/`（他toolの形式は`templates/copilot/`、`templates/kiro/`に手で同期） |
 | installer | `scripts/install.ps1`、`scripts/install.sh` |
 | pipeline例 | `pipelines/` |
 | 利用者ガイド | `docs/user-guide/`、`scripts/build-docs.js` |
@@ -79,9 +80,9 @@ AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js <command> --help
 
 `aidev update`は、launcherが指すkit checkoutを固定の`origin/main`へfast-forwardし、続けて現在のPKG（`--all`ならregistryの全PKG）へ`templates/`を再適用して`.aidev/materialized.json`を書き直します。結果はPKG cloneの通常のdiffなので、利用者がreviewしてcommitします。kit側で配布物を変えるときは次を同時に更新してください。
 
-- `templates/claude-assets/**`（→ PKGの`.claude/**`）と`templates/root/**`（→ PKG root。現在は`CLAUDE.md`と`.mcp.json`）
+- `templates/<tool>/**`（→ PKG rootにそのまま重なる。claudeは`.claude/**`、`CLAUDE.md`、`.mcp.json`）
 - `assets.STATIC_ROOTS` / `STATIC_EXCLUDE`（drift検出の対象）
 - `layout.KIT_MANAGED_GLOBS`と`config.ALWAYS_PROTECTED`（kit管理pathを増やした場合）
-- `templates/claude-assets/settings.json`のdeny list（protected pathを増やした場合）
+- `templates/claude/.claude/settings.json`のdeny list（protected pathを増やした場合）
 - `test/assets.test.js`など配布物を検証するtest
 

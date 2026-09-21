@@ -22,7 +22,7 @@ policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CL
 
 === サブコマンド
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |サブコマンド |動作
 
@@ -38,7 +38,7 @@ policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CL
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -57,7 +57,7 @@ policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CL
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

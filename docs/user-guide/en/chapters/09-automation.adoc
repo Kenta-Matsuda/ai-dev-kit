@@ -8,7 +8,7 @@ There are three kinds of automation. In all of them, a human merges the pull req
 
 Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and change `AIDEV_KIT_URL` to the URL of your central kit. CI clones the kit and runs `node cli/bin/aidev.js` directly, so `aidev` does not need to be installed.
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |File |Purpose
 
@@ -21,7 +21,7 @@ Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and c
 
 The exit code of `aidev check` is the contract with CI.
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Exit code |Meaning
 
@@ -50,7 +50,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 A human merges twice: at `PKG_PR_OPEN` (the code PR) and at `WIKI_PR_OPEN` (the Wiki PR).
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Command |Action
 

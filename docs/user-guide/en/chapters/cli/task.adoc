@@ -27,7 +27,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === Subcommands
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Subcommand |What it does
 
@@ -49,7 +49,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -71,7 +71,7 @@ IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPE
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

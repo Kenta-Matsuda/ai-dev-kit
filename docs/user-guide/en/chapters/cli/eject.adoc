@@ -23,7 +23,7 @@ There is no interactive confirmation. Without `--yes` it lists what would happen
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -45,7 +45,7 @@ There is no interactive confirmation. Without `--yes` it lists what would happen
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

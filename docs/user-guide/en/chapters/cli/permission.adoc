@@ -22,7 +22,7 @@ There is no interactive editing of the candidate. Adjust it through `secrets_pat
 
 === Subcommands
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Subcommand |Behaviour
 
@@ -38,7 +38,7 @@ There is no interactive editing of the candidate. Adjust it through `secrets_pat
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -57,7 +57,7 @@ There is no interactive editing of the candidate. Adjust it through `secrets_pat
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

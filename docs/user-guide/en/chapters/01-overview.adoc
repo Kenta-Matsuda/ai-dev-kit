@@ -5,13 +5,13 @@
 
 After adopting it, you have three things:
 
-* **The same setup** — `.claude/` (agents, skills, hooks), `CLAUDE.md` and `.mcp.json` are shared by the whole team. `aidev update` refreshes them, and `aidev check` finds hand edits.
+* **The same setup** — `.claude/` (agents, skills, hooks), `CLAUDE.md` and `.mcp.json` are shared by the whole team. They come from the kit's templates and the team may edit them. `aidev apply` takes in new templates, merging with edits; `aidev check` stops only unresolved conflicts and missing hooks.
 * **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. Claude reads them before it reads the source. When the code moves on, `aidev sync` catches the Wiki up and opens a PR.
 * **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only.
 
 === Who does what
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Role |What to do
 
@@ -34,7 +34,7 @@ After adopting it, you have three things:
 
 === Terms
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Term |Meaning
 

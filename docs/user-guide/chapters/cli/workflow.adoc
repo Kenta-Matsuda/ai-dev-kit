@@ -25,7 +25,7 @@ PR は作りません。
 
 === サブコマンド
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |サブコマンド |動作
 
@@ -44,7 +44,7 @@ PR は作りません。
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -69,7 +69,7 @@ PR は作りません。
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

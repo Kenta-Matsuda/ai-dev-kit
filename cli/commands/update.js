@@ -1,33 +1,27 @@
 'use strict';
 /**
- * `aidev update` — bring the kit forward, then the package(s) with it.
+ * `aidev update` — bring the kit checkout forward.
  *
- *   1. Fast-forward the kit checkout that provides the running CLI.
- *   2. Re-apply the templates to the current PKG clone (or, with --all, to
- *      every clone registered on this machine). Files the kit generated and
- *      nobody edited are replaced; a locally edited file is a conflict that
- *      needs --force or a PR to the kit.
+ * This updates the CLI and the templates it carries, and nothing in any PKG.
+ * Applying the new templates to a PKG is `aidev apply`, run by each team when
+ * it suits them: that step changes files the team owns and may need a merge,
+ * so it must not ride along with a routine CLI update.
  *
- * The result is an ordinary diff in the PKG clone: review it, commit it, and
- * the whole team receives the update through git.
+ * After updating, the packages registered on this machine whose recorded kit
+ * commit is older are listed, so nobody has to remember which clones still
+ * carry the previous templates.
  */
 
-const fs = require('fs');
-const path = require('path');
 const { EXIT, AidevError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
 const gitMod = require('../lib/git');
-const assets = require('../lib/assets');
 const home = require('../lib/home');
 const ui = require('../lib/ui');
 
-const FLAGS = { 'dry-run': 'boolean', json: 'boolean', 'kit-only': 'boolean', all: 'boolean', force: 'boolean' };
+const FLAGS = { 'dry-run': 'boolean', json: 'boolean' };
 const FLAG_HELP = {
-  'dry-run': 'show what would change; write nothing',
+  'dry-run': 'show whether a newer kit exists; change nothing',
   json: 'machine-readable output',
-  'kit-only': 'update the CLI only; leave package files alone',
-  all: 're-apply templates to every package registered on this machine',
-  force: 'replace tool configuration files that were edited locally',
 };
 const REMOTE = 'origin';
 const REF = 'main';
@@ -70,48 +64,20 @@ function selfUpdate(installRoot, { dryRun }) {
   return { ...result, updated: true };
 }
 
-/** Re-apply the templates to one PKG clone. */
-function applyToPackage(repoRoot, { installRoot, dryRun, force, human, kitVersion = null }) {
-  // The PKG's aidev.yaml says which tools to set up; a clone whose config
-  // cannot be read keeps the tool list recorded at the last materialisation.
-  const tools = assets.configuredTools(repoRoot);
-  const mat = assets.materializeStaticAssets(repoRoot, { installRoot, dryRun, force, tools });
-  const kitCommit = gitMod.headSha(installRoot);
-  const summary = {
-    path: repoRoot, ok: mat.ok, created: mat.created, updated: mat.updated, pruned: mat.pruned,
-    unchanged: mat.unchanged.length, conflicts: mat.conflicts,
-  };
-  if (mat.noTemplates) { summary.ok = false; summary.reason = 'no templates in the kit checkout'; return summary; }
-  if (mat.conflicts.length > 0) {
-    if (human) {
-      ui.fail(`${repoRoot}: ${mat.conflicts.length} file(s) were edited locally and were not replaced:`);
-      for (const c of mat.conflicts) ui.dim(`    ${c.path} — ${c.reason}`);
-      ui.dim('    Re-run with --force to take the kit version, or send the change to ai-dev-kit as a PR.');
-    }
-    return summary;
+/** Registered packages whose recorded kit commit is not the one now installed. */
+function packagesBehind(kitCommit) {
+  const behind = [];
+  for (const p of home.listPackages().present) {
+    let lock = null;
+    try { lock = cfgMod.loadLock(p.path); } catch { lock = null; }
+    const applied = (lock && lock.kitCommit) || p.kitCommit || null;
+    if (!applied || applied !== kitCommit) behind.push({ path: p.path, name: p.name || null, applied });
   }
-  const changed = mat.created.length + mat.updated.length + mat.pruned.length;
-  if (!dryRun) {
-    require('../lib/layout').ensureAidevGitignore(repoRoot);
-    assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit, kitVersion, tools, installRoot }));
-    home.registerPackage(repoRoot, { remote: gitMod.remoteUrl(repoRoot, 'origin'), kitCommit });
-  }
-  if (human) {
-    if (changed === 0) ui.ok(`${path.basename(repoRoot)}: tool configuration already current`);
-    else {
-      ui.ok(`${path.basename(repoRoot)}: ${dryRun ? 'would update' : 'updated'} ${changed} file(s)`);
-      for (const p of mat.created) ui.dim(`    + ${p}`);
-      for (const p of mat.updated) ui.dim(`    ~ ${p}`);
-      for (const p of mat.pruned) ui.dim(`    - ${p}`);
-      if (!dryRun) ui.dim('    Review with "git diff", then commit so your team receives the update.');
-    }
-  }
-  summary.changed = changed;
-  return summary;
+  return behind;
 }
 
 function run(ctx) {
-  const { installRoot, repoRoot, flags } = ctx;
+  const { installRoot, flags } = ctx;
   const dryRun = !!flags['dry-run'];
   const human = !flags.json;
 
@@ -122,20 +88,17 @@ function run(ctx) {
     else ui.ok(`${dryRun ? 'would update' : 'updated'} ai-dev-kit ${self.versionFrom || '?'} → ${self.versionTo || '?'} (${self.from.slice(0, 7)} → ${self.to.slice(0, 7)})`);
   }
 
-  const packages = [];
-  if (!flags['kit-only']) {
-    let targets = [];
-    if (flags.all) targets = home.listPackages().present.map((p) => p.path);
-    else if (repoRoot && fs.existsSync(cfgMod.configPath(repoRoot))) targets = [repoRoot];
-    if (targets.length === 0 && human) {
-      ui.info('not inside a package; pass --all to update every registered package, or run this in a package clone.');
-    }
-    for (const t of targets) packages.push(applyToPackage(t, { installRoot, dryRun, force: !!flags.force, human, kitVersion: ctx.version || null }));
+  const now = dryRun ? self.to : gitMod.headSha(installRoot);
+  const behind = packagesBehind(now);
+  if (human && behind.length > 0) {
+    ui.info(`${behind.length} package(s) on this machine still carry templates from an older kit:`);
+    for (const b of behind) ui.dim(`    ${b.path}${b.applied ? ` (applied ${String(b.applied).slice(0, 7)})` : ''}`);
+    ui.dim('    Run "aidev apply" in each when convenient; it merges the new templates with your edits.');
+  } else if (human && self.updated && !dryRun) {
+    ui.dim('    Run "aidev apply" in your package clones to take the new templates.');
   }
-
-  const conflicts = packages.filter((p) => p.conflicts && p.conflicts.length > 0).length;
-  if (flags.json) ui.json({ ok: conflicts === 0, dryRun, kit: self, packages });
-  return conflicts === 0 ? EXIT.OK : EXIT.DRIFT;
+  if (flags.json) ui.json({ ok: true, dryRun, kit: self, packagesBehind: behind });
+  return EXIT.OK;
 }
 
-module.exports = { run, FLAGS, FLAG_HELP, selfUpdate, applyToPackage, summary: 'ai-dev-kit本体を更新し、PKGのツール設定を再適用する' };
+module.exports = { run, FLAGS, FLAG_HELP, selfUpdate, packagesBehind, summary: 'ai-dev-kit 本体（CLI とテンプレート）を更新する。PKG への適用は aidev apply' };

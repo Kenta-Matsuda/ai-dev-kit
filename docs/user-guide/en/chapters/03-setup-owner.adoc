@@ -27,7 +27,7 @@ git switch -c feature/ai-dev-kit
 aidev init
 ----
 +
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Question |How to answer
 
@@ -44,7 +44,7 @@ aidev init
 |Inferred from the `origin` URL. For Azure DevOps, confirm organization / project / repository, then answer the branch the Wiki should follow (default `main`).
 |===
 +
-After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step.
+After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step. It then asks `Build the LLM Wiki now? (Y/n)`. Enter starts the build (step 4).
 +
 * `✗ N kit-owned file(s) differ from the kit copy` → there is already a hand-edited `.claude/` or similar. Save its contents somewhere, then run `aidev init --force`.
 * `run "aidev init" at the repository root` → move to the root and run it there.
@@ -59,14 +59,7 @@ aidev permission configure --approve
 +
 See xref:permissions[Permissions and safety] for what the policy contains.
 
-. Generate the Wiki. This takes time. If it stops part way, the same command resumes where it left off.
-+
-[source,bash]
-----
-aidev knowledge build
-----
-+
-Progress is shown like this:
+. Wait for the Wiki build. It starts when you press Enter at the last question of `aidev init`. It takes time. If it stops part way, running `aidev init` again resumes where it left off.
 +
 [source,text]
 ----
@@ -78,10 +71,10 @@ Progress is shown like this:
 ✓ knowledge-builder completed 163/163 queued generation target(s) ($4.9012)
 ----
 +
-It is done when the last line is `✓ knowledge-builder completed N/N`. If it stops with anything else, check the following and **run the same command again**.
+It is done when the last line is `✓ knowledge-builder completed N/N`. If it stops with anything else, check the following and run `aidev init` again.
 +
 * `⚠ the knowledge-builder agent did not run` → Claude Code was not found. Fix the `claude` line of `aidev doctor`.
-* `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → the finished part is saved. Run it again. If it keeps running out of time, add `--agent-batch-size 10`.
+* `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → the finished part is saved. Run it again.
 +
 The Wiki is complete when the second line of `aidev status` is `✅`.
 

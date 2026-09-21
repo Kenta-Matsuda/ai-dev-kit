@@ -26,7 +26,7 @@ It does not merge the PR. With `generic` hosting it pushes and you open the PR b
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -57,13 +57,18 @@ It does not merge the PR. With `generic` hosting it pushes and you open the PR b
 |`--no-agent`
 |Update only the inventory and manifest; leave the prose for a later run
 
-|`--agent-name <name>`, `--agent-tool <tool>`, `--agent-timeout <ms>`, `--agent-model <model>`, `--agent-batch-size <n>`, `--survey`, `--no-survey`
+|`--agent-name <name>` +
+`--agent-tool <tool>` +
+`--agent-timeout <ms>` +
+`--agent-model <model>` +
+`--agent-batch-size <n>` +
+`--survey`, `--no-survey`
 |Same as xref:cli-knowledge[aidev knowledge]
 |===
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

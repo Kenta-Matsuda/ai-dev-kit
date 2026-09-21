@@ -76,7 +76,7 @@ hook を外す編集は `aidev check` が終了コード 2 で検出し、CI が
 
 policy は AI が作れません。人間が CLI で置きます。
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コマンド |動作
 

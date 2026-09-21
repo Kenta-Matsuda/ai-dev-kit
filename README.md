@@ -4,7 +4,7 @@
 
 導入すると、PKG の clone に次が入ります。
 
-- `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` — チーム共通の Claude Code 設定。`aidev update` で更新。`aidev.yaml` の `tools.default` に `copilot` / `codex` / `kiro` を足すと、同じテンプレートから各ツール用の設定（`.github/copilot-instructions.md` と `.github/agents/`、`AGENTS.md`、`.kiro/`）も生成
+- `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` — チーム共通の Claude Code 設定。kit のテンプレートから置かれ、チームが編集できる。新しいテンプレートは `aidev apply` で取り込む（編集済みはマージ、衝突はマーカーで残す）。`aidev.yaml` の `tools.default` に `copilot` / `codex` / `kiro` を足すと、そのツール用のテンプレート（`.github/copilot-instructions.md` と `.github/agents/`、`AGENTS.md`、`.kiro/`）も置かれる
 - `.aidev/knowledge/` — AI がソースを読む前に引く、根拠付きの Wiki。tracking branch が進んだら `aidev sync` が PR で追従
 - `.aidev/policy.yaml` — AI が書いてよいパスの定義。hooks が毎回の書き込みを検査
 - `aidev.yaml` — PKG 固有の設定（生成対象・秘密パス・Azure DevOps 接続先）
@@ -33,9 +33,8 @@ git clone <kit-url> ~/ai-dev-kit
 
 ```bash
 cd <pkg>
-aidev init                              # 4 つの質問に答える（Enter で既定値）
+aidev init                              # 4 つの質問に答え、LLM Wiki を生成する（Enter で既定値。止まったら再実行）
 aidev permission configure --approve    # init で policy を置かなかった場合
-aidev knowledge build                   # LLM Wiki を生成（時間がかかる。止まっても同じコマンドで再開）
 aidev check                             # 0 なら整合
 git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json
 git commit -m "chore: adopt ai-dev-kit"
@@ -56,7 +55,8 @@ claude
 
 - `aidev status` — 状態を 1 画面で確認（`⚠️ … run "aidev sync"` なら `aidev sync`）
 - `aidev sync` — tracking branch に追従して Wiki を更新し、`ai/wiki-<sha>` の PR を作る
-- `aidev update` — kit を更新し、PKG の配布ファイルを再適用（差分をコミット）
+- `aidev update` — kit 本体（CLI とテンプレート）を更新
+- `aidev apply` — 新しいテンプレートを PKG に取り込む（編集済みはマージ。差分をコミット）
 - `aidev check` — CI 用。0=ok / 2=drift / 3=権限 / 4=Wiki
 
 ## ドキュメント
@@ -70,9 +70,9 @@ npm run docs:build     # build/docs/ai-dev-kit-user-guide.html（日本語）と
 
 - 導入担当者の手順、メンバーの手順、日常の使い方、LLM Wiki、権限、自動化、トラブルシューティング
 - `aidev.yaml` リファレンス、環境変数、PKG 内のファイル
-- `aidev init` / `status` / `check` / `knowledge` / `sync` / `permission` / `task` / `workflow` / `update` / `doctor` / `eject` / `hook` / `mcp`
+- `aidev init` / `status` / `check` / `knowledge` / `sync` / `permission` / `task` / `workflow` / `update` / `doctor` / `eject` / `uninstall` / `hook` / `mcp`
 
 CI の例は `pipelines/azure-pipelines-check.yml`（PR ごとの `aidev check`）と `pipelines/azure-pipelines-sync.yml`（夜間の `aidev sync`）です。
 
-kit 自体の設計と保守は [maintainer-docs/](maintainer-docs/README.md) を参照してください。
+kit 自体の設計と保守は [docs/developer-guide/](docs/developer-guide/README.md) を参照してください。
 

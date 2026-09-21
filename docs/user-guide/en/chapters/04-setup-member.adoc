@@ -41,7 +41,7 @@ aidev init
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[set the environment variable] and open a new terminal.
 * `✗ N kit-owned file(s) differ from the kit copy` → the `.claude/` or similar in your clone differs from the distributed version. Check with `git status`; if the change was not intended, restore it with `aidev init --force`.
-* `ℹ next: "aidev knowledge build"` → the Wiki has not been merged yet. Ask the package owner.
+* If it asks `the LLM Wiki is not in this clone yet …` → press Enter (`N`). Run `git pull` after the package owner's pull request merges.
 
 . Check the state.
 +

@@ -69,6 +69,16 @@ export AZURE_DEVOPS_PAT="<your-pat>"
 +
 To make it permanent, set it as a user environment variable or in your shell profile (xref:environment-reference[Environment variables]).
 
+=== Uninstall
+
+[source,bash]
+----
+aidev uninstall --dry-run   # see what would be removed
+aidev uninstall --yes
+----
+
+This removes the launcher and `AIDEV_HOME`. The kit clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
+
 === Next steps
 
 * Adopting the kit in a package for the first time → xref:setup-owner[Package owner steps]

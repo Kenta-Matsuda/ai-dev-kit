@@ -4,7 +4,7 @@
 
 Never write values into files. Set them in your shell profile, as user environment variables, or as pipeline secret variables.
 
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Variable |Description
 
@@ -27,7 +27,7 @@ Never write values into files. Set them in your shell profile, as user environme
 |When set, internal errors show a stack trace.
 
 |`AIDEV_BIN_DIR`
-|Overrides where the installer places the launcher.
+|Overrides where the installer places the launcher. `aidev uninstall` looks in the same place.
 
 |`HTTPS_PROXY` / `https_proxy`
 |HTTPS proxy URL. Used by the remote check, `npx` and Claude Code.
@@ -38,7 +38,8 @@ Never write values into files. Set them in your shell profile, as user environme
 |`NO_COLOR`
 |When set, output is not coloured.
 
-|`AIDEV_KIT_URL` / `AIDEV_KIT_REF`, `AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
+|`AIDEV_KIT_URL` / `AIDEV_KIT_REF` +
+`AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
 |Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly sync.
 |===
 

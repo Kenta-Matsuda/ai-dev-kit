@@ -18,7 +18,7 @@ Display only. xref:cli-check[aidev check] runs the same checks and returns them 
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -31,7 +31,7 @@ Display only. xref:cli-check[aidev check] runs the same checks and returns them 
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

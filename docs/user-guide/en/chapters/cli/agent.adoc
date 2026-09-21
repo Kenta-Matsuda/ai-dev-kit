@@ -30,7 +30,7 @@ The adapters other than Claude Code follow each tool's published non-interactive
 
 === Subcommands
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Subcommand |What it does
 
@@ -46,7 +46,7 @@ The adapters other than Claude Code follow each tool's published non-interactive
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -71,7 +71,7 @@ The adapters other than Claude Code follow each tool's published non-interactive
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

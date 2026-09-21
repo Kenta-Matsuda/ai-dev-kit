@@ -23,9 +23,13 @@ const FLAGS = { json: 'boolean', 'no-remote': 'boolean' };
 const FLAG_HELP = { json: 'machine-readable output', 'no-remote': 'do not contact the remote' };
 
 /** Everything `status` and `check` look at, computed once. */
-function inspect(repoRoot, config, { checkRemote = true } = {}) {
+function inspect(repoRoot, config, { checkRemote = true, installRoot = assets.DEFAULT_INSTALL_ROOT } = {}) {
   const st = stateMod.computeState(repoRoot, config, { checkRemote });
-  const drift = assets.detectDrift(repoRoot, { tools: config && config.tools ? config.tools.default : null });
+  const configState = assets.inspectConfig(repoRoot, {
+    tools: config && config.tools ? config.tools.default : null,
+    installRoot,
+    kitCommit: gitMod.headSha(installRoot),
+  });
   let policy = { ok: false, error: null, present: false };
   try {
     const pol = cfgMod.loadPolicy(repoRoot, { required: true });
@@ -42,7 +46,7 @@ function inspect(repoRoot, config, { checkRemote = true } = {}) {
       || gitMod.revParse(repoRoot, `origin/ai/wiki-${String(st.trackingSha).slice(0, 12)}`)
     : null;
   return {
-    state: st, drift, policy, manifest, records, handEdits, inconsistencies,
+    state: st, config: configState, policy, manifest, records, handEdits, inconsistencies,
     syncLease: syncLease ? { ...syncLease, evaluation: leases.evaluateLease(syncLease) } : null,
     workLeases, wikiBranchForTracking: wikiBranch,
   };
@@ -65,9 +69,14 @@ function run(ctx) {
   }
 
   const config = cfgMod.loadConfig(repoRoot);
-  const r = inspect(repoRoot, config, { checkRemote: !flags['no-remote'] });
+  const r = inspect(repoRoot, config, { checkRemote: !flags['no-remote'], installRoot });
   const st = r.state;
   const kitCommit = gitMod.headSha(installRoot);
+  const cfgState = r.config;
+  const configLine = cfgState.noLock ? 'not recorded — run "aidev init"'
+    : cfgState.conflicts.length ? `CONFLICTS in ${cfgState.conflicts.length} file(s) — resolve, then "aidev apply"`
+      : cfgState.hooksMissing.length ? `kit hooks missing from .claude/settings.json (${cfgState.hooksMissing.join(', ')})`
+        : `applied from kit ${stateMod.short(cfgState.lock.kitCommit)}${cfgState.customised.length ? `, ${cfgState.customised.length} file(s) customised` : ''}${cfgState.missing.length ? `, ${cfgState.missing.length} missing` : ''}${cfgState.outdated ? ' — newer templates available: "aidev apply"' : ''}`;
 
   if (flags.json) {
     ui.json({
@@ -75,14 +84,17 @@ function run(ctx) {
       package: config.package.name,
       hosting: config.hosting.type,
       tools: config.tools.default,
-      kit: { version: ctx.version || null, commit: kitCommit, applied: r.drift.lock?.kitCommit || null },
+      kit: { version: ctx.version || null, commit: kitCommit, applied: cfgState.lock?.kitCommit || null },
       state: st,
       wiki: {
         present: !!r.manifest, pages: r.manifest?.stats?.pages ?? 0, targets: r.records.length,
         pending: st.pendingPages, handEdits: r.handEdits, inconsistencies: r.inconsistencies.length,
         branchForTracking: r.wikiBranchForTracking,
       },
-      drift: { ok: r.drift.ok, noLock: r.drift.noLock, modified: r.drift.modified.map((m) => m.path), missing: r.drift.missing, extra: r.drift.extra },
+      toolConfig: {
+        ok: cfgState.ok, noLock: cfgState.noLock, conflicts: cfgState.conflicts, hooksMissing: cfgState.hooksMissing,
+        missing: cfgState.missing, customised: cfgState.customised, outdated: cfgState.outdated,
+      },
       policy: r.policy,
       syncLease: r.syncLease,
       workLeases: r.workLeases.map((l) => ({ taskId: l.taskId, branch: l.branch })),
@@ -94,7 +106,7 @@ function run(ctx) {
   ui.table([
     ['hosting', `${config.hosting.type}${config.hosting.repository ? ` (${config.hosting.repository})` : ''}, tracking origin/${st.trackingBranch}`],
     ['tools', config.tools.default.join(', ')],
-    ['kit', `${ctx.version || '?'} @ ${stateMod.short(kitCommit)}${r.drift.lock?.kitCommit && r.drift.lock.kitCommit !== kitCommit ? ` (this clone was set up with ${stateMod.short(r.drift.lock.kitCommit)}; run "aidev update")` : ''}`],
+    ['kit', `${ctx.version || '?'} @ ${stateMod.short(kitCommit)}`],
   ]);
   ui.out('');
   ui.out(stateMod.formatSummary(st));
@@ -104,7 +116,7 @@ function run(ctx) {
   ui.out('');
   ui.table([
     ['Wiki', r.manifest ? `${r.manifest.stats?.pages ?? 0} page(s) for ${r.records.length} target(s)${st.pendingPages ? `, ${st.pendingPages} pending` : ''}` : 'not generated'],
-    ['tool config', r.drift.noLock ? 'not recorded — run "aidev init"' : (r.drift.ok ? 'matches the kit' : 'DRIFT (edited by hand or outdated)')],
+    ['tool config', configLine],
     ['policy', r.policy.ok ? `placed (${r.policy.protectedCount} protected paths)` : 'missing — run "aidev permission configure --approve"'],
   ]);
   if (r.handEdits.length > 0) {
@@ -112,11 +124,11 @@ function run(ctx) {
     for (const h of r.handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
   }
   if (r.inconsistencies.length > 0) ui.warn(`${r.inconsistencies.length} inventory inconsistency/ies; run "aidev knowledge build --full" if they persist.`);
-  if (!r.drift.ok && !r.drift.noLock) {
-    for (const m of r.drift.modified.slice(0, 10)) ui.dim(`    modified: ${m.path}`);
-    for (const m of r.drift.missing.slice(0, 10)) ui.dim(`    missing:  ${m}`);
-    for (const m of r.drift.extra.slice(0, 10)) ui.dim(`    untracked: ${m}`);
-    ui.dim('    "aidev update" restores kit files; local changes belong in a PR to ai-dev-kit.');
+  if (!cfgState.noLock) {
+    for (const m of cfgState.conflicts.slice(0, 10)) ui.dim(`    conflict:   ${m}`);
+    for (const m of cfgState.hooksMissing.slice(0, 10)) ui.dim(`    missing hook: ${m}`);
+    for (const m of cfgState.missing.slice(0, 10)) ui.dim(`    missing:    ${m} (restored by "aidev apply")`);
+    for (const m of cfgState.customised.slice(0, 10)) ui.dim(`    customised: ${m}`);
   }
   if (r.syncLease) {
     ui.warn(r.syncLease.evaluation.valid

@@ -13,7 +13,7 @@ aidev status
 
 The symbol and sentence on the second line tell you what to do next.
 
-[cols="3,2",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Shown |What to do
 
@@ -41,7 +41,7 @@ The symbol and sentence on the second line tell you what to do next.
 
 For other messages, see xref:troubleshooting-status[Troubleshooting].
 
-In the lines that follow, check that `tool config` says `matches the kit` and `policy` says `placed`. `DRIFT` means someone hand-edited `.claude/` or similar, or the kit is old (xref:daily-update[Updating the kit]). `policy missing` is fixed with `aidev permission configure --approve`.
+In the lines that follow, check `tool config` and `policy`. `tool config` starts with `applied from kit <sha>` and adds how many files the team edited (`customised`) and whether newer templates exist (`newer templates available: "aidev apply"`). `CONFLICTS` means an `aidev apply` conflict is unresolved; `kit hooks missing` means the hooks are gone from `.claude/settings.json` (xref:daily-apply[aidev apply]). `policy missing` is fixed with `aidev permission configure --approve`.
 
 === How the Wiki is used
 
@@ -92,29 +92,48 @@ When a newer kit exists, running a command in the package shows this:
   Update now, before running this command? (y/N):
 ----
 
-`y` updates only the kit first. To also update the distributed files in the package (`.claude/` and so on), run this at the package root:
+`y` updates the kit (the CLI and its templates). Package files do not change at this point.
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
+ℹ 1 package(s) on this machine still carry templates from an older kit:
+    C:\work\demo-pkg (applied 499f940)
+    Run "aidev apply" in each when convenient; it merges the new templates with your edits.
+----
+
+[[daily-apply]]
+=== aidev apply — take the new templates into the package
+
+After updating the kit, run this at the package root when it suits you. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the kit's changes.
 
 [source,bash]
 ----
-aidev update
+aidev apply
 ----
 
 [source,text]
 ----
-✓ updated ai-dev-kit 0.2.0 → 0.2.1 (9491efe → e0aa66c)
-✓ demo-pkg: updated 3 file(s)
+✓ applied 3 change(s) for claude
     ~ .claude/agents/knowledge-builder.md
-    ~ .claude/skills/knowledge-usage/SKILL.md
-    ~ CLAUDE.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
     Review with "git diff", then commit so your team receives the update.
 ----
 
 Review the diff, commit it and open a PR. After the merge, the other members get the same state with just `git pull`.
 
-* `✗ … file(s) were edited locally and were not replaced` → some files were hand-edited. Send the change to the kit as a PR, or replace them with the distributed version using `aidev update --force`.
-* To update every package registered on this machine at once, run `aidev update --all`.
+When the team and the kit changed the same lines, git-style conflict markers are written into the file and the command stops with exit code 2.
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+----
+
+Resolve the markers, settle the content, run `aidev apply` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the kit version of every file instead, run `aidev apply --force`.
 
 === Related
 
 * xref:knowledge[LLM Wiki] — how generation works and how to resume
-* xref:cli-status[aidev status], xref:cli-sync[aidev sync], xref:cli-update[aidev update]
+* xref:cli-status[aidev status], xref:cli-sync[aidev sync], xref:cli-update[aidev update], xref:cli-apply[aidev apply]

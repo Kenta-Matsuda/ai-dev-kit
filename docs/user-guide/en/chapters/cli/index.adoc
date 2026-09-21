@@ -21,7 +21,7 @@ aidev <command> [subcommand] [options] [arguments]
 [[cli-common-options]]
 === Common options
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -43,7 +43,7 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 [[cli-exit-codes]]
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Meaning
 
@@ -54,7 +54,7 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 |General error (bad option, missing configuration, network failure, agent failure, and so on)
 
 |2
-|drift: the distributed files (`.claude/**`, `CLAUDE.md`, `.mcp.json`, the generated configuration of other tools) differ from what was recorded
+|drift: the tool-configuration record (`.aidev/materialized.json`) is missing, conflict markers from `aidev apply` are unresolved, or the kit's hooks are gone from `.claude/settings.json`
 
 |3
 |permission: the policy is missing or broken, or approval was refused
@@ -67,7 +67,7 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 === Commands
 
 .Inside a PKG clone
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Command |Summary
 
@@ -97,25 +97,31 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |Create and run approved scripts
+
+|xref:cli-apply[`aidev apply`]
+|Apply the kit's latest templates to this package (edited files are merged)
 |===
 
 .For this machine
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Command |Summary
 
 |xref:cli-update[`aidev update`]
-|Update the kit and re-apply the distributed files to the PKG
+|Update the kit itself (CLI and templates); applying to a PKG is `aidev apply`
 
 |xref:cli-doctor[`aidev doctor`]
 |Diagnose the environment of this machine and the PKG
 
 |xref:cli-eject[`aidev eject`]
 |Take the PKG out of kit management
+
+|xref:cli-uninstall[`aidev uninstall`]
+|Remove `aidev` from this machine
 |===
 
 .Called by tools
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Command |Summary
 
@@ -144,11 +150,15 @@ include::task.adoc[]
 
 include::workflow.adoc[]
 
+include::apply.adoc[]
+
 include::update.adoc[]
 
 include::doctor.adoc[]
 
 include::eject.adoc[]
+
+include::uninstall.adoc[]
 
 include::hook.adoc[]
 

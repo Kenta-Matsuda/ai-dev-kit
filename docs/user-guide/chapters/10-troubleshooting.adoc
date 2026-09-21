@@ -6,7 +6,7 @@
 [[troubleshooting-install]]
 === インストール
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
@@ -29,7 +29,7 @@
 [[troubleshooting-status]]
 === aidev status / aidev check の表示
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
@@ -45,8 +45,11 @@
 |`⚠️ N page(s) still await prose regeneration`
 |`aidev knowledge build`。
 
-|`tool config  DRIFT`
-|`git diff` で確認します。意図しない変更なら `aidev update` で配布版に戻します。意図した変更は kit への PR にします。
+|`tool config  CONFLICTS in N file(s)`
+|`aidev apply` の衝突が未解消です。該当ファイルのマーカー（`<<<<<<<` / `=======` / `>>>>>>>`）を解消し、`aidev apply` を実行して記録を更新し、コミットします。
+
+|`tool config  kit hooks missing from .claude/settings.json`
+|kit の hooks が消えています。`aidev apply --force` で kit 版に戻すか、hooks を手で戻します。
 
 |`tool config  not recorded — run "aidev init"`
 |`aidev init` を実行します。
@@ -72,8 +75,8 @@
 |終了コード |表示 |対処
 
 |2
-|`kit-owned files differ from .aidev/materialized.json`
-|`aidev update` で配布版に戻すか、変更を kit への PR に送ります。
+|`tool configuration file(s) carry unresolved conflict markers` / `the kit's hooks are missing`
+|衝突マーカーを解消して `aidev apply` を実行するか、`aidev apply --force` で kit 版にします。チームの編集そのものは 2 になりません。
 
 |2
 |`.aidev/materialized.json is missing`
@@ -103,7 +106,7 @@
 [[troubleshooting-agent]]
 === Wiki の生成
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
@@ -114,7 +117,7 @@
 |同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けます。
 
 |`✗ knowledge-builder made no Wiki progress: 0/N`
-|続く `Claude result:` を読みます。`permission denial(s)` があれば `aidev update` で `.claude/settings.json` を配布版に戻します。
+|続く `Claude Code result:` を読みます。`permission denial(s)` があれば `.claude/settings.json` の deny 設定を確認し、必要なら `aidev apply --force` で kit 版に戻します。
 
 |`⚠ N completion report(s) were rejected`
 |同じコマンドで再実行します。続くなら `--full`。
@@ -132,7 +135,7 @@
 [[troubleshooting-sync]]
 === aidev sync
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
@@ -161,7 +164,7 @@
 [[troubleshooting-permission]]
 === 権限拒否
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
@@ -177,25 +180,29 @@
 |`policy could not be evaluated (…); write blocked`
 |`aidev permission show` で確認し、`aidev permission reconfigure --approve` で置き直します。
 
-|`reconfigure --approve` が `this candidate weakens the policy in force` で止まる
+|`reconfigure --approve` が +
+`this candidate weakens the policy in force` で止まる
 |`git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml` で差分を確認し、意図どおりなら `--force` を付けます。
 |===
 
 [[troubleshooting-update]]
 === kit 更新後
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
-|`aidev status` の `kit` 行に `run "aidev update"`
-|PKG で `aidev update` し、差分をコミットして PR にします。
+|`aidev status` の `tool config` 行に `newer templates available: "aidev apply"`
+|都合のよいときに PKG で `aidev apply` し、差分をコミットして PR にします。
 
 |`aidev check` が終了コード 2 になった
-|`git pull`。それでも 2 なら `aidev update` して差分をコミットします。
+|`git pull`。それでも 2 なら、`aidev status` で衝突マーカーか hooks の欠落かを確認し、解消して `aidev apply` を実行します。
 
-|`✗ … file(s) were edited locally and were not replaced`
-|`aidev update --force` で配布版にするか、変更を kit への PR に送ります。
+|`✗ N file(s) need your attention` / `conflict markers were written`
+|チームの編集と kit の変更が同じ箇所です。マーカーを解消して `aidev apply` を実行し、コミットします。kit 版にしてよければ `aidev apply --force` です。
+
+|`edited locally and the template it was based on … is not in the kit checkout's history`
+|kit の clone に前回のコミットがありません（shallow clone など）。kit の clone で `git fetch --unshallow` するか、手で直すか `aidev apply --force` にします。
 
 |`✗ the kit checkout has diverged from origin/main`
 |kit の clone にローカルコミットがあります。捨ててよければ `git reset --hard origin/main`。
@@ -204,7 +211,7 @@
 [[troubleshooting-windows]]
 === Windows
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 

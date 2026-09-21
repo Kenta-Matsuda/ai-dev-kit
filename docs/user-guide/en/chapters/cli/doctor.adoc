@@ -18,7 +18,7 @@ Each line is `✓` (ok), `⚠` (warning) or `✗` (failure).
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 

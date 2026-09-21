@@ -17,7 +17,7 @@ aidev hook session-stop
 
 Claude Code starts it from the distributed `.claude/settings.json`. It reads the hook input (JSON) on stdin and writes its decision (JSON) to stdout. To try it out, pass an input file with `--input <file>`.
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Subcommand |What it does
 

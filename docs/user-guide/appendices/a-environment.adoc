@@ -4,7 +4,7 @@
 
 値をファイルに書かず、シェルの profile、ユーザー環境変数、pipeline の secret variable から渡します。
 
-[cols="2,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |変数 |説明
 
@@ -27,7 +27,7 @@
 |設定すると内部エラーの stack trace を表示します。
 
 |`AIDEV_BIN_DIR`
-|installer が起動スクリプトを置く場所を上書きします。
+|installer が起動スクリプトを置く場所を上書きします。`aidev uninstall` も同じ場所を見ます。
 
 |`HTTPS_PROXY` / `https_proxy`
 |HTTPS proxy の URL。remote の確認、`npx`、Claude Code が使います。
@@ -38,7 +38,8 @@
 |`NO_COLOR`
 |設定すると色付けを止めます。
 
-|`AIDEV_KIT_URL` / `AIDEV_KIT_REF`、`AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
+|`AIDEV_KIT_URL` / `AIDEV_KIT_REF` +
+`AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
 |`pipelines/*.yml` が使う pipeline 変数。中央 kit の URL とブランチ、夜間 sync の bot の名前とメール。
 |===
 

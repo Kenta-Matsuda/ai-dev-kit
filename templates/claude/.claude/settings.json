@@ -28,7 +28,8 @@
       "Bash(git push:*)",
       "Bash(aidev permission configure:*)",
       "Bash(aidev permission reconfigure:*)",
-      "Bash(aidev eject:*)"
+      "Bash(aidev eject:*)",
+      "Bash(aidev uninstall:*)"
     ]
   },
   "hooks": {

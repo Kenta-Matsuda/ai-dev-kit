@@ -1,0 +1,68 @@
+[[cli-uninstall]]
+== aidev uninstall
+
+この端末から `aidev` コマンドを消します。
+
+=== 書式
+
+[source,text]
+----
+aidev uninstall --dry-run
+aidev uninstall --yes [--json]
+----
+
+=== 説明
+
+installer が置いたものを消します。①起動スクリプト（Windows: `aidev.cmd` と `aidev.ps1`、POSIX: `aidev`。installer が生成したものだけ）、②Windows ではユーザー PATH に足した起動スクリプトの場所、③`AIDEV_HOME` の `registry.json` と `cache/`。
+
+消さないものと、消したいときのコマンドを表示します。
+
+* kit の clone。`aidev` はこの中で動いているので、表示された `Remove-Item` / `rm -rf` を後で自分で実行します。
+* 登録済みの各 PKG に kit が置いたファイル。commit されてチームで共有しているので、消すならチームの変更として PR にします。先に xref:cli-eject[`aidev eject --yes`] を実行するか（Wiki と `aidev.yaml` は残ります）、表示された `git rm` を PKG の clone で実行します（Wiki も消えます）。
+
+対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。消すものが無くても 0 で終わります。
+
+再インストールは kit の clone で installer を実行します（xref:install[端末に aidev を入れる]）。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--yes`
+|確認済みとして実行する
+
+|`--dry-run`
+|消すものと、残すものを消すコマンドを表示し、何も書かない
+
+|`--json`
+|JSON で出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|消した。消すものが無かった。`--dry-run`
+
+|1
+|`--yes` が無い
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev uninstall --dry-run
+aidev uninstall --yes
+rm -rf ~/ai-dev-kit            # 表示された kit の clone を消すコマンド
+----
+
+=== 関連
+
+* xref:cli-eject[aidev eject] — PKG を kit の管理から外す
+* xref:install[端末に aidev を入れる]

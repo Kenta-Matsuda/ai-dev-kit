@@ -18,7 +18,7 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 
 === Options
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
@@ -34,7 +34,7 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 
 === Exit codes
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Code |Condition
 
@@ -45,7 +45,7 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 |General error, such as a broken `aidev.yaml`
 
 |2
-|`.aidev/materialized.json` is missing, or `.claude/**`, `CLAUDE.md` or `.mcp.json` differ from what was recorded. Warnings with `--strict`
+|`.aidev/materialized.json` is missing, conflict markers from `aidev apply` remain, or the kit's hooks are gone from `.claude/settings.json`. A tool configuration file merely edited by the team passes. Warnings with `--strict`
 
 |3
 |`.aidev/policy.yaml` is missing or cannot be read
@@ -76,7 +76,7 @@ A failure (exit code 2):
 
 [source,text]
 ----
-✗ [exit 2] kit-owned files differ from .aidev/materialized.json (1 modified). Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.
+✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev apply" to record the result.
     modified: .claude/settings.json
 ----
 

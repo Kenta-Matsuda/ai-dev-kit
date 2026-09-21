@@ -30,7 +30,7 @@ Claude Code 以外のアダプタは各ツールの非対話モードの公開�
 
 === サブコマンド
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |サブコマンド |動作
 
@@ -46,7 +46,7 @@ Claude Code 以外のアダプタは各ツールの非対話モードの公開�
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -71,7 +71,7 @@ Claude Code 以外のアダプタは各ツールの非対話モードの公開�
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 

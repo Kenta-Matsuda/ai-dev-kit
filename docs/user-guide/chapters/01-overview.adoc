@@ -5,13 +5,13 @@
 
 導入すると、次の 3 つがそろいます。
 
-* **同じ設定** — `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` をチーム全員で共有します。`aidev update` で更新し、手編集は `aidev check` が見つけます。
+* **同じ設定** — `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` をチーム全員で共有します。kit のテンプレートから置かれ、チームが編集できます。新しいテンプレートは `aidev apply` で取り込み、編集済みならマージします。`aidev check` は未解消の衝突と hooks の欠落だけを止めます。
 * **LLM Wiki** — `.aidev/knowledge/` に、コードの構造と役割を説明する Markdown ページを生成します。Claude はソースを読む前にここを引きます。コードが進んだら `aidev sync` が追従し、PR を作ります。
 * **書き込みの制限** — `.aidev/policy.yaml` に「AI が書いてよい場所」を定め、hook が毎回の書き込みを検査します。ソースは通常 read-only です。
 
 === 誰が何をするか
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |役割 |すること
 
@@ -34,7 +34,7 @@
 
 === 用語
 
-[cols="1,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |用語 |意味
 

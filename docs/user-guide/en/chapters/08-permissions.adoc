@@ -76,7 +76,7 @@ After you approve a run, the `issue-to-pr` agent receives a work lease from the 
 
 The AI cannot create the policy. A human places it with the CLI.
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |Command |Action
 

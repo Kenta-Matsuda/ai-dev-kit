@@ -76,6 +76,8 @@ function ask(rl, question, dflt) {
   });
 }
 
+const stateShort = (sha) => (sha ? String(sha).slice(0, 7) : 'unknown');
+
 function splitList(v, dflt) {
   if (v == null || String(v).trim() === '') return dflt;
   return String(v).split(',').map((s) => s.trim()).filter(Boolean);
@@ -300,34 +302,52 @@ async function run(ctx) {
     say.ok(`wrote ${layout.AIDEV_GITIGNORE_REL} (runtime state stays out of git)`);
   }
 
-  // --- 4. materialise the tool configuration --------------------------------
-  const mat = assets.materializeStaticAssets(repoRoot, { installRoot, dryRun, force: !!flags.force, tools: toolList });
-  if (mat.noTemplates) {
-    ui.fail(`no templates found under ${installRoot}. The ai-dev-kit checkout looks incomplete.`);
-    steps.push({ step: 'tool config', action: 'missing-templates' });
-  } else if (mat.conflicts.length > 0) {
-    ui.fail(`${mat.conflicts.length} kit-owned file(s) differ from the kit copy:`);
-    for (const c of mat.conflicts) say.dim(`    ${c.path} — ${c.reason}`);
-    say.dim('    Send intended changes to ai-dev-kit as a PR, or re-run with --force to take the kit version.');
-    steps.push({ step: 'tool config', action: 'conflict', conflicts: mat.conflicts.map((c) => c.path) });
-    if (flags.json) ui.json({ ok: false, dryRun, steps });
-    return EXIT.DRIFT;
-  } else {
-    const wrote = mat.created.length + mat.updated.length;
-    if (wrote === 0) say.ok(`tool configuration is current (${mat.unchanged.length} file(s) for ${toolList.join(', ')})`);
-    else say.ok(`${dryRun ? 'would write' : 'wrote'} ${wrote} tool configuration file(s) (${mat.unchanged.length} already current)`);
-    for (const p of mat.created) say.dim(`    + ${p}`);
-    for (const p of mat.updated) say.dim(`    ~ ${p}`);
-    for (const p of mat.pruned) say.dim(`    - ${p} (no longer shipped)`);
-    steps.push({ step: 'tool config', action: dryRun ? 'would-materialise' : 'materialised',
-      created: mat.created.length, updated: mat.updated.length, unchanged: mat.unchanged.length, pruned: mat.pruned.length });
-  }
-
-  // --- 5. record what was materialised --------------------------------------
+  // --- 4. the tool configuration --------------------------------------------
+  // First time: place the templates of the chosen tools (this is the only
+  // apply init performs). Later: the files and the record came from git, so
+  // init only reports; taking newer templates is "aidev apply", run by the
+  // team when it suits them.
   const kitCommit = gitMod.headSha(installRoot);
-  if (!dryRun && !mat.noTemplates) {
-    assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit, kitVersion: ctx.version || null, tools: toolList, installRoot }));
-    steps.push({ step: 'materialized.json', action: 'write' });
+  const hasLock = cfgMod.loadLock(repoRoot) != null;
+  // --force re-applies too: it means "take the kit version of every file".
+  if (!hasLock || flags.force) {
+    const mat = assets.applyTemplates(repoRoot, {
+      installRoot, dryRun, force: !!flags.force, tools: toolList, kitCommit, kitVersion: ctx.version || null,
+    });
+    if (mat.noTemplates) {
+      ui.fail(`no templates found under ${installRoot} for ${toolList.join(', ')}. The ai-dev-kit checkout looks incomplete.`);
+      steps.push({ step: 'tool config', action: 'missing-templates' });
+    } else if (mat.conflicts.length > 0) {
+      ui.fail(`${mat.conflicts.length} file(s) already exist here and differ from the kit templates:`);
+      for (const c of mat.conflicts) say.dim(`    ${c.path} — ${c.reason}`);
+      say.dim('    Move them aside (or re-run with --force to take the kit version) and run "aidev init" again.');
+      steps.push({ step: 'tool config', action: 'conflict', conflicts: mat.conflicts.map((c) => c.path) });
+      if (flags.json) ui.json({ ok: false, dryRun, steps });
+      return EXIT.DRIFT;
+    } else {
+      const wrote = mat.created.length + mat.updated.length;
+      if (wrote === 0) say.ok(`tool configuration is current (${mat.unchanged.length} file(s) for ${toolList.join(', ')})`);
+      else say.ok(`${dryRun ? 'would write' : 'wrote'} ${wrote} tool configuration file(s) for ${toolList.join(', ')} (${mat.unchanged.length} already current)`);
+      for (const p of mat.created) say.dim(`    + ${p}`);
+      for (const p of mat.updated) say.dim(`    ~ ${p}`);
+      steps.push({ step: 'tool config', action: dryRun ? 'would-materialise' : 'materialised',
+        created: mat.created.length, updated: mat.updated.length, unchanged: mat.unchanged.length, pruned: mat.pruned.length });
+      if (!dryRun) steps.push({ step: 'materialized.json', action: 'write' });
+    }
+  } else {
+    const insp = assets.inspectConfig(repoRoot, { tools: toolList, installRoot, kitCommit });
+    if (insp.conflicts.length > 0) {
+      say.warn(`${insp.conflicts.length} tool configuration file(s) still carry conflict markers; resolve them and run "aidev apply".`);
+      for (const p of insp.conflicts) say.dim(`    ! ${p}`);
+    } else if (insp.hooksMissing.length > 0) {
+      say.warn(`the kit's hooks are missing from .claude/settings.json (${insp.hooksMissing.join(', ')}); run "aidev apply".`);
+    } else {
+      say.ok(`tool configuration is recorded for ${toolList.join(', ')} (from git)`);
+    }
+    if (insp.outdated) {
+      say.info(`the kit installed here (${stateShort(kitCommit)}) is newer than the one these files came from (${stateShort(insp.lock.kitCommit)}); "aidev apply" takes the new templates when your team is ready.`);
+    }
+    steps.push({ step: 'tool config', action: 'keep', conflicts: insp.conflicts.length, outdated: insp.outdated });
   }
 
   // --- 6. register this clone on this machine --------------------------------
@@ -446,7 +466,7 @@ async function run(ctx) {
     const todo = [];
     if (!policyPlaced) todo.push('aidev permission configure --approve   # after reviewing the candidate');
     if (!wikiComplete) todo.push('aidev init                              # builds (or continues) the LLM Wiki');
-    todo.push('git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json && git commit');
+    todo.push(`git add aidev.yaml .aidev ${assets.listStaticFiles(repoRoot, { tools: toolList, installRoot }).map((f) => f.split('/')[0]).filter((v, i, a) => a.indexOf(v) === i).join(' ')} && git commit`);
     todo.push('open a pull request so everyone gets the same setup');
     todo.forEach((t, i) => say.dim(`    ${i + 1}. ${t}`));
   } else if (!wikiComplete) {

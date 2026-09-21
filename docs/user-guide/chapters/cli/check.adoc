@@ -18,7 +18,7 @@ aidev check [options]
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -34,7 +34,7 @@ aidev check [options]
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 
@@ -45,7 +45,7 @@ aidev check [options]
 |`aidev.yaml` が壊れているなどの一般エラー
 
 |2
-|`.aidev/materialized.json` が無い、または `.claude/**`・`CLAUDE.md`・`.mcp.json` が記録と違う。`--strict` 時の警告
+|`.aidev/materialized.json` が無い、`aidev apply` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えている。チームがツール設定ファイルを編集しただけなら通ります。`--strict` 時の警告
 
 |3
 |`.aidev/policy.yaml` が無い、または読めない
@@ -76,7 +76,7 @@ aidev check
 
 [source,text]
 ----
-✗ [exit 2] kit-owned files differ from .aidev/materialized.json (1 modified). Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.
+✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev apply" to record the result.
     modified: .claude/settings.json
 ----
 

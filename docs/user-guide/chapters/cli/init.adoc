@@ -18,15 +18,15 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 * kit のテンプレートから `.claude/**`、`CLAUDE.md`、`.mcp.json` を置き、`.aidev/materialized.json` にハッシュを記録する
 * この clone を端末に登録する
 * `.aidev/policy.yaml` が無ければ候補を表示し、`Place this policy now? (y/N)` と尋ねる
-* Wiki の有無を確認し、次にすることを表示する
+* Wiki が無ければ `Build the LLM Wiki now? (Y/n)` と尋ね、生成する。未完成の Wiki があれば続きから再開する
 
-Wiki は生成しません（`aidev knowledge build` が行います）。既存の `.claude/` は配布版とマージしません。差分があれば終了コード 2 で止まり、`--force` で置き換えます。
+初めての導入では Wiki の生成が既定です。設定は既にあるのに Wiki が無い clone（チームの PR が未マージ）では、既定は「生成しない」です。`--wiki` / `--no-wiki` で質問を省けます。既存の `.claude/` は配布版とマージしません。差分があれば終了コード 2 で止まり、`--force` で置き換えます。
 
 質問は stdin が端末で、`--yes` も `--json` も無いときだけ行います。
 
 === オプション
 
-[cols="2,3",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
@@ -57,7 +57,9 @@ Wiki は生成しません（`aidev knowledge build` が行います）。既存
 |`--hosting <value>`
 |`azure-devops` または `generic`（既定: `origin` の URL から推定）
 
-|`--org <value>`, `--project <value>`, `--repository <value>`
+|`--org <value>` +
+`--project <value>` +
+`--repository <value>`
 |Azure DevOps の組織・プロジェクト・リポジトリ名
 
 |`--tracking-branch <value>`
@@ -71,11 +73,17 @@ Wiki は生成しません（`aidev knowledge build` が行います）。既存
 
 |`--approve`
 |policy を尋ねずに置く
+
+|`--wiki`
+|Wiki を尋ねずに生成（または再開）する
+
+|`--no-wiki`
+|Wiki を今は生成しない
 |===
 
 === 終了コード
 
-[cols="1,4",options="header"]
+[%autowidth.stretch,options="header"]
 |===
 |コード |条件
 
@@ -83,7 +91,7 @@ Wiki は生成しません（`aidev knowledge build` が行います）。既存
 |成功
 
 |1
-|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない
+|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない。Wiki の生成が途中で止まった（`aidev init` の再実行で続行）
 
 |2
 |既存の `.claude/**`、`CLAUDE.md`、`.mcp.json` が配布版と違う（`--force` で置き換え）
@@ -98,11 +106,18 @@ Wiki は生成しません（`aidev knowledge build` が行います）。既存
 aidev init
 ----
 
-質問なしで、policy も同時に置く:
+質問なしで、policy も置き、Wiki も生成する:
 
 [source,bash]
 ----
 aidev init --yes --include "src/**,docs/**" --approve
+----
+
+Wiki は後回しにする:
+
+[source,bash]
+----
+aidev init --no-wiki
 ----
 
 2 人目以降:
