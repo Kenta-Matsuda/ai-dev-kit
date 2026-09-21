@@ -1,0 +1,103 @@
+[[cli-permission]]
+== aidev permission
+
+書き込み権限 policy を置き、見ます。
+
+=== 書式
+
+[source,text]
+----
+aidev permission configure [--approve] [options]
+aidev permission reconfigure [--approve] [options]
+aidev permission show [--json]
+----
+
+=== 説明
+
+policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CLI が `aidev.yaml` から **候補** `.aidev/policy.candidate.yaml` を作り、人間が読んで `--approve` で置く 2 段階です。
+
+`--approve` で置くとき、今の policy より保護が減る変更は **弱化** と判定され、`--force` が無いと終了コード 3 で止まります。
+
+候補を対話で編集する機能はありません。調整は `aidev.yaml` の `secrets_paths` で行います。
+
+=== サブコマンド
+
+[cols="1,4",options="header"]
+|===
+|サブコマンド |動作
+
+|`configure`
+|候補を書く。policy が既にあればエラー。`--approve` で置く
+
+|`reconfigure`
+|policy がある状態で候補を作り直す。`--approve` で置く。弱化があれば `--force` も必要
+
+|`show`
+|有効な policy を表示する。ファイルが無ければ組み込みの最小 policy を表示し、終了コード 3
+|===
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--approve`
+|候補を `.aidev/policy.yaml` として置き、候補ファイルを消す
+
+|`--json`
+|JSON で出力する
+
+|`--force`
+|`configure`: policy があっても候補を作り直す。`--approve`: 弱化があっても置く
+
+|`--dry-run`
+|候補を表示するだけで書かない
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|候補を書いた、置いた、表示した
+
+|1
+|`aidev.yaml` が読めない、`configure` で policy が既にある
+
+|3
+|`--approve` で弱化を検出した（`--force` 無し）。`show` で policy が無い
+|===
+
+=== 例
+
+導入時に `N` と答えた後、候補を読んで置く:
+
+[source,bash]
+----
+cat .aidev/policy.candidate.yaml
+aidev permission configure --approve
+----
+
+`secrets_paths` を変えた後に作り直す:
+
+[source,bash]
+----
+aidev permission reconfigure
+git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
+aidev permission reconfigure --approve      # 保護を弱める差分があるときは --force も付ける
+----
+
+有効な policy を見る:
+
+[source,bash]
+----
+aidev permission show
+----
+
+=== 関連
+
+* xref:permissions[権限と安全性] — 4 つの区分
+* xref:cli-hook[aidev hook] — 判定を行う hook

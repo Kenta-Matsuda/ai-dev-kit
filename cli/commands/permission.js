@@ -43,9 +43,9 @@ function buildCandidate(config) {
   return {
     version: 1,
     protected: protectedPaths,
-    read_only: ['src/**'],
-    writable_during_sync: ['knowledge/**'],
-    writable: ['knowledge/**', 'workflows/**', 'docs/**'],
+    read_only: [...cfgMod.DEFAULT_POLICY_SCOPES.read_only],
+    writable_during_sync: [...cfgMod.DEFAULT_POLICY_SCOPES.writable_during_sync],
+    writable: [...cfgMod.DEFAULT_POLICY_SCOPES.writable],
   };
 }
 
@@ -135,9 +135,12 @@ function detectWeakening(current, candidate) {
   // Escalation: a path only writable while a sync lease is held becoming
   // unconditionally writable is a loss of protection even though nothing was
   // removed from a list.
+  // The default policy legitimately lists the Wiki in both sections, so only
+  // a path that was NOT already writable counts as newly escalated.
   const nextWritable = set(candidate.writable);
+  const nowWritable = set(current.writable);
   for (const p of set(current.writable_during_sync)) {
-    if (nextWritable.has(p)) losses.push({ section: 'writable_during_sync', path: p, kind: 'escalated-to-writable' });
+    if (nextWritable.has(p) && !nowWritable.has(p)) losses.push({ section: 'writable_during_sync', path: p, kind: 'escalated-to-writable' });
   }
 
   return { weakening: losses.length > 0, losses };
@@ -218,7 +221,7 @@ function configure(ctx, { reconfigure = false } = {}) {
       weakening: weakened.weakening, losses: weakened.losses });
     return EXIT.OK;
   }
-  ui.heading('aidev permission configure');
+  ui.heading(`aidev permission ${reconfigure ? 'reconfigure' : 'configure'}`);
   ui.ok(`candidate written to ${CANDIDATE_REL}`);
   if (weakened.weakening) {
     ui.out('');

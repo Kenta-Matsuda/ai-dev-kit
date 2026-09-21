@@ -1,0 +1,99 @@
+[[cli-agent]]
+== aidev agent
+
+同梱 agent を、この PKG に設定した AI ツールで 1 回起動します。
+
+=== 書式
+
+[source,text]
+----
+aidev agent list [--json]
+aidev agent show <name> [--tool <tool>] [--model <model>] [--json]
+aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout <ms>] [--prompt-file <path>] [--dry-run] [--json]
+----
+
+=== 説明
+
+`aidev knowledge build` や `aidev sync` が起動するのと同じ経路で、同梱 agent（`agents-creator`、`issue-to-pr`、`knowledge-builder`、`permission-setting`、`workflow-creator`）に 1 つの仕事を渡します。agent は PKG の clone の中で、対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。
+
+ツールとモデルは次の順で決まります。
+
+. `--tool` / `--model`
+. `aidev.yaml` の `tools.agents.<name>`
+. `aidev.yaml` の `tools.agent` / `tools.agent_model`
+
+使えるツールは `tools.default` にあるものだけです。他のツールを指定すると、`aidev.yaml` に足して `aidev update` を実行するよう案内して止まります。
+
+仕事の渡し方はツールごとに違います。Claude Code には標準入力で渡し、`--agent <name>` で agent を選びます。GitHub Copilot CLI と Kiro CLI には `.aidev/cache/agents/` に書いた仕事ファイルを指す 1 行をコマンドラインで渡し、同じく名前で agent を選びます。OpenAI Codex CLI は名前で agent を選べないため、仕事ファイルの先頭に agent の定義を含めます。
+
+Claude Code 以外のアダプタは各ツールの非対話モードの公開仕様に沿って実装していますが、kit の保守者は実機で確認していません。`run --dry-run` か `show` で実際のコマンドラインを確認してから使ってください。
+
+=== サブコマンド
+
+[cols="1,4",options="header"]
+|===
+|サブコマンド |動作
+
+|`list`
+|同梱 agent と、それぞれが動くツール・モデルを表示する
+
+|`show <name>`
+|agent の説明・定義ファイル・ツール・モデル・実行されるコマンドラインを表示する
+
+|`run <name> [<task>...]`
+|agent を起動する。仕事は引数、`--prompt-file`、または標準入力から受け取る
+|===
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|JSON で出力する
+
+|`--tool <tool>`
+|この起動のツール（`claude`、`copilot`、`codex`、`kiro`）
+
+|`--model <model>`
+|この起動のモデル。`""` でモデルのフラグを渡さない
+
+|`--timeout <ms>`
+|`run`: 時間予算（10000〜7200000。既定 1800000 = 30 分）
+
+|`--prompt-file <path>`
+|`run`: 仕事をファイルから読む
+
+|`--dry-run`
+|`run`: 実行されるコマンドラインを表示して起動しない
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|成功（`run` では agent が正常終了）
+
+|1
+|agent 名・ツール・モデルが不正、ツールが `tools.default` に無い、ツールが見つからない、agent が失敗または時間切れ
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev agent list
+aidev agent show knowledge-builder --tool copilot
+aidev agent run issue-to-pr "Work Item 42 をトリアージして実装方針を提案して" --dry-run
+aidev agent run issue-to-pr "Work Item 42 をトリアージして実装方針を提案して"
+aidev agent run knowledge-builder --prompt-file task.md --model opus
+----
+
+=== 関連
+
+* xref:configuration[aidev.yaml リファレンス] — `tools.default`、`tools.agent`、`tools.agents`
+* xref:cli-workflow[aidev workflow] — `steps.js` の `ctx.agent`

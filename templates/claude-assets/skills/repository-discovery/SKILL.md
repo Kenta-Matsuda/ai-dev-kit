@@ -1,6 +1,6 @@
 ---
 name: repository-discovery
-description: PKG（submodule src/）の構成・言語・ビルド方法を少ないトークンで横断調査する手順。Wikiが無い/古い場合や、knowledge-builder が生成前に使う。
+description: PKG（リポジトリルート）の構成・言語・ビルド方法を少ないトークンで横断調査する手順。Wikiが無い/古い場合や、knowledge-builder が生成前に使う。
 ---
 
 # repository-discovery
@@ -18,7 +18,7 @@ description: PKG（submodule src/）の構成・言語・ビルド方法を少�
 
 ## 調査順序
 
-1. **既存Wiki** — `knowledge/index.md` を仮説と索引として使う。ただし古い可能性があるため正本扱いしない
+1. **既存Wiki** — `.aidev/knowledge/index.md` を仮説と索引として使う。ただし古い可能性があるため正本扱いしない
 2. **リポジトリマニフェスト** — 言語、workspace、entrypoint、build方法を特定する
 
 | ファイル | 言語 / ビルド |

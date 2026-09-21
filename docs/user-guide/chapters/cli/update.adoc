@@ -1,0 +1,89 @@
+[[cli-update]]
+== aidev update
+
+kit を更新し、PKG の配布ファイルを再適用します。
+
+=== 書式
+
+[source,text]
+----
+aidev update [options]
+----
+
+=== 説明
+
+. kit の clone を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
+. `--kit-only` でなければ、今の PKG（`--all` なら端末に登録された全 PKG）に配布ファイルを再適用します。手編集されたファイルは置き換えず **競合** として残します（`--force` で置き換え）。
+
+結果は PKG の通常の差分です。`git diff` で確認し、コミットして PR にすると、チームは `git pull` だけで同じ状態になります。
+
+Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--dry-run`
+|何が変わるかを表示し、何も書かない
+
+|`--json`
+|JSON で出力する
+
+|`--kit-only`
+|kit だけ更新し、PKG のファイルは触らない
+
+|`--all`
+|端末に登録された全 PKG に再適用する
+
+|`--force`
+|手編集された配布ファイルを置き換える
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|更新した、または最新だった
+
+|1
+|kit の clone に未コミット変更がある、`main` 以外、diverge、fetch 失敗
+
+|2
+|手編集との競合が残った
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev update
+----
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.2.0 → 0.2.1 (9491efe → e0aa66c)
+✓ demo-pkg: updated 3 file(s)
+    ~ .claude/agents/knowledge-builder.md
+    ~ .claude/skills/knowledge-usage/SKILL.md
+    ~ CLAUDE.md
+    Review with "git diff", then commit so your team receives the update.
+----
+
+競合がある場合（終了コード 2）:
+
+[source,text]
+----
+✗ C:\work\demo-pkg: 1 file(s) were edited locally and were not replaced:
+    .claude/settings.json — has been edited locally
+    Re-run with --force to take the kit version, or send the change to ai-dev-kit as a PR.
+----
+
+=== 関連
+
+* xref:daily-update[日常の使い方: kit の更新]
+* xref:troubleshooting-update[トラブルシューティング: kit 更新後]

@@ -1,0 +1,223 @@
+[[troubleshooting]]
+== Troubleshooting
+
+Look up the symptom to find what to do. The messages are the English text `aidev` actually prints.
+
+[[troubleshooting-install]]
+=== Installation
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|`aidev` is not found
+|Open a new terminal. On POSIX, add `export PATH="$HOME/.local/bin:$PATH"` to your profile. If that does not help, run the installer again.
+
+|`node not found` / `node vXX is too old`
+|Install Node.js {node-min-version} or newer and run the installer again.
+
+|`this checkout looks like a wrapper`
+|You ran the installer inside a PKG. Run it in the kit clone.
+
+|`the dedicated ai-dev-kit checkout must be on branch main`
+|Run `git switch main` in the kit clone, then try again.
+
+|`aidev doctor` shows `⚠ claude not found on PATH` / `is too old`
+|Install Claude Code {claude-min-version} or newer. Generating the Wiki needs it.
+|===
+
+[[troubleshooting-status]]
+=== Output of aidev status / aidev check
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|`⚠ this directory is not set up for ai-dev-kit`
+|Move to the PKG root. If it is not set up yet, see xref:setup-owner[Package owner steps].
+
+|`❌ LLM Wiki has not been generated yet`
+|`git pull`. If it is still missing, run `aidev knowledge build`. AI writes are blocked until then.
+
+|`⚠️ … has changed since the Wiki was generated`
+|Run `aidev sync`, or wait for the nightly pipeline's PR to be merged and then `git pull`.
+
+|`⚠️ N page(s) still await prose regeneration`
+|Run `aidev knowledge build`.
+
+|`tool config  DRIFT`
+|Check with `git diff`. If the change was not intended, `aidev update` restores the distributed version. If it was intended, send it as a PR to the kit.
+
+|`tool config  not recorded — run "aidev init"`
+|Run `aidev init`.
+
+|`policy  missing`
+|Run `aidev permission configure --approve`.
+
+|`⚠ a stale sync lease is present`
+|A previous sync stopped halfway. Continue with `aidev sync --resume` or discard it with `aidev sync --abort`.
+
+|`⚠ N Wiki page(s) edited by hand since generation`
+|If the edits can be dropped, add `--force` to the next build / sync. Move anything worth keeping into the source.
+
+|`ℹ️ remote unverified`
+|The remote is unreachable. You can keep working. Check your proxy settings.
+|===
+
+[[troubleshooting-exit]]
+=== Exit codes of aidev check
+
+[cols="1,2,3",options="header"]
+|===
+|Exit code |Message |What to do
+
+|2
+|`kit-owned files differ from .aidev/materialized.json`
+|Restore the distributed version with `aidev update`, or send the change as a PR to the kit.
+
+|2
+|`.aidev/materialized.json is missing`
+|Run `aidev init` and commit.
+
+|3
+|`.aidev/policy.yaml not found`
+|Run `aidev permission configure --approve`.
+
+|3
+|`failed to parse .aidev/policy.yaml`
+|Replace it with `aidev permission reconfigure --approve`.
+
+|4
+|`LLM Wiki has not been generated yet`
+|Run `aidev knowledge build` and commit.
+
+|4
+|`N inventory inconsistency/ies`
+|Run `aidev knowledge build --full`.
+
+|4
+|`a stale sync lease is present`
+|Run `aidev sync --resume` or `aidev sync --abort`.
+|===
+
+[[troubleshooting-agent]]
+=== Wiki generation
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|`⚠ the knowledge-builder agent did not run`
+|Fix the `claude` line in `aidev doctor` and run the same command again.
+
+|`✗ the knowledge-builder agent ran out of time`
+|Run the same command again. If it keeps happening, add `--agent-batch-size 10`.
+
+|`✗ knowledge-builder made no Wiki progress: 0/N`
+|Read the `Claude result:` lines that follow. If they mention `permission denial(s)`, run `aidev update` to restore the distributed `.claude/settings.json`.
+
+|`⚠ N completion report(s) were rejected`
+|Run the same command again. If it persists, use `--full`.
+
+|`✗ … left the Wiki checkpoint invalid: PKG checkout changed during generation`
+|You switched branches during generation. Switch back and run again.
+
+|`✗ N Wiki page(s) were edited by hand and would be overwritten`
+|Add `--force`, or move the edits into the source.
+
+|`✗ --scope <path> matched no files in generation targets`
+|Give a path that is inside `package.include` in `aidev.yaml`.
+|===
+
+[[troubleshooting-sync]]
+=== aidev sync
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|`✗ a sync lease is present`
+|`aidev sync --resume` (continue) or `aidev sync --abort` (discard).
+
+|`✗ the held lease targets … but origin/main is now …`
+|As shown: finish the previous run with `aidev sync --resume --to <sha>`, or `--abort` and start over.
+
+|`✗ could not fetch origin/main`
+|Check that `git fetch origin main` works (network, credentials, proxy).
+
+|`⚠ AZURE_DEVOPS_PAT is not set; open the pull request … by hand`
+|Set the environment variable and run again, or open the PR by hand from the pushed branch.
+
+|`ℹ hosting.type is generic; open the pull request … by hand`
+|Normal. Open the PR by hand.
+
+|`✓ the Wiki committed on origin/main already describes …`
+|Run `git pull`.
+
+|`✗ hand-edited Wiki pages would be overwritten`
+|Run `aidev sync --force`.
+|===
+
+[[troubleshooting-permission]]
+=== Denied writes
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|Claude reports `… is read-only (**): no work lease`
+|Normal. Source changes go through the `issue-to-pr` agent's work lease, or a human makes them.
+
+|`… is protected (.claude/**)`
+|Normal. Kit files are changed through a PR to the kit.
+
+|`Wiki consistency error … All writes are blocked`
+|Run `aidev knowledge build`.
+
+|`policy could not be evaluated (…); write blocked`
+|Check with `aidev permission show` and replace the policy with `aidev permission reconfigure --approve`.
+
+|`reconfigure --approve` stops with `this candidate weakens the policy in force`
+|Compare with `git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml`. If the change is intended, add `--force`.
+|===
+
+[[troubleshooting-update]]
+=== After a kit update
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|The `kit` line of `aidev status` says `run "aidev update"`
+|Run `aidev update` in the PKG, commit the diff and open a PR.
+
+|`aidev check` now exits with 2
+|`git pull`. If it is still 2, run `aidev update` and commit the diff.
+
+|`✗ … file(s) were edited locally and were not replaced`
+|Take the distributed version with `aidev update --force`, or send the change as a PR to the kit.
+
+|`✗ the kit checkout has diverged from origin/main`
+|The kit clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
+|===
+
+[[troubleshooting-windows]]
+=== Windows
+
+[cols="2,3",options="header"]
+|===
+|Symptom |What to do
+
+|PowerShell blocks `aidev.ps1` because of the execution policy
+|Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or call `aidev.cmd` explicitly.
+
+|The hooks cannot find `aidev`
+|Start `claude` from a new terminal. The installer has already added the launcher to PATH.
+
+|Questions such as `Place this policy now?` do not appear and the command ends
+|stdin is not a terminal (some IDE terminals, pipes). Run in a normal terminal, or pass the values with `--yes` / `--approve`.
+
+|`spawnSync git ETIMEDOUT`
+|The remote check timed out after 3 seconds. You can keep working. Check your proxy.
+|===
+

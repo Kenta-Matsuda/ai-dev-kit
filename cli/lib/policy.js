@@ -9,9 +9,10 @@
  *                                            a valid lease of either kind
  *   3. Consistency error + no sync lease   → deny everything
  *   4. Consistency error + sync lease      → allow knowledge/** only
- *   5. read_only paths                     → allow only under a matching work
+ *   5. writable paths                      → allow (Wiki, workflows, aidev.yaml)
+ *   6. read_only paths                     → allow only under a matching work
  *                                            lease (branch- and path-scoped)
- *   6. otherwise                           → allow
+ *   7. otherwise                           → allow
  *
  * Rule 2 sitting above the leases is what makes a lease incapable of widening
  * into the kit's own control surface.
@@ -20,7 +21,7 @@
 const pathsMod = require('./paths');
 const leasesMod = require('./leases');
 const stateMod = require('./state');
-const { ALWAYS_PROTECTED } = require('./config');
+const { ALWAYS_PROTECTED, DEFAULT_POLICY_SCOPES } = require('./config');
 
 const DECISION = { ALLOW: 'allow', DENY: 'deny' };
 
@@ -39,7 +40,7 @@ function deny(reason, extra = {}) {
  * runs inside a hook's time budget).
  */
 function decide(repoRoot, targetPath, {
-  config = null, policy = null, state = null, submodulePath = 'src', now = Date.now(),
+  config = null, policy = null, state = null, now = Date.now(),
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
   if (rel == null) {
@@ -51,7 +52,7 @@ function decide(repoRoot, targetPath, {
     return deny('refusing to write the repository root itself', { rule: 'outside-repo', path: rel });
   }
 
-  const pol = policy || { protected: [...ALWAYS_PROTECTED], read_only: ['src/**'], writable_during_sync: ['knowledge/**'] };
+  const pol = policy || { protected: [...ALWAYS_PROTECTED], ...DEFAULT_POLICY_SCOPES };
   const secretGlobs = config?.secrets_paths || [];
 
   // ---- 2. secrets and protected paths -------------------------------------
@@ -70,7 +71,7 @@ function decide(repoRoot, targetPath, {
   }
 
   // ---- 3 & 4. consistency gate --------------------------------------------
-  const st = state || stateMod.computeState(repoRoot, config, { submodulePath, checkRemote: false });
+  const st = state || stateMod.computeState(repoRoot, config, { checkRemote: false });
   if (st.severity === stateMod.SEVERITY.ERROR) {
     const lease = leasesMod.readSyncLease(repoRoot);
     const ev = leasesMod.evaluateLease(lease, now);
@@ -78,11 +79,11 @@ function decide(repoRoot, targetPath, {
       return deny(
         `Wiki consistency error (${st.message}) and no valid sync lease is held` +
         (lease ? ` (existing lease is ${ev.reason})` : '') +
-        '. All writes are blocked; run "aidev sync" (or "aidev sync --resume" / "--abort").',
+        '. All writes are blocked; run "aidev knowledge build" (or "aidev sync --resume" / "--abort").',
         { rule: 'consistency-no-lease', path: rel, state: st.severity });
     }
     const syncWritable = pol.writable_during_sync && pol.writable_during_sync.length > 0
-      ? pol.writable_during_sync : ['knowledge/**'];
+      ? pol.writable_during_sync : [...DEFAULT_POLICY_SCOPES.writable_during_sync];
     const hit = pathsMod.firstMatch(syncWritable, rel);
     if (hit) {
       return allow(
@@ -95,10 +96,18 @@ function decide(repoRoot, targetPath, {
       { rule: 'sync-lease-scope', path: rel });
   }
 
-  // ---- 5. read-only regions ------------------------------------------------
+  // ---- 5. explicitly writable regions -------------------------------------
+  // The Wiki, workflows and aidev.yaml are the places an agent is meant to
+  // write; they sit inside the read-only PKG, so they are checked first.
+  const wHit = pathsMod.firstMatch(pol.writable || [], rel);
+  if (wHit) {
+    return allow(`"${rel}" is writable by policy (${wHit})`, { rule: 'writable', path: rel, pattern: wHit });
+  }
+
+  // ---- 6. read-only regions ------------------------------------------------
   const roHit = pathsMod.firstMatch(pol.read_only, rel);
   if (roHit) {
-    const found = leasesMod.findAuthorizingWorkLease(repoRoot, rel, { submodulePath, now });
+    const found = leasesMod.findAuthorizingWorkLease(repoRoot, rel, { now });
     if (found.lease) {
       // Re-assert include/exclude so a lease cannot reach past package scope.
       const inc = config?.package?.include || [];

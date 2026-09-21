@@ -1,0 +1,75 @@
+[[install]]
+== 端末に aidev を入れる
+
+自分の端末に `aidev` コマンドを入れます。端末につき 1 回です。
+
+=== 必要なもの
+
+* Node.js {node-min-version} 以上
+* Git
+* Claude Code {claude-min-version} 以上（Wiki の生成と対話に使います）
+* 中央 {project-name} リポジトリの URL（以下 `<kit-url>`）
+
+=== 手順
+
+. kit を clone します。この clone が `aidev` の実体になるので、消したり動かしたりしないでください。ブランチは `main` のままにします。
++
+[source,bash]
+----
+git clone <kit-url> ~/ai-dev-kit
+----
++
+Windows では `C:\tools\ai-dev-kit` のような短いパスをおすすめします。
+
+. installer を実行します。
++
+.Windows（PowerShell）
+[source,powershell]
+----
+cd C:\tools\ai-dev-kit
+.\scripts\install.ps1
+----
++
+.macOS / Linux / WSL
+[source,bash]
+----
+cd ~/ai-dev-kit
+./scripts/install.sh
+----
++
+installer はファイルをコピーせず、clone を指す起動スクリプトを置きます（Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`、POSIX: `~/.local/bin`）。最後に `next: aidev doctor` と出れば成功です。
++
+* `node not found` / `too old` → Node.js {node-min-version} 以上を入れて再実行します。
+* `this checkout looks like a wrapper` → PKG の中で実行しています。kit の clone で実行します。
+* `~/.local/bin is not on your PATH` → 表示された `export PATH=...` をシェルの profile に追加します。
+
+. **新しいターミナルを開き**、動作を確認します。
++
+[source,bash]
+----
+aidev --version
+aidev doctor
+----
++
+`aidev doctor` の各行が `✓` か `⚠` なら問題ありません。PKG の外なので `aidev.yaml not found` の `⚠` は正常です。`✗` があれば xref:troubleshooting-install[トラブルシューティング: インストール] を見てください。
++
+`claude` の行が `⚠ not found on PATH` なら Wiki を生成できません。Claude Code を入れてから進みます。
+
+. Azure DevOps の PKG を使う場合は、PAT を環境変数に入れます。ファイルには書きません。
++
+[source,powershell]
+----
+$env:AZURE_DEVOPS_PAT = "<your-pat>"
+----
++
+[source,bash]
+----
+export AZURE_DEVOPS_PAT="<your-pat>"
+----
++
+恒久化するにはユーザー環境変数かシェルの profile に設定します（xref:environment-reference[環境変数]）。
+
+=== 次のステップ
+
+* PKG に初めて導入する → xref:setup-owner[導入担当者の手順]
+* 導入済みの PKG を使う → xref:setup-member[メンバーの手順]

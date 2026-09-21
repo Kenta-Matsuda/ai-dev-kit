@@ -1,0 +1,155 @@
+= コマンドリファレンス
+
+[[cli-reference]]
+== コマンドリファレンスの読み方
+
+`aidev` の全コマンドを 1 コマンド 1 ページで説明します。各ページは **書式 → 説明 → オプション → 終了コード → 例** の順です。オプションは `aidev <command> --help` と同じです。
+
+[[cli-syntax]]
+=== 共通の書式
+
+[source,text]
+----
+aidev <command> [subcommand] [options] [arguments]
+----
+
+* オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
+* 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
+* `knowledge`、`agent`、`permission`、`task`、`workflow`、`hook`、`mcp` はサブコマンドが必須です。
+* PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。
+
+[[cli-common-options]]
+=== 共通オプション
+
+[cols="1,3",options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|機械可読な JSON だけを出力します（対応コマンドのみ）。
+
+|`--dry-run`
+|何が変わるかを表示し、何も書きません（対応コマンドのみ）。
+
+|`--help`, `-h`
+|コマンド一覧、またはそのコマンドのオプションを表示します。
+
+|`--version`, `-V`
+|kit のバージョンを表示します。
+|===
+
+`hook`、`mcp`、`update` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
+
+[[cli-exit-codes]]
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |意味
+
+|0
+|成功
+
+|1
+|一般エラー（不正なオプション、設定不備、ネットワーク失敗、agent の失敗など）
+
+|2
+|drift: 配布したファイル（`.claude/**`、`CLAUDE.md`、`.mcp.json`、他ツール用に生成した設定）が記録と違う
+
+|3
+|permission: policy が無い・壊れている、または承認を拒否した
+
+|4
+|wiki: Wiki が無い・壊れている、または前回の sync が途中で止まっている
+|===
+
+[[cli-commands]]
+=== コマンド一覧
+
+.PKG の clone の中で使う
+[cols="2,4",options="header"]
+|===
+|コマンド |要約
+
+|xref:cli-init[`aidev init`]
+|この PKG に {project-name} を導入する（初回は対話、2 人目以降は質問なし）
+
+|xref:cli-status[`aidev status`]
+|この PKG の状態を 1 画面で表示する
+
+|xref:cli-check[`aidev check`]
+|整合性を終了コードで返す（CI 用）
+
+|xref:cli-knowledge[`aidev knowledge <build\|status>`]
+|LLM Wiki を生成する・状態を見る
+
+|xref:cli-sync[`aidev sync`]
+|`main` に追従して Wiki を更新し、PR を作る
+
+|xref:cli-agent[`aidev agent <list\|show\|run>`]
+|同梱 agent を設定済みの AI ツールで起動する
+
+|xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
+|書き込み権限 policy を置く・見る
+
+|xref:cli-task[`aidev task <list\|show\|resume\|advance\|abandon>`]
+|issue-to-pr タスクの進行状態を扱う
+
+|xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
+|承認済みスクリプトを作る・実行する
+|===
+
+.この端末に対して使う
+[cols="2,4",options="header"]
+|===
+|コマンド |要約
+
+|xref:cli-update[`aidev update`]
+|kit を更新し、PKG の配布ファイルを再適用する
+
+|xref:cli-doctor[`aidev doctor`]
+|端末と PKG の実行環境を診断する
+
+|xref:cli-eject[`aidev eject`]
+|kit の管理から外す
+|===
+
+.ツールから呼ばれる
+[cols="2,4",options="header"]
+|===
+|コマンド |要約
+
+|xref:cli-hook[`aidev hook <…>`]
+|Claude Code の hook から呼ばれる内部コマンド
+
+|xref:cli-mcp[`aidev mcp azure-devops`]
+|`.mcp.json` から起動される内部コマンド
+|===
+
+include::init.adoc[]
+
+include::status.adoc[]
+
+include::check.adoc[]
+
+include::knowledge.adoc[]
+
+include::sync.adoc[]
+
+include::agent.adoc[]
+
+include::permission.adoc[]
+
+include::task.adoc[]
+
+include::workflow.adoc[]
+
+include::update.adoc[]
+
+include::doctor.adoc[]
+
+include::eject.adoc[]
+
+include::hook.adoc[]
+
+include::mcp.adoc[]

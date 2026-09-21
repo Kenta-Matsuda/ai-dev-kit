@@ -1,0 +1,96 @@
+[[cli-workflow]]
+== aidev workflow
+
+承認済みのスクリプトを、上限付きで実行します。
+
+=== 書式
+
+[source,text]
+----
+aidev workflow new <name> [--force] [--dry-run] [--json]
+aidev workflow approve <name> [--force] [--dry-run] [--json]
+aidev workflow run <name> [--max-iterations <n>] [--max-minutes <n>] [--resume] [--dry-run] [--json]
+aidev workflow list [--json]
+----
+
+=== 説明
+
+`.aidev/workflows/<name>/` の `workflow.yaml`（上限・予算・許可コマンド）と `steps.js`（処理）を、人間が承認した内容のまま実行します。`approve` は 2 ファイルのハッシュを `approval.json` に記録し、`run` はハッシュが一致するときだけ実行します。
+
+`steps.js` は `module.exports = async function steps(ctx)` で、`ctx.run(cmd, args)` は `workflow.yaml` の `commands` にあるコマンドだけを実行できます。`{ done: true }` を返すと終了します。上限は反復 10 回、60 分、同じ失敗 3 回までで、下げることはできますが上げられません。`cost.max_tokens` または `cost.max_usd` は必須です。
+
+`ctx.agent(prompt, { name?, tool?, model?, timeoutMs? })` は同梱 agent を AI ツールで起動し、`{ ok, result, reason, costUsd, durationMs, tool, agent, model }` を返します（失敗しても throw しません）。既定の agent・ツール・モデルは `workflow.yaml` の `agent:` ブロック（`name` 必須、`tool` / `model` / `timeout_ms` 任意）で決め、省略分は `aidev.yaml` の `tools.agents.<name>` と `tools.agent` / `tools.agent_model` に従います。ツールは `tools.default` にあるものだけ使えます。1 回の起動は `timeout_ms` と workflow の残り時間の短い方で打ち切られ、報告された費用の合計が `cost.max_usd` に達すると次の起動は拒否されて workflow が止まります。
+
+PR は作りません。
+
+=== サブコマンド
+
+[cols="1,4",options="header"]
+|===
+|サブコマンド |動作
+
+|`new <name>`
+|雛形を書く。既にあれば `--force` が必要
+
+|`approve <name>`
+|定義を検証し、ハッシュを記録する
+
+|`run <name>`
+|承認が有効なら実行する。`--resume` で未完了の実行を続ける
+
+|`list`
+|各 workflow の承認状態（`approved` / `not approved` / `CHANGED since approval`）を表示する
+|===
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|JSON で出力する
+
+|`--force`
+|`new`: 既存を上書きする。`approve`: 同じ内容でも記録し直す
+
+|`--dry-run`
+|`run`: 承認の有効性と上限を表示して実行しない
+
+|`--max-iterations <n>`
+|`run`: 反復回数の上限をさらに下げる
+
+|`--max-minutes <n>`
+|`run`: 時間の上限をさらに下げる
+
+|`--resume`
+|`run`: 最後の未完了の実行から続ける
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|成功
+
+|1
+|名前や定義が不正、未承認、承認後に変更された、上限で止まった
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev workflow new nightly-tests
+# steps.js と workflow.yaml を編集して git diff でレビュー
+aidev workflow approve nightly-tests
+aidev workflow run nightly-tests --dry-run
+aidev workflow run nightly-tests
+----
+
+=== 関連
+
+* xref:automation-workflow[自動化: aidev workflow]

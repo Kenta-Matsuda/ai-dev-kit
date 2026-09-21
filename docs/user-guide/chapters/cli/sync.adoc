@@ -1,0 +1,128 @@
+[[cli-sync]]
+== aidev sync
+
+`main`（tracking branch）に追従して Wiki を更新し、PR を作ります。
+
+=== 書式
+
+[source,text]
+----
+aidev sync [options]
+----
+
+=== 説明
+
+`origin/main` を fetch し、その先端に合わせて Wiki を更新し、PR にします。
+
+. tracking branch に既に最新の Wiki がコミットされていれば、何もせず終わります（`git pull` で受け取れます）。
+. 作業ロック（sync lease）を取り、一時 worktree `.aidev/cache/sync-worktree/` に target を checkout します。**あなたの checkout は変更しません。**
+. worktree の中で inventory / manifest を書き直し、knowledge-builder agent が変更分の本文を書きます（`--no-agent` なら本文は後回し）。
+. `ai/wiki-<sha>` ブランチにコミットして push し、PR を開きます（Azure DevOps で token があるとき）。
+. worktree を消し、ロックを解放します。
+
+途中で失敗するとロックと worktree が残ります。`--resume` で続き、`--abort` で捨てます。
+
+PR はマージしません。`generic` hosting では push まで行い、PR は手で作ります。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--to <sha>`
+|先端ではなくこのコミットに追従する（tracking branch から到達できるもの）
+
+|`--dry-run`
+|fetch して何が変わるかを表示し、何も書かない
+
+|`--no-pr`
+|ローカルの `ai/wiki-<sha>` ブランチにコミットするだけで、push と PR はしない
+
+|`--resume`
+|途中で止まった sync を続ける
+
+|`--abort`
+|途中で止まった sync を捨てる（worktree を消し、ロックを解放する）
+
+|`--check-only`
+|tracking branch が進んだかだけ報告する
+
+|`--json`
+|JSON で出力する
+
+|`--force`
+|期限切れのロックを引き継ぐ、または手編集された Wiki ページを上書きする
+
+|`--no-agent`
+|inventory と manifest だけ更新し、本文は後回しにする
+
+|`--agent-name <name>`, `--agent-tool <tool>`, `--agent-timeout <ms>`, `--agent-model <model>`, `--agent-batch-size <n>`, `--survey`, `--no-survey`
+|xref:cli-knowledge[aidev knowledge] と同じ
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|完了した。何もする必要が無かった。PR を作れず手動案内で終わった
+
+|1
+|fetch 失敗、ロックが既にある、`--to` に到達できない、手編集がある（`--force` 無し）、agent の失敗・途中終了
+
+|4
+|`--check-only` で Wiki が壊れている。worktree 内の検証で失敗した
+|===
+
+=== 例
+
+通常の追従:
+
+[source,bash]
+----
+aidev sync
+----
+
+[source,text]
+----
+aidev sync
+  tracking branch  origin/main
+  target           9f8e7d6
+  wiki describes   1a2b3c4
+  sync branch      ai/wiki-9f8e7d6c5b4a
+
+ℹ generation target changes: +2 ~5 -0 →1 (=155)
+✓ acquired sync lease (ttl 120m)
+✓ created worktree at .aidev/cache/sync-worktree (9f8e7d6)
+✓ inventory rewritten (162 targets, 1 shard(s))
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
+✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ opened pull request !123 https://dev.azure.com/contoso/Platform/_git/demo-pkg/pullrequest/123
+    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
+✓ sync lease released
+----
+
+何が変わるか見るだけ:
+
+[source,bash]
+----
+aidev sync --dry-run
+----
+
+止まった sync を続ける / 捨てる:
+
+[source,bash]
+----
+aidev sync --resume
+aidev sync --abort
+----
+
+=== 関連
+
+* xref:daily-sync[日常の使い方: aidev sync]
+* xref:troubleshooting-sync[トラブルシューティング: aidev sync]
+* xref:automation-ci[自動化: CI] — 夜間 pipeline

@@ -1,0 +1,86 @@
+[[cli-check]]
+== aidev check
+
+Checks consistency and returns the result as an exit code. Meant for CI.
+
+=== Synopsis
+
+[source,text]
+----
+aidev check [options]
+----
+
+=== Description
+
+Runs the same checks as `aidev status` and turns the first problem found into the exit code. The order is drift (2) → policy (3) → Wiki (4).
+
+In a directory without `aidev.yaml`, and in an ejected repository, it does nothing and exits 0. Warnings (`main` has moved ahead, prose not yet generated) stay at 0; with `--strict` they become 2.
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--strict`
+|Treat warnings as failures (exit code 2)
+
+|`--json`
+|Machine-readable output
+
+|`--no-remote`
+|Do not contact the remote
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|Consistent
+
+|1
+|General error, such as a broken `aidev.yaml`
+
+|2
+|`.aidev/materialized.json` is missing, or `.claude/**`, `CLAUDE.md` or `.mcp.json` differ from what was recorded. Warnings with `--strict`
+
+|3
+|`.aidev/policy.yaml` is missing or cannot be read
+
+|4
+|The Wiki is missing or broken, or the previous sync stopped halfway
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev check
+----
+
+[source,text]
+----
+aidev check
+  tracking     9f8e7d6
+  base         1a2b3c4
+  knowledge    1a2b3c4
+  tool config  matches the kit
+  policy       valid
+✓ environment is consistent.
+----
+
+A failure (exit code 2):
+
+[source,text]
+----
+✗ [exit 2] kit-owned files differ from .aidev/materialized.json (1 modified). Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.
+    modified: .claude/settings.json
+----
+
+=== See also
+
+* xref:automation-ci[Automation: CI]
+* xref:troubleshooting-exit[Troubleshooting: exit codes of aidev check]

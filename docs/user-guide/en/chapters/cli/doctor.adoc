@@ -1,0 +1,59 @@
+[[cli-doctor]]
+== aidev doctor
+
+Checks the environment on this machine and in the package.
+
+=== Synopsis
+
+[source,text]
+----
+aidev doctor [--json]
+----
+
+=== Description
+
+For the machine, it reports Node.js, git, where `aidev` and the kit live, whether a newer kit exists, how many packages are registered, and whether each AI tool is present and which version. Inside a package it checks every tool in `tools.default` of `aidev.yaml`; outside one, only `claude`. Inside a package it also reports `aidev.yaml`, `origin`, the policy, the tool and model agents run with, whether the token variable is set (the value is never read), the proxy, whether the remote is reachable, and the Wiki state.
+
+Each line is `✓` (ok), `⚠` (warning) or `✗` (failure).
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|No `✗`
+
+|1
+|One or more `✗`
+|===
+
+=== Example
+
+[source,bash]
+----
+aidev doctor
+----
+
+[source,text]
+----
+aidev doctor
+  ✓ node                   v22.17.1
+  ✓ git                    git version 2.44.0.windows.1
+  ✓ aidev                  0.2.0 @ C:\tools\ai-dev-kit
+  ✓ kit update             up to date
+  ✓ claude                 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
+  ✓ aidev.yaml             C:\work\demo-pkg
+  ✓ policy                 14 protected patterns
+  ⚠ env AZURE_DEVOPS_PAT   not set — Azure DevOps calls will fail
+  ✓ remote reachability    origin/main = 9f8e7d6
+  ✓ Wiki state             the Wiki describes the code this work is based on.
+
+⚠ 1 warning(s); nothing blocking.
+----
+
+=== See also
+
+* xref:install[Install aidev on your machine]
+* xref:troubleshooting-install[Troubleshooting: installation]

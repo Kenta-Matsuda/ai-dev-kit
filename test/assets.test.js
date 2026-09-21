@@ -6,17 +6,19 @@
  * passing even if the kit shipped none. This script exercises the real files in
  * this repository against the code that consumes them:
  *
- *   - .mcp.json          must route to an implemented `aidev mcp` server
- *   - settings.json      its hooks must name implemented `aidev hook` names,
- *                        and its deny list must cover the protected floor
- *   - CLAUDE.md          must exist and be tracked as a kit-owned static file
- *   - agents / skills    frontmatter must parse and declare name + description
+ *   - templates/root/.mcp.json   must route to an implemented `aidev mcp` server
+ *   - templates/claude-assets/settings.json
+ *                                its hooks must name implemented `aidev hook`
+ *                                names, and its deny list must cover the
+ *                                protected floor
+ *   - templates/root/CLAUDE.md   must exist and be tracked as a kit-owned file
+ *   - agents / skills            frontmatter must parse and declare name + description
  *
- * `.claude/` is generated, so the contract has two halves and both are checked
- * here: the templates under `templates/claude-assets/` must be valid, and
- * `aidev init` must turn them into a `.claude/` whose hooks are really wired.
- * Validating only the templates would pass on a repo where init silently wrote
- * nothing at all.
+ * The PKG's `.claude/`, `CLAUDE.md` and `.mcp.json` are generated from those
+ * templates, so the contract has two halves and both are checked here: the
+ * templates must be valid, and `aidev init` must turn them into a tree whose
+ * hooks are really wired. Validating only the templates would pass on a repo
+ * where init silently wrote nothing at all.
  *
  * Run: node test/assets.test.js
  */
@@ -26,21 +28,27 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { suite, test, ok, eq } = require('./harness');
-const { makeRepo, copyTemplates } = require('./fixtures');
+const { makeRepo, copyDir, KIT_ROOT } = require('./fixtures');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = KIT_ROOT;
 const BIN = path.join(ROOT, 'cli', 'bin', 'aidev.js');
 const hookMod = require('../cli/commands/hook');
 const mcpMod = require('../cli/commands/mcp');
 const assets = require('../cli/lib/assets');
-const { ALWAYS_PROTECTED } = require('../cli/lib/config');
+const layout = require('../cli/lib/layout');
+const cfgMod = require('../cli/lib/config');
+const home = require('../cli/lib/home');
+const { ALWAYS_PROTECTED } = cfgMod;
+
+/** One AIDEV_HOME for the run: init registers clones there, never in the real one. */
+const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-home-'));
 
 /** Run the real CLI the way a pipeline does, capturing code and output. */
 function aidev(args, cwd) {
   try {
     const stdout = execFileSync(process.execPath, [BIN, ...args], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, AIDEV_NO_COLOR: '1' },
+      env: { ...process.env, NO_COLOR: '1', AIDEV_HOME: HOME, AIDEV_NO_UPDATE_CHECK: '1' },
     });
     return { code: 0, out: stdout };
   } catch (e) {
@@ -59,24 +67,29 @@ function lastJson(text) {
 }
 
 /**
- * A bare directory holding only the kit's templates.
+ * A private copy of the kit's templates plus an empty repository to
+ * materialise into.
  *
- * Materialisation needs no git, no config and no submodule, so the fixture is
- * deliberately smaller than makeRepo(): anything else in the directory could
- * only obscure which file the code under test actually wrote.
+ * Materialisation needs no git and no config, so the fixture is deliberately
+ * smaller than makeRepo(): anything else in the directory could only obscure
+ * which file the code under test actually wrote. Tests that need to *change* a
+ * template edit the copy, never the kit checkout.
  */
 function withTempKit(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-assets-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-assets-'));
+  const installRoot = path.join(base, 'kit');
+  const repoRoot = path.join(base, 'repo');
   try {
-    copyTemplates(root);
-    return fn(root);
+    copyDir(path.join(ROOT, 'templates'), path.join(installRoot, 'templates'));
+    fs.mkdirSync(repoRoot, { recursive: true });
+    return fn(repoRoot, installRoot);
   } finally {
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 
 const readIfExists = (rel) => {
-  const p = path.join(ROOT, rel);
+  const p = path.join(ROOT, ...rel.split('/'));
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 };
 
@@ -93,25 +106,30 @@ function frontmatter(text) {
 }
 
 function listMd(dir) {
-  const full = path.join(ROOT, dir);
+  const full = path.join(ROOT, ...dir.split('/'));
   if (!fs.existsSync(full)) return [];
   return fs.readdirSync(full).filter((f) => f.endsWith('.md')).sort();
 }
 
+const ROOT_TEMPLATES = 'templates/root';
+const CLAUDE_TEMPLATES = assets.TEMPLATE_ROOT; // templates/claude-assets
+const tpl = (installRoot, rel) => path.join(installRoot, ...CLAUDE_TEMPLATES.split('/'), ...rel.split('/'));
+
 function run() {
   // ---------------------------------------------------------------- .mcp.json
-  suite('assets: .mcp.json');
+  suite('assets: .mcp.json template');
 
-  const mcpRaw = readIfExists('.mcp.json');
+  const mcpRaw = readIfExists(`${ROOT_TEMPLATES}/.mcp.json`);
 
-  test('.mcp.json ships with the kit', () => {
-    ok(mcpRaw !== null, '.mcp.json is missing; the static-asset contract requires it');
+  test('.mcp.json ships with the kit as a root template', () => {
+    ok(mcpRaw !== null, `${ROOT_TEMPLATES}/.mcp.json is missing; the static-asset contract requires it`);
   });
 
   if (mcpRaw !== null) {
     const doc = JSON.parse(mcpRaw);
 
     test('every server is launched through the aidev CLI', () => {
+      ok(Object.keys(doc.mcpServers || {}).length > 0, 'no servers declared');
       for (const [name, entry] of Object.entries(doc.mcpServers || {})) {
         eq(entry.command, 'aidev', `${name} must be launched via aidev`);
       }
@@ -136,11 +154,11 @@ function run() {
   // ------------------------------------------------------------- settings.json
   suite('assets: settings.json template');
 
-  const settingsRaw = readIfExists(`${assets.TEMPLATE_ROOT}/settings.json`);
+  const settingsRaw = readIfExists(`${CLAUDE_TEMPLATES}/settings.json`);
 
   test('the settings.json template ships with the kit', () => {
     ok(settingsRaw !== null,
-      `${assets.TEMPLATE_ROOT}/settings.json is missing; without it aidev init cannot wire any hook`);
+      `${CLAUDE_TEMPLATES}/settings.json is missing; without it aidev init cannot wire any hook`);
   });
 
   if (settingsRaw !== null) {
@@ -192,7 +210,10 @@ function run() {
       const deny = (settings.permissions && settings.permissions.deny) || [];
       const denied = deny.join('\n');
       for (const p of ALWAYS_PROTECTED) {
-        // `.aidev-ejected` is covered, but the floor is what must be reachable.
+        // `.aidev/.gitignore` is written by the CLI and is protected by policy;
+        // it is also a plain file Claude Code has no reason to touch, so the
+        // deny list is not required to spell it out.
+        if (p === layout.AIDEV_GITIGNORE_REL) continue;
         ok(denied.includes(p),
           `permissions.deny does not mention the protected path ${p}`);
       }
@@ -225,20 +246,22 @@ function run() {
         .filter(Boolean)
         .map((m) => m[1]));
       for (const p of ALWAYS_PROTECTED) {
+        if (p === layout.AIDEV_GITIGNORE_REL) continue;
         ok(edits.has(p), `permissions.deny lacks Edit(${p})`);
       }
     });
 
-    test('hooks use exec form anchored to Claude\'s project root', () => {
-      for (const matchers of Object.values(settings.hooks || {})) {
+    // `aidev` is installed on PATH by the installer, so the hook can be one
+    // plain command. The old exec form pointed at ${CLAUDE_PROJECT_DIR}/cli,
+    // which no longer exists inside a PKG clone.
+    test('hooks use the string form "aidev hook <name>"', () => {
+      for (const [event, matchers] of Object.entries(settings.hooks || {})) {
         for (const matcher of matchers) {
           for (const h of matcher.hooks || []) {
-            eq(h.command, 'node', 'hook executable');
-            ok(Array.isArray(h.args), `hook has no exec-form args: ${JSON.stringify(h)}`);
-            eq(h.args[0], '${CLAUDE_PROJECT_DIR}/cli/bin/aidev.js', 'project-root CLI path');
-            eq(h.args[1], 'hook', 'hook command group');
-            ok(typeof h.args[2] === 'string' && h.args[2].length > 0,
-              `hook subcommand is missing: ${JSON.stringify(h)}`);
+            eq(h.type, 'command', `${event}: hook type`);
+            ok(/^aidev hook [\w-]+$/.test(h.command), `${event}: unexpected command ${JSON.stringify(h.command)}`);
+            ok(h.args === undefined, `${event}: exec-form args are no longer used: ${JSON.stringify(h)}`);
+            ok(!/CLAUDE_PROJECT_DIR|cli\/bin/.test(JSON.stringify(h)), `${event}: hook must not point into the old wrapper layout`);
           }
         }
       }
@@ -248,22 +271,33 @@ function run() {
   // ----------------------------------------------------------------- CLAUDE.md
   suite('assets: CLAUDE.md');
 
-  test('CLAUDE.md ships with the kit', () => {
-    ok(readIfExists('CLAUDE.md') !== null, 'CLAUDE.md is missing');
+  test('CLAUDE.md ships with the kit as a root template', () => {
+    ok(readIfExists(`${ROOT_TEMPLATES}/CLAUDE.md`) !== null, `${ROOT_TEMPLATES}/CLAUDE.md is missing`);
   });
 
-  test('kit-owned files are tracked for drift detection', () => {
-    const tracked = assets.listStaticFiles(ROOT);
-    for (const rel of ['CLAUDE.md', '.mcp.json']) {
-      if (fs.existsSync(path.join(ROOT, rel))) {
-        ok(tracked.includes(rel), `${rel} exists but is not tracked as a static asset`);
+  test('the shipped CLAUDE.md describes the PKG-clone layout, not the wrapper', () => {
+    const text = readIfExists(`${ROOT_TEMPLATES}/CLAUDE.md`) || '';
+    ok(text.includes(layout.KNOWLEDGE_REL), `mentions ${layout.KNOWLEDGE_REL}`);
+    ok(!/submodule/i.test(text), 'no longer talks about a submodule');
+  });
+
+  test('kit-owned files are tracked for drift detection once materialised', () => {
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      const tracked = assets.listStaticFiles(repoRoot);
+      for (const rel of ['CLAUDE.md', '.mcp.json', '.claude/settings.json']) {
+        ok(tracked.includes(rel), `${rel} was materialised but is not tracked as a static asset`);
       }
-    }
+    });
   });
 
   test('personal settings are never tracked', () => {
-    ok(!assets.listStaticFiles(ROOT).includes('.claude/settings.local.json'),
-      'settings.local.json is personal and must stay out of the lock');
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      fs.writeFileSync(path.join(repoRoot, '.claude', 'settings.local.json'), '{"mine":true}\n');
+      ok(!assets.listStaticFiles(repoRoot).includes('.claude/settings.local.json'),
+        'settings.local.json is personal and must stay out of the lock');
+    });
   });
 
   // ------------------------------------------------------------------- agents
@@ -273,7 +307,7 @@ function run() {
     'agents-creator', 'issue-to-pr', 'knowledge-builder',
     'workflow-creator', 'permission-setting',
   ];
-  const AGENT_DIR = `${assets.TEMPLATE_ROOT}/agents`;
+  const AGENT_DIR = `${CLAUDE_TEMPLATES}/agents`;
   const agentFiles = listMd(AGENT_DIR);
 
   test('all five documented agents ship', () => {
@@ -282,7 +316,7 @@ function run() {
   });
 
   for (const file of agentFiles) {
-    const fm = frontmatter(fs.readFileSync(path.join(ROOT, AGENT_DIR, file), 'utf8'));
+    const fm = frontmatter(fs.readFileSync(path.join(ROOT, ...AGENT_DIR.split('/'), file), 'utf8'));
     test(`${file}: frontmatter declares name and description`, () => {
       ok(fm, 'no frontmatter block');
       eq(fm.name, file.replace(/\.md$/, ''), 'name must match the filename');
@@ -293,9 +327,9 @@ function run() {
       // Claude Code gives a subagent's frontmatter `model` precedence over the
       // session model with no way to override it from above. A name here would
       // silently defeat .claude/settings.json, settings.local.json,
-      // aidev.yaml's model.agent and --agent-model all at once.
-      eq(fm.model, 'inherit',
-        'a bundled agent must inherit the session model, not pin one');
+      // aidev.yaml's tools.agent_model and --agent-model all at once.
+      ok(fm.model === undefined || fm.model === 'inherit',
+        `a bundled agent must inherit the session model, not pin one (got ${fm.model})`);
     });
   }
 
@@ -305,10 +339,10 @@ function run() {
   const SKILLS = [
     'repository-discovery', 'knowledge-usage', 'test-and-verify', 'secure-coding',
     'azure-devops', 'change-planning', 'code-review', 'commit-and-pr',
-    'submodule-sync', 'failure-triage',
+    'knowledge-sync', 'failure-triage',
   ];
 
-  const SKILL_DIR = path.join(ROOT, ...assets.TEMPLATE_ROOT.split('/'), 'skills');
+  const SKILL_DIR = path.join(ROOT, ...CLAUDE_TEMPLATES.split('/'), 'skills');
 
   test('all ten documented skills ship', () => {
     const present = fs.existsSync(SKILL_DIR)
@@ -316,6 +350,10 @@ function run() {
       : [];
     const missing = SKILLS.filter((s) => !present.includes(s));
     ok(missing.length === 0, `missing skills: ${missing.join(', ') || '(none)'}`);
+  });
+
+  test('the renamed submodule-sync skill is gone', () => {
+    ok(!fs.existsSync(path.join(SKILL_DIR, 'submodule-sync')), 'submodule-sync was replaced by knowledge-sync');
   });
 
   for (const name of SKILLS) {
@@ -347,22 +385,31 @@ function run() {
 
   const ignore = readIfExists('.gitignore');
   if (ignore) {
-    test('.gitignore excludes every credential-bearing and local-state path', () => {
-      for (const p of [
-        '.claude/settings.local.json', '.env', '.aidev/cache/', '.aidev/tasks/',
-        '.aidev/leases/', '.aidev/sync.lock', 'knowledge/.cache/', 'workflows/*/runs/',
-      ]) {
+    test('the kit\'s own .gitignore excludes credential-bearing paths', () => {
+      for (const p of ['.claude/settings.local.json', '.env', '*.pem', '*.key']) {
         ok(ignore.includes(p), `.gitignore does not list ${p}`);
       }
     });
-
-    // policy.yaml is reviewed and shared; ignoring it would silently unshare
-    // the one file the whole approval flow exists to distribute.
-    test('.gitignore does not exclude the shared policy', () => {
-      ok(!/^\.aidev\/policy\.yaml\s*$/m.test(ignore),
-        '.aidev/policy.yaml must be committed, not ignored');
-    });
   }
+
+  // The runtime-state ignores now live in the PKG, written by the CLI as
+  // .aidev/.gitignore, so every clone gets them without editing its own root
+  // .gitignore.
+  test('.aidev/.gitignore keeps runtime state out of git', () => {
+    for (const p of ['cache/', 'leases/', 'tasks/', 'sync.lock', 'knowledge/.cache/', 'workflows/*/runs/']) {
+      ok(layout.AIDEV_GITIGNORE.includes(p), `.aidev/.gitignore does not list ${p}`);
+    }
+  });
+
+  // policy.yaml is reviewed and shared; ignoring it would silently unshare
+  // the one file the whole approval flow exists to distribute. The Wiki and
+  // the materialisation record are shared the same way.
+  test('.aidev/.gitignore does not exclude the shared files', () => {
+    for (const p of ['policy.yaml', 'knowledge/', 'materialized.json']) {
+      ok(!new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}\\s*$`, 'm').test(layout.AIDEV_GITIGNORE),
+        `.aidev/${p} must be committed, not ignored`);
+    }
+  });
 
   const attrs = readIfExists('.gitattributes');
   if (attrs) {
@@ -373,24 +420,27 @@ function run() {
     });
   }
 
-  // ------------------------------------------------------ materialising .claude
+  // ------------------------------------------------------ materialising the PKG
   // The templates above are only a promise; these tests are the delivery. Every
   // assertion in this suite is about the tree `aidev init` actually produces,
   // because that is the copy the hooks and the guard read.
-  suite('assets: .claude/ materialisation');
+  suite('assets: materialisation');
 
   const templatePairs = assets.listTemplateFiles(ROOT);
+  const ROOT_FILES = ['CLAUDE.md', '.mcp.json'];
 
-  test('every template maps to a path under .claude/', () => {
+  test('every template maps to .claude/ or one of the two root files', () => {
     ok(templatePairs.length > 0, 'no templates were discovered');
-    for (const { dest } of templatePairs) {
-      ok(dest.startsWith('.claude/'), `${dest} escapes .claude/`);
+    for (const { src, dest } of templatePairs) {
+      ok(path.isAbsolute(src), `${dest}: src is not absolute (${src})`);
+      ok(dest.startsWith('.claude/') || ROOT_FILES.includes(dest), `${dest} lands somewhere unexpected`);
     }
   });
 
-  test('the templates cover settings, all agents and all skills', () => {
+  test('the templates cover settings, the root files, all agents and all skills', () => {
     const dests = templatePairs.map((p) => p.dest);
     ok(dests.includes('.claude/settings.json'), 'settings.json is not materialised');
+    for (const f of ROOT_FILES) ok(dests.includes(f), `${f} is not materialised`);
     for (const a of AGENTS) {
       ok(dests.includes(`.claude/agents/${a}.md`), `agent ${a} is not materialised`);
     }
@@ -399,25 +449,31 @@ function run() {
     }
   });
 
-  test('materialising a fresh repo writes .claude/ byte-identically', () => {
-    withTempKit((root) => {
-      const r = assets.materializeStaticAssets(root);
+  test('the running CLI reads its templates from its own checkout by default', () => {
+    eq(path.resolve(assets.DEFAULT_INSTALL_ROOT), ROOT, 'DEFAULT_INSTALL_ROOT');
+    eq(assets.listTemplateFiles().map((p) => p.dest), templatePairs.map((p) => p.dest), 'same set');
+  });
+
+  test('materialising a fresh repo writes every template byte-identically', () => {
+    withTempKit((repoRoot, installRoot) => {
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
       ok(r.ok, `materialisation reported conflicts: ${JSON.stringify(r.conflicts)}`);
       eq(r.unchanged.length, 0, 'a fresh repo should have nothing already current');
-      ok(r.created.length >= 16, `expected at least 16 files, got ${r.created.length}`);
+      ok(r.created.length >= 17, `expected at least 17 files, got ${r.created.length}`);
+      eq(r.created.length, templatePairs.length, 'one file per template');
 
-      for (const { src, dest } of assets.listTemplateFiles(root)) {
-        const want = fs.readFileSync(path.join(root, src));
-        const got = fs.readFileSync(path.join(root, dest));
+      for (const { src, dest } of assets.listTemplateFiles(installRoot)) {
+        const want = fs.readFileSync(src);
+        const got = fs.readFileSync(path.join(repoRoot, ...dest.split('/')));
         ok(want.equals(got), `${dest} does not match its template`);
       }
     });
   });
 
   test('materialising twice changes nothing the second time', () => {
-    withTempKit((root) => {
-      const first = assets.materializeStaticAssets(root);
-      const second = assets.materializeStaticAssets(root);
+    withTempKit((repoRoot, installRoot) => {
+      const first = assets.materializeStaticAssets(repoRoot, { installRoot });
+      const second = assets.materializeStaticAssets(repoRoot, { installRoot });
       eq(second.created.length, 0, 'the second run created files');
       eq(second.updated.length, 0, 'the second run rewrote files');
       eq(second.unchanged.length, first.created.length, 'not every file was recognised as current');
@@ -427,30 +483,31 @@ function run() {
   // Overwriting silently would destroy the only copy of the edit; the design
   // routes kit-owned changes through a PR to the kit instead.
   test('a hand-edited kit file is a conflict, not an overwrite', () => {
-    withTempKit((root) => {
-      assets.materializeStaticAssets(root);
-      const target = path.join(root, '.claude', 'settings.json');
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      const target = path.join(repoRoot, '.claude', 'settings.json');
       fs.writeFileSync(target, '{"hooks":{}}\n');
 
-      const r = assets.materializeStaticAssets(root);
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
       ok(!r.ok, 'a divergent file was accepted');
       eq(r.conflicts.length, 1, JSON.stringify(r.conflicts));
       eq(r.conflicts[0].path, '.claude/settings.json');
       eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'the local edit was destroyed anyway');
 
-      const forced = assets.materializeStaticAssets(root, { force: true });
+      const forced = assets.materializeStaticAssets(repoRoot, { installRoot, force: true });
       ok(forced.ok, 'force did not resolve the conflict');
       eq(forced.updated.length, 1, 'force did not rewrite the file');
-      const want = fs.readFileSync(path.join(root, ...assets.TEMPLATE_ROOT.split('/'), 'settings.json'));
+      const want = fs.readFileSync(tpl(installRoot, 'settings.json'));
       ok(want.equals(fs.readFileSync(target)), 'force left the file unlike the template');
     });
   });
 
   test('--dry-run writes nothing', () => {
-    withTempKit((root) => {
-      const r = assets.materializeStaticAssets(root, { dryRun: true });
+    withTempKit((repoRoot, installRoot) => {
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot, dryRun: true });
       ok(r.created.length > 0, 'dry run reported no work');
-      ok(!fs.existsSync(path.join(root, '.claude', 'settings.json')), 'a dry run wrote a file');
+      ok(!fs.existsSync(path.join(repoRoot, '.claude', 'settings.json')), 'a dry run wrote a file');
+      ok(!fs.existsSync(path.join(repoRoot, 'CLAUDE.md')), 'a dry run wrote a root file');
     });
   });
 
@@ -459,34 +516,34 @@ function run() {
   // Treating that as a conflict would make every routine update demand --force,
   // which trains people to pass it and defeats the check entirely.
   test('the untouched previous generation is replaced without --force', () => {
-    withTempKit((root) => {
-      assets.materializeStaticAssets(root);
-      assets.writeLock(root, assets.buildLock(root, { kitCommit: null }));
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
 
       // The kit ships a new version of the file; nobody touched the copy on disk.
-      const tpl = path.join(root, ...assets.TEMPLATE_ROOT.split('/'), 'settings.json');
-      const bumped = `${fs.readFileSync(tpl, 'utf8').trimEnd()}\n`.replace('"deny"', '"deny" ');
-      fs.writeFileSync(tpl, bumped);
+      const t = tpl(installRoot, 'settings.json');
+      const bumped = `${fs.readFileSync(t, 'utf8').trimEnd()}\n`.replace('"deny"', '"deny" ');
+      fs.writeFileSync(t, bumped);
 
-      const r = assets.materializeStaticAssets(root);
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
       ok(r.ok, `a routine update was reported as a conflict: ${JSON.stringify(r.conflicts)}`);
       eq(r.updated, ['.claude/settings.json']);
-      eq(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'), bumped);
+      eq(fs.readFileSync(path.join(repoRoot, '.claude', 'settings.json'), 'utf8'), bumped);
     });
   });
 
   test('a local edit is still a conflict even when the kit also moved', () => {
-    withTempKit((root) => {
-      assets.materializeStaticAssets(root);
-      assets.writeLock(root, assets.buildLock(root, { kitCommit: null }));
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
 
       // Both sides changed: the lock no longer matches what is on disk.
-      const tpl = path.join(root, ...assets.TEMPLATE_ROOT.split('/'), 'settings.json');
-      fs.writeFileSync(tpl, `${fs.readFileSync(tpl, 'utf8').trimEnd()}\n\n`);
-      const dest = path.join(root, '.claude', 'settings.json');
+      const t = tpl(installRoot, 'settings.json');
+      fs.writeFileSync(t, `${fs.readFileSync(t, 'utf8').trimEnd()}\n\n`);
+      const dest = path.join(repoRoot, '.claude', 'settings.json');
       fs.writeFileSync(dest, '{"hooks":{}}\n');
 
-      const r = assets.materializeStaticAssets(root);
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
       ok(!r.ok, 'a local edit was silently overwritten');
       eq(r.conflicts.length, 1, JSON.stringify(r.conflicts));
       eq(r.conflicts[0].reason, 'has been edited locally');
@@ -498,18 +555,18 @@ function run() {
   // every later drift check. Only lock-known files qualify: the lock is the
   // evidence that the file was ours to delete.
   test('a file the kit no longer ships is pruned; a team file is not', () => {
-    withTempKit((root) => {
-      assets.materializeStaticAssets(root);
-      const retired = path.join(root, '.claude', 'agents', 'retired.md');
-      const teamOwned = path.join(root, '.claude', 'agents', 'team-owned.md');
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      const retired = path.join(repoRoot, '.claude', 'agents', 'retired.md');
+      const teamOwned = path.join(repoRoot, '.claude', 'agents', 'team-owned.md');
 
       // Order is the whole test: only what exists when the lock is written is
       // recorded as kit-generated, so the team file added afterwards is not.
       fs.writeFileSync(retired, '# was shipped once\n');
-      assets.writeLock(root, assets.buildLock(root, { kitCommit: null }));
+      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
       fs.writeFileSync(teamOwned, '# never shipped\n');
 
-      const r = assets.materializeStaticAssets(root);
+      const r = assets.materializeStaticAssets(repoRoot, { installRoot });
       ok(r.pruned.includes('.claude/agents/retired.md'), `retired.md was not pruned: ${r.pruned}`);
       ok(!fs.existsSync(retired), 'retired.md is still on disk');
       ok(fs.existsSync(teamOwned), 'a team-owned file was deleted');
@@ -517,37 +574,62 @@ function run() {
   });
 
   test('personal settings are never overwritten or pruned', () => {
-    withTempKit((root) => {
-      const local = path.join(root, '.claude', 'settings.local.json');
+    withTempKit((repoRoot, installRoot) => {
+      const local = path.join(repoRoot, '.claude', 'settings.local.json');
       fs.mkdirSync(path.dirname(local), { recursive: true });
       fs.writeFileSync(local, '{"mine":true}\n');
-      assets.materializeStaticAssets(root);
-      assets.writeLock(root, assets.buildLock(root, { kitCommit: null }));
-      assets.materializeStaticAssets(root);
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: null }));
+      assets.materializeStaticAssets(repoRoot, { installRoot });
       eq(fs.readFileSync(local, 'utf8'), '{"mine":true}\n', 'settings.local.json was touched');
     });
   });
 
-  // ------------------------------------------------------------- init end-to-end
-  suite('assets: aidev init materialises .claude/');
+  test('the lock records every materialised file under .aidev/materialized.json', () => {
+    withTempKit((repoRoot, installRoot) => {
+      assets.materializeStaticAssets(repoRoot, { installRoot });
+      assets.writeLock(repoRoot, assets.buildLock(repoRoot, { kitCommit: 'abc' }));
+      const lockFile = path.join(repoRoot, '.aidev', 'materialized.json');
+      ok(fs.existsSync(lockFile), 'lock written at .aidev/materialized.json');
+      eq(path.resolve(cfgMod.lockPath(repoRoot)), path.resolve(lockFile), 'cfg.lockPath agrees');
+      const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+      eq(lock.kitCommit, 'abc', 'records the kit commit');
+      for (const { dest } of templatePairs) ok(lock.files[dest], `${dest} absent from the lock`);
+      ok(assets.detectDrift(repoRoot).ok, 'a fresh materialisation has no drift');
+    });
+  });
 
-  test('init on a fresh clone leaves the hooks wired', () => {
-    const fx = makeRepo({ withTemplates: true, withLock: false });
+  // ------------------------------------------------------------- init end-to-end
+  suite('assets: aidev init sets up a bare PKG clone');
+
+  const BARE = { withConfig: false, withAssets: false, withPolicy: false, withWiki: false, withLock: false };
+
+  test('init on a fresh clone writes the config, the tool config and the record', () => {
+    const fx = makeRepo(BARE);
     try {
-      ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')),
-        'the fixture already had settings.json; the test would prove nothing');
+      ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'the fixture already had aidev.yaml; the test would prove nothing');
+      ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')), 'the fixture already had settings.json');
 
       const r = aidev(['init', '--yes'], fx.root);
       eq(r.code, 0, `init failed: ${r.out}`);
 
+      // aidev.yaml: schema v2, hosting inferred as generic from the local origin.
+      const cfgText = fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8');
+      ok(/^version:\s*2\s*$/m.test(cfgText), `aidev.yaml is not schema v2: ${cfgText.slice(0, 200)}`);
+      const config = cfgMod.loadConfig(fx.root);
+      eq(config.hosting.type, 'generic', 'hosting inferred from a local origin URL');
+      // The fixture's bare remote is <tmp>/origin.git, so that is the inferred name.
+      eq(config.package.name, 'origin', 'named after the origin repository');
+      ok(config.package.include.includes('src/**'), `include proposed from the tree: ${config.package.include}`);
+      ok(config.package.include.includes('docs/**'), 'docs proposed too');
+
+      // The materialised tool configuration.
       const settingsPath = path.join(fx.root, '.claude', 'settings.json');
       ok(fs.existsSync(settingsPath), `init did not create settings.json: ${r.out}`);
-
-      // The whole point: the file that lands must wire real hooks.
       const doc = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       eq(Object.keys(doc.hooks || {}).sort(),
         ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop'].sort());
-
+      for (const f of ROOT_FILES) ok(fs.existsSync(path.join(fx.root, f)), `missing ${f}`);
       for (const a of AGENTS) {
         ok(fs.existsSync(path.join(fx.root, '.claude', 'agents', `${a}.md`)), `missing agent ${a}`);
       }
@@ -556,37 +638,100 @@ function run() {
       }
 
       // Drift detection is only meaningful if the generated tree is in the lock.
-      const lock = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev-lock'), 'utf8'));
-      ok(lock.files['.claude/settings.json'], 'settings.json is absent from .aidev-lock');
+      const lock = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'materialized.json'), 'utf8'));
+      ok(lock.files['.claude/settings.json'], 'settings.json is absent from .aidev/materialized.json');
+      ok(lock.files['CLAUDE.md'], 'CLAUDE.md is absent from the record');
       ok(assets.detectDrift(fx.root).ok, 'a freshly initialised repo already reports drift');
+
+      // Runtime state stays out of git.
+      eq(fs.readFileSync(path.join(fx.root, '.aidev', '.gitignore'), 'utf8'), layout.AIDEV_GITIGNORE, '.aidev/.gitignore');
+
+      // The policy waits for a human: a candidate, not the real thing.
+      ok(fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'policy candidate written');
+      ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy not placed without approval');
+
+      // The clone is registered on this machine.
+      const reg = JSON.parse(fs.readFileSync(path.join(HOME, 'registry.json'), 'utf8'));
+      ok(reg.packages.some((p) => path.resolve(p.path).toLowerCase() === path.resolve(fx.root).toLowerCase()),
+        `registered in AIDEV_HOME: ${JSON.stringify(reg)}`);
+    } finally { fx.cleanup(); }
+  });
+
+  test('init --approve places the policy directly', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes', '--approve'], fx.root);
+      eq(r.code, 0, `init failed: ${r.out}`);
+      ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy placed');
+      ok(!fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'no dangling candidate');
+      const pol = cfgMod.loadPolicy(fx.root, { required: true });
+      for (const p of ALWAYS_PROTECTED) ok(pol.protected.includes(p), `policy protects ${p}`);
+      ok(pol.protected.some((p) => /secrets/.test(p)), 'secrets_paths are protected');
+    } finally { fx.cleanup(); }
+  });
+
+  test('init --json on a fresh clone reports the first-time steps', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes', '--json'], fx.root);
+      eq(r.code, 0, r.out);
+      const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
+      eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}: ${r.out}`);
+      const j = lastJson(r.out);
+      eq(j.ok, true, 'ok');
+      eq(j.firstTime, true, 'first time');
+      const names = j.steps.map((s) => `${s.step}:${s.action}`);
+      ok(names.includes('aidev.yaml:create'), `wrote the config: ${names}`);
+      ok(names.includes('tool config:materialised'), `materialised: ${names}`);
+      ok(names.includes('materialized.json:write'), `recorded: ${names}`);
+      ok(names.includes('registry:registered'), `registered: ${names}`);
+      ok(names.includes('policy:candidate'), `candidate: ${names}`);
+      // A first-time init builds the Wiki. Without Claude Code (the harness points
+      // AIDEV_CLAUDE_BIN at nothing) only the structured half is written, which is
+      // still a successful build step; the prose stays queued for the next init.
+      ok(names.includes('knowledge:built'), `wiki built: ${names}`);
+    } finally { fx.cleanup(); }
+  });
+
+  test('init --dry-run writes nothing', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes', '--dry-run'], fx.root);
+      eq(r.code, 0, r.out);
+      for (const rel of ['aidev.yaml', 'CLAUDE.md', '.mcp.json', '.claude/settings.json',
+        '.aidev/materialized.json', '.aidev/policy.candidate.yaml']) {
+        ok(!fs.existsSync(path.join(fx.root, ...rel.split('/'))), `dry run wrote ${rel}`);
+      }
     } finally { fx.cleanup(); }
   });
 
   test('init is idempotent and reports nothing to do the second time', () => {
-    const fx = makeRepo({ withTemplates: true, withLock: false });
+    const fx = makeRepo(BARE);
     try {
       eq(aidev(['init', '--yes'], fx.root).code, 0);
+      const cfgBefore = fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8');
       const r = aidev(['init', '--yes', '--json'], fx.root);
       eq(r.code, 0, r.out);
 
-      // The stdout contract every other command keeps: human lines may precede
-      // it, but there is exactly one JSON document.
+      // The stdout contract every other command keeps: exactly one JSON document.
       const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
       eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}: ${r.out}`);
 
       const j = lastJson(r.out);
       ok(j, `no JSON in output: ${r.out}`);
-      const step = j.steps.find((s) => s.step === '.claude');
-      ok(step, `no .claude step reported: ${r.out}`);
+      eq(j.firstTime, false, 'no longer first time');
+      const step = j.steps.find((s) => s.step === 'tool config');
+      ok(step, `no tool config step reported: ${r.out}`);
       eq(step.created, 0, 'the second init recreated files');
       eq(step.updated, 0, 'the second init rewrote files');
       ok(step.unchanged > 0, 'the second init saw no current files');
+      eq(fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8'), cfgBefore, 'aidev.yaml was not rewritten');
     } finally { fx.cleanup(); }
   });
 
   // init must not be a way to launder an edit to a kit-owned file.
   test('init refuses to overwrite a divergent kit file without --force', () => {
-    const fx = makeRepo({ withTemplates: true, withLock: false });
+    const fx = makeRepo(BARE);
     try {
       eq(aidev(['init', '--yes'], fx.root).code, 0);
       const target = path.join(fx.root, '.claude', 'settings.json');
@@ -598,6 +743,61 @@ function run() {
 
       eq(aidev(['init', '--yes', '--force'], fx.root).code, 0, 'init --force did not recover');
       ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not restore the hooks');
+      ok(assets.detectDrift(fx.root).ok, 'the record was refreshed after --force');
+    } finally { fx.cleanup(); }
+  });
+
+  test('init honours explicit flags over inference', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes', '--name', 'explicit', '--hosting', 'azure-devops',
+        '--org', 'o', '--project', 'p', '--repository', 'r', '--include', 'src/**',
+        '--tracking-branch', 'develop', '--agent-model', 'opus'], fx.root);
+      eq(r.code, 0, r.out);
+      const config = cfgMod.loadConfig(fx.root);
+      eq(config.package.name, 'explicit', 'name');
+      eq(config.hosting.type, 'azure-devops', 'hosting');
+      eq(config.hosting.organization, 'o', 'org');
+      eq(config.hosting.project, 'p', 'project');
+      eq(config.hosting.repository, 'r', 'repository');
+      eq(config.package.include, ['src/**'], 'include');
+      eq(config.sync.tracking_branch, 'develop', 'tracking branch');
+      eq(config.tools.agent_model, 'opus', 'agent model');
+    } finally { fx.cleanup(); }
+  });
+
+  test('init with azure-devops hosting needs the three coordinates', () => {
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes', '--hosting', 'azure-devops'], fx.root);
+      ok(r.code !== 0, 'refused');
+      ok(/organization|--org/.test(r.out), `names what is missing: ${r.out}`);
+      ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'nothing half-written');
+    } finally { fx.cleanup(); }
+  });
+
+  test('init run from a subdirectory sets up the clone root, not the subdirectory', () => {
+    // findRepoRoot walks up to the directory holding .aidev/ (or, failing that,
+    // the git toplevel), so nothing kit-owned can land inside src/.
+    const fx = makeRepo(BARE);
+    try {
+      const r = aidev(['init', '--yes'], path.join(fx.root, 'src'));
+      eq(r.code, 0, r.out);
+      ok(fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'aidev.yaml at the root');
+      ok(!fs.existsSync(path.join(fx.root, 'src', 'aidev.yaml')), 'nothing written into src/');
+      ok(!fs.existsSync(path.join(fx.root, 'src', '.claude')), 'no .claude/ inside src/');
+    } finally { fx.cleanup(); }
+  });
+
+  // The registry is what `aidev update --all` walks; a clone that init never
+  // registered would silently miss every kit update.
+  test('a registered clone is listed as present while it exists', () => {
+    const fx = makeRepo(BARE);
+    try {
+      eq(aidev(['init', '--yes'], fx.root).code, 0);
+      const env = { AIDEV_HOME: HOME };
+      const listed = home.listPackages(env);
+      ok(listed.present.some((p) => path.resolve(p.path).toLowerCase() === path.resolve(fx.root).toLowerCase()), 'present');
     } finally { fx.cleanup(); }
   });
 }
@@ -609,3 +809,4 @@ if (require.main === module) {
   run();
   process.exit(summary() ? 0 : 1);
 }
+

@@ -1,0 +1,71 @@
+[[cli-eject]]
+== aidev eject
+
+PKG を kit の管理から外します。
+
+=== 書式
+
+[source,text]
+----
+aidev eject --dry-run
+aidev eject --yes [--keep-assets] [--force] [--json]
+----
+
+=== 説明
+
+順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ `.claude/**`、`CLAUDE.md`、`.mcp.json` を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
+
+残すもの: PKG のファイル、`.aidev/knowledge/`（Wiki）、`aidev.yaml`、`.aidev/workflows/`。
+
+eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外してください。`aidev init` で再導入できます。
+
+対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。進行中の sync や作業リースがあると `--force` 無しでは拒否します。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--yes`
+|確認済みとして実行する
+
+|`--dry-run`
+|消すものと外す hook を表示し、何も書かない
+
+|`--json`
+|JSON で出力する
+
+|`--force`
+|eject 済みでも、進行中のリースがあっても実行する
+
+|`--keep-assets`
+|`.claude/`、`CLAUDE.md`、`.mcp.json` を残す
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|eject した。既に eject 済み。`--dry-run`
+
+|1
+|`--yes` が無い。管理の痕跡が無い。進行中のリースがある
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev eject --dry-run
+aidev eject --yes
+git add -A && git commit -m "chore: eject from ai-dev-kit"
+----
+
+=== 関連
+
+* xref:cli-init[aidev init] — 再導入
+* xref:files-and-state[PKG 内のファイル]

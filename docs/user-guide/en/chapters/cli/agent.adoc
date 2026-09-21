@@ -1,0 +1,99 @@
+[[cli-agent]]
+== aidev agent
+
+Starts a bundled agent once, with the AI tool this PKG is set up for.
+
+=== Synopsis
+
+[source,text]
+----
+aidev agent list [--json]
+aidev agent show <name> [--tool <tool>] [--model <model>] [--json]
+aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout <ms>] [--prompt-file <path>] [--dry-run] [--json]
+----
+
+=== Description
+
+Hands one task to a bundled agent (`agents-creator`, `issue-to-pr`, `knowledge-builder`, `permission-setting`, `workflow-creator`) through the same launcher that `aidev knowledge build` and `aidev sync` use. The agent runs inside the PKG clone with the same configuration files, hooks and policy as an interactive session.
+
+The tool and model are chosen in this order:
+
+. `--tool` / `--model`
+. `tools.agents.<name>` in `aidev.yaml`
+. `tools.agent` / `tools.agent_model` in `aidev.yaml`
+
+Only tools listed in `tools.default` can be used. Naming another tool stops with a hint to add it to `aidev.yaml` and run `aidev update`.
+
+How the task reaches the tool differs. Claude Code receives it on standard input and selects the agent with `--agent <name>`. GitHub Copilot CLI and Kiro CLI receive one command-line sentence pointing at a task file written under `.aidev/cache/agents/`, and also select the agent by name. OpenAI Codex CLI cannot select an agent by name, so the task file starts with the agent's definition.
+
+The adapters other than Claude Code follow each tool's published non-interactive mode, but the kit maintainers have not checked them against the real tools. Use `run --dry-run` or `show` to see the exact command line before relying on one.
+
+=== Subcommands
+
+[cols="1,4",options="header"]
+|===
+|Subcommand |What it does
+
+|`list`
+|Lists the bundled agents with the tool and model each one runs with
+
+|`show <name>`
+|Shows the agent's description, definition file, tool, model and the command line that would run
+
+|`run <name> [<task>...]`
+|Starts the agent. The task comes from the arguments, `--prompt-file`, or standard input
+|===
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--json`
+|Machine-readable output
+
+|`--tool <tool>`
+|Tool for this run (`claude`, `copilot`, `codex`, `kiro`)
+
+|`--model <model>`
+|Model for this run; `""` passes no model flag
+
+|`--timeout <ms>`
+|`run`: time budget, 10000 to 7200000 (default 1800000 = 30 minutes)
+
+|`--prompt-file <path>`
+|`run`: read the task from a file
+
+|`--dry-run`
+|`run`: print the command line that would run; start nothing
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|Success (for `run`: the agent finished normally)
+
+|1
+|Bad agent name, tool or model; the tool is not in `tools.default`; the tool was not found; the agent failed or timed out
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev agent list
+aidev agent show knowledge-builder --tool copilot
+aidev agent run issue-to-pr "Triage work item 42 and propose an implementation plan" --dry-run
+aidev agent run issue-to-pr "Triage work item 42 and propose an implementation plan"
+aidev agent run knowledge-builder --prompt-file task.md --model opus
+----
+
+=== See also
+
+* xref:configuration[aidev.yaml reference] — `tools.default`, `tools.agent`, `tools.agents`
+* xref:cli-workflow[aidev workflow] — `ctx.agent` in `steps.js`

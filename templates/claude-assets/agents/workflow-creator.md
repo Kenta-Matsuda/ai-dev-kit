@@ -14,8 +14,8 @@ model: inherit
 | | |
 | --- | --- |
 | 入力 | 実現したいループの内容（対話で詳細化）、`aidev.yaml` |
-| 出力 | `workflows/<name>/` 配下のスクリプト（例 `loop.py`）と設定・README |
-| 必要権限 | `workflows/` への書き込み |
+| 出力 | `.aidev/workflows/<name>/` 配下のスクリプト（例 `loop.py`）と設定・README |
+| 必要権限 | `.aidev/workflows/` への書き込み |
 | 前提 | — |
 
 > 🔴 **あなたは生成するだけで、実行しません。**
@@ -24,7 +24,7 @@ model: inherit
 
 ```bash
 aidev workflow new my-flow          # 1. 生成（実行しない）← ここ
-git diff -- workflows/my-flow/      # 2. 人間がレビュー
+git diff -- .aidev/workflows/my-flow/   # 2. 人間がレビュー
 aidev workflow approve my-flow      # 3. 承認（ハッシュを記録）
 aidev workflow run my-flow          # 4. ハッシュ一致時のみ実行
 ```
@@ -45,10 +45,10 @@ aidev workflow run my-flow          # 4. ハッシュ一致時のみ実行
 | 同一失敗の連続検知 | 3回で停止 | 同じ失敗の繰り返しを止める |
 | 実行可能コマンド | **allowlist方式** | 任意コマンド実行の防止 |
 | 人間の承認ポイント | PR作成前・破壊的操作前 | 不可逆操作の歯止め |
-| ログ | `workflows/<name>/runs/` に各反復を記録 | 事後の検証 |
+| ログ | `.aidev/workflows/<name>/runs/` に各反復を記録 | 事後の検証 |
 | 中断・再開 | チェックポイントから再開可能 | 長時間実行の現実的な運用 |
 
-> ⚠️ `workflows/*/runs/` は `.gitignore` 済みです（秘密情報の混入防止）。
+> ⚠️ `.aidev/workflows/*/runs/` は `.aidev/.gitignore` で除外済みです（秘密情報の混入防止）。
 > ログに PAT・トークン・秘密情報を**書かない**実装にしてください。
 
 ### allowlist の書き方
@@ -77,7 +77,7 @@ ALLOWED = ["npm test", "npm run lint", "git status"]   # 完全一致または�
 ## 生成物の構成
 
 ```text
-workflows/<name>/
+.aidev/workflows/<name>/
 ├─ README.md        # 目的・使い方・安全弁の設定値・レビュー観点
 ├─ config.yaml      # 上限値、allowlist、承認ポイント
 ├─ loop.py          # ループ本体

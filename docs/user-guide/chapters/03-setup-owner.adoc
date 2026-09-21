@@ -1,0 +1,105 @@
+[[setup-owner]]
+== 導入担当者の手順
+
+PKG に {project-name} を初めて導入し、設定・policy・Wiki を PR にしてチームへ配ります。PKG につき 1 人が 1 回行います。
+
+=== 必要なもの
+
+* xref:install[端末に aidev を入れる] が終わっていて、`aidev doctor` で `claude` が `✓`
+* PKG の clone。コミットが 1 つ以上あり、`origin` が設定されている
+* Azure DevOps なら `AZURE_DEVOPS_PAT` を設定済み
+* Wiki の生成には時間がかかります。目安は生成対象 20 ファイルごとに数分〜十数分です
+
+=== 手順
+
+. PKG のルートで作業ブランチを切ります。
++
+[source,bash]
+----
+cd <pkg>
+git switch -c feature/ai-dev-kit
+----
+
+. `aidev init` を実行し、4 つの質問に答えます。Enter で `[ ]` の既定値になります。
++
+[source,bash]
+----
+aidev init
+----
++
+[cols="1,3",options="header"]
+|===
+|質問 |答え方
+
+|1/4 tools
+|そのまま Enter で `claude`。複数使うなら `claude, copilot` のようにカンマ区切りで書きます（`claude`、`copilot`、`codex`、`kiro`）。
+
+|2/4 Wiki の生成対象
+|説明ページを作りたいパス（glob、カンマ区切り）。`src/**`, `docs/**` などが提案されます。Wiki の調査そのものは PKG 全体を対象にするので、ここは「ページが欲しい場所」だけで構いません。
+
+|3/4 秘密パス
+|AI に読ませないパス。既定の 5 つに、証明書や設定の置き場があれば追加します。
+
+|4/4 hosting
+|`origin` の URL から推定されます。Azure DevOps なら organization / project / repository を確認し、最後に Wiki が追いかけるブランチ（既定 `main`）を答えます。
+|===
++
+質問のあと、設定ファイルが書かれ、policy の要約と `Place this policy now? (y/N)` が表示されます。`y` で policy が置かれます。`N` なら候補ファイルが書かれ、次の手順で承認します。
++
+* `✗ N kit-owned file(s) differ from the kit copy` → 既に手編集された `.claude/` などがあります。内容を退避してから `aidev init --force` を実行します。
+* `run "aidev init" at the repository root` → ルートに移動して実行します。
+
+. policy を承認します（手順 2 で `N` にした場合だけ）。候補を読み、納得したら置きます。
++
+[source,bash]
+----
+cat .aidev/policy.candidate.yaml
+aidev permission configure --approve
+----
++
+policy の中身は xref:permissions[権限と安全性] を見てください。
+
+. Wiki を生成します。時間がかかります。途中で止まっても、同じコマンドで続きから再開できます。
++
+[source,bash]
+----
+aidev knowledge build
+----
++
+進み方は次のように表示されます。
++
+[source,text]
+----
+ℹ running the knowledge-builder agent: 163 generation target(s) in 9 batch(es) of up to 20, after a survey run
+✓ survey complete in 3m 12s ($0.4120)
+ℹ batch 1/9: 20 target(s), src/api/auth.ts … src/api/users.ts
+✓ batch 1/9 complete: 20/20 in 4m 2s ($0.5533)
+...
+✓ knowledge-builder completed 163/163 queued generation target(s) ($4.9012)
+----
++
+最後が `✓ knowledge-builder completed N/N` なら完了です。それ以外で止まったら、次を確認して **同じコマンドをもう一度** 実行します。
++
+* `⚠ the knowledge-builder agent did not run` → Claude Code が見つかりません。`aidev doctor` の `claude` 行を直します。
+* `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → 終わった分は保存されています。再実行します。何度も時間切れになるなら `--agent-batch-size 10` を付けます。
++
+`aidev status` の 2 行目が `✅` になれば Wiki は完成です。
+
+. コミットして PR を作ります。
++
+[source,bash]
+----
+aidev check
+git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json
+git commit -m "chore: adopt ai-dev-kit"
+git push -u origin feature/ai-dev-kit
+----
++
+`aidev check` が `✓ environment is consistent.` であることを確認してから push します。`.aidev/.gitignore` が一時ファイルを除外するので、`git add .aidev` で余計なものは入りません。
+
+. PR をレビューしてもらい、`main` にマージします。マージ後、メンバーは xref:setup-member[メンバーの手順] で参加できます。
+
+=== 次のステップ
+
+* CI に `aidev check` を入れる、夜間に Wiki を追従させる → xref:automation-ci[自動化: CI]
+* AI が編集した後に lint / test を走らせる → xref:configuration[aidev.yaml リファレンス] の `quality_gates`

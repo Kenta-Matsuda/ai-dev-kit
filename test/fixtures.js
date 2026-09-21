@@ -1,5 +1,19 @@
 'use strict';
-/** Shared fixture: a throwaway wrapper repo with git, submodule and policy. */
+/**
+ * Shared fixture: a throwaway PKG clone set up the way `aidev init` leaves it.
+ *
+ * Layout (one temp directory per fixture):
+ *
+ *   origin.git/   bare remote — what "origin/main" points at
+ *   author/       a second clone used to push new PKG commits (advancePkg)
+ *   pkg/          the clone under test (fx.root): PKG files + kit files, all
+ *                 committed and pushed, so HEAD == origin/main == knowledgeSha
+ *
+ * Kit files are written the way the CLI writes them: aidev.yaml (v2),
+ * .aidev/policy.yaml, .aidev/.gitignore, .aidev/knowledge/ (manifest,
+ * inventory, index.md), the tool config (.claude/settings.json, CLAUDE.md,
+ * .mcp.json) and .aidev/materialized.json built with the production hasher.
+ */
 
 const fs = require('fs');
 const os = require('os');
@@ -25,7 +39,7 @@ function write(p, s) {
   fs.writeFileSync(p, s, 'utf8');
 }
 
-/** Recursive directory copy, used to plant the kit's real templates. */
+/** Recursive directory copy. */
 function copyDir(src, dst) {
   fs.mkdirSync(dst, { recursive: true });
   for (const e of fs.readdirSync(src, { withFileTypes: true })) {
@@ -36,173 +50,169 @@ function copyDir(src, dst) {
   }
 }
 
-/**
- * Plant the kit's real `templates/claude-assets/` in a fixture repo.
- *
- * The real files rather than a stand-in: the point of a materialisation test is
- * that what the kit ships is what lands in `.claude/`, which a fake template
- * could not demonstrate.
- */
-function copyTemplates(root) {
-  const assets = require('../cli/lib/assets');
-  const rel = assets.TEMPLATE_ROOT.split('/');
-  copyDir(path.join(__dirname, '..', ...rel), path.join(root, ...rel));
+/** The kit checkout the tests exercise (templates are read from here). */
+const KIT_ROOT = path.resolve(__dirname, '..');
+
+/** The default PKG: a small TypeScript-ish tree with docs and a secret. */
+const DEFAULT_PKG_FILES = {
+  'src/api/auth.ts': 'export function auth() { return 1; }\n',
+  'src/api/routing.ts': 'export const routes = [];\n',
+  'docs/readme.md': '# pkg docs\n',
+  'config/secrets/key.pem': 'SECRET\n',
+  'README.md': '# my-pkg\n',
+};
+
+function kitHook(name) {
+  return { type: 'command', command: `aidev hook ${name}` };
 }
 
 /**
- * The kit-owned files every wrapper repo carries, byte-identical.
+ * The kit-owned files every set-up PKG carries.
  *
- * `settings: false` leaves `.claude/` empty, which is what a clone looks like
- * before `aidev init` materialises it.
+ * `hooks: true` wires the kit's hooks the way the shipped settings.json does,
+ * plus a team-owned hook that eject must leave alone. `realTemplates: true`
+ * copies the kit's actual templates instead of a stand-in.
  */
-function writeStaticAssets(root, { hooks = false, settings = true } = {}) {
-  write(path.join(root, 'CLAUDE.md'), '# test wrapper\n');
+function writeStaticAssets(root, { hooks = false, realTemplates = false } = {}) {
+  if (realTemplates) {
+    copyDir(path.join(KIT_ROOT, 'templates', 'claude-assets'), path.join(root, '.claude'));
+    copyDir(path.join(KIT_ROOT, 'templates', 'root'), root);
+    return;
+  }
+  write(path.join(root, 'CLAUDE.md'), '# test package instructions\n');
   write(path.join(root, '.mcp.json'), `${JSON.stringify({
     mcpServers: { 'azure-devops': { command: 'aidev', args: ['mcp', 'azure-devops'] } },
   }, null, 2)}\n`);
-  // `hooks: true` wires the kit's hooks the way a real settings.json does, plus
-  // a team-owned hook that eject must leave alone.
-  const kitHook = (name) => ({
-    type: 'command', command: 'node',
-    args: ['${CLAUDE_PROJECT_DIR}/cli/bin/aidev.js', 'hook', name],
-  });
   const settingsDoc = hooks ? {
     hooks: {
-      PreToolUse: [
-        { matcher: 'Write|Edit|MultiEdit|Bash', hooks: [kitHook('guard-write')] },
-      ],
-      SessionStart: [
-        { matcher: '*', hooks: [
-          kitHook('session-start'),
-          { type: 'command', command: 'echo team-owned-hook' },
-        ] },
-      ],
+      PreToolUse: [{ matcher: 'Write|Edit|MultiEdit|Bash', hooks: [kitHook('guard-write')] }],
+      SessionStart: [{ matcher: '*', hooks: [kitHook('session-start'), { type: 'command', command: 'echo team-owned-hook' }] }],
     },
   } : { hooks: {} };
-  if (settings) {
-    write(path.join(root, '.claude', 'settings.json'), `${JSON.stringify(settingsDoc, null, 2)}\n`);
-  }
+  write(path.join(root, '.claude', 'settings.json'), `${JSON.stringify(settingsDoc, null, 2)}\n`);
 }
 
-/**
- * Build a wrapper repo containing a real PKG submodule.
- *
- * The repo is built the way a correctly-initialised one looks: kit-owned static
- * files present and recorded in `.aidev-lock`. Without that, `detectDrift`
- * reports `noLock` and every `aidev check` returns exit 2, which would mask the
- * exit codes most of these tests exist to pin down. `withLock: false` recreates
- * the un-initialised repo on purpose.
- *
- * Returns { root, pkgRoot, pkgOrigin, cleanup }.
- */
-function makeRepo({
-  withWiki = true, withPolicy = true, withLock = true, withHooks = false,
-  withTemplates = false, pkgFiles = null,
-} = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-test-'));
-  const pkgOrigin = path.join(base, 'pkg-origin');
-  const root = path.join(base, 'wrapper');
-
-  // --- the PKG repository (acts as the submodule's origin) ---
-  fs.mkdirSync(pkgOrigin, { recursive: true });
-  git(['init', '-q', '-b', 'main'], pkgOrigin);
-  const files = pkgFiles || {
-    'src/api/auth.ts': 'export function auth() { return 1; }\n',
-    'src/api/routing.ts': 'export const routes = [];\n',
-    'docs/readme.md': '# pkg docs\n',
-    'config/secrets/key.pem': 'SECRET\n',
-  };
-  for (const [rel, body] of Object.entries(files)) write(path.join(pkgOrigin, rel), body);
-  git(['add', '-A'], pkgOrigin);
-  git(['commit', '-q', '-m', 'initial'], pkgOrigin);
-  const pkgSha = git(['rev-parse', 'HEAD'], pkgOrigin);
-
-  // --- the wrapper repository ---
-  fs.mkdirSync(root, { recursive: true });
-  git(['init', '-q', '-b', 'main'], root);
-  write(path.join(root, 'README.md'), '# wrapper\n');
-  git(['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', pkgOrigin, 'src'], root);
-
-  // --- kit-owned static assets (shipped identically by the central kit) ---
-  // With templates present, `.claude/` is left empty so init has something to
-  // materialise; otherwise a stand-in settings.json stands in for a repo that
-  // has already been initialised.
-  writeStaticAssets(root, { hooks: withHooks, settings: !withTemplates });
-  if (withTemplates) copyTemplates(root);
-
-  write(path.join(root, 'aidev.yaml'), [
-    'version: 1',
+function configYaml({ name = 'my-pkg', hosting = 'azure-devops', include, exclude, secrets, extra = [] } = {}) {
+  const q = (s) => JSON.stringify(s);
+  const hostingLines = hosting === 'azure-devops'
+    ? ['hosting:', '  type: azure-devops', '  organization: my-org', '  project: my-project',
+      '  repository: my-pkg', '  auth_env: AZURE_DEVOPS_PAT', '  tracking_branch: main',
+      '  triage:', '    labels: ["ai-ready"]']
+    : ['hosting:', '  type: generic', '  repository: my-pkg', '  tracking_branch: main'];
+  return [
+    'version: 2',
     'package:',
-    '  name: my-pkg',
-    '  include: ["src/src/**", "src/docs/**"]',
+    `  name: ${name}`,
+    `  include: [${(include || ['src/**', 'docs/**', 'mod/**']).map(q).join(', ')}]`,
     '  exclude:',
-    '    - "**/node_modules/**"',
+    ...(exclude || ['**/node_modules/**']).map((s) => `    - ${q(s)}`),
     'secrets_paths:',
-    '  - "src/config/secrets/**"',
-    'azure_devops:',
-    '  organization: my-org',
-    '  project: my-project',
-    '  repository: my-pkg',
-    '  wrapper_repository: my-pkg-ai-dev',
-    '  auth_env: AZURE_DEVOPS_PAT',
-    '  triage:',
-    '    labels: ["ai-ready"]',
+    ...(secrets || ['config/secrets/**']).map((s) => `  - ${q(s)}`),
+    ...hostingLines,
     'sync:',
-    '  tracking_branch: main',
     '  lease_ttl_minutes: 120',
     'task:',
     '  lease_ttl_minutes: 120',
     'knowledge:',
     '  max_files_per_dir: 20',
+    ...extra,
     '',
-  ].join('\n'));
+  ].join('\n');
+}
 
-  if (withPolicy) {
-    write(path.join(root, '.aidev', 'policy.yaml'), [
-      'version: 1',
-      'protected:',
-      '  - ".claude/**"',
-      '  - "CLAUDE.md"',
-      '  - ".mcp.json"',
-      '  - ".aidev/policy.yaml"',
-      '  - ".aidev/leases/**"',
-      '  - ".aidev/sync.lock"',
-      '  - ".aidev-lock"',
-      '  - "src/config/secrets/**"',
-      'read_only:',
-      '  - "src/**"',
-      'writable_during_sync:',
-      '  - "knowledge/**"',
-      '',
-    ].join('\n'));
-  }
+function policyYaml() {
+  return [
+    'version: 1',
+    'protected:',
+    '  - ".claude/**"',
+    '  - "CLAUDE.md"',
+    '  - ".mcp.json"',
+    '  - ".aidev/policy.yaml"',
+    '  - ".aidev/leases/**"',
+    '  - ".aidev/sync.lock"',
+    '  - ".aidev/materialized.json"',
+    '  - "config/secrets/**"',
+    'read_only:',
+    '  - "**"',
+    'writable_during_sync:',
+    '  - ".aidev/knowledge/**"',
+    'writable:',
+    '  - ".aidev/knowledge/**"',
+    '  - ".aidev/workflows/**"',
+    '  - "aidev.yaml"',
+    '',
+  ].join('\n');
+}
 
+/**
+ * Build a PKG clone with the kit set up.
+ *
+ * Returns { root, pkgDir (== root), pkgOrigin (the author clone), originGit,
+ * pkgSha (the commit the Wiki describes; also HEAD and origin/main), cleanup }.
+ */
+function makeRepo({
+  withWiki = true, withPolicy = true, withLock = true, withHooks = false,
+  withAssets = true, realTemplates = false, withConfig = true,
+  pkgFiles = null, hosting = 'azure-devops', configExtra = [],
+} = {}) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-test-'));
+  const originGit = path.join(base, 'origin.git');
+  const author = path.join(base, 'author');
+  const root = path.join(base, 'pkg');
+
+  // --- bare origin + author clone with the PKG's own files ---
+  fs.mkdirSync(originGit, { recursive: true });
+  git(['init', '-q', '--bare', '-b', 'main'], originGit);
+  git(['-c', 'protocol.file.allow=always', 'clone', '-q', originGit, author], base);
+  git(['checkout', '-q', '-b', 'main'], author);
+  const files = pkgFiles || DEFAULT_PKG_FILES;
+  for (const [rel, body] of Object.entries(files)) write(path.join(author, rel), body);
+  git(['add', '-A'], author);
+  git(['commit', '-q', '-m', 'initial'], author);
+  git(['-c', 'protocol.file.allow=always', 'push', '-q', '-u', 'origin', 'main'], author);
+
+  // --- the clone under test ---
+  git(['-c', 'protocol.file.allow=always', 'clone', '-q', originGit, root], base);
+  git(['config', 'protocol.file.allow', 'always'], root);
+  git(['config', 'protocol.file.allow', 'always'], author);
+
+  if (withConfig) write(path.join(root, 'aidev.yaml'), configYaml({ hosting, extra: configExtra }));
+  write(path.join(root, '.aidev', '.gitignore'), require('../cli/lib/layout').AIDEV_GITIGNORE);
+  if (withAssets) writeStaticAssets(root, { hooks: withHooks, realTemplates });
+  if (withPolicy) write(path.join(root, '.aidev', 'policy.yaml'), policyYaml());
+
+  // The Wiki describes the PKG's initial commit. The setup commit on top adds
+  // only kit-managed files, which the state model ignores when deciding
+  // whether the code moved — exactly what happens after a real `aidev init`.
+  const pkgSha = git(['rev-parse', 'HEAD'], root);
   if (withWiki) {
-    write(path.join(root, 'knowledge', 'manifest.json'), `${JSON.stringify({
-      schemaVersion: 2,
-      knowledgeSha: pkgSha,
-      kitCommit: null,
-      generatedAt: new Date().toISOString(),
-      inventoryShards: ['inventory/00.json'],
-      stats: { files: 0, pages: 0, maskedFiles: 0 },
+    write(path.join(root, '.aidev', 'knowledge', 'index.md'), '# index\n');
+    write(path.join(root, '.aidev', 'knowledge', 'inventory', '00.json'), '[]\n');
+    write(path.join(root, '.aidev', 'knowledge', 'manifest.json'), `${JSON.stringify({
+      schemaVersion: 3, knowledgeSha: pkgSha, kitCommit: null,
+      generatedAt: new Date().toISOString(), inventoryShards: ['inventory/00.json'],
+      stats: { files: 0, pages: 0, maskedFiles: 0 }, checkpoint: { pendingPaths: [] },
     }, null, 2)}\n`);
-    write(path.join(root, 'knowledge', 'inventory', '00.json'), '[]\n');
-    write(path.join(root, 'knowledge', 'index.md'), '# index\n');
   }
-
-  // Built with the production hasher rather than a hand-rolled copy, so the
-  // fixture cannot drift from what detectDrift actually computes.
-  if (withLock) {
+  if (withLock && withAssets) {
     const assets = require('../cli/lib/assets');
     assets.writeLock(root, assets.buildLock(root, { kitCommit: null }));
   }
-
   git(['add', '-A'], root);
-  git(['commit', '-q', '-m', 'wrapper init'], root);
+  git(['commit', '-q', '-m', 'aidev setup'], root);
+  git(['push', '-q', 'origin', 'main'], root);
+  const setupSha = git(['rev-parse', 'HEAD'], root);
+  git(['pull', '-q', '--ff-only', 'origin', 'main'], author);
 
   return {
-    root, pkgOrigin, pkgSha,
-    pkgDir: path.join(root, 'src'),
+    root,
+    pkgDir: root,
+    pkgOrigin: author,
+    originGit,
+    /** The commit the Wiki describes (the PKG's initial commit). */
+    pkgSha,
+    /** HEAD == origin/main after setup (pkgSha + kit files). */
+    setupSha,
     /** Re-record the lock after a test deliberately changes a static file. */
     relock() {
       const assets = require('../cli/lib/assets');
@@ -212,12 +222,26 @@ function makeRepo({
   };
 }
 
-/** Advance the PKG origin by one commit and return the new SHA. */
+/**
+ * Advance origin/main by one commit (through the author clone) and return the
+ * new SHA. The clone under test does not see it until it fetches or pulls.
+ */
 function advancePkg(fx, rel = 'src/api/new.ts', body = 'export const x = 1;\n') {
+  git(['pull', '-q', '--ff-only', 'origin', 'main'], fx.pkgOrigin);
   write(path.join(fx.pkgOrigin, rel), body);
   git(['add', '-A'], fx.pkgOrigin);
   git(['commit', '-q', '-m', `add ${rel}`], fx.pkgOrigin);
+  git(['push', '-q', 'origin', 'main'], fx.pkgOrigin);
   return git(['rev-parse', 'HEAD'], fx.pkgOrigin);
 }
 
-module.exports = { makeRepo, advancePkg, git, write, writeStaticAssets, copyTemplates, copyDir };
+/** Bring the clone under test up to origin/main (fast-forward). */
+function pullPkg(fx) {
+  git(['fetch', '-q', 'origin', 'main'], fx.root);
+  git(['merge', '-q', '--ff-only', 'origin/main'], fx.root);
+  return git(['rev-parse', 'HEAD'], fx.root);
+}
+
+module.exports = {
+  makeRepo, advancePkg, pullPkg, git, write, writeStaticAssets, copyDir, configYaml, policyYaml, KIT_ROOT,
+};

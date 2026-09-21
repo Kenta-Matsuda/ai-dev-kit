@@ -1,0 +1,105 @@
+[[setup-owner]]
+== Package owner steps
+
+Adopt {project-name} in a package for the first time, and share the setup, the policy and the Wiki with the team through a PR. One person does this once per package.
+
+=== What you need
+
+* xref:install[Install aidev on your machine] is done, and `aidev doctor` shows `✓` for `claude`
+* A clone of the package with at least one commit and `origin` set
+* For Azure DevOps, `AZURE_DEVOPS_PAT` is set
+* Generating the Wiki takes time. Expect a few minutes to fifteen minutes per 20 generation targets
+
+=== Steps
+
+. Create a working branch at the package root.
++
+[source,bash]
+----
+cd <pkg>
+git switch -c feature/ai-dev-kit
+----
+
+. Run `aidev init` and answer four questions. Enter accepts the default shown in `[ ]`.
++
+[source,bash]
+----
+aidev init
+----
++
+[cols="1,3",options="header"]
+|===
+|Question |How to answer
+
+|1/4 tools
+|Press Enter for `claude`. For several tools, write them comma-separated, such as `claude, copilot` (`claude`, `copilot`, `codex`, `kiro`).
+
+|2/4 Wiki generation targets
+|The paths you want explanation pages for (globs, comma-separated). `src/**`, `docs/**` and similar are suggested. The Wiki's research covers the whole package anyway, so list only the places you want pages for.
+
+|3/4 secret paths
+|Paths the AI must never read. Add the places where certificates or configuration live to the five defaults.
+
+|4/4 hosting
+|Inferred from the `origin` URL. For Azure DevOps, confirm organization / project / repository, then answer the branch the Wiki should follow (default `main`).
+|===
++
+After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step.
++
+* `✗ N kit-owned file(s) differ from the kit copy` → there is already a hand-edited `.claude/` or similar. Save its contents somewhere, then run `aidev init --force`.
+* `run "aidev init" at the repository root` → move to the root and run it there.
+
+. Approve the policy (only if you answered `N` in step 2). Read the candidate and place it once you agree with it.
++
+[source,bash]
+----
+cat .aidev/policy.candidate.yaml
+aidev permission configure --approve
+----
++
+See xref:permissions[Permissions and safety] for what the policy contains.
+
+. Generate the Wiki. This takes time. If it stops part way, the same command resumes where it left off.
++
+[source,bash]
+----
+aidev knowledge build
+----
++
+Progress is shown like this:
++
+[source,text]
+----
+ℹ running the knowledge-builder agent: 163 generation target(s) in 9 batch(es) of up to 20, after a survey run
+✓ survey complete in 3m 12s ($0.4120)
+ℹ batch 1/9: 20 target(s), src/api/auth.ts … src/api/users.ts
+✓ batch 1/9 complete: 20/20 in 4m 2s ($0.5533)
+...
+✓ knowledge-builder completed 163/163 queued generation target(s) ($4.9012)
+----
++
+It is done when the last line is `✓ knowledge-builder completed N/N`. If it stops with anything else, check the following and **run the same command again**.
++
+* `⚠ the knowledge-builder agent did not run` → Claude Code was not found. Fix the `claude` line of `aidev doctor`.
+* `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → the finished part is saved. Run it again. If it keeps running out of time, add `--agent-batch-size 10`.
++
+The Wiki is complete when the second line of `aidev status` is `✅`.
+
+. Commit and open a PR.
++
+[source,bash]
+----
+aidev check
+git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json
+git commit -m "chore: adopt ai-dev-kit"
+git push -u origin feature/ai-dev-kit
+----
++
+Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want.
+
+. Have the PR reviewed and merge it into `main`. After the merge, members can join with xref:setup-member[Member steps].
+
+=== Next steps
+
+* Add `aidev check` to CI, keep the Wiki up to date every night → xref:automation-ci[Automation: CI]
+* Run lint / test after the AI edits files → `quality_gates` in xref:configuration[aidev.yaml reference]

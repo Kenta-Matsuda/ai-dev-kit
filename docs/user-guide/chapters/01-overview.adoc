@@ -1,133 +1,61 @@
 [[overview]]
-== 概要
+== {project-name} とは
 
-{project-name}は、既存のパッケージ（以降「PKG」）を直接変更せず、チーム共通のClaude Code実行環境を構築・運用するためのセットアップキットです。中央の{project-name}を土台にした *wrapper repository* を作り、対象PKGを`src/` Git submoduleとして組み込みます。
+{project-name} は、チームの各リポジトリ（PKG）に **同じ Claude Code の設定** と **そのリポジトリ専用の LLM Wiki** を置き、`aidev` コマンドで保守するためのキットです。
 
-このガイドは、{project-name} {aidev-version}の利用者、導入管理者、CI管理者、保守者を対象にしています。実際に到達できるCLI機能を基準とし、将来設計はxref:implementation-status[実装状況と既知の制約]で明確に区別します。
+導入すると、次の 3 つがそろいます。
 
-[[overview-benefits]]
-=== 導入によって得られるもの
+* **同じ設定** — `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` をチーム全員で共有します。`aidev update` で更新し、手編集は `aidev check` が見つけます。
+* **LLM Wiki** — `.aidev/knowledge/` に、コードの構造と役割を説明する Markdown ページを生成します。Claude はソースを読む前にここを引きます。コードが進んだら `aidev sync` が追従し、PR を作ります。
+* **書き込みの制限** — `.aidev/policy.yaml` に「AI が書いてよい場所」を定め、hook が毎回の書き込みを検査します。ソースは通常 read-only です。
 
-[cols="1,3",options="header"]
-|===
-|目的 |提供される機能
-
-|Claude Code設定の統一
-|共通のAgents、Skills、hooks、MCP設定を`.claude/`、`CLAUDE.md`、`.mcp.json`として配布します。
-
-|PKGごとの安全設定
-|読み取り対象、生成対象、秘密領域、書き込み可能範囲を`aidev.yaml`と承認済みpolicyで管理します。
-
-|AI向け知識の共有
-|対象PKGのソース、テスト、設定、CI、文書を根拠にしたLLM Wikiをwrapper側の`knowledge/`へ生成します。
-
-|PKG更新への追従
-|`src/`の更新、Wikiの再計算、同期branchのpush、wrapper PR作成を`aidev sync`で一連の処理として実行します。
-
-|構成ドリフトの検出
-|`aidev check`が共通設定、policy、PKGとWikiの対象SHA、生成ページの手編集を検査します。
-
-|チームとCIでの再現
-|レビュー済み設定と生成物をGit管理し、開発者とAzure Pipelinesで同じ検査を実行できます。
-|===
-
-[[overview-fit]]
-=== 利用に適した環境
-
-次の条件を満たすチームでの利用を想定しています。
-
-* Claude Codeを利用する。
-* ソース管理、Work Item、CIにAzure DevOpsを利用する。
-* 対象PKGとAI実行環境を別repositoryにし、PKGを`src/` submoduleとして参照できる。
-* AIが作成したPRと同期PRを人間がレビューし、自動マージしない。
-* hooksだけをセキュリティ境界とせず、最小権限の認証、必須CI、branch policyを併用できる。
-
-[[overview-out-of-scope]]
-=== 対象外または未完成の範囲
-
-[WARNING]
-====
-Agent定義や設定項目が存在しても、公開CLIから完結して利用できるとは限りません。特に`issue-to-pr`、端末間のtask復元、background refresh、自己改善PRは、現時点でエンドツーエンド機能ではありません。
-====
-
-次の用途は対象外、または部分実装です。
-
-* Claude Code以外のAIツールとの互換レイヤー
-* 既存`.claude/`設定との自動マージ
-* 完全なprocess sandbox、または利用者が上書きできないmanaged settingsの配布
-* Work Item取得からPKG PR、同期PRまでを自動完結する`issue-to-pr`
-* 別端末でAzure DevOpsだけからtask cacheを再構築する処理
-* Stop hookが記録したqueueの常駐consumer
-* 自己改善案を中央kitのbranchやPRへ自動変換する処理
-* workflowの実token数・金額上限、および破壊操作前承認の強制
-
-現在利用しやすい範囲は、環境初期化、共通設定配布、policy生成・承認、Wiki生成、整合性チェック、PKG追従、同期PR、CIです。
-
-[[overview-reader-paths]]
-=== 読み方
+=== 誰が何をするか
 
 [cols="1,3",options="header"]
 |===
-|目的 |読む章
+|役割 |すること
 
-|初めて導入する
-|xref:concepts[アーキテクチャと主要概念]を確認し、xref:getting-started[利用開始]を順番に実行します。
+|全員（1 回）
+|自分の端末に `aidev` を入れます。→ xref:install[端末に aidev を入れる]
 
-|既存wrapperを日常利用する
-|xref:operations[日常運用]、xref:knowledge[LLM Wiki]、xref:troubleshooting[トラブルシューティング]を参照します。
+|導入担当者（PKG につき 1 人、1 回）
+|`aidev init` で設定を作り、`aidev knowledge build` で Wiki を生成し、PR でチームに配ります。→ xref:setup-owner[導入担当者の手順]
 
-|安全性を評価する
-|xref:security[権限とセキュリティ]とxref:implementation-status[実装状況と既知の制約]を確認します。
-
-|自動化する
-|xref:automation[Workflow、Task、CI/CD]とxref:environment-reference[環境変数リファレンス]を参照します。
-
-|コマンドを調べる
-|xref:cli-reference[CLIリファレンス]を参照し、実際の導入版では`aidev <command> --help`も確認します。
-
-|kit自体を変更する
-|xref:maintenance[保守者ガイド]とxref:document-build[このガイドのビルド]を参照します。
+|メンバー
+|`git pull` → `aidev init` → `claude`。質問はありません。→ xref:setup-member[メンバーの手順]
 |===
 
-[[overview-terms]]
+=== しないこと
+
+* PR をマージしません。マージは常に人間が行います。
+* 実機で検証済みの AI ツールは Claude Code です。GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI は各ツールの非対話モードに沿ったアダプタで起動できますが、kit の保守者は実機で確認していません。hooks による書き込み policy の実行時強制は Claude Code だけです。
+* 対応する hosting は Azure DevOps と `generic`（git のみ。PR は手動）だけです。
+* サンドボックスではありません。hook と policy は「うっかり」を止める仕組みです。最終的な守りは token の権限と branch policy です。
+
 === 用語
 
 [cols="1,3",options="header"]
 |===
 |用語 |意味
 
-|中央kit
-|チームが保守する{project-name}の中央repositoryです。
-
-|CLI専用checkout
-|`aidev` launcherが参照する、中央kitの固定checkoutです。wrapperとは別に保持します。
-
-|wrapper repository
-|Claude Codeを起動する作業rootです。共通設定、PKG submodule、生成Wikiを保持します。
-
 |PKG
-|AI作業の対象となる既存repositoryです。wrapperの`src/`にsubmoduleとして配置します。
+|{project-name} を導入する対象リポジトリの clone。`aidev` はその中で実行します。
 
-|static asset
-|同じkit commitを適用したwrapper間でbyte-identicalにする`.claude/**`、`CLAUDE.md`、`.mcp.json`です。
+|kit
+|{project-name} 本体の clone。`aidev` コマンドの実体です。端末に 1 つです。
 
-|generation target
-|Wikiページを生成・更新する起点です。`package.include`と`package.exclude`で決まります。
+|LLM Wiki
+|`.aidev/knowledge/` に生成される、AI 向けの説明ページ群。コードから作った派生情報で、正本ではありません。
 
-|repository evidence
-|Wiki本文を検証するためにagentが調査できるtracked fileです。`knowledge.evidence`で決まります。
+|tracking branch
+|Wiki が追いかけるブランチ。通常は `main` です。
 
-|3SHA
-|`remoteSha`、`submoduleSha`、`knowledgeSha`の組み合わせです。
-
-|lease
-|限定された書き込みを一定時間だけ許可するローカル状態です。work leaseとsync leaseがあります。
+|policy
+|`.aidev/policy.yaml`。AI が書いてよいパス、書けないパス、常に禁止のパスを決めます。
 |===
 
-[[overview-conventions]]
-=== 表記上の注意
+=== 困ったとき
 
-* `<org>`、`<project>`、`<repository>`、`<your-pat>`は、利用環境の値に置き換えるplaceholderです。
-* コマンド例の`main`は既定値です。実際のtracking branchが異なる場合は`aidev.yaml`に合わせます。
-* `aidev check`は製品CLI、`npm run check`はkit保守用test scriptです。両者を混同しないでください。
-* `NOTE`は補足、`TIP`は推奨、`WARNING`は障害や誤解の可能性、`CAUTION`はデータ損失や権限リスクを示します。
+* 症状から引く → xref:troubleshooting[トラブルシューティング]
+* コマンドの書式とオプション → xref:cli-reference[コマンドリファレンス]
+* 設定項目 → xref:configuration[aidev.yaml リファレンス]

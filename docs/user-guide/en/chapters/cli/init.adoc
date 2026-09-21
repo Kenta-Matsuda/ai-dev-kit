@@ -1,0 +1,119 @@
+[[cli-init]]
+== aidev init
+
+Sets up {project-name} in this PKG. Interactive the first time, no questions for everyone after that.
+
+=== Synopsis
+
+[source,text]
+----
+aidev init [options]
+----
+
+=== Description
+
+Run it at the root of the PKG clone. If there is no `aidev.yaml`, it asks four questions (tools, Wiki generation targets, secret paths, hosting) and writes `aidev.yaml`. If the file already exists, it asks nothing. In both cases it then:
+
+* writes `.aidev/.gitignore`
+* places `.claude/**`, `CLAUDE.md` and `.mcp.json` from the kit templates and records their hashes in `.aidev/materialized.json`
+* registers this clone on this machine
+* if `.aidev/policy.yaml` is missing, shows the candidate and asks `Place this policy now? (y/N)`
+* checks whether the Wiki exists and prints what to do next
+
+It does not generate the Wiki (`aidev knowledge build` does). It does not merge an existing `.claude/` with the distributed version: if they differ it stops with exit code 2, and `--force` replaces them.
+
+Questions are asked only when stdin is a terminal and neither `--yes` nor `--json` is given.
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--dry-run`
+|Show what would be written; write nothing
+
+|`--yes`
+|Do not ask questions; use the values inferred or given by flags
+
+|`--force`
+|Replace distributed files that were edited locally
+
+|`--json`
+|Machine-readable output
+
+|`--name <value>`
+|Package name (default: the repository name)
+
+|`--include <value>`
+|Wiki generation targets, comma-separated globs (default: inferred from the tree)
+
+|`--exclude <value>`
+|Globs excluded from generation targets, comma-separated
+
+|`--secrets <value>`
+|Secret paths never read by the AI, comma-separated globs
+
+|`--hosting <value>`
+|`azure-devops` or `generic` (default: inferred from the `origin` URL)
+
+|`--org <value>`, `--project <value>`, `--repository <value>`
+|Azure DevOps organization, project and repository name
+
+|`--tracking-branch <value>`
+|Branch the Wiki follows (default: `main`)
+
+|`--tools <value>`
+|AI coding tools to configure, comma-separated: `claude`, `copilot`, `codex`, `kiro` (default `claude`)
+
+|`--agent-model <value>`
+|Model for the agent that writes the Wiki (default: `sonnet`)
+
+|`--approve`
+|Place the generated permission policy without asking
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|Success
+
+|1
+|Not a git repository, no commits, run in a subdirectory, or the Azure DevOps organization and so on could not be determined
+
+|2
+|Existing `.claude/**`, `CLAUDE.md` or `.mcp.json` differ from the distributed version (`--force` replaces them)
+|===
+
+=== Examples
+
+First time (interactive):
+
+[source,bash]
+----
+aidev init
+----
+
+Without questions, placing the policy at the same time:
+
+[source,bash]
+----
+aidev init --yes --include "src/**,docs/**" --approve
+----
+
+Everyone after the first person:
+
+[source,bash]
+----
+aidev init
+----
+
+=== See also
+
+* xref:setup-owner[Package owner steps], xref:setup-member[Member steps]
+* xref:cli-permission[aidev permission], xref:cli-knowledge[aidev knowledge]
+

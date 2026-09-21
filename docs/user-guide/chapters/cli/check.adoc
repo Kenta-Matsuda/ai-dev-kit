@@ -1,0 +1,86 @@
+[[cli-check]]
+== aidev check
+
+整合性を検査し、結果を終了コードで返します。CI 用です。
+
+=== 書式
+
+[source,text]
+----
+aidev check [options]
+----
+
+=== 説明
+
+`aidev status` と同じ検査を行い、最初に見つかった問題の種類を終了コードにします。順序は drift（2）→ policy（3）→ Wiki（4）です。
+
+`aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、何もせず 0 で終わります。警告（`main` が進んでいる、本文が未生成）は 0 のままで、`--strict` を付けると 2 になります。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--strict`
+|警告も失敗（終了コード 2）にする
+
+|`--json`
+|JSON で出力する
+
+|`--no-remote`
+|remote に接続しない
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|整合している
+
+|1
+|`aidev.yaml` が壊れているなどの一般エラー
+
+|2
+|`.aidev/materialized.json` が無い、または `.claude/**`・`CLAUDE.md`・`.mcp.json` が記録と違う。`--strict` 時の警告
+
+|3
+|`.aidev/policy.yaml` が無い、または読めない
+
+|4
+|Wiki が無い・壊れている、または前回の sync が途中で止まっている
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev check
+----
+
+[source,text]
+----
+aidev check
+  tracking     9f8e7d6
+  base         1a2b3c4
+  knowledge    1a2b3c4
+  tool config  matches the kit
+  policy       valid
+✓ environment is consistent.
+----
+
+失敗の例（終了コード 2）:
+
+[source,text]
+----
+✗ [exit 2] kit-owned files differ from .aidev/materialized.json (1 modified). Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.
+    modified: .claude/settings.json
+----
+
+=== 関連
+
+* xref:automation-ci[自動化: CI]
+* xref:troubleshooting-exit[トラブルシューティング: aidev check の終了コード]

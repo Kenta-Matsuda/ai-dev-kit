@@ -5,9 +5,9 @@
  *
  *   0  success
  *   1  general error
- *   2  drift: static files disagree with .aidev-lock
+ *   2  drift: materialised tool config disagrees with .aidev/materialized.json
  *   3  permission policy violation
- *   4  wiki inconsistency: submoduleSha != knowledgeSha
+ *   4  wiki inconsistency: the Wiki is missing or structurally broken
  */
 const EXIT = {
   OK: 0,

@@ -1,0 +1,141 @@
+[[cli-knowledge]]
+== aidev knowledge
+
+LLM Wiki を生成し、状態を見ます。
+
+=== 書式
+
+[source,text]
+----
+aidev knowledge build [options]
+aidev knowledge status [options]
+----
+
+=== 説明
+
+`build` は Wiki を生成します。前回から変わったファイルと前回未完了のファイルだけを対象にし（差分）、manifest と inventory を書いてから knowledge-builder agent を起動して本文を書きます。途中で止まっても、同じコマンドで続きから再開できます。
+
+`--no-agent` を付けると manifest と inventory だけを書き、本文は未生成のまま残します。Claude Code が無い CI 向けです。
+
+手編集された Wiki ページがあると止まります（`--force` で上書き）。
+
+`status` は Wiki が説明しているコミット、生成日時、ページ数、未生成のページ数、手編集を表示します。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--scope <path>`
+|このパス配下のページだけ作り直す。調査範囲は PKG 全体のまま
+
+|`--full`
+|差分ではなく全ページを作り直す
+
+|`--dry-run`
+|何が対象になるかを表示し、何も書かない
+
+|`--json`
+|JSON で出力する
+
+|`--force`
+|手編集された Wiki ページを上書きする
+
+|`--no-remote`
+|`status`: remote に接続しない
+
+|`--no-agent`
+|manifest と inventory だけ書き、本文は後回しにする
+
+|`--agent-name <name>`
+|knowledge-builder の代わりにこの agent を起動する
+
+|`--agent-tool <tool>`
+|agent を動かす AI ツール（`claude`、`copilot`、`codex`、`kiro`）。`aidev.yaml` の `tools.default` にあるものだけ。既定は `tools.agents.<name>.tool`、無ければ `tools.agent`
+
+|`--agent-timeout <ms>`
+|agent 1 回の時間予算（既定 1800000 = 30 分）
+
+|`--agent-model <model>`
+|agent のモデル。`""` でツールの既定に任せる
+
+|`--agent-batch-size <n>`
+|agent 1 回に渡すファイル数（既定 20）
+
+|`--survey`
+|必ず最初に `overview.md` と `index.md` を書き直す
+
+|`--no-survey`
+|`overview.md` と `index.md` を書き直さない
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|`build`: すべて生成した（`--no-agent` なら構造を書いた）。`status`: Wiki が正常
+
+|1
+|`build`: agent が失敗・時間切れ・途中で止まった（再実行で続行できる）。手編集があり `--force` が無い。`--scope` に一致するファイルが無い
+
+|4
+|`status`: Wiki が無い、または壊れている
+|===
+
+=== 例
+
+生成する（初回も更新も同じ。止まっても同じコマンドで再開）:
+
+[source,bash]
+----
+aidev knowledge build
+----
+
+何が対象になるか確認だけする:
+
+[source,bash]
+----
+aidev knowledge build --dry-run
+----
+
+[source,text]
+----
+aidev knowledge build (dry run)
+  target               1a2b3c4
+  generation targets   163
+  ...
+  queued now           7
+✓ dry run complete; nothing was written.
+    would then run the knowledge-builder agent for 7 generation target(s) in 1 batch(es).
+----
+
+`src/api` 配下だけを、小さい batch で作り直す:
+
+[source,bash]
+----
+aidev knowledge build --scope src/api --agent-batch-size 10
+----
+
+全ページを作り直す（手編集も捨てる）:
+
+[source,bash]
+----
+aidev knowledge build --full --force
+----
+
+状態を見る:
+
+[source,bash]
+----
+aidev knowledge status
+----
+
+=== 関連
+
+* xref:knowledge[LLM Wiki] — 生成の進み方と再開
+* xref:cli-sync[aidev sync]
+* xref:configuration[aidev.yaml リファレンス] — `package.include`、`knowledge.*`、`tools.agent_model`

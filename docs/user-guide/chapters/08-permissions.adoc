@@ -1,0 +1,110 @@
+[[permissions]]
+== 権限と安全性
+
+{project-name} は、AI が PKG の中で **書いてよい場所** を `.aidev/policy.yaml`（policy）に定め、Claude Code の hook で毎回の書き込みを検査します。ソースは通常 read-only です。token はファイルに書かず、環境変数だけで渡します。
+
+[[permissions-policy]]
+=== policy の 4 つの区分
+
+[cols="1,2,3",options="header"]
+|===
+|区分 |既定 |意味
+
+|`protected`
+|`.claude/**`, `CLAUDE.md`, `.mcp.json`, `.aidev/policy.yaml` など kit のファイル + `secrets_paths`
+|常に書き込み禁止。policy から消しても CLI が付け直します。
+
+|`read_only`
+|`**`（PKG 全体）
+|`issue-to-pr` agent が作業リースを持つ間だけ、許可パスに限り書けます。
+
+|`writable_during_sync`
+|`.aidev/knowledge/**`
+|Wiki が壊れている・無いときに、sync の間だけ書けます。
+
+|`writable`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
+|通常時に書けます。
+|===
+
+判定は上から順です。リポジトリ外と `protected` は常に拒否、Wiki が無い間はすべて拒否、その後 `writable` → `read_only`（リースがあれば許可）の順に見ます。
+
+[[permissions-hooks]]
+=== hook が何をするか
+
+配布される `.claude/settings.json` は 4 つの hook を登録します。
+
+[cols="1,1,3",options="header"]
+|===
+|イベント |コマンド |動作
+
+|SessionStart
+|`aidev hook session-start`
+|Wiki の状態と進行中の作業をセッションのコンテキストに入れます。
+
+|PreToolUse（Write / Edit / Bash など）
+|`aidev hook guard-write`
+|書き込み先を policy で判定し、拒否なら理由を返します。policy が読めないときも拒否します。
+
+|PostToolUse（Write / Edit）
+|`aidev hook quality-gate`
+|PKG のファイルを編集した後、`quality_gates` のコマンドを実行し、失敗の出力を Claude に返します。
+
+|Stop
+|`aidev hook session-stop`
+|セッション終了時の状態を `.aidev/cache/` に記録します。
+|===
+
+拒否されると、Claude には次のような理由が返ります。
+
+[source,text]
+----
+ai-dev-kit: "src/api/auth.ts" is read-only (**): no work lease. …
+ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
+----
+
+hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます。
+
+[[permissions-lease]]
+=== AI がソースを編集できるのは作業リースの間だけ
+
+`issue-to-pr` agent は、ユーザーが実行を承認した後に CLI から作業リース（ブランチ・許可パス・期限）を受け取り、その範囲でだけ編集します。リースは `aidev task abandon <id>` で解放でき、期限が切れても無効になります。
+
+[[permissions-commands]]
+=== policy を置く・変える・見る
+
+policy は AI が作れません。人間が CLI で置きます。
+
+[cols="2,3",options="header"]
+|===
+|コマンド |動作
+
+|`aidev permission configure --approve`
+|候補 `.aidev/policy.candidate.yaml` を `.aidev/policy.yaml` として置きます。`aidev init` で `N` と答えた後に使います。
+
+|`aidev permission reconfigure` → `reconfigure --approve`
+|`secrets_paths` を変えたときなどに候補を作り直して置きます。保護を弱める変更には `--force` も必要です。
+
+|`aidev permission show`
+|有効な policy を表示します。
+|===
+
+[[permissions-secrets]]
+=== 秘密情報
+
+* `secrets_paths` のファイルは、AI が読まず、書かず、Wiki からも隠されます。
+* PAT は `hosting.auth_env`（既定 `AZURE_DEVOPS_PAT`）の環境変数だけで渡します。`aidev.yaml` に書くと起動を拒否します。
+* `aidev doctor` と `aidev init` は token の有無だけを報告し、値は読みません。
+
+=== してはいけないこと
+
+* `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.aidev/policy.yaml` を手で編集しない（変えたいときは kit への PR）
+* AI が「拒否された」と報告したら、回避策を探さず理由を読む
+* token をコミット・ログ・PR 本文に含めない
+
+=== 関連
+
+* xref:cli-permission[aidev permission]
+* xref:cli-hook[aidev hook]
+* xref:configuration[aidev.yaml リファレンス] — `secrets_paths`、`hosting.auth_env`

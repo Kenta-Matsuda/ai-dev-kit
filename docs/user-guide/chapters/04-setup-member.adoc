@@ -1,0 +1,67 @@
+[[setup-member]]
+== メンバーの手順
+
+導入済みの PKG で Claude Code を使い始めます。質問はなく、3 つのコマンドで終わります。
+
+=== 必要なもの
+
+* xref:install[端末に aidev を入れる] が終わっている
+* 導入担当者の PR が `main` にマージされている
+* Azure DevOps の PKG なら `AZURE_DEVOPS_PAT` を設定済み
+
+=== 手順
+
+. PKG を clone するか、最新を取り込みます。
++
+[source,bash]
+----
+git clone <pkg-url>
+cd <pkg>
+# 既に clone がある場合
+git pull
+----
+
+. `aidev init` を実行します。設定は既にあるので質問はありません。
++
+[source,bash]
+----
+aidev init
+----
++
+[source,text]
+----
+✓ aidev.yaml is present (set up by your team); nothing to ask.
+✓ tool configuration is current (18 file(s): .claude/, CLAUDE.md, .mcp.json)
+✓ AZURE_DEVOPS_PAT is set (value not read)
+✓ .aidev/policy.yaml is present
+✓ LLM Wiki is present (.aidev/knowledge/)
+
+ℹ ready. Run "aidev status" any time, then start your AI tool (e.g. "claude") in this directory.
+----
++
+* `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[環境変数を設定] して、ターミナルを開き直します。
+* `✗ N kit-owned file(s) differ from the kit copy` → あなたの clone の `.claude/` などが配布版と違います。`git status` で確認し、意図した変更でなければ `aidev init --force` で戻します。
+* `ℹ next: "aidev knowledge build"` → Wiki がまだマージされていません。導入担当者に確認します。
+
+. 状態を確認します。
++
+[source,bash]
+----
+aidev status
+----
++
+2 行目が `✅ the Wiki describes the code this work is based on.` なら準備完了です。`⚠️` や `❌` の読み方は xref:daily-status[aidev status の読み方] を見てください。
+
+. PKG のルートで Claude Code を起動します。
++
+[source,bash]
+----
+claude
+----
++
+セッション開始時に、Wiki の状態が 1 行でコンテキストに入ります。Claude は `.aidev/knowledge/index.md` から調べ始めます。
+
+=== 次のステップ
+
+* 毎日の流れ → xref:daily[日常の使い方]
+* Claude が「書き込みを拒否された」と言ったら → xref:permissions[権限と安全性]

@@ -18,11 +18,12 @@ const fs = require('fs');
 const path = require('path');
 const { sha256, writeJsonAtomic, readJsonIfExists } = require('./config');
 const pathsMod = require('./paths');
+const layout = require('./layout');
 const git = require('./git');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
-function knowledgeDir(repoRoot) { return path.join(repoRoot, 'knowledge'); }
+function knowledgeDir(repoRoot) { return layout.abs(repoRoot, layout.KNOWLEDGE_REL); }
 function manifestPath(repoRoot) { return path.join(knowledgeDir(repoRoot), 'manifest.json'); }
 function inventoryDir(repoRoot) { return path.join(knowledgeDir(repoRoot), 'inventory'); }
 
@@ -87,18 +88,19 @@ function safeReaddir(dir) {
 
 /**
  * Enumerate the PKG files in scope at a given ref, with blob hashes.
- * Paths are returned repo-relative to the wrapper (i.e. prefixed with `src/`).
+ * Paths are repo-relative. Kit-managed files (aidev.yaml, .aidev/**, the
+ * materialised tool config) are never generation targets.
  */
-function scanPackage(repoRoot, config, { submodulePath = 'src', ref = 'HEAD' } = {}) {
-  const subDir = path.join(repoRoot, submodulePath);
-  const entries = git.lsTreeBlobs(subDir, ref);
+function scanPackage(repoRoot, config, { ref = 'HEAD' } = {}) {
+  const entries = git.lsTreeBlobs(repoRoot, ref);
   if (entries == null) return null;
   const include = config?.package?.include || [];
   const exclude = config?.package?.exclude || [];
   const secrets = config?.secrets_paths || [];
   const out = [];
   for (const e of entries) {
-    const rel = pathsMod.normalizeRel(`${submodulePath}/${e.path}`);
+    const rel = pathsMod.normalizeRel(e.path);
+    if (layout.isKitManaged(rel)) continue;
     if (!pathsMod.isIncluded(rel, include, exclude)) continue;
     out.push({
       path: rel,
@@ -145,7 +147,10 @@ function diffInventory(oldRecords, newRecords) {
     const prev = oldByPath.get(p);
     if (prev) {
       consumedOld.add(p);
-      if (prev.blob === rec.blob) unchanged.push(rec);
+      // Unchanged keeps its recorded prose: callers carry pages/selfHashes
+      // forward from these records, so the fresh (hash-less) scan entry alone
+      // would silently drop every page hash on each incremental build.
+      if (prev.blob === rec.blob) unchanged.push({ ...rec, pages: prev.pages || [], selfHashes: prev.selfHashes || {} });
       else modified.push({ ...rec, previousBlob: prev.blob });
     }
   }
@@ -252,7 +257,7 @@ function removeOrphanedPages(repoRoot, pages, { dryRun = false } = {}) {
     // The inventory is derived data; a path escaping knowledge/ means it is
     // corrupt or crafted, and deleting on its say-so would be the bug.
     if (pathsMod.escapesRoot(norm) || !full.startsWith(path.resolve(kDir) + path.sep)) {
-      skipped.push({ page: norm, reason: 'outside knowledge/' });
+      skipped.push({ page: norm, reason: 'outside .aidev/knowledge/' });
       continue;
     }
     if (!fs.existsSync(full)) { skipped.push({ page: norm, reason: 'already absent' }); continue; }
@@ -288,10 +293,202 @@ function validateInventoryConsistency(records) {
   return problems;
 }
 
+// ------------------------------------------------------- completion reports
+
+/**
+ * Where the knowledge-builder agent reports finished work.
+ *
+ * The agent never edits the manifest or an inventory shard. Rewriting a
+ * 2000-record JSON shard from a language model is slow, error-prone and, in a
+ * headless run with no Bash, cannot even compute the page hashes it would need.
+ * Instead the agent drops one small JSON file per finished generation target
+ * here and the CLI folds those reports into the structured state: hashes,
+ * shard records and the checkpoint. A run stopped by a timeout keeps every
+ * report it already wrote, which is what makes the next run a resume rather
+ * than a restart.
+ */
+const CACHE_DIR_REL = `${layout.KNOWLEDGE_REL}/.cache`;
+const DONE_DIR_REL = `${CACHE_DIR_REL}/done`;
+
+/** Pseudo target the survey run reports under. */
+const SURVEY_TARGET = '__survey__';
+
+/** Pages a survey run must produce; later batches read them instead of re-surveying. */
+const OVERVIEW_PAGE = `${layout.KNOWLEDGE_REL}/overview.md`;
+const INDEX_PAGE = `${layout.KNOWLEDGE_REL}/index.md`;
+
+function cacheDir(repoRoot) { return layout.abs(repoRoot, CACHE_DIR_REL); }
+function doneDir(repoRoot) { return layout.abs(repoRoot, DONE_DIR_REL); }
+
+/** File name the agent is told to use for a target's report. */
+function doneFileName(target) {
+  return `${String(target).replace(/[\\/]/g, '__')}.json`;
+}
+
+/** Read every report in the done directory without applying anything. */
+function collectCompletions(repoRoot) {
+  const dir = doneDir(repoRoot);
+  const reports = [];
+  const invalid = [];
+  for (const f of safeReaddir(dir).sort()) {
+    if (!/\.json$/i.test(f)) continue;
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
+    catch (e) { invalid.push({ file: f, reason: `invalid JSON (${e.message})` }); continue; }
+    if (!doc || typeof doc !== 'object' || typeof doc.target !== 'string' || doc.target.trim() === '') {
+      invalid.push({ file: f, reason: 'missing "target"' });
+      continue;
+    }
+    const pages = doc.pages == null ? [] : doc.pages;
+    if (!Array.isArray(pages) || pages.some((p) => typeof p !== 'string')) {
+      invalid.push({ file: f, reason: '"pages" must be an array of paths' });
+      continue;
+    }
+    const target = doc.target.trim();
+    reports.push({
+      file: f,
+      target: target === SURVEY_TARGET ? SURVEY_TARGET : pathsMod.normalizeRel(target),
+      pages,
+      targetSha: typeof doc.targetSha === 'string' ? doc.targetSha : null,
+      note: typeof doc.note === 'string' ? doc.note : null,
+    });
+  }
+  return { reports, invalid };
+}
+
+/** Validate a reported page path and hash it. Returns { page, hash } or { error }. */
+function checkReportedPage(repoRoot, raw) {
+  const norm = pathsMod.normalizeRel(raw);
+  const K = layout.KNOWLEDGE_REL;
+  if (!norm || pathsMod.escapesRoot(norm) || !norm.startsWith(`${K}/`)) {
+    return { error: `page outside ${K}/: ${raw}` };
+  }
+  if (norm.startsWith(`${K}/.cache/`) || norm === `${K}/manifest.json`
+    || norm.startsWith(`${K}/inventory/`)) {
+    return { error: `not a Wiki page: ${raw}` };
+  }
+  const hash = hashPage(repoRoot, norm);
+  if (!hash) return { error: `page not found: ${norm}` };
+  return { page: norm, hash };
+}
+
+/**
+ * Fold the agent's completion reports into the inventory and checkpoint.
+ *
+ * For every valid report: the target record's `pages`/`selfHashes` are
+ * replaced with the reported pages and their current hashes, a page shared by
+ * several targets gets the same hash everywhere, and the target leaves
+ * `checkpoint.pendingPaths`. Consumed and rejected reports are deleted; a
+ * rejected target simply stays pending, so the next run does it again.
+ *
+ * Reports are left untouched when the manifest is missing, has no checkpoint,
+ * or describes a different SHA than `targetSha`: the caller decides what that
+ * means, and deleting evidence of finished work would not help it.
+ */
+function applyCompletions(repoRoot, { targetSha = null, shardSize = 2000 } = {}) {
+  const { reports, invalid } = collectCompletions(repoRoot);
+  const result = {
+    applied: [],
+    rejected: invalid.map((i) => ({ file: i.file, target: null, reason: i.reason })),
+    survey: null,
+    manifestInvalid: false,
+    remaining: null,
+  };
+  const dir = doneDir(repoRoot);
+  const drop = (file) => { try { fs.unlinkSync(path.join(dir, file)); } catch { /* best effort */ } };
+  for (const i of invalid) drop(i.file);
+  if (reports.length === 0) return result;
+
+  const manifest = readManifest(repoRoot);
+  const pendingPaths = manifest?.checkpoint?.pendingPaths;
+  if (!manifest || !Array.isArray(pendingPaths)
+    || (targetSha != null && manifest.knowledgeSha !== targetSha)) {
+    result.manifestInvalid = true;
+    return result;
+  }
+
+  const records = readInventory(repoRoot, manifest);
+  const byPath = new Map(records.map((r) => [r.path, r]));
+  const pending = new Set(pendingPaths);
+  const pageHashes = new Map();
+  let touched = false;
+
+  for (const rep of reports) {
+    if (rep.targetSha && targetSha && rep.targetSha !== targetSha) {
+      result.rejected.push({ file: rep.file, target: rep.target, reason: `written for ${rep.targetSha}, not ${targetSha}` });
+      drop(rep.file);
+      continue;
+    }
+    const pages = [];
+    let error = null;
+    for (const raw of rep.pages) {
+      const checked = checkReportedPage(repoRoot, raw);
+      if (checked.error) { error = checked.error; break; }
+      pages.push(checked.page);
+      pageHashes.set(checked.page, checked.hash);
+    }
+    if (rep.target === SURVEY_TARGET) {
+      if (!error && !pages.includes(OVERVIEW_PAGE)) error = `survey did not report ${OVERVIEW_PAGE}`;
+      if (!error && !pages.includes(INDEX_PAGE)) error = `survey did not report ${INDEX_PAGE}`;
+      if (error) result.rejected.push({ file: rep.file, target: rep.target, reason: error });
+      else result.survey = { pages };
+      drop(rep.file);
+      continue;
+    }
+    if (error) {
+      result.rejected.push({ file: rep.file, target: rep.target, reason: error });
+      drop(rep.file);
+      continue;
+    }
+    const rec = byPath.get(rep.target);
+    if (!rec) {
+      result.rejected.push({ file: rep.file, target: rep.target, reason: 'not a generation target in the inventory' });
+      drop(rep.file);
+      continue;
+    }
+    rec.pages = [...new Set(pages)];
+    rec.selfHashes = Object.fromEntries(rec.pages.map((p) => [p, pageHashes.get(p)]));
+    pending.delete(rep.target);
+    touched = true;
+    result.applied.push({ target: rep.target, pages: rec.pages, note: rep.note });
+    drop(rep.file);
+  }
+
+  if (touched) {
+    // One page, one hash: a page several targets share was just rewritten for
+    // all of them, so every record referencing it must agree or `status`
+    // would report an inventory inconsistency the agent never caused.
+    for (const rec of records) {
+      for (const page of Object.keys(rec.selfHashes || {})) {
+        if (pageHashes.has(page)) rec.selfHashes[page] = pageHashes.get(page);
+      }
+    }
+    manifest.inventoryShards = writeInventory(repoRoot, records, shardSize);
+    manifest.checkpoint.pendingPaths = pendingPaths.filter((p) => pending.has(p));
+    manifest.stats = {
+      ...(manifest.stats || {}),
+      pages: new Set(records.flatMap((r) => Object.keys(r.selfHashes || {}))).size,
+    };
+    writeManifest(repoRoot, manifest);
+  }
+  result.remaining = manifest.checkpoint.pendingPaths.length;
+  return result;
+}
+
+/** How many of `targets` have a report waiting (written, not yet applied). */
+function countPendingReports(repoRoot, targets) {
+  const wanted = new Set(targets || []);
+  let n = 0;
+  for (const rep of collectCompletions(repoRoot).reports) if (wanted.has(rep.target)) n++;
+  return n;
+}
+
 module.exports = {
-  SCHEMA_VERSION, knowledgeDir, manifestPath, inventoryDir,
+  SCHEMA_VERSION, CACHE_DIR_REL, DONE_DIR_REL, SURVEY_TARGET, OVERVIEW_PAGE, INDEX_PAGE,
+  knowledgeDir, manifestPath, inventoryDir, cacheDir, doneDir, doneFileName,
   emptyManifest, readManifest, writeManifest,
   readInventory, writeInventory, scanPackage,
   diffInventory, detectHandEdits, hashPage, validateInventoryConsistency,
   orphanedPages, removeOrphanedPages,
+  collectCompletions, applyCompletions, countPendingReports,
 };

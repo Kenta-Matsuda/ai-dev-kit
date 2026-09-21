@@ -1,0 +1,14 @@
+:project-name: ai-dev-kit
+:command-name: aidev
+:node-min-version: 20
+:claude-min-version: 2.1.259
+:default-branch: main
+:default-pat-env: AZURE_DEVOPS_PAT
+:aidev-version: 0.2.0
+:aidev-home-win: %LOCALAPPDATA%\ai-dev-kit
+:aidev-home-posix: ~/.local/share/ai-dev-kit
+:guide-source-dir: docs/user-guide
+:guide-output: build/docs/ai-dev-kit-user-guide.html
+:guide-output-en: build/docs/ai-dev-kit-user-guide.en.html
+:chapter-label:
+:last-update-label!:

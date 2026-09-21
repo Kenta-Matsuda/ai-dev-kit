@@ -17,22 +17,31 @@
  *
  * Safety valves below are mandatory, not defaults to taste: an agent-authored
  * loop with no iteration cap is the failure mode this design exists to prevent.
+ *
+ * A workflow may start a bundled agent through `ctx.agent(prompt)`. Which
+ * agent, tool and model it uses comes from the `agent:` block of the
+ * definition (reviewed and hashed like everything else), falling back to
+ * `tools.agent` / `tools.agents.<name>` in aidev.yaml. Every agent run is
+ * bounded by the workflow's remaining minutes and, when the tool reports
+ * cost, by `cost.max_usd`.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { EXIT, AidevError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
+const agentMod = require('../lib/agent');
+const toolsMod = require('../lib/tools');
 const yaml = require('../lib/yaml');
 const ui = require('../lib/ui');
 
 const FLAGS = {
   json: 'boolean', force: 'boolean', 'dry-run': 'boolean',
-  yes: 'boolean', 'max-iterations': 'string', 'max-minutes': 'string',
+  'max-iterations': 'string', 'max-minutes': 'string',
   resume: 'boolean',
 };
 
-const WORKFLOWS_DIR = 'workflows';
+const WORKFLOWS_DIR = require('../lib/layout').WORKFLOWS_REL;
 
 /** Hard ceilings: a definition may lower these, never raise them. */
 const LIMITS = Object.freeze({
@@ -132,6 +141,29 @@ function validateDefinition(raw, source) {
     throw new AidevError(`${source}: commands must list the allowed executables (an empty allowlist runs nothing)`);
   }
 
+  // The agent a `ctx.agent()` call starts, and the tool/model it runs with.
+  // Everything here reaches a subprocess argument, so it is validated with the
+  // same rules as the CLI flags.
+  let agent = null;
+  if (raw.agent != null) {
+    if (typeof raw.agent !== 'object' || Array.isArray(raw.agent)) throw new AidevError(`${source}: agent must be a mapping`);
+    const a = raw.agent;
+    if (a.name == null) throw new AidevError(`${source}: agent.name is required when agent is given`);
+    let name;
+    try { name = agentMod.assertAgentName(a.name); } catch (e) { throw new AidevError(`${source}: agent.name: ${e.message}`); }
+    const tool = a.tool == null ? null : agentMod.assertTool(a.tool, `${source}: agent.tool`);
+    let timeoutMs = null;
+    if (a.timeout_ms != null) {
+      const n = Number(a.timeout_ms);
+      if (!Number.isInteger(n) || n < 10000 || n > 7200000) {
+        throw new AidevError(`${source}: agent.timeout_ms must be a whole number of milliseconds between 10000 and 7200000`);
+      }
+      timeoutMs = n;
+    }
+    agent = { name, tool, timeout_ms: timeoutMs };
+    if (a.model !== undefined) agent.model = cfgMod.assertModel(a.model, `${source}: agent.model`);
+  }
+
   return {
     name,
     description: raw.description ? String(raw.description) : '',
@@ -146,6 +178,7 @@ function validateDefinition(raw, source) {
       max_usd: cost.max_usd == null ? null : Number(cost.max_usd),
     },
     commands: allowlist,
+    agent,
     approvals: {
       before_pr: raw.approvals?.before_pr !== false,
       before_destructive: raw.approvals?.before_destructive !== false,
@@ -188,6 +221,14 @@ commands:
   - npm
   - git
 
+# steps.js の ctx.agent(prompt) が起動するエージェント。省略時は ctx.agent に { name } を渡す。
+# tool / model を省くと aidev.yaml の tools.agent / tools.agents.<name> に従う。
+# agent:
+#   name: knowledge-builder      # 同梱エージェント名（aidev agent list）
+#   tool: claude                 # ${toolsMod.TOOL_IDS.join(' | ')}（aidev.yaml の tools.default にあるもの）
+#   model: sonnet                # "" で model フラグを渡さない
+#   timeout_ms: 600000           # 1 回の起動の時間予算（残り時間が短ければそちらが優先）
+
 approvals:
   before_pr: true            # PR 作成前に人間の承認
   before_destructive: true   # 破壊的操作の前に人間の承認
@@ -201,10 +242,14 @@ const TEMPLATE_STEPS = (name) => `'use strict';
  * ただしこのファイルも承認ハッシュの対象なので、編集すると承認は失効します。
  *
  * @param {object} ctx
- *   ctx.repoRoot   ラッパーリポジトリのルート
+ *   ctx.repoRoot   PKG clone のルート
  *   ctx.iteration  1 始まりの反復回数
  *   ctx.log(msg)   runs/<id>/ に記録
  *   ctx.run(cmd, args)  commands 許可リストに含まれる場合のみ実行
+ *   ctx.agent(prompt, { name?, tool?, model?, timeoutMs? })
+ *                  workflow.yaml の agent: で決めたエージェントを AI ツールで起動する。
+ *                  戻り値 { ok, result, reason, costUsd, durationMs, tool, agent, model }
+ *                  失敗しても throw しない。cost.max_usd を使い切ると次の起動は拒否される
  * @returns {{ done: boolean, note?: string }}
  */
 module.exports = async function steps(ctx) {
@@ -213,6 +258,10 @@ module.exports = async function steps(ctx) {
   // 例: テストを実行し、通ったら終了する
   // const r = await ctx.run('npm', ['test']);
   // if (r.code === 0) return { done: true, note: 'tests pass' };
+
+  // 例: 失敗したテストの出力をエージェントに渡して直させる
+  // const a = await ctx.agent(\`Fix the failing tests. Output:\\n\${r.stdout}\${r.stderr}\`);
+  // if (!a.ok) return { done: false, note: a.reason };
 
   return { done: true, note: 'template: nothing to do' };
 };
@@ -275,6 +324,7 @@ function approve(ctx) {
     limits: def.limits,
     cost: def.cost,
     commands: def.commands,
+    agent: def.agent,
   };
   cfgMod.writeJsonAtomic(approvalPath(repoRoot, name), record);
 
@@ -289,9 +339,11 @@ function approve(ctx) {
 // -------------------------------------------------------------------------- run
 
 async function runWorkflow(ctx) {
-  const { repoRoot, flags, positionals } = ctx;
+  const { repoRoot, flags, positionals, installRoot } = ctx;
   const name = sanitizeName(positionals[1]);
   const def = loadDefinition(repoRoot, name);
+  // Optional: only a workflow that calls ctx.agent needs aidev.yaml.
+  const config = cfgMod.loadConfig(repoRoot, { required: false });
 
   // ---- approval gate -------------------------------------------------------
   const approval = cfgMod.readJsonIfExists(approvalPath(repoRoot, name));
@@ -338,6 +390,10 @@ async function runWorkflow(ctx) {
       ['max minutes', maxMinutes],
       ['commands', def.commands.join(', ')],
       ['budget', def.cost.max_tokens ? `${def.cost.max_tokens} tokens` : `$${def.cost.max_usd}`],
+      ['agent', def.agent
+        ? `${def.agent.name} via ${def.agent.tool || (config ? config.tools.agent : 'aidev.yaml tools.agent')}`
+          + (def.agent.model !== undefined ? ` (model: ${def.agent.model || 'tool default'})` : '')
+        : 'none in workflow.yaml (steps may pass { name } to ctx.agent)'],
     ]);
     ui.ok('dry run: the approval is valid and the workflow would execute.');
     return EXIT.OK;
@@ -364,6 +420,61 @@ async function runWorkflow(ctx) {
     } catch (e) {
       return { code: e.status == null ? 1 : e.status, stdout: e.stdout || '', stderr: e.stderr || '' };
     }
+  };
+
+  // ---- the agent launcher handed to steps.js -------------------------------
+  // Bounded twice: each run gets at most the workflow's remaining minutes, and
+  // once the reported cost reaches cost.max_usd no further agent starts. Cost
+  // is only known for tools that report it (Claude Code); the others count as
+  // zero, which is why the time limit is the valve that always holds.
+  let spentUsd = 0;
+  let agentRuns = 0;
+  const runAgentStep = async (prompt, overrides = {}) => {
+    if (!config) throw new AidevError('ctx.agent needs aidev.yaml in this PKG (run "aidev init")');
+    if (overrides == null || typeof overrides !== 'object') throw new AidevError('ctx.agent: the second argument must be an object');
+    const base = def.agent || {};
+    let agentName = base.name || null;
+    if (overrides.name != null) {
+      try { agentName = agentMod.assertAgentName(overrides.name); } catch (e) { throw new AidevError(`ctx.agent: ${e.message}`); }
+    }
+    if (!agentName) throw new AidevError('ctx.agent: no agent named — set agent.name in workflow.yaml or pass { name }');
+    const settings = cfgMod.agentSettings(config, agentName);
+    const tool = overrides.tool != null
+      ? agentMod.assertTool(overrides.tool, 'ctx.agent tool')
+      : (base.tool || settings.tool);
+    agentMod.assertToolEnabled(tool, config, 'ctx.agent tool');
+    let model = settings.model;
+    if (base.model !== undefined) model = base.model;
+    if (overrides.model !== undefined) model = cfgMod.assertModel(overrides.model, 'ctx.agent model');
+    if (typeof prompt !== 'string' || !prompt.trim()) throw new AidevError('ctx.agent: prompt must be a non-empty string');
+
+    if (def.cost.max_usd != null && spentUsd >= def.cost.max_usd) {
+      const e = new AidevError(`cost limit of $${def.cost.max_usd} reached ($${spentUsd.toFixed(4)} reported so far)`);
+      e.budgetExhausted = true;
+      throw e;
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new AidevError(`time limit of ${maxMinutes} minutes exceeded`);
+    const wanted = Number(overrides.timeoutMs) || base.timeout_ms || agentMod.DEFAULT_TIMEOUT_MS;
+    const timeoutMs = Math.max(1000, Math.min(wanted, remainingMs));
+
+    agentRuns++;
+    log(`agent ${agentName} via ${tool}${model ? ` (${model})` : ''} starting (budget ${agentMod.formatDuration(timeoutMs)})`);
+    const res = await agentMod.runAgent({
+      repoRoot, installRoot, tool, agent: agentName, prompt, model, timeoutMs,
+      label: `wf-${name}-${agentName}`,
+      onProgress: flags.json ? null : ({ elapsedMs }) => ui.dim(`    agent ${agentName}: ${agentMod.formatDuration(elapsedMs)} elapsed…`),
+    });
+    if (res.costUsd != null) spentUsd += Number(res.costUsd) || 0;
+    log(`agent ${agentName} ${res.ok ? 'finished' : `failed: ${res.reason}`} in ${agentMod.formatDuration(res.durationMs)}`
+      + (res.costUsd != null ? ` ($${Number(res.costUsd).toFixed(4)})` : ''));
+    return {
+      ok: !!res.ok, agent: agentName, tool, model,
+      result: res.result == null ? '' : String(res.result),
+      reason: res.ok ? null : (res.reason || null),
+      costUsd: res.costUsd ?? null, durationMs: res.durationMs ?? null,
+      timedOut: !!res.timedOut, skipped: !!res.skipped,
+    };
   };
 
   let steps;
@@ -418,8 +529,9 @@ async function runWorkflow(ctx) {
     let result;
     try {
       // eslint-disable-next-line no-await-in-loop
-      result = await steps({ repoRoot, iteration, log, run: runCmd, definition: def });
+      result = await steps({ repoRoot, iteration, log, run: runCmd, agent: runAgentStep, definition: def });
     } catch (e) {
+      if (e && e.budgetExhausted) { stopReason = e.message; log(stopReason); break; }
       const sig = String(e.message);
       if (sig === lastFailure) {
         identicalFailures++;
@@ -445,6 +557,7 @@ async function runWorkflow(ctx) {
     finishedAt: new Date().toISOString(),
     iterations: iteration, done, note, stopReason,
     resumedFrom, priorIterations,
+    agentRuns, costUsd: agentRuns > 0 ? spentUsd : null,
   };
   try {
     fs.mkdirSync(runDir, { recursive: true });
@@ -459,6 +572,7 @@ async function runWorkflow(ctx) {
       ui.dim(`    continue where it stopped: aidev workflow run ${name} --resume`);
     }
   }
+  if (agentRuns > 0) ui.dim(`    agent runs: ${agentRuns}${spentUsd > 0 ? `, reported cost $${spentUsd.toFixed(4)}` : ''}`);
   ui.dim(`    artifacts: ${WORKFLOWS_DIR}/${name}/runs/${runId}/`);
   if (def.approvals.before_pr) {
     ui.dim('    approvals.before_pr is set: PR creation requires a human, and is not performed here.');

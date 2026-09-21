@@ -1,0 +1,72 @@
+[[cli-status]]
+== aidev status
+
+Shows the state of this PKG on one screen.
+
+=== Synopsis
+
+[source,text]
+----
+aidev status [options]
+----
+
+=== Description
+
+Shows the PKG name, hosting and kit version, the Wiki state (three commit SHAs and a one-line verdict), the number of Wiki pages, drift of the distributed files, whether the policy is present, hand edits, and any sync in progress.
+
+Display only. xref:cli-check[aidev check] runs the same checks and returns them as an exit code.
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--json`
+|Machine-readable output
+
+|`--no-remote`
+|Do not contact the remote (offline, CI)
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|Displayed (0 even when the state is WARN or ERROR)
+
+|1
+|`aidev.yaml` is missing
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev status
+----
+
+[source,text]
+----
+aidev status — demo-pkg
+  hosting  azure-devops (demo-pkg), tracking origin/main
+  tools    claude
+  kit      0.2.0 @ 9491efe
+
+[ai-dev-kit] base=1a2b3c4  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ origin/main has moved ahead (9f8e7d6); work may continue. Run "aidev sync" to catch up.
+
+  Wiki         163 page(s) for 163 target(s)
+  tool config  matches the kit
+  policy       placed (14 protected paths)
+----
+
+`base` is the commit your current work is based on, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`.
+
+=== See also
+
+* xref:daily-status[Reading aidev status] — what to do for each message
+* xref:cli-check[aidev check]

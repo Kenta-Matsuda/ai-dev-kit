@@ -98,20 +98,14 @@ function samePath(left, right) {
 }
 
 /**
- * Walk upward for the wrapper root: the dir holding aidev.yaml, .aidev-lock or
- * the eject marker.
- *
- * The marker is included because eject removes .aidev-lock; without it, an
- * ejected repo whose aidev.yaml was also deleted would resolve its root by
- * git toplevel instead, and `aidev check` would miss the marker and start
- * judging the repo again.
+ * Walk upward for the PKG root: the dir holding aidev.yaml or a `.aidev/`
+ * directory (which an ejected repository keeps, with its marker inside).
+ * Falls back to the git worktree root, then to the start directory.
  */
 function findRepoRoot(start = process.cwd()) {
   let dir = path.resolve(start);
   for (;;) {
-    if (fs.existsSync(path.join(dir, 'aidev.yaml')) ||
-        fs.existsSync(path.join(dir, '.aidev-lock')) ||
-        fs.existsSync(path.join(dir, '.aidev-ejected'))) {
+    if (fs.existsSync(path.join(dir, 'aidev.yaml')) || fs.existsSync(path.join(dir, '.aidev'))) {
       return dir;
     }
     const parent = path.dirname(dir);
@@ -134,25 +128,50 @@ function currentBranch(cwd) {
   return r.stdout === 'HEAD' ? null : r.stdout;
 }
 
-/**
- * SHA the superproject records for a submodule.
- *
- * `git ls-tree` is authoritative here: it reports what the wrapper commit
- * points at, which is what a reviewer sees in the PR, independent of whether
- * the working tree happens to be checked out or dirty.
- */
-function submoduleSha(repoRoot, subPath = 'src') {
-  const r = run(['ls-tree', 'HEAD', '--', subPath], { cwd: repoRoot });
-  if (r.ok && r.stdout) {
-    const m = r.stdout.match(/^\d+\s+commit\s+([0-9a-f]{40})\s/);
-    if (m) return m[1];
-  }
-  return headSha(path.join(repoRoot, subPath));
+/** URL of a remote, or null. */
+function remoteUrl(cwd, remote = 'origin') {
+  const r = run(['remote', 'get-url', remote], { cwd });
+  return r.ok && r.stdout ? r.stdout : null;
 }
 
-/** SHA actually checked out inside the submodule working tree. */
-function submoduleWorktreeSha(repoRoot, subPath = 'src') {
-  return headSha(path.join(repoRoot, subPath));
+/**
+ * Did anything outside `excludes` change between two commits?
+ *
+ * The Wiki describes the package's source, not the kit's own files, so a
+ * commit that only adds `.aidev/knowledge/` or updates `.claude/` must not
+ * count as "the code moved". Returns null when either commit is unknown.
+ */
+function treeChanged(cwd, a, b, excludes = []) {
+  if (!isSha(a) || !isSha(b)) return null;
+  if (a === b) return false;
+  const spec = ['--', '.', ...excludes.map((e) => `:(exclude)${e}`)];
+  const r = run(['diff', '--quiet', a, b, ...spec], { cwd });
+  if (r.ok) return false;
+  if (r.status === 1) return true;
+  return null;
+}
+
+/** The merge base of two commits, or null when they share no history. */
+function mergeBase(cwd, a, b) {
+  if (!a || !b) return null;
+  const r = run(['merge-base', a, b], { cwd });
+  return r.ok && isSha(r.stdout) ? r.stdout : null;
+}
+
+/**
+ * Add a detached worktree at `dir` for `ref`. Used by sync so the Wiki can be
+ * regenerated for the tracking branch without touching the developer's own
+ * checkout. Returns { ok, stderr }.
+ */
+function worktreeAdd(cwd, dir, ref) {
+  assertSafeRef(ref, 'ref');
+  return run(['worktree', 'add', '--detach', dir, ref], { cwd });
+}
+
+function worktreeRemove(cwd, dir) {
+  const r = run(['worktree', 'remove', '--force', dir], { cwd });
+  run(['worktree', 'prune'], { cwd });
+  return r;
 }
 
 /**
@@ -229,7 +248,7 @@ function hasUncommittedChanges(cwd) {
 
 module.exports = {
   run, must, isRepo, repoTopLevel, samePath, findRepoRoot, isSha, assertSafeRef,
-  headSha, currentBranch, submoduleSha, submoduleWorktreeSha,
+  headSha, currentBranch, remoteUrl, mergeBase, treeChanged, worktreeAdd, worktreeRemove,
   remoteSha, fetch, revParse, commitExists, isAncestor,
   lsTreeBlobs, hasUncommittedChanges,
 };

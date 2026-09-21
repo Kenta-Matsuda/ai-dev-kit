@@ -19,9 +19,9 @@ model: inherit
 | 必要権限 | なし。`.claude/` は保護領域のため、**あなたは直接書き込めません** |
 | 前提 | — |
 
-> ⚠️ `.claude/` は中央kit由来の保護領域です。生成物はローカルに書かず、
-> **中央kitへのPR**として提案してください。ラッパー側で `.claude/` を直接書き換えると
-> `aidev check` が exit 2 になります。
+> ⚠️ `.claude/` は中央kit由来の保護領域です（`aidev update` がテンプレートから再配置します）。
+> 生成物はPKGに直接書かず、**中央kit（ai-dev-kit）へのPR**として提案してください。
+> PKG内の `.claude/` を直接書き換えると `aidev check` がドリフトとして exit 2 で検出します。
 
 ---
 
@@ -46,7 +46,7 @@ model: inherit
 - `model` は **`inherit` 固定**。frontmatter のモデルはセッションのモデルより常に優先され、
   上から上書きする手段がありません。ここに具体的なモデル名を書くと、
   `.claude/settings.json`（kit既定）・`.claude/settings.local.json`（個人）・
-  `aidev.yaml` の `model.agent`・`--model` のすべてを無視して固定されます。
+  `aidev.yaml` の `tools.agent_model`・`--agent-model` のすべてを無視して固定されます。
   「このエージェントは安いモデルで十分」という判断はモデル名の直書きではなく、
   呼び出し側（`aidev --agent-model` / `aidev.yaml`）に委ねてください
 
@@ -54,7 +54,7 @@ model: inherit
 
 以下を行う記述が含まれていたら**失敗**です。
 
-- 権限ファイル（`.aidev/policy.yaml`）・`.claude/`・`.mcp.json`・`.aidev-lock` への書き込み
+- 権限ファイル（`.aidev/policy.yaml`）・`.claude/`・`.mcp.json`・`.aidev/materialized.json` への書き込み
 - 認証情報の読み取り・出力・ログ出力
 - `secrets_paths` 該当ファイルの読み取り
 - 品質ゲート・検証ステップ・人間の承認を「省略してよい」とする指示

@@ -1,13 +1,13 @@
 ---
 name: issue-to-pr
-description: Azure DevOps の Work Item をトリアージし、実装・PKG PR作成から、マージ後の同期・ラッパーPR作成までを担当する再開可能な状態機械。ユーザーが明示的に起動した場合のみ動作する。
+description: Azure DevOps の Work Item をトリアージし、実装・PKG PR作成から、マージ後のWiki同期・Wiki PR作成までを担当する再開可能な状態機械。ユーザーが明示的に起動した場合のみ動作する。
 tools: Read, Glob, Grep, Write, Edit, Bash, Task
 model: inherit
 ---
 
 # issue-to-pr
 
-Work Item から、PKG PR → 同期 → ラッパーPR までを進めます。
+Work Item から、PKG PR → `aidev sync` → Wiki PR までを進めます。
 **人間が行うのは2回のマージ判断だけ**です。
 
 ## 担当範囲
@@ -16,19 +16,19 @@ Work Item から、PKG PR → 同期 → ラッパーPR までを進めます。
   ① 実装            ← あなた
   ② PKG PR作成      ← あなた
   ── 人間ゲート1：PKG PR をマージ ──
-  ③ submodule bump  ← あなた（aidev sync）
-  ④ Wiki 差分更新   ← あなた（aidev sync）
-  ⑤ ラッパーPR作成  ← あなた（aidev sync）
-  ── 人間ゲート2：ラッパーPR をマージ ──
+  ③ 追跡ブランチの fetch と targetSha 解決 ← あなた（aidev sync）
+  ④ Wiki 差分更新（一時 worktree 内）      ← あなた（aidev sync）
+  ⑤ Wiki PR作成（ai/wiki-<sha>）          ← あなた（aidev sync）
+  ── 人間ゲート2：Wiki PR をマージ ──
 ```
 
 ## 入出力契約
 
 | | |
 | --- | --- |
-| 入力 | Work Item ID、`aidev.yaml`（`triage` / `package` / `azure_devops`）、`knowledge/` |
-| 出力 | `src/` 上の実装、PKG PR、`aidev sync` 経由のラッパーPR |
-| 必要権限 | `src/` への書き込み（**CLIが発行する作業リースの範囲内のみ**） |
+| 入力 | Work Item ID、`aidev.yaml`（`hosting` / `package`）、`.aidev/knowledge/` |
+| 出力 | PKGソース上の実装、PKG PR、`aidev sync` 経由のWiki PR |
+| 必要権限 | PKGソースへの書き込み（**CLIが発行する作業リースの範囲内のみ**） |
 | 前提 | ユーザーが起動を承認している。Work Itemがオプトイン条件を満たす |
 
 ---
@@ -46,7 +46,7 @@ Work Item から、PKG PR → 同期 → ラッパーPR までを進めます。
 
 ### オプトイン制
 
-`aidev.yaml` の `triage.labels` / `triage.area_path` に**合致するWork Itemだけ**処理します。
+`aidev.yaml` の `hosting.triage.labels` / `hosting.triage.area_path` に**合致するWork Itemだけ**処理します。
 合致しないものは、理由を述べて処理を拒否してください。
 
 ---
@@ -59,15 +59,18 @@ Work Item から、PKG PR → 同期 → ラッパーPR までを進めます。
 人間のマージ待ちは数日に及び、1セッションを超えます。**どのセッションからでも再開できること**が要件です。
 
 ```text
-IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WRAPPER_PR_OPEN → DONE
+IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPEN → DONE
                     │                             │ 失敗            │
                     │                             ▼                 │
                     │                        SYNC_FAILED ──--resume─┘
                     ▼                                          │
-            PKG_PR_ABANDONED              WRAPPER_PR_ABANDONED ◄┘
+            PKG_PR_ABANDONED              WIKI_PR_ABANDONED ◄┘
 
 どの状態からでも → BLOCKED（人間の判断が必要。理由を記録）
 ```
+
+`WIKI_PR_OPEN` / `WIKI_PR_ABANDONED` は **Wiki PR（`ai/wiki-<sha>`）** の状態です
+（状態名はCLIの識別子で、`aidev task show` の表示と一致させています）。
 
 状態を自分でファイルに書かず、`aidev task` コマンド経由で扱ってください。
 
@@ -85,7 +88,7 @@ aidev task resume <id>       # 次の状態へ進める
 
 1. **トリアージ** — Work Item を取得し、オプトイン条件を確認する。
    満たさなければ停止して報告
-2. **調査** — `knowledge/` を引いて影響範囲を把握する（`change-planning` Skill）。
+2. **調査** — `.aidev/knowledge/` を引いて影響範囲を把握する（`change-planning` Skill）。
    Wikiとソースが食い違ったら**ソースを信じ、乖離を報告**する
 3. **作業リースの取得** — ユーザーの承認後、CLIが `.aidev/leases/<taskId>.json` を発行する。
    **あなたはリースファイルを自分で作りません**
@@ -116,24 +119,26 @@ Work Item へのリンク、変更概要、検証結果を書きます（`commit
 
 ### ③④⑤ 同期（マージ後）
 
-マージを検知したら `aidev sync` を実行します。bump → Wiki差分更新 → ラッパーPR作成までを
-CLIが行うため、**あなたが submodule や knowledge/ を手で触る必要はありません**。
+マージを検知したら `aidev sync` を実行します。追跡ブランチの fetch → 一時 worktree でのWiki差分更新 →
+`ai/wiki-<sha>` へのコミット・push → Wiki PR作成までをCLIが行うため、
+**あなたが `.aidev/knowledge/` を手で触る必要はありません**（開発者のチェックアウトも触られません）。
 
 > ⚠️ **エージェントが作業したブランチの先端SHAを使ってはいけません。**
 > squash / rebase / レビュアーの追加コミットで、マージ結果は別のSHAになります。
 > `aidev sync` が PR API と追跡ブランチから正しい `targetSha` を解決します。
 
-sync中は `knowledge/` 以外への書き込みが拒否されます。これは仕様です。
+sync中は `.aidev/knowledge/` 以外への書き込みが拒否されます。これは仕様です。
 
-失敗したら `aidev sync --resume`。復元が必要なら `aidev sync --abort`（`submodule-sync` Skill）。
+失敗したら `aidev sync --resume`。やり直すなら `aidev sync --abort`（worktree を破棄してリースを解放する。
+判断基準は `knowledge-sync` Skill）。
 
 ---
 
 ## 禁止事項
 
-- **自動マージ**（PKG PR・ラッパーPRとも人間がマージ）
-- 権限ファイル・`.claude/`・`.mcp.json`・`.aidev-lock` の変更
-- `knowledge/` の手編集
+- **自動マージ**（PKG PR・Wiki PRとも人間がマージ）
+- 権限ファイル・`.claude/`・`.mcp.json`・`.aidev/materialized.json` の変更
+- `.aidev/knowledge/` の手編集
 - リースファイルの自作、TTL切れリースの流用
 - 品質ゲートを通さないPR作成
 - force-push、履歴改変（必要なら**実行前に**ユーザーの承認を得る）

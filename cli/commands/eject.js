@@ -3,7 +3,7 @@
  * `aidev eject` — leave kit management.
  *
  * Spec: kit管理から外す（以後 `check` 対象外・手動管理へ）. After ejecting, the
- * repository keeps everything that is *its own* — the submodule, the generated
+ * repository keeps everything that is *its own* — its source, the generated
  * Wiki, aidev.yaml, any workflows — but nothing enforces the kit's rules any
  * more, and `aidev check` stops judging it.
  *
@@ -14,7 +14,7 @@
  *   2. Only then are the policy, the lock and the leases removed.
  *
  * Reversing those steps would brick the repository. `loadPolicy` falls back to
- * a *restrictive* built-in policy when .aidev/policy.yaml is absent (src/**
+ * a *restrictive* built-in policy when .aidev/policy.yaml is absent (the PKG
  * read-only, .claude/** protected), and guard-write fails closed. So a repo
  * with live hooks and no policy file is not unmanaged — it is maximally locked,
  * with every path denied and no CLI left to mint a lease that would open it.
@@ -22,7 +22,7 @@
  * enforcement too.
  *
  * What is deliberately NOT deleted:
- *   - `src/` and its git submodule wiring — the PKG is the point of the repo.
+ *   - the PKG source files — they were never the kit's to touch.
  *   - `knowledge/` — an expensive artefact the team may still want to read.
  *   - `aidev.yaml` — it records the ADO connection; deleting it silently would
  *     lose the organization/project mapping. It stops being read, not existing.
@@ -102,7 +102,7 @@ function unwireHooks(repoRoot) {
     if (typeof cmd !== 'string') return false;
     // Legacy shell-form hooks invoked `aidev hook ...` directly.
     if (/(^|[\s/\\"'])aidev(\.js)?(["']?\s+|\s+)hook\b/.test(cmd)) return true;
-    // Current hooks use Claude Code's exec form so the project-root placeholder
+    // Current hooks use Claude Code's string form ("aidev hook <name>" on PATH); the exec
     // is substituted as one argv element without cwd or shell-tokenisation risk.
     const args = Array.isArray(entry.args) ? entry.args : [];
     const script = args.findIndex((arg) =>
@@ -138,7 +138,7 @@ function unwireHooks(repoRoot) {
 }
 
 /** Everything eject would touch, computed without writing anything. */
-function planEject(repoRoot, { keepAssets }) {
+function planEject(repoRoot, { keepAssets, installRoot }) {
   const remove = [];
   for (const rel of CONTROL_FILES) {
     if (fs.existsSync(path.join(repoRoot, rel))) remove.push(rel);
@@ -150,7 +150,9 @@ function planEject(repoRoot, { keepAssets }) {
   // Kit-owned static assets are removed by default: leaving CLAUDE.md and
   // .claude/agents behind would keep instructing agents to use a kit that is no
   // longer installed. --keep-assets is for teams adopting them as their own.
-  const staticFiles = keepAssets ? [] : assets.listStaticFiles(repoRoot);
+  const staticFiles = keepAssets ? [] : assets.listStaticFiles(repoRoot, {
+    tools: assets.configuredTools(repoRoot), installRoot,
+  });
 
   return { remove, staticFiles };
 }
@@ -199,7 +201,7 @@ function run(ctx) {
     fs.existsSync(cfgMod.policyPath(repoRoot));
   if (!isManaged && !flags.force) {
     throw new AidevError(
-      `${repoRoot} does not look kit-managed (no aidev.yaml, .aidev-lock or .aidev/policy.yaml).\n` +
+      `${repoRoot} does not look kit-managed (no aidev.yaml, ${cfgMod.LOCK_NAME} or ${cfgMod.POLICY_REL}).\n` +
       '    Refusing to delete files from a directory that was never initialised. Use --force to override.');
   }
 
@@ -221,7 +223,7 @@ function run(ctx) {
     }
   }
 
-  const { remove, staticFiles } = planEject(repoRoot, { keepAssets });
+  const { remove, staticFiles } = planEject(repoRoot, { keepAssets, installRoot: ctx.installRoot });
   const hooks = unwireHooks(repoRoot);
 
   if (!flags.json) {
@@ -238,9 +240,9 @@ function run(ctx) {
     }
     ui.out('');
     ui.info('will keep:');
-    ui.dim('    src/ (the PKG submodule)   knowledge/ (the generated Wiki)');
-    ui.dim('    aidev.yaml (no longer read)   workflows/ (team-authored)');
-    if (keepAssets) ui.dim('    .claude/, CLAUDE.md, .mcp.json (--keep-assets)');
+    ui.dim('    your package files   .aidev/knowledge/ (the generated Wiki)');
+    ui.dim('    aidev.yaml (no longer read)   .aidev/workflows/ (team-authored)');
+    if (keepAssets) ui.dim('    the AI tool configuration files (--keep-assets)');
   }
 
   if (dryRun) {
@@ -284,12 +286,16 @@ function run(ctx) {
   }
   if (!keepAssets) {
     // Directories the asset sweep may have emptied.
-    for (const d of ['.claude']) {
-      const full = path.join(repoRoot, d);
-      try { if (fs.existsSync(full) && fs.readdirSync(full).length === 0) fs.rmdirSync(full); } catch { /* keep */ }
+    const toolsMod = require('../lib/tools');
+    for (const id of toolsMod.TOOL_IDS) {
+      for (const d of toolsMod.getTool(id).configDirs) {
+        const full = path.join(repoRoot, ...d.split('/'));
+        try { if (fs.existsSync(full) && fs.readdirSync(full).length === 0) fs.rmdirSync(full); } catch { /* keep */ }
+      }
     }
   }
   pruneAidevDir(repoRoot);
+  try { require('../lib/home').unregisterPackage(repoRoot); } catch { /* registry is best-effort */ }
 
   // --- 3. record that this was deliberate ----------------------------------
   const marker = {
@@ -316,6 +322,7 @@ function run(ctx) {
   }
 
   ui.ok(`removed ${removed.length} kit file(s); wrote ${cfgMod.EJECT_MARKER_NAME}`);
+  ui.dim('    .aidev/ is kept for the marker and the Wiki; delete it by hand if you no longer want either.');
   ui.out('');
   ui.info('this repository is now maintained by hand.');
   ui.dim('    "aidev check" no longer applies — remove it from the branch policy and the pipeline,');

@@ -1,0 +1,111 @@
+[[automation]]
+== 自動化
+
+3 つの自動化があります。いずれも PR のマージは人間が行います。
+
+[[automation-ci]]
+=== CI
+
+kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 kit の URL に変えて使います。CI は kit を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。
+
+[cols="2,3",options="header"]
+|===
+|ファイル |用途
+
+|`pipelines/azure-pipelines-check.yml`
+|PR ごとに `aidev check` を実行します。`main` の branch policy で **必須の build validation** にしてください。これが無いと hook を外す編集がマージできてしまいます。
+
+|`pipelines/azure-pipelines-sync.yml`
+|毎日 18:00 UTC に `aidev sync --no-agent` と `aidev task advance` を実行します。`--no-agent` なので構造だけ更新し、本文は PR に「未生成」と記されます。pipeline に Claude Code と token 予算を用意できたら `--no-agent` を外します。変数 `AZURE_DEVOPS_PAT`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。
+|===
+
+`aidev check` の終了コードが CI の契約です。
+
+[cols="1,3",options="header"]
+|===
+|終了コード |意味
+
+|0
+|整合しています。警告（`main` が進んでいる、本文が未生成）は 0 のままです。`--strict` で 2 になります。
+
+|2
+|`.claude/**`・`CLAUDE.md`・`.mcp.json` が配布版と違います。
+
+|3
+|`.aidev/policy.yaml` が無い、または壊れています。
+
+|4
+|Wiki が無い・壊れている、または前回の sync が途中で止まっています。
+|===
+
+[[automation-task]]
+=== aidev task — issue-to-pr の進行状態
+
+`issue-to-pr` agent が Work Item を実装して PR を作ると、進行状態が `.aidev/tasks/<id>.json`（gitignore 済み）に記録されます。`aidev task` はその状態を見て進めます。
+
+[source,text]
+----
+IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPEN → DONE
+----
+
+人間がマージするのは `PKG_PR_OPEN`（コードの PR）と `WIKI_PR_OPEN`（Wiki の PR）の 2 回です。
+
+[cols="2,3",options="header"]
+|===
+|コマンド |動作
+
+|`aidev task list`
+|未完了のタスクを一覧します。
+
+|`aidev task show <id>`
+|状態と次に取り得る状態を表示します。
+
+|`aidev task advance [<id>]`
+|PR の状態を見て 1 段階進めます。id を省くと未完了タスクをすべて処理します（夜間 pipeline 用）。
+
+|`aidev task resume <id>`
+|進められるところまで進め、次に人間または agent がすることを表示します。
+
+|`aidev task abandon <id>`
+|タスクを放棄し、作業リースを解放します。PR は閉じません。
+|===
+
+[[automation-workflow]]
+=== aidev workflow — 承認済みスクリプトの実行
+
+チームが書いた JavaScript を、人間が承認した内容のまま、回数・時間・コマンドの上限付きで実行します。
+
+. 雛形を作ります。
++
+[source,bash]
+----
+aidev workflow new nightly-tests
+----
++
+`.aidev/workflows/nightly-tests/` に `workflow.yaml`（上限・予算・許可コマンド）と `steps.js`（処理）ができます。
+
+. 2 つのファイルを編集し、`git diff` でレビューします。
+
+. 承認します。承認は 2 ファイルのハッシュとして記録され、どちらかを編集すると無効になります。
++
+[source,bash]
+----
+aidev workflow approve nightly-tests
+----
+
+. 実行します。
++
+[source,bash]
+----
+aidev workflow run nightly-tests
+----
++
+上限で止まったら `--resume` で続きから実行します。
+
+`steps.js` の書き方は雛形のコメントにあります。上限は反復 10 回、60 分、同じ失敗 3 回までで、これより上げることはできません。
+
+`steps.js` から `ctx.agent(prompt)` で同梱 agent を起動できます。どの agent をどのツール・モデルで動かすかは `workflow.yaml` の `agent:`（`name` / `tool` / `model` / `timeout_ms`）で決め、省略した項目は `aidev.yaml` の `tools.agents.<name>` と `tools.agent` に従います。各起動は workflow の残り時間で打ち切られ、`cost.max_usd` に達すると次の起動は拒否されます（費用を報告するのは Claude Code だけです）。
+
+=== 関連
+
+* xref:cli-check[aidev check]、xref:cli-sync[aidev sync]、xref:cli-task[aidev task]、xref:cli-workflow[aidev workflow]

@@ -23,7 +23,7 @@ PKG固有の権限ポリシー**候補**を対話で作成します。
 
 | | |
 | --- | --- |
-| 入力 | `aidev.yaml`、`src/` の構成、開発者との対話 |
+| 入力 | `aidev.yaml`、PKGのソース構成（リポジトリルート）、開発者との対話 |
 | 出力 | ポリシー候補の**提案内容**（`protected` / `read_only` / `writable_during_sync` / `writable`）と各項目の根拠 |
 | 必要権限 | なし（読み取りのみ。書き込みはCLIが行う） |
 | 前提 | ユーザーが対話的に起動している |
@@ -49,10 +49,11 @@ PKGごとに違うのは主に「秘密情報の在処」と「書き換えて�
 | 原則 | 意味 |
 | --- | --- |
 | **既定は拒否** | 迷ったら禁止側に倒す。緩めるのは後からでもできる |
-| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/leases/`・`.aidev/sync.lock`・`.aidev-lock`・`.aidev-ejected` は常に protected。CLIが強制的に再付与する |
+| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/leases/**`・`.aidev/sync.lock`・`.aidev/materialized.json`・`.aidev/.gitignore`・`.aidev/ejected.json` は常に protected。CLIが強制的に再付与する |
 | **秘密は protected へ** | `aidev.yaml` の `secrets_paths` は protected に昇格させる（read_onlyでは足りない） |
-| **`src/` は read_only** | 書き込みは issue-to-pr の作業リース経由のみ |
-| **`knowledge/` は writable_during_sync** | syncリース保持中だけ書ける |
+| **PKG全体（`**`）は read_only** | 書き込みは issue-to-pr の作業リース経由のみ |
+| **`.aidev/knowledge/**` は writable_during_sync** | syncリース保持中（またはCLIが起動した knowledge-builder）だけ書ける |
+| **writable は最小限** | 既定は `.aidev/knowledge/**`・`.aidev/workflows/**`・`aidev.yaml` のみ |
 
 ### 権限を弱める提案をする場合
 
@@ -64,7 +65,7 @@ CLIも「権限を弱める変更」を検出して差分確認なしには配�
 
 ## 手順
 
-1. `aidev.yaml` と `src/` の構成を読む
+1. `aidev.yaml` とPKGのソース構成（リポジトリルート）を読む
 2. 上の4点を開発者に聞く（分かっている前提を示しながら確認する）
 3. 候補を提示する。**各エントリに1行の根拠を添える**
 4. ユーザーに次のコマンドを案内して終了する

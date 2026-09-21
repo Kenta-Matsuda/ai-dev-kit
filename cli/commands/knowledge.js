@@ -4,7 +4,8 @@
  *
  * The CLI owns the structured half of the Wiki — the file inventory, the
  * manifest and the resumable checkpoint. Prose generation belongs to the
- * knowledge-builder agent, which reads the plan this command produces. Keeping
+ * knowledge-builder agent, which reads the plan this command produces and is
+ * started right after the structured write (`--no-agent` skips it). Keeping
  * the split here is what lets `build` be re-run safely: scanning, sharding and
  * diffing are deterministic and free, so a resumed run never re-pays for work
  * already done.
@@ -24,10 +25,20 @@ const agentMod = require('../lib/agent');
 const ui = require('../lib/ui');
 
 const FLAGS = {
-  scope: 'string', refresh: 'boolean', resume: 'boolean',
+  scope: 'string', full: 'boolean',
   'dry-run': 'boolean', json: 'boolean', force: 'boolean',
   'no-remote': 'boolean',
   ...agentMod.AGENT_FLAGS,
+};
+
+const FLAG_HELP = {
+  scope: 'only (re)generate targets under this path; research still covers the whole PKG',
+  full: 'regenerate every target from scratch instead of only what changed or was left queued',
+  'dry-run': 'show what would be queued and written; write nothing',
+  json: 'machine-readable output',
+  force: 'overwrite Wiki pages that were edited by hand',
+  'no-remote': 'status: skip the remote check',
+  ...agentMod.AGENT_FLAG_HELP,
 };
 
 function status(ctx, config) {
@@ -45,9 +56,9 @@ function status(ctx, config) {
 
   ui.heading('aidev knowledge status');
   ui.table([
-    ['remoteSha', stateMod.short(st.remoteSha)],
-    ['submoduleSha', stateMod.short(st.submoduleSha)],
-    ['knowledgeSha', stateMod.short(st.knowledgeSha)],
+    ['tracking', stateMod.short(st.trackingSha)],
+    ['base', stateMod.short(st.baseSha)],
+    ['knowledge', stateMod.short(st.knowledgeSha)],
     ['generatedAt', manifest?.generatedAt || '-'],
     ['generation targets', records.length],
     ['evidence files', manifest?.evidence?.trackedFiles ?? '-'],
@@ -68,19 +79,42 @@ function status(ctx, config) {
   return st.severity === stateMod.SEVERITY.ERROR ? EXIT.KNOWLEDGE : EXIT.OK;
 }
 
-async function build(ctx, config) {
+async function build(ctx, config, { silent = false } = {}) {
   const { repoRoot, flags } = ctx;
   const human = !flags.json; // --json must emit exactly one JSON document
-  const subDir = path.join(repoRoot, 'src');
-  if (!fs.existsSync(subDir)) {
-    throw new AidevError('src/ submodule is not present — run "git submodule update --init --recursive"');
-  }
-  const targetSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
-  if (!targetSha) throw new AidevError('could not determine the submodule SHA');
+  // With `silent` the JSON document is handed back to the caller (init embeds
+  // it in its own report) instead of being printed here.
+  let json = null;
+  const emitJson = (obj) => { json = obj; if (!silent) ui.json(obj); };
+  if (!gitMod.isRepo(repoRoot)) throw new AidevError(`${repoRoot} is not a git repository`);
+  // The Wiki describes the tracking-branch commit this work is based on. On a
+  // feature branch that is the merge-base; without a fetched tracking branch it
+  // is HEAD itself.
+  const base = stateMod.resolveBase(repoRoot, config.sync.tracking_branch);
+  const targetSha = base.baseSha;
+  if (!targetSha) throw new AidevError('could not resolve HEAD — commit something first');
 
-  const existing = inventory.readManifest(repoRoot);
-  const resuming = !!(flags.refresh || flags.resume);
-  const oldRecords = resuming ? inventory.readInventory(repoRoot, existing) : [];
+  let existing = inventory.readManifest(repoRoot);
+
+  // A previous run may have been stopped (timeout, Ctrl-C) after the agent
+  // reported targets the CLI never got to record. Fold those in first, so they
+  // count as done rather than being generated a second time.
+  if (existing && !flags['dry-run']) {
+    const leftover = inventory.applyCompletions(repoRoot, {
+      targetSha: existing.knowledgeSha, shardSize: config.knowledge.inventory_shard_size,
+    });
+    if (leftover.applied.length > 0) {
+      existing = inventory.readManifest(repoRoot);
+      if (human) ui.info(`${leftover.applied.length} target(s) finished by an earlier run were recorded.`);
+    }
+  }
+
+  // Incremental by default: only what changed since the recorded inventory is
+  // regenerated, and whatever an earlier run left queued is picked up again.
+  // `--full` throws the inventory away and regenerates every target.
+  const resuming = !flags.full;
+  const existingRecords = inventory.readInventory(repoRoot, existing);
+  const oldRecords = resuming ? existingRecords : [];
   const newRecords = inventory.scanPackage(repoRoot, config) || [];
   const evidenceRecords = knowledgeScope.scanEvidence(repoRoot, config) || [];
   const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
@@ -104,8 +138,8 @@ async function build(ctx, config) {
   const generationSet = new Set(
     [...diff.added, ...diff.modified].map((record) => record.path));
 
-  // A failed/partial agent owns this queue. Merge it back on refresh instead of
-  // losing it merely because its target blob is now recorded as unchanged.
+  // Whatever an earlier run left queued is still owed. Merge it back instead
+  // of losing it merely because its target blob is now recorded as unchanged.
   if (resuming) {
     for (const pendingPath of existing?.checkpoint?.pendingPaths || []) {
       if (currentTargets.has(pendingPath)) generationSet.add(pendingPath);
@@ -143,8 +177,9 @@ async function build(ctx, config) {
   }
 
   // Hand edits are human work. Overwriting them must be an explicit decision,
-  // so this halts rather than warning-and-proceeding.
-  const handEdits = inventory.detectHandEdits(repoRoot, oldRecords)
+  // so this halts rather than warning-and-proceeding — with --full as well,
+  // which is why the check reads the recorded inventory, not oldRecords.
+  const handEdits = inventory.detectHandEdits(repoRoot, existingRecords)
     .filter((h) => h.reason !== 'missing');
   if (handEdits.length > 0 && !flags.force && !flags['dry-run']) {
     const list = handEdits.slice(0, 10).map((h) => `      ${h.page} (${h.reason})`).join('\n');
@@ -156,7 +191,7 @@ async function build(ctx, config) {
 
   if (flags['dry-run']) {
     if (flags.json) {
-      ui.json({
+      emitJson({
         ok: true,
         dryRun: true,
         targetSha,
@@ -172,19 +207,22 @@ async function build(ctx, config) {
         for (const h of handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
       }
       ui.ok('dry run complete; nothing was written.');
-      if (flags.agent || flags['agent-name'] != null) {
-        const opts = agentMod.resolveOptions(flags, config);
-        ui.dim(`    would then run the ${opts.agent} agent for ${pending.length} generation target(s).`);
+      const opts = agentMod.resolveOptions(flags, config);
+      if (opts.enabled && pending.length > 0) {
+        const batches = Math.ceil(pending.length / opts.batchSize);
+        ui.dim(`    would then run the ${opts.agent} agent with ${agentMod.toolLabel(opts.tool)} for ${pending.length} generation target(s) in ${batches} batch(es).`);
+      } else if (!opts.enabled && pending.length > 0) {
+        ui.dim(`    --no-agent: ${pending.length} generation target(s) would stay queued without prose.`);
       }
     }
-    return EXIT.OK;
+    return { code: EXIT.OK, json };
   }
 
   // Writing knowledge/** while the Wiki is inconsistent is precisely what the
   // sync lease authorises — and regenerating is what *resolves* that state. So
-  // refusing here would make `aidev sync` the only way out even when src/ is
+  // refusing here would make `aidev sync` the only way out even when the code is
   // already at the commit the operator wants described (a rename committed
-  // straight into the submodule, say). Take the lease for the duration of the
+  // a fresh clone with a Wiki committed later, say). Take the lease for the duration of the
   // write instead: the invariant "knowledge/** is only rewritten under a lease"
   // holds, concurrent syncs are still excluded, and the deadlock is gone.
   const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
@@ -196,7 +234,7 @@ async function build(ctx, config) {
       // names --resume/--abort, which is the right outcome here too.
       leases.acquireSyncLease(repoRoot, {
         targetSha,
-        originalSha: st.submoduleSha,
+        originalSha: st.knowledgeSha,
         ttlMinutes: config.sync.lease_ttl_minutes,
         force: !!flags.force,
       });
@@ -237,7 +275,7 @@ async function build(ctx, config) {
     // prose is still queued are reported by computeState as a WARN, not by
     // holding this SHA back — sync must be able to finish and release its lease.
     manifest.knowledgeSha = targetSha;
-    manifest.kitCommit = gitMod.headSha(repoRoot);
+    manifest.kitCommit = gitMod.headSha(ctx.installRoot);
     manifest.generatedAt = new Date().toISOString();
     manifest.inventoryShards = shards;
     manifest.stats = {
@@ -253,7 +291,7 @@ async function build(ctx, config) {
 
     // The index is the entry point the design requires; create a stub if absent
     // so the directory is never a bare pile of generated pages.
-    const indexPath = path.join(repoRoot, 'knowledge', 'index.md');
+    const indexPath = path.join(repoRoot, ...inventory.INDEX_PAGE.split('/'));
     if (!fs.existsSync(indexPath)) {
       cfgMod.writeFileAtomic(indexPath, [
         `# ${config.package.name} — LLM Wiki`,
@@ -279,7 +317,6 @@ async function build(ctx, config) {
       for (const p of pending.slice(0, 20)) ui.dim(`    ${p}`);
       if (pending.length > 20) ui.dim(`    … and ${pending.length - 20} more`);
       ui.dim(`    The agent can research ${evidenceState.trackedFiles} tracked, non-secret file(s) across the PKG repository.`);
-      ui.dim('    Prose generation runs as an agent task; the checkpoint lets it resume.');
     } else ui.ok('no generation targets in scope need regeneration.');
     if (deferred.length > 0) {
       ui.warn(`${deferred.length} generation target(s) outside --scope were left for a later build.`);
@@ -307,6 +344,9 @@ async function build(ctx, config) {
         secretsPaths: config.secrets_paths,
       },
       human,
+      // Everything is being (re)generated: the repository map is worth
+      // redoing before the batches start.
+      fullRebuild: scope === null && pending.length === scoped.length,
     });
   } else {
     // Still validate the agent flags even with nothing to do. Otherwise a typo
@@ -320,15 +360,15 @@ async function build(ctx, config) {
     }
   }
 
-  // Re-read rather than trusting the list we queued: the agent owns clearing
-  // its own completed paths, and a partial run must leave the remainder
-  // visible so --refresh can resume.
+  // Re-read rather than trusting the list we queued: the checkpoint was
+  // advanced from the agent's completion reports after every batch, and a
+  // partial run must leave the remainder visible so the next build resumes.
   let after = null;
   let afterReadError = null;
   try { after = inventory.readManifest(repoRoot); }
   catch (e) { afterReadError = e; }
   const observedPending = after?.checkpoint?.pendingPaths;
-  const actualSourceSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
+  const actualSourceSha = stateMod.resolveBase(repoRoot, config.sync.tracking_branch).baseSha;
   agentResult = agentMod.assessWikiProgress(agentResult, pending, observedPending, {
     expectedTargetSha: targetSha,
     actualTargetSha: afterReadError ? targetSha : after?.knowledgeSha,
@@ -357,15 +397,14 @@ async function build(ctx, config) {
   const afterPending = after?.checkpoint?.pendingPaths;
   const remaining = Array.isArray(afterPending) ? afterPending.length : pending.length;
   agentMod.renderWikiProgress(agentResult, { human });
-  if (human && agentResult.reason?.startsWith('not requested')) {
-    ui.warn('Claude was not started because agent execution is opt-in.');
-    ui.dim('    Run "aidev knowledge build --refresh --agent" to generate the LLM Wiki prose.');
-    ui.dim('    The manifest and checkpoint are already saved, so the queued work is not lost.');
+  if (human && pending.length > 0 && agentResult.reason?.startsWith('not requested')) {
+    ui.info(`--no-agent: ${remaining} generation target(s) stay queued without prose.`);
+    ui.dim('    Run "aidev knowledge build" to write them; the manifest and checkpoint are saved.');
   }
 
   const commandOk = structuredOk && !(agentResult.ran && !agentResult.ok);
   if (!human) {
-    ui.json({
+    emitJson({
       ok: commandOk,
       structuredOk,
       targetSha,
@@ -381,15 +420,15 @@ async function build(ctx, config) {
   }
   // A failed or incomplete agent is reported but does not discard the
   // structured write; the non-zero exit tells CI that prose is still owed.
-  return commandOk ? EXIT.OK : EXIT.GENERAL;
+  return { code: commandOk ? EXIT.OK : EXIT.GENERAL, json };
 }
 
 async function run(ctx) {
   const sub = ctx.positionals[0];
   const config = cfgMod.loadConfig(ctx.repoRoot);
   if (sub === 'status') return status(ctx, config);
-  if (sub === 'build') return build(ctx, config);
+  if (sub === 'build') return (await build(ctx, config)).code;
   throw new AidevError(`unknown subcommand: aidev knowledge ${sub || ''} (expected: build, status)`);
 }
 
-module.exports = { run, FLAGS, summary: 'LLM Wikiの生成と状態確認' };
+module.exports = { run, build, FLAGS, FLAG_HELP, summary: 'LLM Wikiの生成と状態確認' };

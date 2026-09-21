@@ -1,66 +1,87 @@
 # ai-dev-kit maintainer documentation
 
-このディレクトリは、**ai-dev-kit本体を設計・実装・レビュー・リリースする人**のための資料です。
+このディレクトリは、**ai-dev-kit本体（CLI・template・同梱Agents/Skills）を設計・実装・レビュー・リリースする人**のための資料です。
 
-利用者がPKG知識を置く`docs/knowledge`や、ai-dev-kitがラッパーリポジトリに生成する`knowledge/`とは用途が異なります。ここにはPKGの業務知識を置かず、逆にai-dev-kitの内部実装を生成Wikiへ混在させないでください。
+利用者向けの導入・日常運用は`docs/user-guide/`（AsciiDoc、`npm run docs:build`で日本語版と英語版のHTML）を正本とします。ここには対象PKGの業務知識を置かず、逆にai-dev-kitの内部実装を利用者向けガイドや生成Wikiへ混在させないでください。
+
+対象は **0.2.0（PKG clone方式、内部呼称 S1）** です。`aidev`は利用者のPKG git cloneの中で動き、kitが追加するファイルはすべてそのPKG repositoryへcommitされます。
 
 ## 資料一覧
 
 | ファイル | 内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | wrapper構成、静的asset、3SHA、lease、Wiki inventory、sync、hooks、policy、workflow、MCP |
-| [configuration-reference.md](configuration-reference.md) | `aidev.yaml`の全設定、既定値、制約、モデル解決 |
-| [cli-reference.md](cli-reference.md) | 公開CLI、内部subcommand、終了コード、dry-run、冪等性、eject |
-| [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未接続の区別、既知の制約、将来状態機械、保守上の未決事項 |
-
-利用者向けの導入・日常運用はルートの[README.md](../README.md)を正本とします。
+| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configの実体化とdrift、3SHA（source-tree比較）、lease、Wiki inventory / manifest v3とbatch agent実行、worktreeベースのsync、hooks、policy評価順序、workflow、MCP、update |
+| [cli-reference.md](cli-reference.md) | 全command・subcommand・option・終了code。`aidev <cmd> --help`と一致させる |
+| [configuration-reference.md](configuration-reference.md) | `aidev.yaml` schema v2（`validateConfig` / `DEFAULTS`）、`.aidev/policy.yaml`、`DEFAULT_POLICY_SCOPES`、model解決、環境変数、CLIが書く各JSONの形 |
+| [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未実装の台帳、既知の不整合、将来設計、保守時の完了条件 |
+| [design-decisions.md](design-decisions.md) | 採用した設計判断と却下した代替案、未決の論点 |
+| `proposals/` | 実装前の計画文書。実装後は上記へ反映し、計画文書は履歴として残す |
 
 ## 文書化の原則
 
-1. **現在の実装と将来設計を分ける。** 実装されていない経路を、利用可能な機能としてREADMEへ書かない。
-2. **公開契約はコードとテストを正本にする。** command一覧は`cli/bin/aidev.js`、設定は`cli/lib/config.js`、exit codeは`cli/lib/errors.js`を参照する。
-3. **生成物の読者を混ぜない。** `knowledge/`は対象PKGをAIへ説明する派生情報であり、本kitの保守資料ではない。
-4. **認証情報を例へ埋め込まない。** 例では環境変数名だけを示す。
-5. **安全機構を過大評価しない。** hooksは補助防御であり、最小権限認証、CI、branch policy、人間レビューが最終防御となる。
+1. **現在の実装と将来設計を分ける。** codeから到達できない経路を、利用可能な機能として利用者ガイドへ書かない。将来設計は`implementation-status.md`と`design-decisions.md`にだけ置く。
+2. **公開契約はcodeとtestを正本にする。** command一覧とhelpは`cli/bin/aidev.js`と各moduleの`FLAGS` / `FLAG_HELP`、設定は`cli/lib/config.js`、exit codeは`cli/lib/errors.js`を参照する。文書とcodeが食い違ったらcodeを直すか文書を直すかを決め、放置しない。
+3. **生成物の読者を混ぜない。** `.aidev/knowledge/`は対象PKGをAIへ説明する派生情報であり、本kitの保守資料ではない。
+4. **認証情報を例へ埋め込まない。** 例では環境変数名（`hosting.auth_env`）だけを示す。`validateConfig`はtokenらしき値を拒否する。
+5. **安全機構を過大評価しない。** hooksは補助防御であり、最小権限のtoken、`aidev check`を必須にしたCI、branch policy、人間レビューが最終防御となる。
+6. **wrapper時代の語彙を持ち込まない。** wrapper repository、`src/` submodule、`.aidev-lock`、`aidev kit apply`、`aidev plan`、`submoduleSha` / `remoteSha`は0.2.0に存在しない。codeのcommentに残っている箇所は`implementation-status.md`の「既知の不整合」に列挙している。
 
 ## ソース上の主な正本
 
 | 関心 | 正本 |
 | --- | --- |
-| CLI routing / help | `cli/bin/aidev.js` |
-| `aidev.yaml` / policy schema | `cli/lib/config.js` |
+| CLI routing / help / update通知 | `cli/bin/aidev.js` |
+| PKG内の配置とkit管理path | `cli/lib/layout.js` |
+| `AIDEV_HOME`（registry、update check cache） | `cli/lib/home.js` |
+| `aidev.yaml` / policy schema、既定値 | `cli/lib/config.js` |
 | 初期化 | `cli/commands/init.js` |
-| CLI self-update | `cli/bin/aidev.js`、`cli/commands/update.js` |
-| wrapperのkit assetとlock | `cli/lib/assets.js`、`cli/commands/kit.js` |
-| 3SHA | `cli/lib/state.js` |
-| Wiki manifest / inventory / evidence scope | `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/commands/knowledge.js` |
-| syncとwrapper PR | `cli/commands/sync.js`、`cli/lib/ado.js`、`cli/lib/leases.js` |
-| policy評価 | `cli/lib/policy.js`、`cli/commands/permission.js` |
+| tool configの実体化・drift | `cli/lib/assets.js`、`templates/claude-assets/`、`templates/root/` |
+| self-updateとtemplate再適用 | `cli/commands/update.js` |
+| 3SHA | `cli/lib/state.js`、`cli/lib/git.js` |
+| Wiki manifest / inventory / 完了報告 | `cli/lib/inventory.js` |
+| evidence scope | `cli/lib/knowledge-scope.js` |
+| agent起動（batch、prompt、launcher） | `cli/lib/agent.js` |
+| `knowledge build` / `status` | `cli/commands/knowledge.js` |
+| sync（worktree、branch、PR） | `cli/commands/sync.js`、`cli/lib/ado.js` |
+| lease | `cli/lib/leases.js` |
+| policy評価 | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
 | hooks | `cli/commands/hook.js`、`templates/claude-assets/settings.json` |
+| task状態機械 | `cli/commands/task.js` |
 | workflow | `cli/commands/workflow.js` |
+| eject | `cli/commands/eject.js` |
+| MCP launcher | `cli/commands/mcp.js`、`templates/root/.mcp.json` |
 | 同梱Agents / Skills | `templates/claude-assets/agents/`、`templates/claude-assets/skills/` |
+| installer | `scripts/install.ps1`、`scripts/install.sh` |
 | pipeline例 | `pipelines/` |
+| 利用者ガイド | `docs/user-guide/`、`scripts/build-docs.js` |
 
 ## 保守者向け検証
 
 ```bash
-npm run lint   # 全moduleのload確認
-npm test       # test/run.js
-npm run check  # 上記2つ
+npm run lint        # 全moduleのload確認（test/loadall.js）
+npm test            # test/run.js（各suiteはnode test/<file>.jsで単独実行可）
+npm run check       # 上記2つ
+npm run docs:check  # 利用者ガイドのbuildと必須ID検証
 ```
 
-`package.json`は`private: true`で、Node.js 20以上を要求します。公開npm packageとしての配布ではなく、専用にcloneしたai-dev-kit checkoutへinstallerがlauncherを作る方式です。開発者がwrapper checkoutからinstallすることは拒否し、旧wrapper pipelineの移行互換として`TF_BUILD=True`の一時環境だけを例外にします。
+testは実際の`claude`を起動しません。agent経路は`AIDEV_CLAUDE_BIN`でstubを指します。CLIを起動するtestは`AIDEV_HOME`を一時directoryへ、`AIDEV_NO_UPDATE_CHECK=1`を必ず設定します（設定しないとregistryが本物のhomeへ書かれ、update checkがnetworkへ出ます）。
 
-## 更新時の注意
+help出力を文書へ写すときは次で実際に確認します。
 
-`aidev update`は、launcherが指すCLI専用ai-dev-kit checkoutを固定の`origin/main`へfast-forwardします。wrapperのremoteやworktreeは更新しません。wrapperを導入元にした旧launcherは拒否されるため、専用checkoutからinstallerを再実行してください。
+```bash
+AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js --help
+AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js <command> --help
+```
 
-wrapperへ中央kitの管理対象を取り込む操作は`aidev kit apply`へ分離されています。対象は次に限定されています。
+`package.json`は`private: true`で、Node.js 20以上を要求します。npm packageとして配布せず、専用にcloneしたai-dev-kit checkout（`installRoot`）へinstallerがlauncherを作ります。installerは`aidev.yaml`や`.aidev/`を持つdirectory（kitを使うPKG）からのinstallを拒否し、checkoutが`main` branchで`origin`を持つことを要求します。
 
-- `templates/claude-assets/`
-- `CLAUDE.md`
-- `.mcp.json`
-- `cli/`
-- `scripts/`
+## kit更新の流れ
 
-`package.json`、`pipelines/`、`.gitignore`、この`maintainer-docs/`はwrapperへの自動適用対象ではありません。対象を広げる場合は、`cli/commands/kit.js`の`KIT_PATHS`、ドリフト検出、移行手順をまとめて設計してください。
+`aidev update`は、launcherが指すkit checkoutを固定の`origin/main`へfast-forwardし、続けて現在のPKG（`--all`ならregistryの全PKG）へ`templates/`を再適用して`.aidev/materialized.json`を書き直します。結果はPKG cloneの通常のdiffなので、利用者がreviewしてcommitします。kit側で配布物を変えるときは次を同時に更新してください。
+
+- `templates/claude-assets/**`（→ PKGの`.claude/**`）と`templates/root/**`（→ PKG root。現在は`CLAUDE.md`と`.mcp.json`）
+- `assets.STATIC_ROOTS` / `STATIC_EXCLUDE`（drift検出の対象）
+- `layout.KIT_MANAGED_GLOBS`と`config.ALWAYS_PROTECTED`（kit管理pathを増やした場合）
+- `templates/claude-assets/settings.json`のdeny list（protected pathを増やした場合）
+- `test/assets.test.js`など配布物を検証するtest
+

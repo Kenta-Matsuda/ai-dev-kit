@@ -188,7 +188,7 @@ const MARKER = '<!-- aidev:state -->';
 async function postStateComment(config, workItemId, record) {
   const safe = {
     taskId: record.taskId, state: record.state, pkgBranch: record.pkgBranch,
-    pkgPullRequestId: record.pkgPullRequestId, wrapperPullRequestId: record.wrapperPullRequestId,
+    pkgPullRequestId: record.pkgPullRequestId, wikiPullRequestId: record.wikiPullRequestId,
     mergedSha: record.mergedSha, operationKey: record.operationKey,
     syncStreamId: record.syncStreamId, updatedAt: record.updatedAt,
   };

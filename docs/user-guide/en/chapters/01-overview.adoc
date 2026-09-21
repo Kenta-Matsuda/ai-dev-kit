@@ -1,0 +1,61 @@
+[[overview]]
+== What {project-name} is
+
+{project-name} is a kit that puts **the same Claude Code setup** and **a repository-specific LLM Wiki** into each of your team's repositories (packages, or PKGs), and maintains them with the `aidev` command.
+
+After adopting it, you have three things:
+
+* **The same setup** — `.claude/` (agents, skills, hooks), `CLAUDE.md` and `.mcp.json` are shared by the whole team. `aidev update` refreshes them, and `aidev check` finds hand edits.
+* **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. Claude reads them before it reads the source. When the code moves on, `aidev sync` catches the Wiki up and opens a PR.
+* **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only.
+
+=== Who does what
+
+[cols="1,3",options="header"]
+|===
+|Role |What to do
+
+|Everyone (once)
+|Install `aidev` on your machine. → xref:install[Install aidev on your machine]
+
+|Package owner (one person per package, once)
+|Create the setup with `aidev init`, generate the Wiki with `aidev knowledge build`, and share it with the team through a PR. → xref:setup-owner[Package owner steps]
+
+|Member
+|`git pull` → `aidev init` → `claude`. No questions asked. → xref:setup-member[Member steps]
+|===
+
+=== What it does not do
+
+* It never merges a PR. A human always merges.
+* Claude Code is the AI tool verified against the real binary. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI can be started through adapters that follow each tool's non-interactive mode, but the kit maintainers have not checked them against the real tools. Runtime enforcement of the write policy through hooks exists for Claude Code only.
+* The only supported hostings are Azure DevOps and `generic` (git only; PRs by hand).
+* It is not a sandbox. The hook and the policy stop slips. The real protection is the token's permissions and the branch policy.
+
+=== Terms
+
+[cols="1,3",options="header"]
+|===
+|Term |Meaning
+
+|PKG
+|A clone of the repository that adopts {project-name}. `aidev` runs inside it.
+
+|kit
+|A clone of {project-name} itself. It is what the `aidev` command runs from. One per machine.
+
+|LLM Wiki
+|The explanation pages for the AI, generated into `.aidev/knowledge/`. They are derived from the code and are not the source of truth.
+
+|tracking branch
+|The branch the Wiki follows. Usually `main`.
+
+|policy
+|`.aidev/policy.yaml`. It decides which paths the AI may write, which it may not, and which are always forbidden.
+|===
+
+=== When something goes wrong
+
+* Look it up by symptom → xref:troubleshooting[Troubleshooting]
+* Command syntax and options → xref:cli-reference[Command Reference]
+* Configuration keys → xref:configuration[aidev.yaml reference]

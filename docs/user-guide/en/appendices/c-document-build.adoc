@@ -1,0 +1,45 @@
+[[document-build]]
+[appendix]
+== Building this guide
+
+This guide is generated from the AsciiDoc sources in `{guide-source-dir}/` into two HTML files: `{guide-output}` (Japanese) and `{guide-output-en}` (English). Only Node.js {node-min-version} or later and the npm development dependencies are needed.
+
+=== Layout
+
+[source,text]
+----
+docs/user-guide/
+├─ index.adoc            root of the Japanese guide
+├─ _attributes.adoc      shared attributes
+├─ chapters/             Japanese chapters (01-overview … 10-troubleshooting)
+│  └─ cli/               command reference (one file per command)
+├─ appendices/           Japanese appendices
+├─ index-en.adoc         root of the English guide
+├─ en/                   English chapters and appendices (same layout)
+└─ assets/user-guide.css stylesheet embedded in both
+----
+
+=== Build and check
+
+Run from the root of the kit repository.
+
+[source,bash]
+----
+npm ci
+npm run docs:build    # build
+npm run docs:check    # build + validate
+----
+
+`node scripts/build-docs.js --check --lang en` builds one language only.
+
+`docs:check` verifies, for both languages, that every included file exists, that IDs are unique, that every `xref:` target exists, that no `TODO` is left, that the required chapter IDs are present, and that the HTML depends on no external stylesheet or script.
+
+=== Writing rules
+
+* Write only what the reader needs at that moment, in short sentences. Avoid jargon.
+* Give every chapter and command page a unique ID (`[[knowledge]]`, `[[cli-init]]`) and link with `xref:`.
+* Keep the options on a command page identical to `aidev <command> --help`.
+* Use placeholders such as `<your-pat>` for secrets.
+* Do not document features that are not implemented.
+* Keep the Japanese and English guides in the same structure with the same IDs.
+

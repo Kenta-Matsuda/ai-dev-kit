@@ -1,10 +1,8 @@
 = ai-dev-kit User Guide sources
 
-このディレクトリは、`ai-dev-kit User Guide`のAsciiDocソースです。利用者向けの導入、設定、運用、CLI、セキュリティ、CI/CD、障害対応と、保守者向け情報を単一HTMLへまとめます。
+このディレクトリはユーザーガイドの AsciiDoc ソースです。日本語版（`index.adoc`）と英語版（`index-en.adoc` と `en/`）を、同じ構成・同じ ID で保ちます。kit の設計や実装状況は `maintainer-docs/` にあり、このガイドには含めません。
 
 == Quick start
-
-repository rootで実行します。
 
 [source,bash]
 ----
@@ -16,29 +14,32 @@ npm run docs:check
 
 [source,text]
 ----
-build/docs/ai-dev-kit-user-guide.html
+build/docs/ai-dev-kit-user-guide.html      # 日本語
+build/docs/ai-dev-kit-user-guide.en.html   # 英語
 ----
 
-PowerShellで開く場合:
+== Layout
 
-[source,powershell]
+[source,text]
 ----
-Invoke-Item .\build\docs\ai-dev-kit-user-guide.html
+docs/user-guide/
+├─ index.adoc                  日本語版のルート（include 順）
+├─ _attributes.adoc            共通 attribute
+├─ chapters/01-… 10-…          ユーザーガイド
+├─ chapters/cli/               コマンドリファレンス（index.adoc + 1 コマンド 1 ファイル）
+├─ appendices/                 付録
+├─ index-en.adoc               英語版のルート（include 順）
+├─ en/                         英語版の章と付録（_attributes.adoc, chapters/, appendices/）
+└─ assets/user-guide.css       共通 stylesheet
 ----
 
-== Source layout
+`scripts/build-docs.js` が両言語を build し検証します。必須の章 ID は同スクリプトの `REQUIRED_IDS` にあります。
 
-* `index.adoc`: document attributeとchapter include順
-* `_attributes.adoc`: 共通attributeと日本語caption
-* `chapters/`: User Guide本文
-* `appendices/`: 環境変数、実装状況、build手順
-* `assets/user-guide.css`: HTMLへ埋め込むstyle
-* `scripts/build-docs.js`: buildと構造validation
+== Writing rules
 
-== Editing
+* 読者がその場で必要なことだけを、短い文で書く。説明の長さより「次に何をするか」が分かることを優先する。
+* 章とコマンドページに一意の ID を付け、内部リンクは `xref:ID[label]` で書く。両言語で同じ ID を使う。
+* コマンドページのオプションは `AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js <command> --help` と一致させる。既定値は `cli/commands/*.js` と `cli/lib/config.js` が正本。
+* 実装されていない機能は書かない。
+* 一方の言語を変えたら、もう一方も同じ内容に更新する。
 
-各chapterには一意の明示IDを付け、内部linkは`xref:<id>[label]`を使用します。command、path、identifierはmonospace、複数行exampleはsource blockで記述します。
-
-実装済み・部分実装・設計のみを混同せず、CLI optionは`cli/commands/*.js`の`FLAGS`、設定defaultは`cli/lib/config.js`、終了codeは`cli/lib/errors.js`を正本にしてください。
-
-詳細はlink:appendices/c-document-build.adoc[文書ビルド付録]を参照してください。生成HTMLは直接編集せず、AsciiDoc sourceを更新して再buildします。

@@ -1,0 +1,110 @@
+[[permissions]]
+== Permissions and safety
+
+{project-name} defines **where the AI may write** inside the PKG in `.aidev/policy.yaml` (the policy), and a Claude Code hook checks every write against it. Source code is read-only by default. Tokens are never written to files; they are passed only through environment variables.
+
+[[permissions-policy]]
+=== The four policy categories
+
+[cols="1,2,3",options="header"]
+|===
+|Category |Default |Meaning
+
+|`protected`
+|Kit files such as `.claude/**`, `CLAUDE.md`, `.mcp.json`, `.aidev/policy.yaml`, plus `secrets_paths`
+|Never writable. If removed from the policy, the CLI adds them back.
+
+|`read_only`
+|`**` (the whole PKG)
+|Writable only while the `issue-to-pr` agent holds a work lease, and only on the paths that lease allows.
+
+|`writable_during_sync`
+|`.aidev/knowledge/**`
+|Writable only during a sync, when the Wiki is missing or broken.
+
+|`writable`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
+|Writable at any time.
+|===
+
+Rules are checked top to bottom. Paths outside the repository and `protected` paths are always denied, everything is denied while there is no Wiki, then `writable` and `read_only` (allowed with a lease) are checked in that order.
+
+[[permissions-hooks]]
+=== What the hooks do
+
+The distributed `.claude/settings.json` registers four hooks.
+
+[cols="1,1,3",options="header"]
+|===
+|Event |Command |Action
+
+|SessionStart
+|`aidev hook session-start`
+|Puts the Wiki state and any work in progress into the session context.
+
+|PreToolUse (Write / Edit / Bash, …)
+|`aidev hook guard-write`
+|Checks the target path against the policy and returns the reason when it denies. Also denies when the policy cannot be read.
+
+|PostToolUse (Write / Edit)
+|`aidev hook quality-gate`
+|After the AI edits a PKG file, runs the `quality_gates` commands and returns failure output to Claude.
+
+|Stop
+|`aidev hook session-stop`
+|Records the end-of-session state in `.aidev/cache/`.
+|===
+
+When a write is denied, Claude receives a reason like these.
+
+[source,text]
+----
+ai-dev-kit: "src/api/auth.ts" is read-only (**): no work lease. …
+ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
+----
+
+An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge.
+
+[[permissions-lease]]
+=== The AI edits source only under a work lease
+
+After you approve a run, the `issue-to-pr` agent receives a work lease from the CLI (branch, allowed paths, expiry) and edits only within it. `aidev task abandon <id>` releases the lease, and an expired lease is invalid.
+
+[[permissions-commands]]
+=== Placing, changing and viewing the policy
+
+The AI cannot create the policy. A human places it with the CLI.
+
+[cols="2,3",options="header"]
+|===
+|Command |Action
+
+|`aidev permission configure --approve`
+|Places the candidate `.aidev/policy.candidate.yaml` as `.aidev/policy.yaml`. Use it after answering `N` in `aidev init`.
+
+|`aidev permission reconfigure` → `reconfigure --approve`
+|Rebuilds and places the candidate, for example after changing `secrets_paths`. A change that weakens protection also needs `--force`.
+
+|`aidev permission show`
+|Shows the policy in force.
+|===
+
+[[permissions-secrets]]
+=== Secrets
+
+* Files under `secrets_paths` are never read or written by the AI and are hidden from the Wiki.
+* The PAT is passed only through the environment variable named by `hosting.auth_env` (default `AZURE_DEVOPS_PAT`). Writing it into `aidev.yaml` stops every command from starting.
+* `aidev doctor` and `aidev init` report only whether the token is set. They never read the value.
+
+=== What not to do
+
+* Do not hand-edit `.claude/**`, `CLAUDE.md`, `.mcp.json` or `.aidev/policy.yaml` (change them through a PR to the kit).
+* When the AI reports a denied write, read the reason instead of looking for a workaround.
+* Do not put tokens in commits, logs or PR descriptions.
+
+=== Related
+
+* xref:cli-permission[aidev permission]
+* xref:cli-hook[aidev hook]
+* xref:configuration[aidev.yaml reference] — `secrets_paths`, `hosting.auth_env`

@@ -1,0 +1,71 @@
+[[cli-eject]]
+== aidev eject
+
+Removes the package from the kit's management.
+
+=== Synopsis
+
+[source,text]
+----
+aidev eject --dry-run
+aidev eject --yes [--keep-assets] [--force] [--json]
+----
+
+=== Description
+
+In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes `.claude/**`, `CLAUDE.md` and `.mcp.json`, ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
+
+Kept: your package files, `.aidev/knowledge/` (the Wiki), `aidev.yaml`, `.aidev/workflows/`.
+
+After ejecting, `aidev check` returns 0. Remove `aidev check` from CI. `aidev init` re-adopts the package.
+
+There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With a sync or work lease in progress it refuses unless `--force` is given.
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--yes`
+|Run; you have confirmed
+
+|`--dry-run`
+|Show what would be removed and which hooks unwired; write nothing
+
+|`--json`
+|Machine-readable output
+
+|`--force`
+|Run even if already ejected or a lease is in progress
+
+|`--keep-assets`
+|Keep `.claude/`, `CLAUDE.md` and `.mcp.json`
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|Ejected. Already ejected. `--dry-run`
+
+|1
+|`--yes` missing. No trace of kit management. A lease is in progress
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev eject --dry-run
+aidev eject --yes
+git add -A && git commit -m "chore: eject from ai-dev-kit"
+----
+
+=== See also
+
+* xref:cli-init[aidev init] — re-adopting
+* xref:files-and-state[Files in the package]

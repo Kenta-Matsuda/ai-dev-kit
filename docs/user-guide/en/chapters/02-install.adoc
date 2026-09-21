@@ -1,0 +1,75 @@
+[[install]]
+== Install aidev on your machine
+
+Put the `aidev` command on your own machine. Once per machine.
+
+=== What you need
+
+* Node.js {node-min-version} or later
+* Git
+* Claude Code {claude-min-version} or later (used to generate the Wiki and for interactive sessions)
+* The URL of the central {project-name} repository (`<kit-url>` below)
+
+=== Steps
+
+. Clone the kit. This clone is what `aidev` runs from, so do not delete or move it. Leave it on the `main` branch.
++
+[source,bash]
+----
+git clone <kit-url> ~/ai-dev-kit
+----
++
+On Windows, a short path such as `C:\tools\ai-dev-kit` is recommended.
+
+. Run the installer.
++
+.Windows (PowerShell)
+[source,powershell]
+----
+cd C:\tools\ai-dev-kit
+.\scripts\install.ps1
+----
++
+.macOS / Linux / WSL
+[source,bash]
+----
+cd ~/ai-dev-kit
+./scripts/install.sh
+----
++
+The installer copies nothing. It places a launcher that points at the clone (Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`, POSIX: `~/.local/bin`). It succeeded if the last line is `next: aidev doctor`.
++
+* `node not found` / `too old` → install Node.js {node-min-version} or later and run it again.
+* `this checkout looks like a wrapper` → you ran it inside a package. Run it in the kit clone.
+* `~/.local/bin is not on your PATH` → add the `export PATH=...` line shown to your shell profile.
+
+. **Open a new terminal** and check that it works.
++
+[source,bash]
+----
+aidev --version
+aidev doctor
+----
++
+Every line of `aidev doctor` should be `✓` or `⚠`. You are outside a package, so the `⚠` for `aidev.yaml not found` is normal. If there is a `✗`, see xref:troubleshooting-install[Troubleshooting: installation].
++
+If the `claude` line says `⚠ not found on PATH`, the Wiki cannot be generated. Install Claude Code before going on.
+
+. If you use a package hosted on Azure DevOps, put the PAT in an environment variable. Never in a file.
++
+[source,powershell]
+----
+$env:AZURE_DEVOPS_PAT = "<your-pat>"
+----
++
+[source,bash]
+----
+export AZURE_DEVOPS_PAT="<your-pat>"
+----
++
+To make it permanent, set it as a user environment variable or in your shell profile (xref:environment-reference[Environment variables]).
+
+=== Next steps
+
+* Adopting the kit in a package for the first time → xref:setup-owner[Package owner steps]
+* Using a package that already has the kit → xref:setup-member[Member steps]

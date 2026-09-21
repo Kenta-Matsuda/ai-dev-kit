@@ -4,12 +4,12 @@
  *
  * The two-stage PR flow as a resumable state machine:
  *
- *   IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WRAPPER_PR_OPEN → DONE
+ *   IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPEN → DONE
  *                       │              │              └── SYNC_FAILED ──(--resume)──┘
- *                       └── PKG_PR_ABANDONED          WRAPPER_PR_ABANDONED / BLOCKED
+ *                       └── PKG_PR_ABANDONED          WIKI_PR_ABANDONED / BLOCKED
  *
  * Exactly two transitions are human merge gates (PKG_PR_OPEN → PKG_PR_MERGED,
- * WRAPPER_PR_OPEN → DONE); the CLI observes them via the API and never performs
+ * WIKI_PR_OPEN → DONE); the CLI observes them via the API and never performs
  * them.
  *
  * State authority is Azure DevOps. `.aidev/tasks/` is a gitignored local cache
@@ -28,17 +28,17 @@ const ado = require('../lib/ado');
 const ui = require('../lib/ui');
 
 const FLAGS = {
-  json: 'boolean', all: 'boolean', 'dry-run': 'boolean', force: 'boolean',
-  state: 'string', reason: 'string', 'no-remote': 'boolean',
+  json: 'boolean', all: 'boolean', 'dry-run': 'boolean',
+  state: 'string', reason: 'string',
 };
 
 const STATES = Object.freeze([
   'IMPLEMENTING', 'PKG_PR_OPEN', 'PKG_PR_MERGED', 'SYNCHRONIZING',
-  'SYNC_FAILED', 'WRAPPER_PR_OPEN', 'DONE',
-  'PKG_PR_ABANDONED', 'WRAPPER_PR_ABANDONED', 'BLOCKED',
+  'SYNC_FAILED', 'WIKI_PR_OPEN', 'DONE',
+  'PKG_PR_ABANDONED', 'WIKI_PR_ABANDONED', 'BLOCKED',
 ]);
 
-const TERMINAL = Object.freeze(['DONE', 'PKG_PR_ABANDONED', 'WRAPPER_PR_ABANDONED']);
+const TERMINAL = Object.freeze(['DONE', 'PKG_PR_ABANDONED', 'WIKI_PR_ABANDONED']);
 
 /**
  * Legal transitions. SYNC_FAILED routes back to SYNCHRONIZING, never forward to
@@ -49,13 +49,13 @@ const TRANSITIONS = Object.freeze({
   IMPLEMENTING: ['PKG_PR_OPEN', 'PKG_PR_ABANDONED', 'BLOCKED'],
   PKG_PR_OPEN: ['PKG_PR_MERGED', 'PKG_PR_ABANDONED', 'BLOCKED'],
   PKG_PR_MERGED: ['SYNCHRONIZING', 'BLOCKED'],
-  SYNCHRONIZING: ['WRAPPER_PR_OPEN', 'SYNC_FAILED', 'BLOCKED'],
+  SYNCHRONIZING: ['WIKI_PR_OPEN', 'SYNC_FAILED', 'BLOCKED'],
   SYNC_FAILED: ['SYNCHRONIZING', 'BLOCKED'],
-  WRAPPER_PR_OPEN: ['DONE', 'WRAPPER_PR_ABANDONED', 'BLOCKED'],
+  WIKI_PR_OPEN: ['DONE', 'WIKI_PR_ABANDONED', 'BLOCKED'],
   DONE: [],
   PKG_PR_ABANDONED: [],
-  WRAPPER_PR_ABANDONED: [],
-  BLOCKED: ['IMPLEMENTING', 'SYNCHRONIZING', 'PKG_PR_ABANDONED', 'WRAPPER_PR_ABANDONED'],
+  WIKI_PR_ABANDONED: [],
+  BLOCKED: ['IMPLEMENTING', 'SYNCHRONIZING', 'PKG_PR_ABANDONED', 'WIKI_PR_ABANDONED'],
 });
 
 function cacheDir(repoRoot, config) {
@@ -122,7 +122,7 @@ function list(ctx, config) {
   ui.table(tasks.map((t) => [
     t.taskId,
     `${t.state.padEnd(20)} ${t.pkgPullRequestId ? `pkg!${t.pkgPullRequestId} ` : ''}` +
-    `${t.wrapperPullRequestId ? `wrapper!${t.wrapperPullRequestId} ` : ''}` +
+    `${t.wikiPullRequestId ? `wiki!${t.wikiPullRequestId} ` : ''}` +
     `${t.updatedAt || ''}`,
   ]));
   return EXIT.OK;
@@ -142,7 +142,7 @@ function show(ctx, config) {
     ['pkg branch', rec.pkgBranch || '-'],
     ['pkg PR', rec.pkgPullRequestId || '-'],
     ['merged SHA', stateMod.short(rec.mergedSha)],
-    ['wrapper PR', rec.wrapperPullRequestId || '-'],
+    ['Wiki PR', rec.wikiPullRequestId || '-'],
     ['operationKey', rec.operationKey || '-'],
     ['syncStreamId', rec.syncStreamId || '-'],
     ['updated', rec.updatedAt || '-'],
@@ -271,10 +271,9 @@ async function advanceOne(ctx, config, taskId, { bulk = false } = {}) {
           'refusing to guess the resulting SHA.');
       }
       // Verify the SHA is genuinely on the tracking branch before trusting it.
-      const subDir = path.join(repoRoot, 'src');
       const branch = config.sync.tracking_branch;
-      gitMod.fetch(subDir, 'origin', branch);
-      if (!gitMod.commitExists(subDir, merged)) {
+      gitMod.fetch(repoRoot, 'origin', branch);
+      if (!gitMod.commitExists(repoRoot, merged)) {
         throw new AidevError(
           `merge commit ${stateMod.short(merged)} is not present after fetching origin/${branch}. ` +
           'Re-run once the push has propagated.');
@@ -296,20 +295,20 @@ async function advanceOne(ctx, config, taskId, { bulk = false } = {}) {
     if (st.severity === stateMod.SEVERITY.ERROR) {
       next = from === 'SYNCHRONIZING' ? 'SYNC_FAILED' : null;
       detail = `sync has not completed: ${st.message}`;
-    } else if (rec.wrapperPullRequestId) {
-      next = 'WRAPPER_PR_OPEN';
-      detail = `wrapper PR !${rec.wrapperPullRequestId} is open`;
+    } else if (rec.wikiPullRequestId) {
+      next = 'WIKI_PR_OPEN';
+      detail = `Wiki PR !${rec.wikiPullRequestId} is open`;
     } else {
-      detail = 'sync is consistent, but no wrapper PR is recorded yet';
+      detail = 'sync is consistent, but no Wiki PR is recorded yet';
     }
-  } else if (from === 'WRAPPER_PR_OPEN') {
-    if (!rec.wrapperPullRequestId) throw new AidevError(`task ${rec.taskId} is WRAPPER_PR_OPEN but records no PR id`);
-    const repo = config.azure_devops.wrapper_repository;
-    if (!repo) throw new AidevError('azure_devops.wrapper_repository is not configured');
-    const pr = await ado.getPullRequest(config, repo, rec.wrapperPullRequestId);
-    if (pr.status === 'completed') { next = 'DONE'; detail = 'wrapper PR merged'; }
-    else if (pr.status === 'abandoned') { next = 'WRAPPER_PR_ABANDONED'; detail = 'wrapper PR abandoned'; }
-    else detail = `wrapper PR !${rec.wrapperPullRequestId} is still ${pr.status}; waiting on a human merge`;
+  } else if (from === 'WIKI_PR_OPEN') {
+    if (!rec.wikiPullRequestId) throw new AidevError(`task ${rec.taskId} is WIKI_PR_OPEN but records no PR id`);
+    const repo = config.hosting.repository;
+    if (!repo || config.hosting.type !== 'azure-devops') throw new AidevError('the Wiki PR state can only be checked on azure-devops hosting');
+    const pr = await ado.getPullRequest(config, repo, rec.wikiPullRequestId);
+    if (pr.status === 'completed') { next = 'DONE'; detail = 'Wiki PR merged'; }
+    else if (pr.status === 'abandoned') { next = 'WIKI_PR_ABANDONED'; detail = 'Wiki PR abandoned'; }
+    else detail = `Wiki PR !${rec.wikiPullRequestId} is still ${pr.status}; waiting on a human merge`;
   } else {
     detail = `state ${from} advances through agent work, not through observation`;
   }
@@ -391,13 +390,13 @@ async function resume(ctx, config) {
   const guidance = {
     IMPLEMENTING: 'continue the implementation on the work branch, then open the PKG PR',
     PKG_PR_OPEN: 'waiting for a human to merge the PKG PR; re-run this afterwards',
-    PKG_PR_MERGED: 'run "aidev sync" to bump src/ and regenerate the Wiki',
+    PKG_PR_MERGED: 'run "aidev sync" to regenerate the Wiki and open the Wiki PR',
     SYNCHRONIZING: 'run "aidev sync --resume" to finish the in-flight sync',
     SYNC_FAILED: 'run "aidev sync --resume" (or "aidev sync --abort" to unwind)',
-    WRAPPER_PR_OPEN: 'waiting for a human to merge the wrapper PR',
+    WIKI_PR_OPEN: 'waiting for a human to merge the Wiki PR',
     DONE: 'nothing to resume',
     PKG_PR_ABANDONED: 'nothing to resume; the PKG PR was abandoned',
-    WRAPPER_PR_ABANDONED: 'nothing to resume; the wrapper PR was abandoned',
+    WIKI_PR_ABANDONED: 'nothing to resume; the Wiki PR was abandoned',
     BLOCKED: `blocked: ${rec.note || 'no reason recorded'}`,
   }[rec.state] || 'no resume path is defined for this state';
 
@@ -436,7 +435,7 @@ function abandon(ctx, config) {
     ui.ok(`task ${rec.taskId} is already terminal (${rec.state}).`);
     return EXIT.OK;
   }
-  const next = ['WRAPPER_PR_OPEN'].includes(rec.state) ? 'WRAPPER_PR_ABANDONED' : 'PKG_PR_ABANDONED';
+  const next = ['WIKI_PR_OPEN'].includes(rec.state) ? 'WIKI_PR_ABANDONED' : 'PKG_PR_ABANDONED';
   assertTransition(rec.state, next);
 
   if (flags['dry-run']) { ui.ok(`would abandon ${rec.taskId}: ${rec.state} → ${next}`); return EXIT.OK; }

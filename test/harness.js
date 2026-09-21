@@ -1,6 +1,19 @@
 'use strict';
 /** Tiny zero-dependency test harness (node --test is avoided for Node 18 parity). */
 
+const os = require('os');
+const path = require('path');
+
+// The suite must never start the real Claude Code binary. The agent runs by
+// default now, so every `aidev` the tests spawn inherits a binary path that
+// does not exist; tests that exercise the agent pass their own stub through
+// AIDEV_CLAUDE_BIN, which the spawn helpers spread after process.env.
+process.env.AIDEV_CLAUDE_BIN = path.join(os.tmpdir(), 'aidev-tests-no-claude-binary');
+// The same for every other tool adapter: a test that wants one passes a stub.
+process.env.AIDEV_COPILOT_BIN = path.join(os.tmpdir(), 'aidev-tests-no-copilot-binary');
+process.env.AIDEV_CODEX_BIN = path.join(os.tmpdir(), 'aidev-tests-no-codex-binary');
+process.env.AIDEV_KIRO_BIN = path.join(os.tmpdir(), 'aidev-tests-no-kiro-binary');
+
 const results = { pass: 0, fail: 0, failures: [] };
 let currentSuite = '';
 

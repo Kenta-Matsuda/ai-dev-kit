@@ -145,7 +145,7 @@ function sessionStart(ctx) {
   if (sync) {
     const ev = leases.evaluateLease(sync);
     lines.push(ev.valid
-      ? `⏳ a sync is in progress (target ${stateMod.short(sync.targetSha)}); only knowledge/** is writable.`
+      ? `⏳ a sync is in progress (target ${stateMod.short(sync.targetSha)}); only .aidev/knowledge/** is writable.`
       : `⚠️ a stale sync lease is present (${ev.reason}). Run "aidev sync --resume" or "aidev sync --abort".`);
   }
   const work = leases.listWorkLeases(repoRoot).filter((l) => leases.evaluateLease(l).valid);
@@ -160,7 +160,7 @@ function sessionStart(ctx) {
   for (const line of unsyncedTaskLines(repoRoot, config)) lines.push(line);
 
   if (st.severity === stateMod.SEVERITY.ERROR) {
-    lines.push('❌ writes are blocked until the Wiki matches the checked-out code.');
+    lines.push('❌ writes are blocked until the LLM Wiki exists and is readable.');
   }
 
   ui.json({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } });
@@ -194,7 +194,7 @@ function unsyncedTaskLines(repoRoot, config) {
   if (hits.length > 5) out.push(`ℹ️ …and ${hits.length - 5} more (see "aidev task list")`);
 
   // Merge gates are reported separately: nothing to run, a human must merge.
-  const waiting = records.filter((r) => r && (r.state === 'PKG_PR_OPEN' || r.state === 'WRAPPER_PR_OPEN'));
+  const waiting = records.filter((r) => r && (r.state === 'PKG_PR_OPEN' || r.state === 'WIKI_PR_OPEN'));
   if (waiting.length > 0) {
     out.push(`⏳ ${waiting.length} task(s) waiting on a human merge — "aidev task advance" re-checks the API.`);
   }
@@ -220,8 +220,21 @@ function qualityGate(ctx, input) {
   if (names.length === 0) { ui.json({ ok: true, ran: [] }); return EXIT.OK; }
 
   const edited = targetsFrom(input);
-  const subDir = path.join(repoRoot, 'src');
-  const cwd = fs.existsSync(subDir) ? subDir : repoRoot;
+  const cwd = repoRoot;
+
+  // The gates verify PKG code. A Wiki page, a workflow or aidev.yaml is not
+  // PKG code, and running the PKG's lint and typecheck after each of dozens of
+  // Wiki writes is what made agent-driven Wiki generation crawl.
+  const pathsMod = require('../lib/paths');
+  const layout = require('../lib/layout');
+  const touchesPkg = edited.some((t) => {
+    const rel = pathsMod.toRepoRelative(repoRoot, t);
+    return rel != null && rel !== '.' && !layout.isKitManaged(rel);
+  });
+  if (!touchesPkg) {
+    ui.json({ ok: true, ran: [], skipped: 'no PKG file was edited (only kit-managed files)', edited: edited.length });
+    return EXIT.OK;
+  }
   const { execSync } = require('child_process');
   const results = [];
   for (const name of names) {
@@ -262,7 +275,7 @@ function sessionStop(ctx) {
   const queueDir = path.join(repoRoot, '.aidev', 'cache');
   const entry = {
     queuedAt: new Date().toISOString(),
-    submoduleSha: st.submoduleSha,
+    baseSha: st.baseSha,
     knowledgeSha: st.knowledgeSha,
     severity: st.severity,
     // The runner fixes the SHA at submission time and discards the result if

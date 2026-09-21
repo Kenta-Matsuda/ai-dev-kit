@@ -1,0 +1,67 @@
+[[cli-hook]]
+== aidev hook
+
+Claude Code の hook から呼ばれる内部コマンドです。人が直接実行するものではありません。
+
+=== 書式
+
+[source,text]
+----
+aidev hook session-start
+aidev hook guard-write [--input <file>]
+aidev hook quality-gate [--input <file>]
+aidev hook session-stop
+----
+
+=== 説明
+
+配布される `.claude/settings.json` から Claude Code が起動します。stdin で hook の入力（JSON）を受け取り、stdout に判定（JSON）を返します。動作を確かめたいときは `--input <file>` で入力ファイルを渡せます。
+
+[cols="1,4",options="header"]
+|===
+|サブコマンド |動作
+
+|`session-start`
+|Wiki の状態と進行中の作業をセッションのコンテキストとして返す
+
+|`guard-write`
+|書き込み先のパスを policy で判定し、`allow` / `deny` と理由を返す。判定できないときは `deny`
+
+|`quality-gate`
+|PKG のファイルを編集した後に `quality_gates` を実行し、失敗の出力を返す
+
+|`session-stop`
+|セッション終了時の状態を `.aidev/cache/` に記録する
+|===
+
+=== 終了コード
+
+判定を返せば 0 です（`deny` でも 0。判定は JSON の中です）。hook 名が不明なら 1 です。
+
+=== 例
+
+`guard-write` の判定を手で確認する:
+
+[source,bash]
+----
+cat > /tmp/hook.json <<'EOF'
+{"tool_name":"Write","tool_input":{"file_path":"src/api/auth.ts"}}
+EOF
+aidev hook guard-write --input /tmp/hook.json
+----
+
+[source,json]
+----
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**): no work lease. …"
+  }
+}
+----
+
+=== 関連
+
+* xref:permissions-hooks[権限と安全性: hook が何をするか]
+* xref:configuration[aidev.yaml リファレンス] — `quality_gates`

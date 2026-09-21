@@ -1,87 +1,59 @@
 [[environment-reference]]
 [appendix]
-== 環境変数リファレンス
+== 環境変数
 
-[cols="2,2,4",options="header"]
+値をファイルに書かず、シェルの profile、ユーザー環境変数、pipeline の secret variable から渡します。
+
+[cols="2,4",options="header"]
 |===
-|変数 |利用箇所 |説明
+|変数 |説明
 
 |`AZURE_DEVOPS_PAT`
-|Azure DevOps REST、sync PR、MCP
-|既定のPAT変数名です。実際の名前は`azure_devops.auth_env`で変更できます。値をfileやCLI引数へ保存しません。
+|Azure DevOps の PAT。`aidev sync`（PR 作成）、`aidev task`、MCP サーバーが使います。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
 
-|`AIDEV_BIN_DIR`
-|POSIX installer
-|launcher配置directoryを上書きします。未設定時は`$HOME/.local/bin`です。
+|`AIDEV_HOME`
+|端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と kit 更新確認のキャッシュを置きます。
 
-|`TF_BUILD`
-|installerの旧pipeline互換
-|`True`のとき、installerの一部checkout判定に互換例外があります。通常のlocal installで設定しません。
+|`AIDEV_NO_UPDATE_CHECK`
+|設定すると新しい kit の確認をしません。CI では `1` にします。
 
-|`ANTHROPIC_MODEL`
-|Claude Code
-|Claude Code自身のmodel解決に使われ得ます。CLIが明示する`--agent-model`やproject/local settingsとの優先関係に注意します。
+|`AIDEV_CLAUDE_BIN`
+|Claude Code の実行ファイルを直接指定します。通常は未設定です。
 
-|`HTTPS_PROXY`
-|remote、npm、Claude Code
-|HTTPS proxy URLです。credentialを含む値をlogへ出さないでください。
-
-|`https_proxy`
-|remote、npm、Claude Code
-|toolによって参照されるlowercase形式です。
+|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN`
+|同じく GitHub Copilot CLI（`copilot`）、OpenAI Codex CLI（`codex`）、Kiro CLI（`kiro-cli`）の実行ファイルを直接指定します。
 
 |`AIDEV_DEBUG`
-|CLI error reporting
-|truthyな値で予期しないerrorのstack traceを表示します。通常運用では未設定にし、共有前に出力をredactします。
+|設定すると内部エラーの stack trace を表示します。
+
+|`AIDEV_BIN_DIR`
+|installer が起動スクリプトを置く場所を上書きします。
+
+|`HTTPS_PROXY` / `https_proxy`
+|HTTPS proxy の URL。remote の確認、`npx`、Claude Code が使います。
+
+|`ANTHROPIC_MODEL`
+|Claude Code 自身のモデル設定。`aidev` が起動する agent は `tools.agent_model` を優先します。
 
 |`NO_COLOR`
-|CLI UI
-|設定時にANSI colorを抑制します。CI logやsnapshotに使用できます。
+|設定すると色付けを止めます。
 
-|`USER`
-|audit metadata
-|POSIX環境のoperator名として参照され得ます。認証identityの正本ではありません。
-
-|`USERNAME`
-|audit metadata
-|Windows環境のoperator名として参照され得ます。認証identityの正本ではありません。
-
-|`AIDEV_BOT_NAME`
-|scheduled sync pipeline
-|automation commitに使うbot表示名です。
-
-|`AIDEV_BOT_EMAIL`
-|scheduled sync pipeline
-|automation commitに使うbot emailです。
-
-|`ADO_MCP_DEFAULT_PROJECT`
-|Azure DevOps MCP child process
-|`aidev mcp azure-devops`がconfigから解決してchildへ渡します。通常は手動設定しません。
-
-|`PERSONAL_ACCESS_TOKEN`
-|Azure DevOps MCP child process
-|launcherが設定済みPATをchildへ渡す内部変数です。通常は直接設定せず、`azure_devops.auth_env`を使用します。
-
-|`PATH`
-|installer、`claude`、`npx`、Git、Node.js
-|必要なexecutable解決に使います。CLI専用launcherのdirectoryを含めます。
-
-|`HOME`
-|POSIX installer
-|既定のCLI checkoutやlauncher pathの基準です。
-
-|`LOCALAPPDATA`
-|Windows installer
-|既定のCLI sourceとlauncher pathの基準です。
+|`AIDEV_KIT_URL` / `AIDEV_KIT_REF`、`AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
+|`pipelines/*.yml` が使う pipeline 変数。中央 kit の URL とブランチ、夜間 sync の bot の名前とメール。
 |===
 
-[[environment-pat-examples]]
-=== PATの設定例
+=== 設定例
 
-.PowerShell
+.PowerShell（このセッションのみ）
 [source,powershell]
 ----
 $env:AZURE_DEVOPS_PAT = "<your-pat>"
+----
+
+.PowerShell（ユーザー環境変数として保存）
+[source,powershell]
+----
+[Environment]::SetEnvironmentVariable('AZURE_DEVOPS_PAT', '<your-pat>', 'User')
 ----
 
 .bash
@@ -90,25 +62,8 @@ $env:AZURE_DEVOPS_PAT = "<your-pat>"
 export AZURE_DEVOPS_PAT="<your-pat>"
 ----
 
-custom名を使う場合:
+=== 安全な扱い
 
-[source,yaml]
-----
-azure_devops:
-  auth_env: MY_TEAM_AZDO_PAT
-----
-
-[source,powershell]
-----
-$env:MY_TEAM_AZDO_PAT = "<your-pat>"
-----
-
-[[environment-security]]
-=== 環境変数の安全な扱い
-
-* secret managerまたはpipeline secret variableからprocessへ注入します。
-* shell historyへ残る永続化commandを安易に使いません。
-* process dump、debug log、child process継承を信頼境界として評価します。
-* PATのscope、有効期限、owner、rotation手順を管理します。
-* proxy URLにcredentialが含まれる場合は、diagnostic出力を共有する前にredactします。
-* `env`、`Get-ChildItem Env:`など全環境を表示するcommandの出力をissueやPRへ貼り付けません。
+* token は secret manager や pipeline の secret variable から注入し、shell history に残るコマンドを避けます。
+* `env` の出力を issue や PR に貼りません。
+* token には必要最小の scope（PR 作成、Work Item 読み取り）と有効期限を設定します。

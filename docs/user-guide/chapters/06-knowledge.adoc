@@ -1,212 +1,117 @@
 [[knowledge]]
 == LLM Wiki
 
-`knowledge/`は、対象PKGをClaude Codeが理解するための派生Wikiです。PKG sourceが正本であり、Wikiは再生成可能な補助情報です。CLIがdeterministicなstructured stateを管理し、knowledge-builder agentが任意でproseを生成します。
+LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向けに説明する Markdown ページ群です。`.aidev/knowledge/` にコミットし、チームで共有します。
 
-[[knowledge-responsibilities]]
-=== CLIとagentの責務
+* 生成するのは `aidev knowledge build` と `aidev sync` です。どちらも knowledge-builder agent（Claude Code）を起動して本文を書きます。
+* Wiki は正本ではありません。各記述は根拠ファイルへのリンクを持ち、Claude はリンク先で確認します。
+* Wiki が無い間、AI の書き込みはすべて止まります。
 
-[cols="1,4",options="header"]
-|===
-|担当 |責務
-
-|CLI
-|generation targetとevidenceのtree走査、secret mask、Git blob hash、差分とfingerprint、inventory shard、manifest、checkpoint、手編集検出を管理します。
-
-|`knowledge-builder`
-|repository evidence全体から実装を理解・検証し、prose page、index、page hashを更新してpending targetを消化します。
-|===
-
-この分離により、Claude Codeを起動できない環境でもstructured stateを更新できます。ただしproseはpendingのままになることがあります。
-
-[[knowledge-commands]]
-=== buildとstatus
+[[knowledge-files]]
+=== 何が生成されるか
 
 [cols="2,3",options="header"]
 |===
-|command |用途
+|パス |内容
 
-|`aidev knowledge build`
-|manifest、inventory、checkpointなどstructured部分だけを生成・更新します。
+|`.aidev/knowledge/index.md`
+|入口。Claude が最初に読みます。
 
-|`aidev knowledge build --agent`
-|structured部分に加え、knowledge-builderを起動してproseを生成します。
+|`.aidev/knowledge/overview.md`
+|リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）。
 
-|`aidev knowledge status`
-|3SHA、target/evidence件数、pending、手編集、inventory不整合を表示します。
+|`.aidev/knowledge/**/*.md`
+|生成対象ごとの説明ページ。
 
-|`aidev knowledge build --refresh --agent`
-|supporting evidence変更や中断済みpendingを再queueし、proseを続行します。
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|Wiki が説明しているコミットと、ファイルごとのハッシュ。**CLI が管理します。触りません。**
 
-|`aidev knowledge build --resume --agent`
-|保存済みcheckpointを使った再開を意図する場合に使用します。
-
-|`aidev knowledge build --scope <glob> --agent`
-|今回のgeneration targetsだけを絞ります。evidence範囲は維持します。
+|`.aidev/knowledge/.cache/`
+|agent との受け渡しファイル。gitignore 済みです。
 |===
 
-`--agent-name`を指定した場合もagent executionが有効になります。`--agent-timeout`や`--agent-model`だけではagentを起動しません。
+[[knowledge-scope-vs-evidence]]
+=== 生成対象と調査範囲
 
-[[knowledge-scope]]
-=== generation targetsとevidence
+* **生成対象** — ページを作るパス。`aidev.yaml` の `package.include` です。
+* **調査範囲** — agent が裏付けに読んでよいファイル。既定は PKG 全体から `secrets_paths` を除いたものです。
 
-たとえば次の設定では、docsと公開APIをページ更新の起点にしながら、PKG全体を検証根拠にできます。
+生成対象を `docs/**` だけにしても、agent はコードやテストを読んで確認します。調査範囲のファイルが変わると、次の build で全ページが再生成の対象になります。
 
-[source,yaml]
+[[knowledge-agent]]
+=== 生成の進み方
+
+`aidev knowledge build` は次の順で進みます。
+
+. 生成対象を走査し、前回から変わったファイルと前回未完了のファイルを queue に入れます（既定は差分だけ。`--full` で全部）。
+. manifest と inventory を書きます。この時点で構造は最新です。
+. `overview.md` が無いか全部を作り直すときは、まず **survey** が `overview.md` と `index.md` を書きます。
+. queue を 20 件ずつの **batch** に分け、batch ごとに Claude Code を 1 回起動します。1 回の時間予算は 30 分です。
+. batch が終わるたびに進捗を保存します。
+
+[source,text]
 ----
-package:
-  include:
-    - "src/docs/**"
-    - "src/src/api/**"
-  exclude:
-    - "**/generated/**"
-
-knowledge:
-  evidence:
-    include:
-      - "src/**"
-    exclude:
-      - "**/node_modules/**"
-      - "**/generated/**"
-
-secrets_paths:
-  - "src/.env*"
-  - "src/**/private/**"
-----
-
-CLIが表示する`generation targets`とqueueは「今回ページを更新する起点」です。agentが読める全ファイル一覧ではありません。`repository evidence`には、target commitのtracked・非secret file数が別に表示されます。
-
-`knowledge.evidence.exclude`を省略すると`package.exclude`を継承します。明示すると置換されるため、必要な除外をすべて列挙してください。
-
-[[knowledge-data-model]]
-=== manifestとinventory
-
-`knowledge/manifest.json` schema v2は、対象SHA、kit commit、inventory shard、統計、evidence fingerprint、checkpointを保持します。
-
-[source,json]
-----
-{
-  "schemaVersion": 2,
-  "knowledgeSha": "9f2c1ab...",
-  "kitCommit": "3d7e40b...",
-  "inventoryShards": ["inventory/00.json"],
-  "stats": {
-    "files": 55,
-    "pages": 42,
-    "maskedFiles": 0,
-    "evidenceFiles": 3184
-  },
-  "evidence": {
-    "include": ["src/**"],
-    "exclude": ["**/generated/**"],
-    "trackedFiles": 3184,
-    "supportingFiles": 3129,
-    "fingerprint": "sha256:7788..."
-  },
-  "checkpoint": {
-    "pendingPaths": [],
-    "staleIndexes": []
-  }
-}
+ℹ running the knowledge-builder agent: 163 generation target(s) in 9 batch(es) of up to 20, after a survey run
+✓ survey complete in 3m 12s ($0.4120)
+ℹ batch 1/9: 20 target(s), src/api/auth.ts … src/api/users.ts
+    batch 1/9: 7/20 target(s) reported done, 1m 30s elapsed…
+✓ batch 1/9 complete: 20/20 in 4m 2s ($0.5533)
+ℹ batch 2/9: 20 target(s), src/core/a.ts … src/core/z.ts (about 32m 16s left)
 ----
 
-inventory recordはsource path、Git blob、対応page、page self hash、mask状態を保持します。
+`$` は Claude Code が報告したコストです。`(about … left)` は残り時間の見積もりです。
 
-[source,json]
-----
-{
-  "path": "src/src/api/auth.ts",
-  "blob": "a1b2c3d4...",
-  "pages": ["knowledge/api/auth.md"],
-  "selfHashes": {
-    "knowledge/api/auth.md": "sha256:7788..."
-  },
-  "masked": false
-}
-----
+=== 止まったとき
 
-`knowledge.inventory_shard_size`ごとに`knowledge/inventory/NN.json`へ分割します。rootには`knowledge/index.md`を置きます。大きいagent planはGit管理外の`knowledge/.cache/agent-task-*.json`へ保存され、generation targetsとevidence pathsを別配列で保持します。
-
-[[knowledge-incremental]]
-=== 増分更新
-
-CLIは旧inventoryのGit blobとtarget treeを比較します。
-
-* 同一path・異なるblobは変更としてqueueします。
-* 旧recordだけなら削除、新recordだけなら追加として扱います。
-* 同一blob・別pathはrename候補として、不要なLLM再生成を抑えます。
-* 旧commit objectがGCされていても、inventory blobを使って差分を計算します。
-* generation target外のsupporting evidence変更は、evidence fingerprintで検出します。
-
-現時点では「各pageがどのsupporting evidenceに依存したか」というpage単位graphがありません。そのためsupporting evidence fingerprintが変わると、stale proseを残さない安全側の挙動として、全generation targetを再queueします。大規模PKGでは実行時間とagent costに注意してください。
-
-[[knowledge-agent-execution]]
-=== prose agentの実行
-
-CLIは自然言語promptをcommand line引数ではなくstdinでClaude Codeへ渡します。Windowsで空白、改行、shell metacharacterによりpromptや後続optionが分割されることを防ぎます。
-
-実行中は15秒ごとに経過時間とcheckpoint件数を表示します。process exit 0だけでは完了とみなしません。agent終了後にmanifestを再読し、今回queueしたpathが`pendingPaths`から減ったかを確認します。
-
-[cols="1,3",options="header"]
-|===
-|結果 |判定
-
-|全件がpendingから除去
-|完了です。
-
-|一部だけ除去
-|partial failureとしてcheckpointを残し、exit 1になります。
-
-|1件も減らない
-|no-progress failureとして診断を表示し、exit 1になります。
-
-|timeoutまたはClaude起動失敗
-|structured stateとcheckpointを残し、再開可能な形でexit 1になります。
-|===
-
-agent timeoutは`knowledge.agent_timeout_ms`、一時変更は`--agent-timeout`です。modelは`--agent-model`が最優先です。
-
-[[knowledge-hand-edit]]
-=== 生成Wikiの手編集
-
-`selfHashes`により生成pageの手編集を検出します。原則として`knowledge/**`を直接編集せず、PKG source、設定、knowledge-builder指示を修正して再生成します。
-
-[WARNING]
-====
-現行の`knowledge build`は手編集を検出すると`--force`なしで停止しますが、`sync`には警告後もstructured rewriteへ進む経路があります。この挙動が統一されるまで、sync前に`git diff -- knowledge`を確認してください。
-====
-
-`--force`は手編集を上書きし得ます。意図した内容がsource of truthへ移されていることを確認した復旧時だけ使用します。
-
-[[knowledge-status]]
-=== statusの読み方
+再開は常に **同じコマンド** です。終わった分は保存されています。
 
 [cols="2,3",options="header"]
 |===
-|表示 |意味と対応
+|表示 |すること
 
-|3SHAが一致
-|現在のstructured Wikiは`src`と同じcommitを対象にしています。
+|`✗ … ran out of time`
+|同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けるか、`aidev.yaml` の `knowledge.agent_timeout_ms` を増やします。
 
-|remote ahead
-|手元は整合しているがPKG tracking branchに新commitがあります。`sync --dry-run`で確認します。
+|`⚠ … partial Wiki progress: 120/163 completed, 43 remain.`
+|同じコマンドで再開します。
 
-|`submoduleSha != knowledgeSha`
-|重大な不整合です。通常書き込みを止め、syncをresume/abortします。
+|`✗ … made no Wiki progress: 0/20`
+|1 件も終わりませんでした。続けて表示される `Claude result:` を読んで原因を直し、再開します。
 
-|`pending targets > 0`
-|proseが未完了です。`knowledge build --refresh --agent`を実行します。
+|`⚠ the knowledge-builder agent did not run`
+|Claude Code が見つかりません。`aidev doctor` の `claude` 行を直します。
 
-|hand edits
-|生成pageがinventoryのhashと異なります。差分を確認し、生成元へ移して再生成します。
-
-|inventory inconsistency
-|manifest、shard、pageの対応が壊れています。差分を保存してbuildまたはsyncの復旧を行います。
+|Ctrl-C
+|同じコマンドで再開します。
 |===
 
-[[knowledge-ci]]
-=== CIでの扱い
+`aidev status` が `⚠️ N page(s) still await prose regeneration` の間は本文が未完成です。
 
-structured整合性だけでよい場合は`aidev check`を必須checkにします。prose完全性も必須にする場合は、Claude Codeの実行環境、認証、cost、secret handlingを準備したうえで`sync --agent`または`knowledge build --agent`を実行し、`aidev check --strict`を使用します。
+[[knowledge-handedit]]
+=== 手編集しない理由
 
-同梱のscheduled sync pipelineは既定で`--agent`を付けないため、proseがpendingのままでもstructured stateが進む構成です。
+ページごとにハッシュが記録され、手編集は `aidev status` / `aidev check` が検出します。
+
+[source,text]
+----
+⚠ 2 Wiki page(s) edited by hand since generation:
+    .aidev/knowledge/src/api/auth.md (modified)
+----
+
+手編集があると `aidev knowledge build` と `aidev sync` は止まり、上書きするかどうかを人間に委ねます（`--force` で上書き）。手編集は次の生成で失われます。内容が間違っているなら、ソース側（コメントや構造）を直してください。
+
+[[knowledge-scope-flag]]
+=== 一部だけ作り直す
+
+[source,bash]
+----
+aidev knowledge build --scope src/api
+----
+
+`src/api` 配下のページだけを queue に入れます。範囲外の変更は次回に持ち越されます。
+
+=== 関連
+
+* xref:cli-knowledge[aidev knowledge] — オプション
+* xref:cli-sync[aidev sync]
+* xref:configuration[aidev.yaml リファレンス] — `package.include`、`knowledge.*`

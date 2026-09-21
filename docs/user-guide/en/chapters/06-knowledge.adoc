@@ -1,0 +1,117 @@
+[[knowledge]]
+== The LLM Wiki
+
+The LLM Wiki is a set of Markdown pages that explain the structure of the PKG's code and the role of each file, written for the AI. It lives in `.aidev/knowledge/`, is committed, and is shared by the team.
+
+* `aidev knowledge build` and `aidev sync` generate it. Both start the knowledge-builder agent (Claude Code) to write the prose.
+* The Wiki is not the source of truth. Every statement links to the file it came from, and Claude checks that file.
+* While there is no Wiki, every write by the AI is blocked.
+
+[[knowledge-files]]
+=== What is generated
+
+[cols="2,3",options="header"]
+|===
+|Path |Contents
+
+|`.aidev/knowledge/index.md`
+|The entry point. Claude reads it first.
+
+|`.aidev/knowledge/overview.md`
+|A map of the repository: purpose, layout, how to build and test, main modules.
+
+|`.aidev/knowledge/**/*.md`
+|One page per generation target.
+
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|The commit the Wiki describes and a hash per file. **Managed by the CLI. Do not touch.**
+
+|`.aidev/knowledge/.cache/`
+|Files exchanged with the agent. Already gitignored.
+|===
+
+[[knowledge-scope-vs-evidence]]
+=== Generation targets and research scope
+
+* **Generation targets** — the paths that get pages. This is `package.include` in `aidev.yaml`.
+* **Research scope** — the files the agent may read to back up what it writes. By default this is the whole PKG minus `secrets_paths`.
+
+Even if the targets are only `docs/**`, the agent still reads the code and tests to verify. When a file in the research scope changes, the next build regenerates every page.
+
+[[knowledge-agent]]
+=== How generation proceeds
+
+`aidev knowledge build` runs in this order.
+
+. Scan the generation targets and queue the files that changed since last time plus the ones left unfinished (incremental by default; `--full` queues everything).
+. Write the manifest and inventory. The structure is now current.
+. If there is no `overview.md`, or everything is being rebuilt, a **survey** run writes `overview.md` and `index.md` first.
+. Split the queue into **batches** of 20 and start Claude Code once per batch. Each run has a 30-minute budget.
+. Save progress after every batch.
+
+[source,text]
+----
+ℹ running the knowledge-builder agent: 163 generation target(s) in 9 batch(es) of up to 20, after a survey run
+✓ survey complete in 3m 12s ($0.4120)
+ℹ batch 1/9: 20 target(s), src/api/auth.ts … src/api/users.ts
+    batch 1/9: 7/20 target(s) reported done, 1m 30s elapsed…
+✓ batch 1/9 complete: 20/20 in 4m 2s ($0.5533)
+ℹ batch 2/9: 20 target(s), src/core/a.ts … src/core/z.ts (about 32m 16s left)
+----
+
+`$` is the cost Claude Code reported. `(about … left)` is the estimated time remaining.
+
+=== When it stops
+
+To resume, always run the **same command**. Finished work is saved.
+
+[cols="2,3",options="header"]
+|===
+|Message |What to do
+
+|`✗ … ran out of time`
+|Run the same command again. If it keeps happening, add `--agent-batch-size 10` or raise `knowledge.agent_timeout_ms` in `aidev.yaml`.
+
+|`⚠ … partial Wiki progress: 120/163 completed, 43 remain.`
+|Run the same command again.
+
+|`✗ … made no Wiki progress: 0/20`
+|Nothing finished. Read the `Claude result:` lines that follow, fix the cause, then run again.
+
+|`⚠ the knowledge-builder agent did not run`
+|Claude Code was not found. Fix the `claude` line in `aidev doctor`.
+
+|Ctrl-C
+|Run the same command again.
+|===
+
+While `aidev status` says `⚠️ N page(s) still await prose regeneration`, the prose is not finished.
+
+[[knowledge-handedit]]
+=== Why not to edit pages by hand
+
+A hash is recorded per page, and `aidev status` / `aidev check` detect hand edits.
+
+[source,text]
+----
+⚠ 2 Wiki page(s) edited by hand since generation:
+    .aidev/knowledge/src/api/auth.md (modified)
+----
+
+With hand edits present, `aidev knowledge build` and `aidev sync` stop and leave the decision to overwrite to a human (`--force` overwrites). Hand edits are lost on the next generation. If the content is wrong, fix the source (comments or structure) instead.
+
+[[knowledge-scope-flag]]
+=== Rebuilding only part of the Wiki
+
+[source,bash]
+----
+aidev knowledge build --scope src/api
+----
+
+Only pages under `src/api` are queued. Changes outside that path are carried over to the next run.
+
+=== Related
+
+* xref:cli-knowledge[aidev knowledge] — options
+* xref:cli-sync[aidev sync]
+* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`

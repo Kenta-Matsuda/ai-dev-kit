@@ -1,0 +1,55 @@
+= ai-dev-kit User Guide
+:doctype: book
+:lang: en
+:encoding: utf-8
+:reproducible:
+:toc: left
+:toc-title: Contents
+:toclevels: 2
+:sectnums:
+:sectnumlevels: 3
+:sectanchors:
+:sectlinks:
+:xrefstyle: short
+:experimental:
+:table-stripes: even
+:table-frame: ends
+:table-grid: rows
+:imagesdir: assets
+:stylesdir: assets
+:stylesheet: user-guide.css
+:description: Guide to adopting ai-dev-kit in a package and using the shared Claude Code setup and the LLM Wiki
+
+include::en/_attributes.adoc[]
+
+= User Guide
+
+include::en/chapters/01-overview.adoc[]
+
+include::en/chapters/02-install.adoc[]
+
+include::en/chapters/03-setup-owner.adoc[]
+
+include::en/chapters/04-setup-member.adoc[]
+
+include::en/chapters/05-daily.adoc[]
+
+include::en/chapters/06-knowledge.adoc[]
+
+include::en/chapters/07-configuration.adoc[]
+
+include::en/chapters/08-permissions.adoc[]
+
+include::en/chapters/09-automation.adoc[]
+
+include::en/chapters/10-troubleshooting.adoc[]
+
+include::en/chapters/cli/index.adoc[]
+
+= Appendices
+
+include::en/appendices/a-environment.adoc[]
+
+include::en/appendices/b-files.adoc[]
+
+include::en/appendices/c-document-build.adoc[]

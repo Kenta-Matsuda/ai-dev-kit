@@ -1,0 +1,120 @@
+[[daily]]
+== 日常の使い方
+
+毎日することは 3 つです。作業前に `aidev status` を見る。Wiki が古いと言われたら `aidev sync`。kit が新しいと言われたら `aidev update`。
+
+[[daily-status]]
+=== aidev status の読み方
+
+[source,bash]
+----
+aidev status
+----
+
+2 行目の記号と文で、次にすることが決まります。
+
+[cols="3,2",options="header"]
+|===
+|表示 |すること
+
+|`✅ the Wiki describes the code this work is based on.`
+|何もしなくて構いません。
+
+|`⚠️ … has changed since the Wiki was generated … run "aidev sync"`
+|コードが進んで Wiki が古くなっています。xref:daily-sync[aidev sync] を実行するか、夜間 pipeline の PR を待ちます。作業は続けられます。
+
+|`⚠️ N page(s) still await prose regeneration — run "aidev knowledge build".`
+|本文が未生成のページがあります。`aidev knowledge build` を実行します。
+
+|`⚠️ origin/main has moved ahead … Run "aidev sync"`
+|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで `git pull` し、必要なら sync します。
+
+|`⚠️ origin/main has new commits … that are not fetched yet`
+|`git fetch` してから `aidev status` をもう一度実行します。
+
+|`ℹ️ remote unverified …`
+|remote に届きませんでした（offline や proxy）。手元は整合しているので作業は続けられます。
+
+|`❌ LLM Wiki has not been generated yet …`
+|Wiki がありません。**この間、AI の書き込みはすべて止まります。** `git pull` で来るはずなら pull します。来ないなら導入担当者に確認するか、`aidev knowledge build` を実行します。
+|===
+
+その他の表示は xref:troubleshooting-status[トラブルシューティング] を見てください。
+
+続く行では、`tool config` が `matches the kit` か、`policy` が `placed` かを確認します。`DRIFT` なら誰かが `.claude/` などを手編集したか kit が古い印です（xref:daily-update[kit の更新]）。`policy missing` は `aidev permission configure --approve` で解決します。
+
+=== Wiki の使われ方
+
+Claude は `CLAUDE.md` の指示に従い、ソースを読む前に `.aidev/knowledge/index.md` と `overview.md` を読みます。Wiki の各記述は根拠ファイルへのリンクを持ち、Claude はリンク先で裏を取ります。
+
+あなたが Wiki を手で直す必要はありません。間違いを見つけたら、ソース側（コメントや構造）を直して、次の sync で反映させます。手編集は検出され、次の生成で `--force` を求められます（xref:knowledge-handedit[手編集しない理由]）。
+
+[[daily-sync]]
+=== aidev sync — Wiki をコードに追従させる
+
+`aidev status` が `run "aidev sync"` と言ったとき、または PKG の PR がマージされた直後に実行します。多くのチームは夜間 pipeline に任せ、手動で実行するのは急ぐときだけです。
+
+[source,bash]
+----
+aidev sync
+----
+
+sync は次のことをします。**あなたの checkout は触りません。**
+
+. `origin/main` を fetch し、先端を target にします。
+. 一時 worktree（`.aidev/cache/sync-worktree/`）に target を checkout します。
+. 変更のあったページだけ knowledge-builder が書き直します。
+. `ai/wiki-<sha>` ブランチにコミットして push し、PR を開きます。
+
+[source,text]
+----
+✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
+✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
+    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
+✓ sync lease released
+----
+
+PR をレビューしてマージします。マージ後、各メンバーは `git pull` で Wiki を受け取ります。
+
+* `✓ the Wiki committed on origin/main already describes …; "git pull" to receive it.` → 既に最新の Wiki がマージ済みです。`git pull` します。
+* hosting が `generic`、または token が未設定 → push まで行い、PR は手で作るよう案内されます。
+* `✗ sync failed: …` → 原因を直して `aidev sync --resume`。やり直すなら `aidev sync --abort`。
+
+[[daily-update]]
+=== aidev update — kit を更新する
+
+新しい kit があると、PKG でコマンドを実行したときに次のように表示されます。
+
+[source,text]
+----
+⚠ a newer ai-dev-kit is available (9491efe → e0aa66c). Run "aidev update".
+  Update now, before running this command? (y/N):
+----
+
+`y` で kit だけを先に更新します。PKG 内の配布ファイル（`.claude/` など）も更新するには、PKG のルートで実行します。
+
+[source,bash]
+----
+aidev update
+----
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.2.0 → 0.2.1 (9491efe → e0aa66c)
+✓ demo-pkg: updated 3 file(s)
+    ~ .claude/agents/knowledge-builder.md
+    ~ .claude/skills/knowledge-usage/SKILL.md
+    ~ CLAUDE.md
+    Review with "git diff", then commit so your team receives the update.
+----
+
+差分を確認し、コミットして PR にします。マージ後、他のメンバーは `git pull` だけで同じ状態になります。
+
+* `✗ … file(s) were edited locally and were not replaced` → 手編集されたファイルがあります。変更を kit への PR に送るか、`aidev update --force` で配布版に置き換えます。
+* 端末に登録された全 PKG をまとめて更新するには `aidev update --all` です。
+
+=== 関連
+
+* xref:knowledge[LLM Wiki] — 生成の仕組みと再開
+* xref:cli-status[aidev status]、xref:cli-sync[aidev sync]、xref:cli-update[aidev update]

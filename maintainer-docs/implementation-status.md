@@ -1,6 +1,6 @@
 # Implementation status, known gaps, and target designs
 
-この文書は「設計として望んでいること」と「現在production codeから到達できること」を区別するための台帳です。利用者向けREADMEでは、ここで**実装済み**または明示した**部分実装**だけを案内します。
+この文書は「設計として望んでいること」と「現在production codeから到達できること」を区別する台帳です。利用者ガイドには、ここで**実装済み**または明示した**部分実装**だけを書きます。対象は0.2.0（PKG clone方式）です。
 
 ## statusの定義
 
@@ -8,69 +8,89 @@
 | --- | --- |
 | 実装済み | 公開CLIまたは同梱設定から到達でき、主要な失敗処理も存在する |
 | 部分実装 | 部品はあるが、入口・復元・安全弁などに不足がある |
-| 設計のみ | 文書・設定・agent指示には存在するが、production codeの完結経路がない |
+| 未実装 | 文書・設定・agent指示には存在するが、production codeの完結経路がない |
 
 ## 機能matrix
 
 | 機能 | status | 現在の到達範囲 | 主な不足 |
 | --- | --- | --- | --- |
-| Windows/POSIX installer | 実装済み | Node/Git確認、CLI専用checkoutを指すlauncher作成 | checkout移動時は再installが必要 |
-| `aidev init` | 実装済み | config、`.claude/`実体化、lock、後続案内 | policy/Wikiは別command。ADO接続試験はしない |
-| static drift / `aidev check` | 実装済み | lock、policy、3SHA、strict warning | external serviceの完全診断ではない |
-| `aidev doctor` | 実装済み | local runtime、repo、PAT有無、proxy、3SHA | Claude/npxの検査、ADO API認証試験はない |
-| `aidev update` | 実装済み | CLI専用checkoutの固定`origin/main`をfetchしfast-forward-onlyでself-update | npm/release archive配布ではない |
-| `aidev kit apply` | 実装済み | wrapperへ限定KIT_PATHSをfetch/checkout、`.claude`再生成 | package/pipeline/gitignore/maintainer docsは対象外 |
-| permission candidate / approval | 実装済み | configから機械生成、human approve、weakening検出 | `permission-setting` agentとの対話生成ではない |
-| structured Wiki | 実装済み | generation target inventory、repository evidence走査/fingerprint、mask、blob diff、manifest、checkpoint | page単位evidence dependency graphはなく、supporting evidence変更時は全target refresh |
-| prose Wiki agent | 実装済み（opt-in） | `--agent`でPKG全体のtracked・非secret evidenceをstdin planで渡してknowledge-builder起動、heartbeat、checkpoint完了検証、timeout/model指定 | `claude`なしではskip。意味品質とcostは外部管理 |
-| 3SHA / sync lease | 実装済み | local/remote判定、TTL lease、resume/abort | hand-edit扱いがknowledge buildとsyncで不統一 |
-| `aidev sync` | 実装済み | fetch、bump、structured Wiki、任意agent、commit/push/PR | ADO/PAT/push失敗時はmanual completionが必要 |
-| wrapper PR dedup | 実装済み | stream marker検索、同branch更新、旧PR注記 | 新targetでは旧PRを自動closeしない |
-| Azure Pipelines例 | 実装済み | check pipeline、scheduled sync pipeline | scheduled syncは`--agent`なし |
-| Claude hooks | 部分実装 | freshness、write guard、quality gate、journal/queue記録 | background queue consumerなし。sandboxではない |
-| workflow scaffold/approval/run | 部分実装 | JS scaffold、hash承認、iteration/time/failure/allowlist | token/USD計測、destructive前human gateなし。creator agent未接続 |
-| task subcommands | 部分実装 | 既存local JSONのlist/show/resume/advance/abandon | 初期作成、ADOからのcache再構築なし |
-| issue-to-pr orchestration | 設計のみ（agent定義あり） | agent promptとstate helperの一部 | Work Item入口、task作成、public work lease、E2E接続なし |
-| cross-machine task resume | 設計のみ | Azure DevOps helperは一部存在 | Work Item/PRから決定論的cache再構築なし |
-| self-evolution observation | 部分実装 | Stop hookがlocal journalを記録 | 集約、branch、中央kit PR作成なし |
-| managed background refresh | 設計のみ | pending refresh fileを記録 | queueを消費するrunnerなし |
-| MCP launcher | 実装済み | config/env解決、固定版packageのstdio起動 | offline/registry unavailableでは起動不可 |
-| eject / re-adopt | 実装済み | dry-run、明示解除、marker、initによる再採用 | 高影響のため人間reviewが必要 |
+| installer（Windows / POSIX） | 実装済み | Node 20+ / Git確認、kit checkoutを指すlauncher作成、PKGからのinstall拒否 | checkoutを移動したら再install |
+| `aidev init` | 実装済み | 質問（初回のみ）、`aidev.yaml` v2、`.aidev/.gitignore`、template実体化、`materialized.json`、registry、policy候補/配置、eject markerの解除 | Wikiは別command。Azure DevOps接続試験はしない |
+| tool config drift / `aidev check` | 実装済み | `materialized.json`比較、policy検証、3SHA、inventory不整合、期限切れlease、`--strict` | `.claude/settings.local.json`は検査しない（設計どおり） |
+| `aidev status` / `aidev doctor` | 実装済み | 一画面表示、環境診断、`claude` version、token有無、remote到達性 | Azure DevOps API認証試験はない |
+| `aidev update` | 実装済み | kit checkoutのfast-forward、template再適用（current / `--all`）、conflict検出、起動時の更新通知 | commitは利用者が行う。`update`が書く`materialized.json`は`kitVersion`が`null` |
+| permission candidate / approval | 実装済み | `aidev.yaml`から機械生成、`--approve`、弱体化検出と`--force` | `permission-setting` agentとの対話生成ではない。`read_only` / `writable`を設定fileから変える項目がない |
+| structured Wiki | 実装済み | generation target inventory、evidence走査とfingerprint、mask、blob diff、manifest v3、checkpoint、orphan削除（syncのみ） | page単位のevidence依存graphがなく、supporting evidence変更時は全target再queue。`knowledge build`はorphan pageを削除しない |
+| prose Wiki agent | 実装済み（既定で起動、`--no-agent`で省略） | survey + batch起動、完了報告からCLIがhash / inventory / checkpointを更新、中断後は同じcommandで再開、Windows process tree kill、version検査、toolは`tools.agent` / `tools.agents.knowledge-builder` / `--agent-tool` | tool実行fileなしではskip。意味品質とcostは外部管理。完了報告protocolはclaude以外で実機未検証 |
+| 3SHA / sync lease | 実装済み | merge-base基準、source-tree比較、TTL lease、`--resume` / `--abort` | — |
+| `aidev sync` | 実装済み | fetch、no-op判定、一時worktree、inventory更新、任意agent、`ai/wiki-<sha12>` commit/push、Azure DevOps PR作成/更新/superseded注記 | `generic` hostingとtoken不在ではPR手動。旧PRの自動closeなし |
+| Azure Pipelines例 | 実装済み | check pipeline、scheduled sync pipeline（`--no-agent`）+ `task advance` | — |
+| Claude hooks | 部分実装 | SessionStart summary、guard-write（fail-closed）、quality-gate（PKG file編集時のみ）、Stop journal/queue記録 | queueを消費するrunnerなし。sandboxではない |
+| workflow scaffold / approval / run | 部分実装 | JS scaffold、content hash承認、iteration / time / same-failure / allowlist、resume、`agent:`定義と`ctx.agent()`（tool / model / timeout、残り時間で打ち切り、報告costの合計で`max_usd`停止） | token計測なし。USDはtoolが報告した分だけ（claude）。destructive前human gateなし。creator agent未接続 |
+| `aidev task` subcommands | 部分実装 | 既存cache JSONのlist / show / resume / advance / abandon、PKG PRの観測、Work Itemへのstate comment | 初期作成・work lease発行・cache再構築の公開経路なし。`WIKI_PR_OPEN`の観測は常に失敗する（下記） |
+| issue-to-pr orchestration | 未実装（agent定義あり） | agent promptとstate helper | Work Item入口、task作成、public work lease、E2E接続なし |
+| self-evolution | 部分実装 | Stop hookがlocal journalを記録し`due`を計算 | 集約、提案作成、中央kitへのPRなし |
+| managed background refresh | 未実装 | `pending-refresh.json`を記録 | queueを消費するrunnerなし |
+| MCP launcher | 実装済み | config / env解決、固定版packageのstdio起動 | offline / registry unavailableでは起動不可。`generic`では使えない |
+| eject / re-adopt | 実装済み | dry-run、`--yes`必須、hook解除→control surface削除の順序、marker、`init`で再採用 | 高影響のため人間reviewが必要 |
+| 他のAI tool adapter | 部分実装 | `tools.js` registry（`claude` / `copilot` / `codex` / `kiro`）、`tools.default`に応じたderived config実体化（copilot: `.github/copilot-instructions.md` + agents + skills、codex: `AGENTS.md`、kiro: `.kiro/steering` + agents）、drift / prune、`ALWAYS_PROTECTED`と`settings.json` denyへの追加、`aidev agent run` / `--agent-tool` / workflow `ctx.agent`での起動、`AIDEV_<TOOL>_BIN` | claude以外は実機未検証（argvは各toolの公開non-interactive仕様準拠。`aidev agent run --dry-run`で確認）。hook / policyの実行時強制はclaudeのみ。Antigravity CLI未対応。codexはagentを名前で選べずprompt fileに定義を前置 |
+| 他のhosting provider | 未実装 | `azure-devops` / `generic` | GitHub / GitLab adapterは存在しない |
+| `aidev task start`、`aidev plan`、`aidev kit apply`、`aidev profile` / `config` / `pkg` / `evolve` | 未実装 / 削除済み | — | routing表にない。文書に書かない |
 
-## READMEで避ける表現
+## 利用者向け文書で避ける表現
 
-- 「すべて実装予定」: CLI moduleは既に存在する
-- 「init 1 commandでpolicyとWikiまで完成」: どちらも別command
-- 「initは`.claude`を生成しない」: templateから実体化する
-- 「Python 3.11+が必要」: 現行workflowはNode.js
-- 「knowledge buildが既定でproseを生成」: `--agent`が必要
-- 「doctorがAzure DevOps認証を検証」: PAT環境変数の存在確認まで
+- 「`init` 1 commandでWikiまで完成」: Wikiは`knowledge build`が別途必要
+- 「`init`が`.claude`を生成しない」: templateから実体化する
+- 「`knowledge build --no-agent`がproseを生成」: 構造だけ書き、proseはqueueに残る
+- 「`doctor`がAzure DevOps認証を検証」: 環境変数の有無まで
+- 「`sync`が手元のcheckoutを更新する」: 一時worktreeで作業し、結果はPRとして届く
 - 「issue-to-prはどの端末からでも再開可能」: cache再構築経路がない
-- 「Stop hookが非同期runnerでWikiを更新」: queue consumerがない
+- 「Stop hookが非同期でWikiを更新」: queue consumerがない
 - 「自己進化が自動でPRを作る」: local journal記録まで
-- 「workflowのtoken/USD budgetが強制される」: 実消費計測がない
-- 「open sync PRを常に同じPRのまま新SHAへ更新」: source branchが変わるため新PRを作り旧PRを注記する場合がある
+- 「workflowのtoken予算が強制される」: token計測がない。USDはtoolが報告した分（claude）だけで止まる
+- 「`aidev task start`でWork Itemを取り込む」: 存在しない
+- 「Copilot / Codex / Kiroを実機で検証済み」「Claude Code以外でpolicyが実行時に強制される」: adapterは公開仕様準拠で未検証、hookはclaudeのみ
+- 「GitHub / GitLabに対応」: 存在しない
+
+## 既知の不整合（code側に残るwrapper時代の痕跡）
+
+文書は0.2.0の挙動で書いてあります。以下はcodeを読むときに混乱するので、kitへのPRで順次直してください。
+
+| 場所 | 内容 | 影響 |
+| --- | --- | --- |
+| `cli/commands/task.js` | state名`WIKI_PR_OPEN` / `WIKI_PR_ABANDONED`、record field `wikiPullRequestId`、`advanceOne`が`config.azure_devops.wrapper_repository`を読む | `wrapper_repository`はconfig v2に存在せず常に`undefined`のため、`WIKI_PR_OPEN`の`advance`は必ず「azure_devops.wrapper_repository is not configured」で失敗する。sync PR（`ai/wiki-*`）を観測する経路がない。`resume`の案内文「bump src/」「Wiki PR」も旧語彙。`hook.js`の`unsyncedTaskLines`と`ado.postStateComment`も同じstate名を使う |
+| `cli/commands/hook.js` `sessionStop` | `submoduleSha: st.submoduleSha`を記録しようとする | `computeState`に`submoduleSha`は無く常に`undefined`（JSONからは消える）。動作には影響しないが意図が失われている。commentの「README specifies async submission to the managed runner」「inside the submodule」「out of step with src/」も旧語彙 |
+| `cli/lib/errors.js` | header commentが`.aidev-lock`と`submoduleSha != knowledgeSha`を説明 | commentのみ。実際は`materialized.json`とWiki構造破損 |
+| `cli/lib/leases.js` | header commentが`submoduleSha`、`src/**`、「half-bumped submodule」を説明 | commentのみ |
+| `cli/lib/policy.js` | header commentの評価順序に`writable`段が無い | commentのみ。codeは`writable`を`read_only`より先に評価する |
+| `cli/commands/knowledge.js` | commentに「rename committed straight into the submodule」 | commentのみ |
+| `cli/commands/eject.js` | header commentが`src/`とsubmodule、`knowledge/`（`.aidev/`なし）を説明。`unwireHooks`のcommentが「現在はexec form」と述べる | commentのみ。shipped `settings.json`は文字列形式で、regexは両形式を扱う |
+| `cli/commands/workflow.js` | `steps.js` templateの`ctx.repoRoot`説明が「ラッパーリポジトリのルート」 | 生成されるfileの文言。PKG rootが正しい |
+| `package.json` | `description`がwrapper + submodule構成を説明、`files`に存在しない`.claude/` `CLAUDE.md` `.mcp.json`を列挙し`templates/`が無い | `private: true`なので配布には影響しない |
+| `manifest.kitCommit` | `knowledge build`はPKGのHEAD、`sync`はkit checkoutのHEADを書く | 意味が揺れている。どちらかに統一する |
+| `cli/commands/task.js` / `workflow.js` | `FLAGS`の`--force` `--no-remote`（task）、`--yes`（workflow）が未使用 | helpに出るが効かない |
+| `templates/claude-assets/settings.json` | deny listに`.aidev/.gitignore`と`.aidev/policy.candidate.yaml`が無い | guard-writeは`.aidev/.gitignore`をprotectedでdenyするので実害は小さい。候補fileはwritableでもない（`read_only: **`でdeny） |
 
 ## issue-to-prのtarget design
 
-以下は将来接続したい状態機械であり、現在のE2E機能ではありません。
+同梱agent `issue-to-pr`と`task`状態機械が前提にする流れです。E2Eの実装はありません。
 
 ```text
 IMPLEMENTING
     │ PKG PR作成
     ▼
-PKG_PR_OPEN ── close ──> PKG_PR_ABANDONED
-    │ human merge + merge result SHA解決
+PKG_PR_OPEN ── abandon ──> PKG_PR_ABANDONED
+    │ human merge + merge result SHA解決（PR APIのlastMergeCommit）
     ▼
 PKG_PR_MERGED
-    │ sync開始
+    │ aidev sync
     ▼
 SYNCHRONIZING ── failure ──> SYNC_FAILED
-    │                           │ resume
+    │                           │ --resume
     │<──────────────────────────┘
-    │ Wiki更新 + check
+    │ Wiki PR（ai/wiki-<sha12>）作成
     ▼
-WRAPPER_PR_OPEN ── close ──> WRAPPER_PR_ABANDONED
+WIKI_PR_OPEN（現行code名: WIKI_PR_OPEN）── abandon ──> WIKI_PR_ABANDONED
     │ human merge
     ▼
 DONE
@@ -80,81 +100,73 @@ any state ──> BLOCKED
 
 完成条件:
 
-1. Work Item IDを入口に、本文を外部データとして取得・schema化する
-2. `triage.labels` / `area_path`でopt-inを検証する
-3. 専用branchと許可pathを確定する
-4. CLIだけが`.aidev/leases/<taskId>.json`を作る公開・監査可能な経路を用意する
-5. PKG PR APIから実merge result SHAを取得する
-6. task cacheがなくてもWork Item、PR、sync PR metadataから状態を再構築する
-7. 同じ状態機械をuser resume、SessionStart、pipelineから呼べるようにする
-8. PKG PRとwrapper PRは人間がmergeし、自動mergeしない
+1. Work Item IDを入口に本文を外部データとして取得し、`hosting.triage`でopt-inを検証する公開command（例: `aidev task start <id>`。**未実装**）
+2. 専用branch `ai/wi-<id>`と許可pathを確定し、人間の承認後にCLIだけが`.aidev/leases/<taskId>.json`を作る経路
+3. `PKG_PR_OPEN`→`PKG_PR_MERGED`でPR APIの`lastMergeCommit`を使う（実装済み）
+4. `SYNCHRONIZING`以降でsync PR（`ai/wiki-<sha12>`、sync stream marker）を観測する。`wrapper_repository`参照を除去し、state名をWiki PRに改める
+5. task cacheが無くてもWork Item comment / PR metadataから状態を再構築する
+6. 同じ状態機械をuser resume、SessionStart、pipelineから呼ぶ（部分的に実装済み）
+7. PKG PRとWiki PRは人間がmergeし、自動mergeしない
 
 cacheに保持するのはID、branch、SHA、状態、履歴など導出・検証可能なmetadataだけとし、Work Item本文、diff、secretを保存しません。
 
 ## self-evolutionのtarget design
 
-現在は`.aidev/cache/evolution-journal.json`への観測記録だけです。将来PR生成まで接続する場合も、次の制約を維持します。
+現在は`.aidev/cache/evolution-journal.json`への観測記録（Wiki不整合で終了、期限切れlease放置）と`cadence`に基づく`due`判定だけです。将来PR生成まで接続する場合も次を維持します。
 
-- 毎sessionではなくcadence単位で重複を集約する
-- 変更先は中央kitであり、wrapperのstatic assetを直接変更しない
+- 毎sessionではなくcadence単位で集約する
+- 変更先はkit repositoryであり、PKG内の`.claude/**`を直接変更しない（driftになる）
 - settings、MCP、policy、認証、security制御は自動変更対象外
 - token削減を理由に確認、テスト、権限制限を削らない
-- 根拠、影響範囲、期待効果、副作用、安全機構の差分をPRへ記載する
 - human review必須、自動merge禁止
 
 ## known gaps
 
-### Wiki hand-edit policyの不統一
-
-`knowledge build`はself hash不一致を検出すると`--force`なしで停止します。`sync`は警告後もstructured rewriteへ進む経路があります。共通policyへ統一するまで、READMEでは手編集禁止と事前diffを案内します。
-
 ### pending proseのseverity
 
-structured inventoryがtarget SHAへ進んだ時点で3SHAは一致し、`pendingPaths`はwarningです。これによりleaseを解放しsyncを完了できますが、prose完全性を必須にしたいCIでは`--agent`と`check --strict`が必要です。strictはremote aheadなど他warningもexit 2へします。
+structured inventoryがtarget SHAへ進んだ時点で`knowledgeSha == baseSha`となり、`pendingPaths`はWARNです。これによりsync leaseを解放してsyncを完了できますが、prose完全性を必須にしたいCIでは`sync`（`--no-agent`なし、Claude Code必須）と`check --strict`が必要です。strictはtracking branch先行などの他のWARNもexit 2にします。
 
-### repository evidenceの再生成粒度
+### evidence再生成の粒度
 
-`knowledge.evidence`はgeneration targetsから独立してPKG全体を調査できますが、現時点のinventoryは「どのpageがどのsupporting evidenceへ依存したか」を記録しません。そのためgeneration target外のcode/test/config/CIが1件でも変わると、stale proseを避ける側へ倒して全generation targetをqueueします。大規模PKGでcostを下げる将来改善はpage単位dependency graphであり、evidence範囲をdocsだけへ戻して回避してはいけません。
+inventoryは「どのpageがどのsupporting evidenceへ依存したか」を記録しません。generation target外のcode / test / config / CIが1件でも変わると全generation targetをqueueします。改善はpage単位のdependency graphであり、evidence範囲を狭めて回避してはいけません。
 
-### kit apply coverage
+### orphan削除の非対称
 
-`aidev kit apply`は`package.json`、`pipelines/`、`.gitignore`、`maintainer-docs/`をwrapperへ取り込みません。wrapper内に残るCLI copyとpackage metadataが専用CLI checkoutとずれる可能性がありますが、launcherは専用checkoutだけを実行します。対象を広げる場合はwrapper固有ファイルを誤上書きしないmigration設計が必要です。
-
-### workflow safety
-
-content hash、iteration、time、same failure、basename allowlistは実装済みです。token/USD、destructive operation approvalは定義だけです。UI上の表示を強制制御と誤解させないでください。
+`sync`はorphan pageを削除しますが`knowledge build`は削除しません。`build --full`後に旧pageが残る可能性があります。
 
 ### hooksの限界
 
-- settingsはmanaged settingsではなく利用者が変更可能
-- Bash path抽出は既知command/redirection中心で完全ではない
-- hookを削除するローカル変更そのものを、そのhookで確実には止められない
-- static driftをCIで検出し、branch policyでmergeを止める必要がある
+- `.claude/settings.json`はmanaged settingsではなく利用者が変更できる。hooksを外す編集はdriftとして`check`が捕まえ、branch policyで止める前提
+- Bash path抽出は既知command / redirection中心で完全ではない。targetを1つも抽出できないBashはallowになる
+- work lease発行経路が無いため、`read_only`のPKG fileを対話sessionから編集する正規の方法は現在ない（`writable`へ手で追加するしかない）
+
+### updateの前提
+
+`aidev update`はkit checkoutが`main` branchで、`origin`が中央kitであることを要求します。kit開発者が自分のfeature branchでlauncherを使っている端末では`update`は拒否されます（意図どおり）。`checkForUpdate`はlocalがremoteより先でも「newer」と報告します。
 
 ## 適用先ごとに決めること
 
 | 項目 | 判断理由 |
 | --- | --- |
-| PKGのmerge方式 | merge result SHAと運用確認に影響 |
-| tracking branchとforce-push policy | syncの非fast-forward頻度に影響 |
-| wrapper PR botの認証主体 | 人間PATをautomationへ流用しないため |
+| PKGのmerge方式 | merge result SHAの取り方に影響 |
+| tracking branchとforce-push policy | sync対象の決まり方に影響 |
+| sync PR botの認証主体 | 人間PATをpipelineへ流用しないため |
 | PAT scopeと有効期限 | server側の最終権限制御 |
-| scheduled sync間隔 | remote aheadの許容時間と実行cost |
-| proseをCIで生成するか | Claude実行環境、token cost、secret handling |
-| large PKGのshard/concurrency | manifest sizeとagent負荷 |
-| branch policy / required reviewer | kit control surfaceの保護 |
-| 1 PKG = 1 wrapperの例外 | monorepoや複数PKGでは設計見直しが必要 |
+| scheduled sync間隔と`--no-agent`の有無 | 遅延許容、Claude実行環境、token cost |
+| large PKGのshard / batch size / timeout | manifest sizeとagent負荷 |
+| branch policy / required reviewer / `aidev check`必須化 | kit control surfaceの保護 |
+| monorepoの扱い | 1 clone = 1 `aidev.yaml`。複数PKGは`package.include`で分けるか、設計見直し |
 
 ## 保守時の完了条件
 
 機能や文書を更新するときは、少なくとも次を確認します。
 
-1. 利用者READMEが現在到達可能な操作だけを案内している
-2. CLI help、README、`FLAGS`が一致している
-3. `aidev.yaml`のdefault、validator、init template、referenceが一致している
+1. 利用者ガイドが現在到達可能な操作だけを案内している
+2. CLI help（`FLAGS` / `FLAG_HELP`）、`cli-reference.md`、利用者ガイドのcommand pageが一致している
+3. `aidev.yaml`のdefault、validator、`init.buildConfigYaml`、`configuration-reference.md`が一致している
 4. stdout JSON契約とexit codeを壊していない
-5. WindowsとPOSIX installer、path、shell差を考慮した
-6. dry-runのnetwork/cache副作用を明記した
+5. WindowsとPOSIXのinstaller、path、shell差を考慮した
+6. dry-runのnetwork / cache副作用を明記した
 7. secretがconfig、log、PR description、fixtureへ入っていない
-8. `npm run check`が成功する
-9. wrapperへ影響する変更は`aidev kit apply`の対象範囲も検討した
+8. template（`templates/`）を変えたら`STATIC_ROOTS` / `KIT_MANAGED_GLOBS` / `ALWAYS_PROTECTED` / deny listの整合を確認した
+9. `npm run check`と`npm run docs:check`が成功する

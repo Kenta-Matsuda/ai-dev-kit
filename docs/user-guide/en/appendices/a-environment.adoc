@@ -1,0 +1,69 @@
+[[environment-reference]]
+[appendix]
+== Environment variables
+
+Never write values into files. Set them in your shell profile, as user environment variables, or as pipeline secret variables.
+
+[cols="2,4",options="header"]
+|===
+|Variable |Description
+
+|`AZURE_DEVOPS_PAT`
+|The Azure DevOps PAT. Used by `aidev sync` (opening pull requests), `aidev task` and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
+
+|`AIDEV_HOME`
+|Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the kit update-check cache.
+
+|`AIDEV_NO_UPDATE_CHECK`
+|When set, the check for a newer kit is skipped. Set it to `1` in CI.
+
+|`AIDEV_CLAUDE_BIN`
+|Points directly at the Claude Code executable. Normally unset.
+
+|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN`
+|Likewise for the GitHub Copilot CLI (`copilot`), OpenAI Codex CLI (`codex`) and Kiro CLI (`kiro-cli`) executables.
+
+|`AIDEV_DEBUG`
+|When set, internal errors show a stack trace.
+
+|`AIDEV_BIN_DIR`
+|Overrides where the installer places the launcher.
+
+|`HTTPS_PROXY` / `https_proxy`
+|HTTPS proxy URL. Used by the remote check, `npx` and Claude Code.
+
+|`ANTHROPIC_MODEL`
+|Claude Code's own model setting. Agents started by `aidev` use `tools.agent_model` instead.
+
+|`NO_COLOR`
+|When set, output is not coloured.
+
+|`AIDEV_KIT_URL` / `AIDEV_KIT_REF`, `AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
+|Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly sync.
+|===
+
+=== Examples
+
+.PowerShell (this session only)
+[source,powershell]
+----
+$env:AZURE_DEVOPS_PAT = "<your-pat>"
+----
+
+.PowerShell (saved as a user environment variable)
+[source,powershell]
+----
+[Environment]::SetEnvironmentVariable('AZURE_DEVOPS_PAT', '<your-pat>', 'User')
+----
+
+.bash
+[source,bash]
+----
+export AZURE_DEVOPS_PAT="<your-pat>"
+----
+
+=== Handling tokens safely
+
+* Inject tokens from a secret manager or pipeline secret variables; avoid commands that leave them in the shell history.
+* Do not paste `env` output into issues or pull requests.
+* Give tokens the smallest scope that works (create pull requests, read Work Items) and an expiry date.

@@ -5,7 +5,7 @@
 :reproducible:
 :toc: left
 :toc-title: 目次
-:toclevels: 3
+:toclevels: 2
 :sectnums:
 :sectnumlevels: 3
 :sectanchors:
@@ -18,38 +18,38 @@
 :imagesdir: assets
 :stylesdir: assets
 :stylesheet: user-guide.css
-:description: ai-dev-kit の導入、設定、運用、CLI、セキュリティ、保守を扱う包括的なユーザーガイド
+:description: ai-dev-kit を PKG に導入し、チーム共通の Claude Code 環境と LLM Wiki を使うためのガイド
 
 include::_attributes.adoc[]
 
+= ユーザーガイド
+
 include::chapters/01-overview.adoc[]
 
-include::chapters/02-concepts.adoc[]
+include::chapters/02-install.adoc[]
 
-include::chapters/03-getting-started.adoc[]
+include::chapters/03-setup-owner.adoc[]
 
-include::chapters/04-configuration.adoc[]
+include::chapters/04-setup-member.adoc[]
 
-include::chapters/05-operations.adoc[]
+include::chapters/05-daily.adoc[]
 
 include::chapters/06-knowledge.adoc[]
 
-include::chapters/07-security.adoc[]
+include::chapters/07-configuration.adoc[]
 
-include::chapters/08-integrations.adoc[]
+include::chapters/08-permissions.adoc[]
 
-include::chapters/09-cli-reference.adoc[]
+include::chapters/09-automation.adoc[]
 
-include::chapters/10-automation.adoc[]
+include::chapters/10-troubleshooting.adoc[]
 
-include::chapters/11-files-and-state.adoc[]
+include::chapters/cli/index.adoc[]
 
-include::chapters/12-troubleshooting.adoc[]
-
-include::chapters/13-maintenance.adoc[]
+= 付録
 
 include::appendices/a-environment.adoc[]
 
-include::appendices/b-implementation-status.adoc[]
+include::appendices/b-files.adoc[]
 
 include::appendices/c-document-build.adoc[]

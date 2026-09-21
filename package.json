@@ -1,7 +1,7 @@
 {
   "name": "ai-dev-kit",
-  "version": "0.1.0",
-  "description": "Claude Code 実行環境を統一する企業内セットアップキット（ラッパーリポジトリ + サブモジュール構成）",
+  "version": "0.3.0",
+  "description": "AI コーディングツール（Claude Code ほか）の実行環境をチームで統一する CLI（PKG の clone に aidev init で導入し、設定・権限・LLM Wiki を共有し、aidev から agent を起動する）",
   "bin": {
     "aidev": "cli/bin/aidev.js"
   },
@@ -18,10 +18,8 @@
   },
   "files": [
     "cli/",
-    ".claude/",
-    "scripts/",
-    "CLAUDE.md",
-    ".mcp.json"
+    "templates/",
+    "scripts/"
   ],
   "private": true,
   "license": "UNLICENSED",

@@ -2,121 +2,42 @@
 [appendix]
 == このガイドのビルド
 
-User GuideはAsciiDoc sourceから単一のself-contained HTMLへ生成します。Node.js {node-min-version}以上とprojectのnpm development dependencyを使用し、Ruby環境は不要です。
+このガイドは `{guide-source-dir}/` の AsciiDoc から、日本語版 `{guide-output}` と英語版 `{guide-output-en}` の HTML を生成します。Node.js {node-min-version} 以上と npm の development dependency だけを使います。
 
-[[document-build-layout]]
-=== source構成
+=== 構成
 
 [source,text]
 ----
 docs/user-guide/
-├─ index.adoc                  document rootとinclude順
-├─ _attributes.adoc            共通attribute
-├─ README.adoc                 contributor向けquick start
-├─ chapters/                   本文
-│  ├─ 01-overview.adoc
-│  ├─ ...
-│  └─ 13-maintenance.adoc
-├─ appendices/                 付録
-│  ├─ a-environment.adoc
-│  ├─ b-implementation-status.adoc
-│  └─ c-document-build.adoc
-└─ assets/
-   └─ user-guide.css           embedded stylesheet
+├─ index.adoc            日本語版のルート
+├─ _attributes.adoc      共通 attribute
+├─ chapters/             日本語版の章（01-overview … 10-troubleshooting）
+│  └─ cli/               コマンドリファレンス（1 コマンド 1 ファイル）
+├─ appendices/           日本語版の付録
+├─ index-en.adoc         英語版のルート
+├─ en/                   英語版の章と付録（同じ構成）
+└─ assets/user-guide.css 両方に埋め込む stylesheet
 ----
 
-生成先は`{guide-output}`です。`build/docs/`は生成物としてGit管理しません。
+=== ビルドと検証
 
-[[document-build-commands]]
-=== 初回準備
-
-repository rootでdependencyをinstallします。
+kit のリポジトリのルートで実行します。
 
 [source,bash]
 ----
 npm ci
+npm run docs:build    # 生成
+npm run docs:check    # 生成 + 検証
 ----
 
-lockfileがない開発中の初回だけ`npm install`を使用します。通常の開発者とCIは`npm ci`で固定versionを再現します。
+`docs:check` は、include 先が存在すること、ID が重複しないこと、`xref:` の参照先があること、`TODO` が残っていないこと、必須の章 ID がそろっていること、HTML が外部 stylesheet / script に依存しないことを両言語で検証します。
 
-[[document-build-html]]
-=== HTMLを生成する
+=== 書き方
 
-[source,bash]
-----
-npm run docs:build
-----
+* 読者がその場で必要なことだけを、短い文で書く。難しい言葉を使わない。
+* 章とコマンドページには一意の ID（`[[knowledge]]`、`[[cli-init]]`）を付け、リンクは `xref:` で書く。
+* コマンドページのオプションは `aidev <command> --help` と一致させる。
+* 秘密情報は `<your-pat>` のような placeholder だけを書く。
+* 実装されていない機能は書かない。
+* 日本語版と英語版は同じ構成・同じ ID を保つ。
 
-成功すると次を表示します。
-
-[source,text]
-----
-build/docs/ai-dev-kit-user-guide.html
-----
-
-CSSはHTMLへ埋め込むため、生成file単体で閲覧・配布できます。左側TOC、section link、表、admonition、code block、印刷用styleを含みます。
-
-PowerShellで開く例:
-
-[source,powershell]
-----
-Invoke-Item .\build\docs\ai-dev-kit-user-guide.html
-----
-
-[[document-build-check]]
-=== 文書を検証する
-
-[source,bash]
-----
-npm run docs:check
-----
-
-check scriptはbuildに加え、少なくとも次を検証します。
-
-* `include::`の参照先がsource root内に存在する。
-* 明示section IDが重複していない。
-* internal `xref:`の参照先が存在する。
-* `TODO`、`TBD`などの未完成placeholderがない。
-* HTMLにtitle、左TOC、主要chapterが生成されている。
-* AsciiDoc directiveが未展開のまま残っていない。
-* HTMLが想定する最低sizeを満たす。
-
-最終的なvisual checkとして、desktop幅、狭いwindow、print previewも確認します。
-
-[[document-build-writing]]
-=== 執筆規約
-
-* 各chapterに一意の明示IDを付けます。例: `[[knowledge]]`。
-* 内部linkは`xref:knowledge[LLM Wiki]`形式を使用します。
-* command、path、identifierはbacktickで囲みます。
-* 複数行commandは`[source,bash]`または`[source,powershell]` blockにします。
-* `NOTE`、`TIP`、`IMPORTANT`、`WARNING`、`CAUTION`をリスクに応じて使い分けます。
-* secretは`<your-pat>`などのplaceholderだけを使用します。
-* implementation statusを曖昧にせず、部分実装と設計のみを明記します。
-* optionと設定defaultはproduction codeを正本にして更新します。
-* include pathを`docs/user-guide/`の外へ広げず、build時に任意fileを取り込まないようにします。
-
-[[document-build-add-chapter]]
-=== chapterを追加する
-
-. `chapters/NN-name.adoc`を作成し、一意のchapter IDを付けます。
-. `index.adoc`の適切な位置へ`include::`を追加します。
-. 他chapterから必要なxrefを追加します。
-. `npm run docs:check`を実行します。
-. 生成HTMLでTOC順、heading level、表、code blockを確認します。
-
-[[document-build-publish]]
-=== HTMLを公開する
-
-`build/docs/ai-dev-kit-user-guide.html`は静的fileとして、Azure Pipelines artifact、社内Web hosting、静的siteへ配置できます。
-
-公開pipelineでは次を推奨します。
-
-. Node.js {node-min-version}を使用する。
-. `npm ci`でlockfileどおりにinstallする。
-. `npm run docs:check`を実行する。
-. 生成HTMLだけをartifactまたはsiteへpublishする。
-. source commit SHAと{project-name} versionをartifact metadataへ記録する。
-. 公開範囲を確認し、社内URL、credential、未公開仕様が含まれていないことをreviewする。
-
-生成HTMLをrepositoryへcommitする運用に変更する場合は、sourceと生成物のdrift検査、review負荷、merge conflictを別途設計してください。既定はartifact-onlyです。

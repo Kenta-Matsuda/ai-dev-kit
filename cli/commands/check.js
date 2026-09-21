@@ -3,104 +3,86 @@
  * `aidev check` — the CI gate.
  *
  * Exit codes are a public contract (branch policies depend on them):
- *   0 everything agrees (a remote-ahead warning is still 0)
- *   2 static files disagree with .aidev-lock
+ *   0 everything agrees (a "tracking branch moved on" warning is still 0)
+ *   2 materialised tool configuration disagrees with .aidev/materialized.json
  *   3 the policy file is missing or invalid
- *   4 submoduleSha != knowledgeSha
+ *   4 the Wiki is missing or structurally broken
  *
  * When several problems coexist the most specific one wins, checked in the
  * order drift → permission → consistency, so a CI log names the thing a human
  * must fix first rather than the last one detected.
  *
- * A repository carrying the `aidev eject` marker is exempt entirely: it has
- * been returned to manual maintenance, and there is nothing left to enforce.
+ * A repository carrying the `aidev eject` marker is exempt entirely.
  */
 
+const fs = require('fs');
 const { EXIT } = require('../lib/errors');
 const cfgMod = require('../lib/config');
-const assets = require('../lib/assets');
 const stateMod = require('../lib/state');
-const inventory = require('../lib/inventory');
+const { inspect } = require('./status');
 const ui = require('../lib/ui');
 
 const FLAGS = { strict: 'boolean', json: 'boolean', 'no-remote': 'boolean' };
+const FLAG_HELP = {
+  strict: 'treat warnings (tracking branch ahead, pending prose) as failures (exit 2)',
+  json: 'machine-readable output',
+  'no-remote': 'do not contact the remote',
+};
 
 function run(ctx) {
   const { repoRoot, flags } = ctx;
   const problems = [];
-  const report = { drift: null, policy: null, state: null, handEdits: [] };
 
-  // An ejected repository is out of scope by definition: it was deliberately
-  // handed back to manual maintenance, so judging it would fail CI forever on
-  // files nobody has agreed to keep in sync. Exit 0 and say why.
   const ejected = cfgMod.readEjectMarker(repoRoot);
   if (ejected) {
     if (flags.json) {
-      ui.json({
-        ok: true, exitCode: EXIT.OK, ejected: true,
-        ejectedAt: ejected.ejectedAt || null, problems: [],
-      });
+      ui.json({ ok: true, exitCode: EXIT.OK, ejected: true, ejectedAt: ejected.ejectedAt || null, problems: [] });
     } else {
       ui.heading('aidev check');
       ui.ok(`this repository was ejected from kit management${ejected.ejectedAt ? ` at ${ejected.ejectedAt}` : ''}.`);
       ui.dim('    Nothing is checked. Remove "aidev check" from the branch policy and pipeline,');
-      ui.dim(`    or delete ${cfgMod.EJECT_MARKER_NAME} and run "aidev init" to re-adopt the kit.`);
+      ui.dim('    or run "aidev init" to re-adopt the kit.');
     }
+    return EXIT.OK;
+  }
+  if (!fs.existsSync(cfgMod.configPath(repoRoot))) {
+    if (flags.json) ui.json({ ok: true, exitCode: EXIT.OK, managed: false, problems: [] });
+    else { ui.heading('aidev check'); ui.info('not an ai-dev-kit package (no aidev.yaml); nothing to check.'); }
     return EXIT.OK;
   }
 
   const config = cfgMod.loadConfig(repoRoot);
+  const r = inspect(repoRoot, config, { checkRemote: !flags['no-remote'] });
 
-  // --- static-file drift (exit 2) ------------------------------------------
-  const drift = assets.detectDrift(repoRoot);
-  report.drift = drift;
-  if (drift.noLock) {
-    problems.push({ code: EXIT.DRIFT, message: '.aidev-lock is missing — run "aidev init" or "aidev kit apply".' });
-  } else if (!drift.ok) {
+  // --- tool configuration drift (exit 2) -------------------------------------
+  if (r.drift.noLock) {
+    problems.push({ code: EXIT.DRIFT, message: `${cfgMod.LOCK_NAME} is missing — run "aidev init".` });
+  } else if (!r.drift.ok) {
     const parts = [];
-    if (drift.modified.length) parts.push(`${drift.modified.length} modified`);
-    if (drift.missing.length) parts.push(`${drift.missing.length} missing`);
-    if (drift.extra.length) parts.push(`${drift.extra.length} untracked`);
+    if (r.drift.modified.length) parts.push(`${r.drift.modified.length} modified`);
+    if (r.drift.missing.length) parts.push(`${r.drift.missing.length} missing`);
+    if (r.drift.extra.length) parts.push(`${r.drift.extra.length} untracked`);
     problems.push({
       code: EXIT.DRIFT,
-      message: `kit-owned static files differ from .aidev-lock (${parts.join(', ')}). ` +
-        'Run "aidev kit apply" to restore them, or send the change to the central kit as a PR.',
-      detail: drift,
+      message: `kit-owned files differ from ${cfgMod.LOCK_NAME} (${parts.join(', ')}). ` +
+        'Run "aidev update" to restore them, or send the change to ai-dev-kit as a PR.',
     });
   }
 
-  // --- policy integrity (exit 3) -------------------------------------------
-  let policy = null;
-  try {
-    policy = cfgMod.loadPolicy(repoRoot, { required: true });
-    report.policy = { ok: true, protectedCount: policy.protected.length };
-  } catch (e) {
-    report.policy = { ok: false, error: e.message };
-    problems.push({ code: EXIT.PERMISSION, message: e.message });
-  }
-  if (policy) {
-    const missing = cfgMod.ALWAYS_PROTECTED.filter((p) => !policy.protected.includes(p));
-    if (missing.length > 0) {
-      // validatePolicy merges the floor, so reaching here means a loader bug.
-      problems.push({ code: EXIT.PERMISSION, message: `policy is missing protected entries: ${missing.join(', ')}` });
-    }
-  }
+  // --- policy integrity (exit 3) ---------------------------------------------
+  if (!r.policy.ok) problems.push({ code: EXIT.PERMISSION, message: r.policy.error });
 
-  // --- three-SHA consistency (exit 4) --------------------------------------
-  const st = stateMod.computeState(repoRoot, config, { checkRemote: !flags['no-remote'] });
-  report.state = st;
+  // --- Wiki consistency (exit 4) ---------------------------------------------
+  const st = r.state;
   if (st.severity === stateMod.SEVERITY.ERROR) {
     problems.push({ code: EXIT.KNOWLEDGE, message: st.message });
+  } else if (r.inconsistencies.length > 0) {
+    problems.push({ code: EXIT.KNOWLEDGE, message: `${r.inconsistencies.length} inventory inconsistency/ies (a page recorded with differing hashes)` });
+  } else if (r.syncLease && !r.syncLease.evaluation.valid) {
+    problems.push({ code: EXIT.KNOWLEDGE, message: `a stale sync lease is present (${r.syncLease.evaluation.reason}); run "aidev sync --resume" or "aidev sync --abort".` });
   } else if (st.severity === stateMod.SEVERITY.WARN && flags.strict) {
-    // --strict turns the "behind but consistent" warning into a hard failure.
     problems.push({ code: EXIT.DRIFT, message: `${st.message} (--strict)` });
   }
-
-  // --- hand-edited Wiki pages (reported, never fatal) ----------------------
-  try {
-    const records = inventory.readInventory(repoRoot);
-    report.handEdits = inventory.detectHandEdits(repoRoot, records);
-  } catch { report.handEdits = []; }
 
   if (flags.json) {
     ui.json({
@@ -108,21 +90,21 @@ function run(ctx) {
       exitCode: problems.length === 0 ? EXIT.OK : problems[0].code,
       problems,
       severity: st.severity,
-      remoteSha: st.remoteSha, submoduleSha: st.submoduleSha, knowledgeSha: st.knowledgeSha,
-      handEdits: report.handEdits,
+      trackingSha: st.trackingSha, baseSha: st.baseSha, knowledgeSha: st.knowledgeSha,
+      handEdits: r.handEdits,
     });
   } else {
     ui.heading('aidev check');
     ui.table([
-      ['remoteSha', stateMod.short(st.remoteSha)],
-      ['submoduleSha', stateMod.short(st.submoduleSha)],
-      ['knowledgeSha', stateMod.short(st.knowledgeSha)],
-      ['static files', drift.noLock ? 'no .aidev-lock' : (drift.ok ? 'match .aidev-lock' : 'DRIFT')],
-      ['policy', report.policy && report.policy.ok ? 'valid' : 'INVALID'],
+      ['tracking', stateMod.short(st.trackingSha)],
+      ['base', stateMod.short(st.baseSha)],
+      ['knowledge', stateMod.short(st.knowledgeSha)],
+      ['tool config', r.drift.noLock ? 'not recorded' : (r.drift.ok ? 'matches the kit' : 'DRIFT')],
+      ['policy', r.policy.ok ? 'valid' : 'INVALID'],
     ]);
-    if (report.handEdits.length > 0) {
-      ui.warn(`${report.handEdits.length} Wiki page(s) edited by hand since generation:`);
-      for (const h of report.handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
+    if (r.handEdits.length > 0) {
+      ui.warn(`${r.handEdits.length} Wiki page(s) edited by hand since generation:`);
+      for (const h of r.handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
       ui.dim('    Regeneration will report these rather than overwrite them silently.');
     }
     if (problems.length === 0) {
@@ -131,14 +113,12 @@ function run(ctx) {
       ui.ok('environment is consistent.');
     } else {
       for (const p of problems) ui.fail(`[exit ${p.code}] ${p.message}`);
-      if (report.drift && report.drift.modified) {
-        for (const m of report.drift.modified.slice(0, 10)) ui.dim(`    modified: ${m.path}`);
-        for (const m of report.drift.missing.slice(0, 10)) ui.dim(`    missing:  ${m}`);
-        for (const m of report.drift.extra.slice(0, 10)) ui.dim(`    untracked: ${m}`);
-      }
+      for (const m of r.drift.modified.slice(0, 10)) ui.dim(`    modified: ${m.path}`);
+      for (const m of r.drift.missing.slice(0, 10)) ui.dim(`    missing:  ${m}`);
+      for (const m of r.drift.extra.slice(0, 10)) ui.dim(`    untracked: ${m}`);
     }
   }
   return problems.length === 0 ? EXIT.OK : problems[0].code;
 }
 
-module.exports = { run, FLAGS, summary: '環境整合性チェック（静的ファイル・ポリシー・3SHA）' };
+module.exports = { run, FLAGS, FLAG_HELP, summary: '環境整合性チェック（CI用。0=ok / 2=drift / 3=権限 / 4=Wiki）' };

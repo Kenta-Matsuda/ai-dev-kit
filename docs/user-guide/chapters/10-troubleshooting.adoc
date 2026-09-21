@@ -1,0 +1,222 @@
+[[troubleshooting]]
+== トラブルシューティング
+
+症状から対処を引く表です。メッセージは `aidev` が実際に表示する英文です。
+
+[[troubleshooting-install]]
+=== インストール
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|`aidev` が見つからない
+|新しいターミナルを開きます。POSIX では `export PATH="$HOME/.local/bin:$PATH"` を profile に追加します。それでも駄目なら installer を再実行します。
+
+|`node not found` / `node vXX is too old`
+|Node.js {node-min-version} 以上を入れて installer を再実行します。
+
+|`this checkout looks like a wrapper`
+|PKG の中で installer を実行しています。kit の clone で実行します。
+
+|`the dedicated ai-dev-kit checkout must be on branch main`
+|kit の clone で `git switch main` してから実行します。
+
+|`aidev doctor` で `⚠ claude not found on PATH` / `is too old`
+|Claude Code {claude-min-version} 以上を入れます。Wiki の生成にはこれが必要です。
+|===
+
+[[troubleshooting-status]]
+=== aidev status / aidev check の表示
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|`⚠ this directory is not set up for ai-dev-kit`
+|PKG のルートに移動します。未導入なら xref:setup-owner[導入担当者の手順]。
+
+|`❌ LLM Wiki has not been generated yet`
+|`git pull`。それでも無ければ `aidev knowledge build`。この間、AI の書き込みは止まります。
+
+|`⚠️ … has changed since the Wiki was generated`
+|`aidev sync`、または夜間 pipeline の PR がマージされてから `git pull`。
+
+|`⚠️ N page(s) still await prose regeneration`
+|`aidev knowledge build`。
+
+|`tool config  DRIFT`
+|`git diff` で確認します。意図しない変更なら `aidev update` で配布版に戻します。意図した変更は kit への PR にします。
+
+|`tool config  not recorded — run "aidev init"`
+|`aidev init` を実行します。
+
+|`policy  missing`
+|`aidev permission configure --approve`。
+
+|`⚠ a stale sync lease is present`
+|前回の sync が途中で止まっています。`aidev sync --resume` で続けるか、`aidev sync --abort` で捨てます。
+
+|`⚠ N Wiki page(s) edited by hand since generation`
+|編集を捨ててよければ次の build / sync に `--force` を付けます。残したい内容はソース側に移します。
+
+|`ℹ️ remote unverified`
+|remote に届きません。作業は続けられます。proxy の設定を確認します。
+|===
+
+[[troubleshooting-exit]]
+=== aidev check の終了コード
+
+[cols="1,2,3",options="header"]
+|===
+|終了コード |表示 |対処
+
+|2
+|`kit-owned files differ from .aidev/materialized.json`
+|`aidev update` で配布版に戻すか、変更を kit への PR に送ります。
+
+|2
+|`.aidev/materialized.json is missing`
+|`aidev init` を実行してコミットします。
+
+|3
+|`.aidev/policy.yaml not found`
+|`aidev permission configure --approve`。
+
+|3
+|`failed to parse .aidev/policy.yaml`
+|`aidev permission reconfigure --approve` で置き直します。
+
+|4
+|`LLM Wiki has not been generated yet`
+|`aidev knowledge build` を実行してコミットします。
+
+|4
+|`N inventory inconsistency/ies`
+|`aidev knowledge build --full`。
+
+|4
+|`a stale sync lease is present`
+|`aidev sync --resume` または `aidev sync --abort`。
+|===
+
+[[troubleshooting-agent]]
+=== Wiki の生成
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|`⚠ the knowledge-builder agent did not run`
+|`aidev doctor` の `claude` 行を直し、同じコマンドを再実行します。
+
+|`✗ the knowledge-builder agent ran out of time`
+|同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けます。
+
+|`✗ knowledge-builder made no Wiki progress: 0/N`
+|続く `Claude result:` を読みます。`permission denial(s)` があれば `aidev update` で `.claude/settings.json` を配布版に戻します。
+
+|`⚠ N completion report(s) were rejected`
+|同じコマンドで再実行します。続くなら `--full`。
+
+|`✗ … left the Wiki checkpoint invalid: PKG checkout changed during generation`
+|生成中にブランチを切り替えました。ブランチを戻して再実行します。
+
+|`✗ N Wiki page(s) were edited by hand and would be overwritten`
+|`--force` を付けるか、編集内容をソース側に移します。
+
+|`✗ --scope <path> matched no files in generation targets`
+|`aidev.yaml` の `package.include` に含まれるパスを指定します。
+|===
+
+[[troubleshooting-sync]]
+=== aidev sync
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|`✗ a sync lease is present`
+|`aidev sync --resume`（続行）か `aidev sync --abort`（破棄）。
+
+|`✗ the held lease targets … but origin/main is now …`
+|表示どおり `aidev sync --resume --to <sha>` で前回分を終えるか、`--abort` してやり直します。
+
+|`✗ could not fetch origin/main`
+|`git fetch origin main` が通るか確認します（ネットワーク、認証、proxy）。
+
+|`⚠ AZURE_DEVOPS_PAT is not set; open the pull request … by hand`
+|環境変数を設定して再実行するか、push 済みのブランチから手で PR を作ります。
+
+|`ℹ hosting.type is generic; open the pull request … by hand`
+|正常です。手で PR を作ります。
+
+|`✓ the Wiki committed on origin/main already describes …`
+|`git pull` します。
+
+|`✗ hand-edited Wiki pages would be overwritten`
+|`aidev sync --force`。
+|===
+
+[[troubleshooting-permission]]
+=== 権限拒否
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|Claude が `… is read-only (**): no work lease` と報告
+|正常です。ソースの変更は `issue-to-pr` agent の作業リース経由か、人間が行います。
+
+|`… is protected (.claude/**)`
+|正常です。kit のファイルは kit への PR で変えます。
+
+|`Wiki consistency error … All writes are blocked`
+|`aidev knowledge build`。
+
+|`policy could not be evaluated (…); write blocked`
+|`aidev permission show` で確認し、`aidev permission reconfigure --approve` で置き直します。
+
+|`reconfigure --approve` が `this candidate weakens the policy in force` で止まる
+|`git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml` で差分を確認し、意図どおりなら `--force` を付けます。
+|===
+
+[[troubleshooting-update]]
+=== kit 更新後
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|`aidev status` の `kit` 行に `run "aidev update"`
+|PKG で `aidev update` し、差分をコミットして PR にします。
+
+|`aidev check` が終了コード 2 になった
+|`git pull`。それでも 2 なら `aidev update` して差分をコミットします。
+
+|`✗ … file(s) were edited locally and were not replaced`
+|`aidev update --force` で配布版にするか、変更を kit への PR に送ります。
+
+|`✗ the kit checkout has diverged from origin/main`
+|kit の clone にローカルコミットがあります。捨ててよければ `git reset --hard origin/main`。
+|===
+
+[[troubleshooting-windows]]
+=== Windows
+
+[cols="2,3",options="header"]
+|===
+|症状 |対処
+
+|PowerShell で `aidev.ps1` が実行ポリシーで止まる
+|`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`、または `aidev.cmd` を明示して実行します。
+
+|hook が `aidev` を見つけられない
+|新しいターミナルで `claude` を起動します。installer が PATH を追加済みです。
+
+|`Place this policy now?` などの質問が出ずに終わる
+|stdin が端末ではありません（IDE の統合ターミナルの一部、パイプ）。通常のターミナルで実行するか、`--yes` / `--approve` で値を渡します。
+
+|`spawnSync git ETIMEDOUT`
+|remote への確認が 3 秒で timeout しました。作業は続けられます。proxy を確認します。
+|===

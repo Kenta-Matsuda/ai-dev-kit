@@ -1,0 +1,53 @@
+[[cli-mcp]]
+== aidev mcp
+
+`.mcp.json` から起動される内部コマンドです。
+
+=== 書式
+
+[source,text]
+----
+aidev mcp azure-devops [--dry-run | --json]
+----
+
+=== 説明
+
+配布される `.mcp.json` は、`aidev mcp azure-devops` を MCP サーバーの起動コマンドとして登録しています。このコマンドは `aidev.yaml` の `hosting.organization` / `project` と、`hosting.auth_env` の環境変数にある PAT を読み、Azure DevOps MCP サーバー（`@azure-devops/mcp@2.10.0`）を `npx` で起動します。PAT は子プロセスの環境変数で渡し、コマンドラインにもログにも出しません。
+
+`hosting.type` が `azure-devops` でない PKG では起動に失敗します（他の機能には影響しません）。
+
+`--dry-run` / `--json` は起動せず、解決した設定（token の値は含みません）を表示します。
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|設定を表示した。サーバーが 0 で終了した
+
+|1
+|`aidev.yaml` が無い、token 環境変数が未設定、`npx` が起動できない
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev mcp azure-devops --dry-run
+----
+
+[source,text]
+----
+aidev mcp azure-devops (dry run)
+  package              @azure-devops/mcp@2.10.0
+  organization         contoso
+  project              Platform
+  auth env             AZURE_DEVOPS_PAT (set; value not read)
+----
+
+=== 関連
+
+* xref:permissions-secrets[権限と安全性: 秘密情報]
+* xref:environment-reference[環境変数]

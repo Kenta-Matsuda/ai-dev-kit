@@ -7,28 +7,65 @@ const createAsciidoctor = require('@asciidoctor/core');
 
 const ROOT = path.resolve(__dirname, '..');
 const SOURCE_ROOT = path.join(ROOT, 'docs', 'user-guide');
-const ENTRY = path.join(SOURCE_ROOT, 'index.adoc');
 const OUTPUT_DIR = path.join(ROOT, 'build', 'docs');
-const OUTPUT = path.join(OUTPUT_DIR, 'ai-dev-kit-user-guide.html');
-const CHECK_MODE = process.argv.includes('--check');
-const UNKNOWN_ARGS = process.argv.slice(2).filter((arg) => arg !== '--check');
+const STYLES_DIR = path.join(SOURCE_ROOT, 'assets');
+
+const ARGS = process.argv.slice(2);
+const CHECK_MODE = ARGS.includes('--check');
+const LANG_INDEX = ARGS.indexOf('--lang');
+const ONLY_LANG = LANG_INDEX === -1 ? null : ARGS[LANG_INDEX + 1];
+const UNKNOWN_ARGS = ARGS.filter((arg, i) => arg !== '--check' && arg !== '--lang' && i !== LANG_INDEX + 1);
+
+/**
+ * One guide per language. Both share the stylesheet, the chapter IDs and the
+ * layout, so the same validation runs on each.
+ */
+const LANGUAGES = [
+  {
+    lang: 'ja',
+    entry: path.join(SOURCE_ROOT, 'index.adoc'),
+    output: path.join(OUTPUT_DIR, 'ai-dev-kit-user-guide.html'),
+    fragments: ['ai-dev-kit とは', 'コマンドリファレンス'],
+  },
+  {
+    lang: 'en',
+    entry: path.join(SOURCE_ROOT, 'index-en.adoc'),
+    output: path.join(OUTPUT_DIR, 'ai-dev-kit-user-guide.en.html'),
+    fragments: ['What ai-dev-kit is', 'Command Reference'],
+  },
+];
 
 const REQUIRED_IDS = [
+  // User Guide
   'overview',
-  'concepts',
-  'getting-started',
-  'configuration',
-  'operations',
+  'install',
+  'setup-owner',
+  'setup-member',
+  'daily',
   'knowledge',
-  'security',
-  'integrations',
-  'cli-reference',
+  'configuration',
+  'permissions',
   'automation',
-  'files-and-state',
   'troubleshooting',
-  'maintenance',
+  // Command Reference: one page per command
+  'cli-reference',
+  'cli-init',
+  'cli-status',
+  'cli-check',
+  'cli-knowledge',
+  'cli-sync',
+  'cli-agent',
+  'cli-permission',
+  'cli-task',
+  'cli-workflow',
+  'cli-update',
+  'cli-doctor',
+  'cli-eject',
+  'cli-hook',
+  'cli-mcp',
+  // Appendices
   'environment-reference',
-  'implementation-status',
+  'files-and-state',
   'document-build',
 ];
 
@@ -132,14 +169,19 @@ function formatLogMessage(entry) {
   const severity = String(
     entry.severity || (typeof entry.getSeverity === 'function' ? entry.getSeverity() : 'WARN'),
   );
-  const message = String(
-    entry.message || (typeof entry.getMessage === 'function' ? entry.getMessage() : entry),
-  );
+  // Asciidoctor.js hands over either a string or an object {text, source_location}.
+  const raw = entry.message ?? (typeof entry.getMessage === 'function' ? entry.getMessage() : entry);
+  let message;
+  if (typeof raw === 'string') message = raw;
+  else if (raw && typeof raw === 'object') {
+    const text = raw.text || raw.message || JSON.stringify(raw);
+    const where = raw.source_location ? ` (${String(raw.source_location)})` : '';
+    message = `${text}${where}`;
+  } else message = String(raw);
   return `${severity}: ${message}`;
 }
 
-function convert() {
-  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+function convert(guide, version) {
   const asciidoctor = createAsciidoctor();
   let memoryLogger = null;
 
@@ -149,17 +191,21 @@ function convert() {
   }
 
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  asciidoctor.convertFile(ENTRY, {
+  asciidoctor.convertFile(guide.entry, {
     backend: 'html5',
     doctype: 'book',
     safe: 'safe',
+    // No base_dir on purpose: safe mode then confines reads to the entry file's
+    // directory (docs/user-guide), which holds both languages and assets/.
     standalone: true,
     mkdirs: true,
-    to_file: OUTPUT,
+    to_file: guide.output,
     attributes: {
-      'aidev-version': packageJson.version,
-      revnumber: packageJson.version,
+      'aidev-version': version,
+      revnumber: version,
       reproducible: '',
+      stylesdir: STYLES_DIR,
+      stylesheet: 'user-guide.css',
     },
   });
 
@@ -168,42 +214,42 @@ function convert() {
       .map(formatLogMessage)
       .filter((message) => /^(?:WARN|ERROR|FATAL):/i.test(message));
     if (diagnostics.length > 0) {
-      fail(`Asciidoctor reported diagnostics:\n${diagnostics.join('\n')}`);
+      fail(`Asciidoctor reported diagnostics for ${guide.lang}:\n${diagnostics.join('\n')}`);
     }
   }
 }
 
-function validateHtml(ids) {
-  if (!fs.existsSync(OUTPUT)) fail(`output was not created: ${relative(OUTPUT)}`);
-  const stat = fs.statSync(OUTPUT);
-  const html = fs.readFileSync(OUTPUT, 'utf8');
+function validateHtml(guide, ids) {
+  if (!fs.existsSync(guide.output)) fail(`output was not created: ${relative(guide.output)}`);
+  const stat = fs.statSync(guide.output);
+  const html = fs.readFileSync(guide.output, 'utf8');
 
   if (stat.size < 100000) {
-    fail(`output is unexpectedly small (${stat.size} bytes)`);
+    fail(`${guide.lang}: output is unexpectedly small (${stat.size} bytes)`);
   }
 
   const requiredFragments = [
     '<title>ai-dev-kit User Guide</title>',
     'id="toc" class="toc2"',
     '--nav-width:',
-    '導入によって得られるもの',
+    ...guide.fragments,
   ];
   for (const fragment of requiredFragments) {
-    if (!html.includes(fragment)) fail(`generated HTML is missing: ${fragment}`);
+    if (!html.includes(fragment)) fail(`${guide.lang}: generated HTML is missing: ${fragment}`);
   }
 
   for (const id of ids.keys()) {
-    if (!html.includes(`id="${id}"`)) fail(`generated HTML is missing explicit section ID: ${id}`);
+    if (!html.includes(`id="${id}"`)) fail(`${guide.lang}: generated HTML is missing explicit section ID: ${id}`);
   }
 
   if (html.includes('include::chapters/') || html.includes('include::appendices/')) {
-    fail('generated HTML contains an unexpanded include directive');
+    fail(`${guide.lang}: generated HTML contains an unexpanded include directive`);
   }
   if (/<(?:link|script)\b[^>]+(?:href|src)=["']https?:/i.test(html)) {
-    fail('generated HTML depends on an external stylesheet or script');
+    fail(`${guide.lang}: generated HTML depends on an external stylesheet or script`);
   }
   if (ids.size < REQUIRED_IDS.length) {
-    fail(`only ${ids.size} explicit IDs were found`);
+    fail(`${guide.lang}: only ${ids.size} explicit IDs were found`);
   }
 
   return stat.size;
@@ -211,14 +257,20 @@ function validateHtml(ids) {
 
 function main() {
   if (UNKNOWN_ARGS.length > 0) fail(`unknown argument(s): ${UNKNOWN_ARGS.join(', ')}`);
-  const files = collectSources(ENTRY);
-  const ids = validateSources(files);
-  convert();
-  const bytes = validateHtml(ids);
+  const guides = ONLY_LANG ? LANGUAGES.filter((g) => g.lang === ONLY_LANG) : LANGUAGES;
+  if (guides.length === 0) fail(`unknown language: ${ONLY_LANG} (expected: ${LANGUAGES.map((g) => g.lang).join(', ')})`);
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const action = CHECK_MODE ? 'Validated' : 'Built';
-  process.stdout.write(
-    `${action} ${relative(OUTPUT)} (${files.length} AsciiDoc files, ${ids.size} IDs, ${bytes} bytes)\n`,
-  );
+
+  for (const guide of guides) {
+    const files = collectSources(guide.entry);
+    const ids = validateSources(files);
+    convert(guide, packageJson.version);
+    const bytes = validateHtml(guide, ids);
+    process.stdout.write(
+      `${action} ${relative(guide.output)} (${guide.lang}: ${files.length} AsciiDoc files, ${ids.size} IDs, ${bytes} bytes)\n`,
+    );
+  }
 }
 
 try {
@@ -227,3 +279,6 @@ try {
   process.stderr.write(`${error && error.message ? error.message : String(error)}\n`);
   process.exitCode = 1;
 }
+
+
+

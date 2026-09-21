@@ -10,6 +10,7 @@
 const { DEFAULTS, sha256 } = require('./config');
 const git = require('./git');
 const pathsMod = require('./paths');
+const layout = require('./layout');
 
 const DEFAULT_EVIDENCE_INCLUDE = DEFAULTS.knowledge.evidence.include;
 
@@ -25,21 +26,23 @@ function resolveEvidenceScope(config) {
 }
 
 /**
- * Enumerate tracked, non-secret evidence at `ref` in the PKG submodule.
+ * Enumerate tracked, non-secret evidence at `ref` in the PKG.
  *
  * Returning exact paths (rather than only globs) gives the agent a deterministic
  * view of the target commit and prevents generated/untracked worktree files
- * from quietly becoming evidence.
+ * from quietly becoming evidence. Kit-managed files are never evidence: the
+ * Wiki describes the PKG, not the kit's own configuration.
  */
-function scanEvidence(repoRoot, config, { submodulePath = 'src', ref = 'HEAD' } = {}) {
-  const entries = git.lsTreeBlobs(require('path').join(repoRoot, submodulePath), ref);
+function scanEvidence(repoRoot, config, { ref = 'HEAD' } = {}) {
+  const entries = git.lsTreeBlobs(repoRoot, ref);
   if (entries == null) return null;
 
   const scope = resolveEvidenceScope(config);
   const secrets = config?.secrets_paths || [];
   const records = [];
   for (const entry of entries) {
-    const rel = pathsMod.normalizeRel(`${submodulePath}/${entry.path}`);
+    const rel = pathsMod.normalizeRel(entry.path);
+    if (layout.isKitManaged(rel)) continue;
     if (!pathsMod.isIncluded(rel, scope.include, scope.exclude)) continue;
     if (pathsMod.matchesAny(secrets, rel)) continue;
     records.push({ path: rel, blob: entry.blob });

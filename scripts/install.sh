@@ -32,34 +32,23 @@ ok "node ${NODE_VERSION}"
 command -v git >/dev/null 2>&1 || die "git not found. Install git and re-run."
 ok "$(git --version)"
 
-# The launcher must never be tied to a developer's PKG wrapper. `aidev update`
-# advances the entire checkout that supplies the CLI. Azure Pipelines gets a
-# compatibility exception for old wrapper pipelines; its launcher is ephemeral
-# and the pipeline never invokes self-update.
+# The launcher points at this checkout, and `aidev update` fast-forwards it.
+# It must therefore be a clone of ai-dev-kit itself — never a package that
+# merely uses the kit (those carry aidev.yaml / .aidev/).
 REPO_TOP_LEVEL="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" || \
   die "${REPO_ROOT} is not a git checkout. Clone ai-dev-kit and run this installer from that clone."
 REPO_TOP_LEVEL="$(cd "$REPO_TOP_LEVEL" && pwd -P)"
 [ "$REPO_TOP_LEVEL" = "$REPO_ROOT" ] || \
   die "the CLI directory must be the root of its Git checkout: ${REPO_ROOT}"
 git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1 || \
-  die "the dedicated ai-dev-kit checkout must have its central repository configured as origin."
+  die "the ai-dev-kit checkout must have the central repository configured as origin (aidev update needs it)."
 CURRENT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" || \
   die "could not resolve the ai-dev-kit checkout branch."
-
-IS_WRAPPER=false
-if [ -f "$REPO_ROOT/aidev.yaml" ] || [ -f "$REPO_ROOT/.aidev-lock" ] || \
-   [ -f "$REPO_ROOT/.aidev-ejected" ] || \
-   git -C "$REPO_ROOT" remote get-url upstream >/dev/null 2>&1; then
-  IS_WRAPPER=true
+if [ -f "$REPO_ROOT/aidev.yaml" ] || [ -d "$REPO_ROOT/.aidev" ]; then
+  die "this looks like a package that uses ai-dev-kit, not the kit itself. Clone ai-dev-kit into a separate directory and run its installer."
 fi
-if [ "$IS_WRAPPER" = true ] && [ "${TF_BUILD:-}" != "True" ]; then
-  die "this checkout looks like a wrapper. Clone ai-dev-kit into a separate stable directory and run its installer."
-fi
-if [ "$IS_WRAPPER" = true ]; then
-  warn "Azure Pipelines compatibility mode: installing an ephemeral wrapper CLI; self-update remains disabled."
-elif [ "$CURRENT_BRANCH" != "main" ]; then
-  die "the dedicated ai-dev-kit checkout must be on branch main (currently ${CURRENT_BRANCH})."
-fi
+[ "$CURRENT_BRANCH" = "main" ] || \
+  die "the ai-dev-kit checkout must be on branch main (currently ${CURRENT_BRANCH}) so that aidev update can follow it."
 
 [ -f "$REPO_ROOT/cli/bin/aidev.js" ] || die "cli/bin/aidev.js not found under ${REPO_ROOT}."
 

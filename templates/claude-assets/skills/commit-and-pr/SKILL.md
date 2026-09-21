@@ -77,7 +77,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 
 ## マージ
 
-> 🔴 **自動マージは禁止です。** PKG PR・ラッパーPR とも人間がマージします。
+> 🔴 **自動マージは禁止です。** PKG PR・Wiki PR（`ai/wiki-<sha>`）とも人間がマージします。
 
 - auto-complete / `completionOptions` を設定しない
 - 自分でマージしない。レビュー依頼までが範囲です

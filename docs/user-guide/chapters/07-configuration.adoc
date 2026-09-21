@@ -1,0 +1,184 @@
+[[configuration]]
+== aidev.yaml リファレンス
+
+`aidev.yaml` は PKG のルートに置く設定ファイルです。`aidev init` が作り、コミットして共有します。手で編集でき、各コマンドの起動時に検証されます。
+
+=== 例
+
+`aidev init` が作る内容に、任意の項目を足した例です。省略した項目は既定値になります。
+
+[source,yaml]
+----
+version: 2
+
+package:
+  name: "demo-pkg"
+  include:                      # Wiki の生成対象
+    - "src/**"
+    - "docs/**"
+  exclude:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/vendor/**"
+    - "**/generated/**"
+
+secrets_paths:                  # AI が読まず書かず、Wiki からも隠すパス
+  - ".env*"
+  - "**/secrets/**"
+  - "**/*.pem"
+  - "**/*.pfx"
+  - "**/*.key"
+
+hosting:
+  type: azure-devops            # azure-devops | generic
+  organization: "contoso"
+  project: "Platform"
+  repository: "demo-pkg"
+  auth_env: AZURE_DEVOPS_PAT    # PAT を入れる環境変数の名前（値は書かない）
+  tracking_branch: "main"
+
+tools:
+  default: ["claude"]           # 設定を置く AI ツール。複数可: ["claude", "copilot"]
+  agent: claude                 # aidev が agent を動かすときのツール（default の中から）
+  agent_model: "sonnet"         # その agent のモデル。"" でツールの既定に任せる
+  agents:                       # agent ごとの上書き（省略可）
+    knowledge-builder: { model: opus }
+
+knowledge:
+  agent_timeout_ms: 1800000     # agent 1 回の時間予算（30 分）
+  agent_batch_size: 20          # agent 1 回に渡すファイル数
+
+quality_gates:                  # AI がファイルを編集した後に実行するコマンド
+  lint: npm run lint
+  test: npm test
+----
+
+=== よく変える項目
+
+[cols="2,2,3",options="header"]
+|===
+|項目 |既定 |説明
+
+|`package.include`
+|`[]`（= 全ファイル）
+|Wiki の生成対象（glob）。
+
+|`package.exclude`
+|`[]`
+|生成対象から外すパス。
+
+|`secrets_paths`
+|`[]`
+|AI が読まず、書かず、Wiki からも隠すパス。policy の `protected` にも自動で入ります。
+
+|`hosting.type`
+|`generic`
+|`azure-devops` なら PR 作成と Work Item 連携を使います。`generic` は git だけで、PR は手動です。
+
+|`hosting.organization` / `project` / `repository`
+|（`azure-devops` では必須）
+|Azure DevOps の組織・プロジェクト・リポジトリ名。
+
+|`hosting.auth_env`
+|`AZURE_DEVOPS_PAT`
+|PAT を入れる環境変数の **名前**。値は書きません。
+
+|`hosting.tracking_branch`
+|`main`
+|Wiki が追いかけるブランチ。
+
+|`tools.default`
+|`["claude"]`
+|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`、`codex` は `AGENTS.md`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev update` で消えます。
+
+|`tools.agent`
+|`default` の先頭
+|`aidev` が agent を起動するときのツール（`aidev knowledge build`、`aidev sync`、`aidev agent run`、workflow の `ctx.agent`）。`tools.default` にあるものだけ。
+
+|`tools.agent_model`
+|`sonnet`
+|そのときのモデル。`""` にするとツールの既定に任せます。対話セッションのモデルには影響しません。
+
+|`tools.agents.<name>`
+|無し
+|agent ごとに `tool` と `model` を上書きします。例: `knowledge-builder: { tool: copilot, model: "" }`。フラグ（`--agent-tool` / `--agent-model`、`aidev agent run --tool` / `--model`）はさらに優先します。
+
+|`knowledge.agent_timeout_ms`
+|`1800000`
+|agent 1 回（survey または 1 batch）の時間予算。10000〜7200000。
+
+|`knowledge.agent_batch_size`
+|`20`
+|agent 1 回に渡すファイル数。1〜500。小さいほど進捗がこまめに保存されます。
+
+|`quality_gates.<name>`
+|無し
+|AI が PKG のファイルを編集した後に PKG ルートで実行するコマンド。失敗すると出力が Claude に返ります。1 コマンド 120 秒まで。
+|===
+
+=== 通常は変えない項目
+
+[cols="2,2,3",options="header"]
+|===
+|項目 |既定 |説明
+
+|`version`
+|`2`（必須）
+|スキーマの版。
+
+|`package.name`
+|リポジトリ名
+|表示に使う PKG 名。
+
+|`hosting.triage.labels` / `area_path`
+|`[]` / 無し
+|`issue-to-pr` agent が対象とみなす Work Item のタグと Area Path。
+
+
+|`sync.auto_pr`
+|`true`
+|`false` にすると `aidev sync` は push まで行い、PR を作りません。
+
+|`sync.pr.target_branch` / `reviewers`
+|`tracking_branch` / `[]`
+|sync の PR の宛先と reviewer。
+
+|`sync.remote_check_timeout_ms` / `remote_check_ttl_minutes`
+|`3000` / `60`
+|remote の確認の timeout とキャッシュ時間。
+
+|`sync.lease_ttl_minutes`
+|`120`
+|sync の作業ロックの有効時間。
+
+|`task.*`
+|`.aidev/tasks`, `120`, `90`, `3`
+|`aidev task` のキャッシュ場所、リースの有効時間、保持日数、同時実行数。
+
+|`knowledge.max_files_per_dir`
+|`20`
+|Wiki の 1 ディレクトリあたりのページ数の上限。
+
+|`knowledge.inventory_shard_size`
+|`2000`
+|inventory 1 ファイルあたりの記録数。
+
+|`knowledge.evidence.include` / `exclude`
+|`["**"]` / `package.exclude`
+|agent が調査に読んでよいファイル。
+
+|`self_evolution.enabled` / `cadence`
+|`true` / `weekly`
+|セッション終了時の観測記録（`.aidev/cache/`）の有無と周期。
+|===
+
+=== 書いてはいけない項目
+
+`hosting.pat`、`hosting.token`、`hosting.password`、`hosting.secret` は書けません。書くと起動を拒否します。token は `hosting.auth_env` が指す環境変数に入れます（xref:environment-reference[環境変数]）。
+
+=== 関連
+
+* xref:cli-init[aidev init] — 生成時のフラグ
+* xref:permissions[権限と安全性] — `secrets_paths` と policy
+* xref:knowledge[LLM Wiki] — 生成対象と調査範囲

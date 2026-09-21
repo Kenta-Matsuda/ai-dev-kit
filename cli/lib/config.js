@@ -15,10 +15,14 @@ const crypto = require('crypto');
 const yaml = require('./yaml');
 const { AidevError, EXIT } = require('./errors');
 
-const CONFIG_NAME = 'aidev.yaml';
-const LOCK_NAME = '.aidev-lock';
-const POLICY_REL = path.join('.aidev', 'policy.yaml');
-const SYNC_LOCK_REL = path.join('.aidev', 'sync.lock');
+const layout = require('./layout');
+const toolsMod = require('./tools');
+
+const CONFIG_NAME = layout.CONFIG_NAME;
+/** Records the kit commit and per-file hashes of the materialised tool config. */
+const LOCK_NAME = layout.MATERIALIZED_REL;
+const POLICY_REL = layout.POLICY_REL;
+const SYNC_LOCK_REL = layout.SYNC_LOCK_REL;
 
 /**
  * Written by `aidev eject`. Its presence means "this repository is no longer
@@ -30,33 +34,61 @@ const SYNC_LOCK_REL = path.join('.aidev', 'sync.lock');
  * so that tooling can tell "deliberately ejected" apart from "half-installed",
  * which otherwise look identical from disk.
  */
-const EJECT_MARKER_NAME = '.aidev-ejected';
+const EJECT_MARKER_NAME = layout.EJECT_MARKER_REL;
 
 /** Paths that are protected no matter what the policy file says. */
 const ALWAYS_PROTECTED = Object.freeze([
-  '.claude/**',
-  'CLAUDE.md',
-  '.mcp.json',
-  '.aidev/policy.yaml',
+  // The configuration of every supported AI tool, whether or not the PKG uses
+  // it: an agent must never rewrite the instructions another tool will read.
+  ...layout.ALL_TOOL_CONFIG_GLOBS,
+  layout.POLICY_REL,
   '.aidev/leases/**',
-  '.aidev/sync.lock',
-  '.aidev-lock',
+  layout.SYNC_LOCK_REL,
+  layout.MATERIALIZED_REL,
+  layout.AIDEV_GITIGNORE_REL,
   // Writing this by hand would switch enforcement off, which is exactly the
   // move the guard exists to prevent. Ejecting is a human action through the
   // CLI, never a file an agent can create.
-  '.aidev-ejected',
+  layout.EJECT_MARKER_REL,
 ]);
 
+/**
+ * The write scopes every policy starts from. The PKG is read-only for an agent
+ * (issue-to-pr edits it under a work lease); the Wiki, workflows and the PKG's
+ * own aidev.yaml are the places an agent is expected to write.
+ */
+const DEFAULT_POLICY_SCOPES = Object.freeze({
+  read_only: Object.freeze(['**']),
+  writable: Object.freeze([`${layout.KNOWLEDGE_REL}/**`, `${layout.WORKFLOWS_REL}/**`, layout.CONFIG_NAME]),
+  writable_during_sync: Object.freeze([`${layout.KNOWLEDGE_REL}/**`]),
+});
+
+/** Hosting providers the CLI knows how to talk to. */
+const HOSTING_TYPES = Object.freeze(['azure-devops', 'generic']);
+
+/** AI coding tools whose configuration the kit can materialise and which it can start. */
+const TOOLS = toolsMod.TOOL_IDS;
+
 const DEFAULTS = Object.freeze({
-  sync: {
+  hosting: {
+    type: 'generic',
     tracking_branch: 'main',
+    auth_env: { 'azure-devops': 'AZURE_DEVOPS_PAT', generic: null },
+  },
+  tools: {
+    default: Object.freeze(['claude']),
+    agent: 'claude',
+    // The model handed to an agent the CLI starts itself (knowledge build, sync). An
+    // interactive session resolves its own model from the tool's settings.
+    agent_model: 'sonnet',
+  },
+  sync: {
     auto_pr: true,
     remote_check_timeout_ms: 3000,
     remote_check_ttl_minutes: 60,
     lease_ttl_minutes: 120,
   },
   task: {
-    state_backend: 'azure_devops',
     cache_dir: '.aidev/tasks',
     lease_ttl_minutes: 120,
     retention_days: 90,
@@ -64,25 +96,19 @@ const DEFAULTS = Object.freeze({
   },
   knowledge: {
     max_files_per_dir: 20,
-    subagent_concurrency: 4,
     inventory_shard_size: 2000,
     evidence: {
-      include: Object.freeze(['src/**']),
+      // The whole PKG: a docs-only target set is still verified against code.
+      include: Object.freeze(['**']),
     },
     // Wiki generation on a large package is measured in minutes, not seconds;
-    // a short default would turn a working run into a truncated one.
+    // a short default would turn a working run into a truncated one. The
+    // budget applies to each batch, not the whole build.
     agent_timeout_ms: 1800000,
-  },
-  model: {
-    // The model handed to an agent the CLI starts itself (`--agent`).
-    //
-    // Deliberately *not* the model an interactive session runs on: that one is
-    // Claude Code's own resolution, seeded by `.claude/settings.json` (the kit's
-    // shipped default) and overridden per developer in
-    // `.claude/settings.local.json`. `aidev.yaml` cannot influence it, because
-    // `.claude/` is byte-identical across every PKG, so claiming a key here
-    // controlled it would be a setting that quietly does nothing.
-    agent: 'sonnet',
+    // Generation targets handed to one agent run. Smaller batches show
+    // progress sooner and lose less to a timeout; larger ones repeat the
+    // agent's orientation less often.
+    agent_batch_size: 20,
   },
   self_evolution: { enabled: true, cadence: 'weekly' },
 });
@@ -216,58 +242,108 @@ function asModel(v, field, dflt) {
  */
 function assertModel(v, field = 'model') { return asModel(v, field, null); }
 
-/** Validate and normalise aidev.yaml into a fully-defaulted object. */
+/** Validate and normalise aidev.yaml (schema version 2) into a fully-defaulted object. */
 function validateConfig(raw, source = CONFIG_NAME) {
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new AidevError(`${source}: top level must be a mapping`);
   }
-  const version = asInt(raw.version, 'version', 1, { min: 1 });
-  if (version !== 1) throw new AidevError(`${source}: unsupported version ${version} (expected 1)`);
-
-  const pkg = raw.package || {};
-  if (typeof pkg !== 'object' || Array.isArray(pkg)) {
-    throw new AidevError(`${source}: package must be a mapping`);
+  const version = asInt(raw.version, 'version', 2, { min: 1 });
+  if (version !== 2) {
+    throw new AidevError(
+      `${source}: unsupported version ${version} (expected 2). ` +
+      'Version 1 described the retired wrapper-repository layout; run "aidev init" to write a new file.');
   }
+  const mapping = (v, name) => {
+    if (v == null) return {};
+    if (typeof v !== 'object' || Array.isArray(v)) throw new AidevError(`${source}: ${name} must be a mapping`);
+    return v;
+  };
+
+  const pkg = mapping(raw.package, 'package');
   const name = asString(pkg.name, 'package.name', null);
   if (!name) throw new AidevError(`${source}: package.name is required`);
 
-  const ado = raw.azure_devops || {};
-  if (typeof ado !== 'object' || Array.isArray(ado)) {
-    throw new AidevError(`${source}: azure_devops must be a mapping`);
+  // ---- hosting ------------------------------------------------------------
+  const hosting = mapping(raw.hosting, 'hosting');
+  const type = asString(hosting.type, 'hosting.type', DEFAULTS.hosting.type);
+  if (!HOSTING_TYPES.includes(type)) {
+    throw new AidevError(`${source}: hosting.type must be one of ${HOSTING_TYPES.join(', ')} (got ${type})`);
   }
-  for (const k of ['organization', 'project', 'repository']) {
-    if (!asString(ado[k], `azure_devops.${k}`, null)) {
-      throw new AidevError(`${source}: azure_devops.${k} is required`);
-    }
-  }
-  // A PAT in the config file is the one mistake that leaks a credential into
-  // git, so refuse it outright instead of warning.
-  for (const [k, v] of Object.entries(ado)) {
+  // A token in the config file is the one mistake that leaks a credential
+  // into git, so refuse it outright instead of warning.
+  for (const [k, v] of Object.entries(hosting)) {
     if (/^(pat|token|password|secret)$/i.test(k)) {
       throw new AidevError(
-        `${source}: azure_devops.${k} must not be set — supply credentials via the ` +
-        `environment variable named by azure_devops.auth_env`);
+        `${source}: hosting.${k} must not be set — supply credentials via the ` +
+        'environment variable named by hosting.auth_env');
     }
     if (typeof v === 'string' && /^[A-Za-z0-9+/=]{40,}$/.test(v) && k !== 'auth_env') {
-      throw new AidevError(`${source}: azure_devops.${k} looks like an embedded credential`);
+      throw new AidevError(`${source}: hosting.${k} looks like an embedded credential`);
     }
   }
-
-  const triage = ado.triage || {};
-  const sync = raw.sync || {};
-  const task = raw.task || {};
-  const knowledge = raw.knowledge || {};
-  const eve = raw.self_evolution || {};
-  const gates = raw.quality_gates || {};
-
-  // `model: sonnet` is the obvious way to mis-write this, and treating it as an
-  // empty mapping would silently ignore the one thing the author asked for.
-  if (raw.model != null && (typeof raw.model !== 'object' || Array.isArray(raw.model))) {
-    throw new AidevError(
-      `${source}: model must be a mapping — write "model:" on its own line with ` +
-      `"  agent: ${String(raw.model)}" beneath it`);
+  if (type === 'azure-devops') {
+    for (const k of ['organization', 'project', 'repository']) {
+      if (!asString(hosting[k], `hosting.${k}`, null)) {
+        throw new AidevError(`${source}: hosting.${k} is required when hosting.type is azure-devops`);
+      }
+    }
   }
-  const model = raw.model || {};
+  const triage = mapping(hosting.triage, 'hosting.triage');
+  const hostingCfg = {
+    type,
+    organization: asString(hosting.organization, 'hosting.organization', null),
+    project: asString(hosting.project, 'hosting.project', null),
+    repository: asString(hosting.repository, 'hosting.repository', null),
+    auth_env: asString(hosting.auth_env, 'hosting.auth_env', DEFAULTS.hosting.auth_env[type]),
+    tracking_branch: asString(hosting.tracking_branch, 'hosting.tracking_branch', DEFAULTS.hosting.tracking_branch),
+    triage: {
+      labels: asArray(triage.labels, 'hosting.triage.labels'),
+      area_path: asString(triage.area_path, 'hosting.triage.area_path', null),
+    },
+  };
+
+  // ---- tools --------------------------------------------------------------
+  const tools = mapping(raw.tools, 'tools');
+  const toolList = tools.default == null
+    ? [...DEFAULTS.tools.default]
+    : (typeof tools.default === 'string' ? [tools.default] : asArray(tools.default, 'tools.default'));
+  for (const t of toolList) {
+    if (!TOOLS.includes(t)) throw new AidevError(`${source}: tools.default contains unsupported tool "${t}" (supported: ${TOOLS.join(', ')})`);
+  }
+  if (toolList.length === 0) throw new AidevError(`${source}: tools.default must name at least one tool`);
+  const agentTool = asString(tools.agent, 'tools.agent', toolList[0]);
+  if (!TOOLS.includes(agentTool)) throw new AidevError(`${source}: tools.agent "${agentTool}" is not a supported tool`);
+  if (!toolList.includes(agentTool)) {
+    throw new AidevError(`${source}: tools.agent "${agentTool}" is not listed in tools.default (${toolList.join(', ')})`);
+  }
+  // Per-agent overrides: `tools.agents.<name>: { tool, model }`. A tool named
+  // here must be one the PKG sets up, or its configuration files would be
+  // missing when the agent starts. `model: ""` means "pass no model flag".
+  const agentsRaw = mapping(tools.agents, 'tools.agents');
+  const agentOverrides = {};
+  for (const [name, v] of Object.entries(agentsRaw)) {
+    if (!toolsMod.AGENT_NAME_RE.test(name)) {
+      throw new AidevError(`${source}: tools.agents has an invalid agent name ${JSON.stringify(name)}`);
+    }
+    const m = mapping(v, `tools.agents.${name}`);
+    const tool = asString(m.tool, `tools.agents.${name}.tool`, null);
+    if (tool != null && !TOOLS.includes(tool)) {
+      throw new AidevError(`${source}: tools.agents.${name}.tool "${tool}" is not a supported tool (supported: ${TOOLS.join(', ')})`);
+    }
+    if (tool != null && !toolList.includes(tool)) {
+      throw new AidevError(`${source}: tools.agents.${name}.tool "${tool}" is not listed in tools.default (${toolList.join(', ')})`);
+    }
+    const entry = { tool };
+    if (m.model !== undefined) entry.model = asModel(m.model, `tools.agents.${name}.model`, null);
+    agentOverrides[name] = entry;
+  }
+
+  const sync = mapping(raw.sync, 'sync');
+  const pr = mapping(sync.pr, 'sync.pr');
+  const task = mapping(raw.task, 'task');
+  const knowledge = mapping(raw.knowledge, 'knowledge');
+  const eve = mapping(raw.self_evolution, 'self_evolution');
+  const gates = mapping(raw.quality_gates, 'quality_gates');
 
   const cfg = {
     version,
@@ -277,24 +353,28 @@ function validateConfig(raw, source = CONFIG_NAME) {
       exclude: asArray(pkg.exclude, 'package.exclude'),
     },
     secrets_paths: asArray(raw.secrets_paths, 'secrets_paths'),
-    azure_devops: {
-      organization: String(ado.organization),
-      project: String(ado.project),
-      repository: String(ado.repository),
-      wrapper_repository: asString(ado.wrapper_repository, 'azure_devops.wrapper_repository', null),
-      auth_env: asString(ado.auth_env, 'azure_devops.auth_env', 'AZURE_DEVOPS_PAT'),
-      triage: {
-        labels: asArray(triage.labels, 'azure_devops.triage.labels'),
-        area_path: asString(triage.area_path, 'azure_devops.triage.area_path', null),
-      },
+    hosting: hostingCfg,
+    // Modules that talk to Azure DevOps read this alias; it is null for any
+    // other hosting so they can refuse cleanly instead of guessing.
+    azure_devops: type === 'azure-devops' ? {
+      organization: hostingCfg.organization,
+      project: hostingCfg.project,
+      repository: hostingCfg.repository,
+      auth_env: hostingCfg.auth_env,
+      triage: hostingCfg.triage,
+    } : null,
+    tools: {
+      default: toolList,
+      agent: agentTool,
+      agent_model: asModel(tools.agent_model, 'tools.agent_model', DEFAULTS.tools.agent_model),
+      agents: agentOverrides,
     },
     sync: {
-      tracking_branch: asString(sync.tracking_branch, 'sync.tracking_branch', DEFAULTS.sync.tracking_branch),
+      tracking_branch: hostingCfg.tracking_branch,
       auto_pr: asBool(sync.auto_pr, 'sync.auto_pr', DEFAULTS.sync.auto_pr),
-      wrapper_pr: {
-        target_branch: asString(
-          (sync.wrapper_pr || {}).target_branch, 'sync.wrapper_pr.target_branch', 'main'),
-        reviewers: asArray((sync.wrapper_pr || {}).reviewers, 'sync.wrapper_pr.reviewers'),
+      pr: {
+        target_branch: asString(pr.target_branch, 'sync.pr.target_branch', hostingCfg.tracking_branch),
+        reviewers: asArray(pr.reviewers, 'sync.pr.reviewers'),
       },
       remote_check_timeout_ms: asInt(
         sync.remote_check_timeout_ms, 'sync.remote_check_timeout_ms',
@@ -307,7 +387,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
         DEFAULTS.sync.lease_ttl_minutes, { min: 1, max: 10080 }),
     },
     task: {
-      state_backend: asString(task.state_backend, 'task.state_backend', DEFAULTS.task.state_backend),
       cache_dir: asString(task.cache_dir, 'task.cache_dir', DEFAULTS.task.cache_dir),
       lease_ttl_minutes: asInt(task.lease_ttl_minutes, 'task.lease_ttl_minutes',
         DEFAULTS.task.lease_ttl_minutes, { min: 1, max: 10080 }),
@@ -319,21 +398,17 @@ function validateConfig(raw, source = CONFIG_NAME) {
     knowledge: {
       max_files_per_dir: asInt(knowledge.max_files_per_dir, 'knowledge.max_files_per_dir',
         DEFAULTS.knowledge.max_files_per_dir, { min: 1, max: 1000 }),
-      subagent_concurrency: asInt(knowledge.subagent_concurrency, 'knowledge.subagent_concurrency',
-        DEFAULTS.knowledge.subagent_concurrency, { min: 1, max: 64 }),
       inventory_shard_size: asInt(knowledge.inventory_shard_size, 'knowledge.inventory_shard_size',
         DEFAULTS.knowledge.inventory_shard_size, { min: 1, max: 100000 }),
       agent_timeout_ms: asInt(knowledge.agent_timeout_ms, 'knowledge.agent_timeout_ms',
         DEFAULTS.knowledge.agent_timeout_ms, { min: 10000, max: 7200000 }),
+      agent_batch_size: asInt(knowledge.agent_batch_size, 'knowledge.agent_batch_size',
+        DEFAULTS.knowledge.agent_batch_size, { min: 1, max: 500 }),
       // Generation targets remain package.include. Evidence is independently
       // repository-wide by default so a docs-only target set is still checked
       // against source code, tests, configuration and CI.
       evidence: (() => {
-        if (knowledge.evidence != null &&
-            (typeof knowledge.evidence !== 'object' || Array.isArray(knowledge.evidence))) {
-          throw new AidevError(`${source}: knowledge.evidence must be a mapping`);
-        }
-        const evidence = knowledge.evidence || {};
+        const evidence = mapping(knowledge.evidence, 'knowledge.evidence');
         return {
           include: evidence.include == null
             ? [...DEFAULTS.knowledge.evidence.include]
@@ -345,23 +420,40 @@ function validateConfig(raw, source = CONFIG_NAME) {
         };
       })(),
     },
-    model: {
-      agent: asModel(model.agent, 'model.agent', DEFAULTS.model.agent),
-    },
     self_evolution: {
       enabled: asBool(eve.enabled, 'self_evolution.enabled', DEFAULTS.self_evolution.enabled),
       cadence: asString(eve.cadence, 'self_evolution.cadence', DEFAULTS.self_evolution.cadence),
     },
     quality_gates: {},
   };
+  // Older call sites read the agent model here.
+  cfg.model = { agent: cfg.tools.agent_model };
   for (const [k, v] of Object.entries(gates)) {
     cfg.quality_gates[k] = asString(v, `quality_gates.${k}`, null);
   }
-  if (!['azure_devops', 'local'].includes(cfg.task.state_backend)) {
-    throw new AidevError(`${source}: task.state_backend must be azure_devops or local`);
-  }
   return cfg;
 }
+
+/**
+ * The tool and model one named agent runs with, after `tools.agents.<name>`
+ * overrides are applied to the PKG-wide `tools.agent` / `tools.agent_model`.
+ * Returns { tool, model } with model null meaning "no model flag".
+ */
+function agentSettings(config, agentName) {
+  const tools = (config && config.tools) || {};
+  const over = (tools.agents && tools.agents[agentName]) || {};
+  // `config.model.agent` is the older alias of tools.agent_model; a caller that
+  // built a config by hand may carry only that.
+  let baseModel = null;
+  if (tools.agent_model !== undefined) baseModel = tools.agent_model;
+  else if (config && config.model && config.model.agent !== undefined) baseModel = config.model.agent;
+  return {
+    tool: over.tool || tools.agent || 'claude',
+    model: Object.prototype.hasOwnProperty.call(over, 'model') ? over.model : (baseModel == null ? null : baseModel),
+  };
+}
+
+
 
 function configPath(repoRoot) { return path.join(repoRoot, CONFIG_NAME); }
 function policyPath(repoRoot) { return path.join(repoRoot, POLICY_REL); }
@@ -424,9 +516,7 @@ function loadPolicy(repoRoot, { required = false } = {}) {
     return {
       version: 1,
       protected: [...ALWAYS_PROTECTED],
-      read_only: ['src/**'],
-      writable_during_sync: ['knowledge/**'],
-      writable: [],
+      ...DEFAULT_POLICY_SCOPES,
       _fallback: true,
     };
   }
@@ -456,9 +546,9 @@ function tmpDir() { return os.tmpdir(); }
 
 module.exports = {
   CONFIG_NAME, LOCK_NAME, POLICY_REL, SYNC_LOCK_REL, EJECT_MARKER_NAME, ALWAYS_PROTECTED, DEFAULTS,
-  MODEL_MAX_LENGTH,
+  DEFAULT_POLICY_SCOPES, HOSTING_TYPES, TOOLS, MODEL_MAX_LENGTH,
   configPath, policyPath, lockPath, syncLockPath, ejectMarkerPath, readEjectMarker,
   loadConfig, validateConfig, loadPolicy, validatePolicy, loadLock, saveLock,
   readTextIfExists, readJsonIfExists, writeFileAtomic, writeJsonAtomic,
-  sha256, sha256File, secretGlobs, assertModel, nowIso, tmpDir,
+  sha256, sha256File, secretGlobs, assertModel, agentSettings, nowIso, tmpDir,
 };

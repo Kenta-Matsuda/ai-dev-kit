@@ -1,0 +1,88 @@
+[[files-and-state]]
+[appendix]
+== PKG 内のファイル
+
+{project-name} が PKG の clone に置くファイルと、コミットするかどうかの一覧です。
+
+=== コミットするもの
+
+[cols="2,3,2",options="header"]
+|===
+|パス |内容 |誰が書くか
+
+|`aidev.yaml`
+|PKG の設定
+|`aidev init`、人間
+
+|`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `.claude/settings.json`
+|配布される agent・skill・hooks
+|`aidev init` / `aidev update`。手編集は drift
+
+|`CLAUDE.md`
+|Claude への共通の指示
+|同上
+
+|`.mcp.json`
+|MCP サーバーの登録
+|同上
+
+|`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `AGENTS.md`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`
+|`tools.default` に `copilot` / `codex` / `kiro` を書いたときだけ。同じテンプレートから生成した各ツール用の指示・agent・skill
+|同上。ツールを外すと次の `aidev update` で削除
+
+|`.aidev/policy.yaml`
+|承認済みの書き込み権限 policy
+|`aidev permission … --approve`、`aidev init`
+
+|`.aidev/materialized.json`
+|配布ファイルのハッシュ。drift の判定に使う
+|`aidev init` / `aidev update`
+
+|`.aidev/knowledge/index.md`, `overview.md`, ページ
+|LLM Wiki
+|knowledge-builder agent
+
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|Wiki の構造と進捗
+|CLI のみ
+
+|`.aidev/workflows/<name>/`
+|workflow の定義と承認記録
+|`aidev workflow`、人間
+
+|`.aidev/.gitignore`
+|下の「コミットしないもの」を除外する
+|`aidev init` / `aidev update`
+|===
+
+`.claude/settings.local.json` は個人設定で、kit の管理外です。
+
+=== コミットしないもの
+
+`.aidev/.gitignore` が除外します。消しても次のコマンドで作り直されます。
+
+[cols="2,3",options="header"]
+|===
+|パス |内容
+
+|`.aidev/cache/`
+|remote 確認のキャッシュ、sync の一時 worktree、セッションの記録
+
+|`.aidev/leases/`, `.aidev/sync.lock`
+|sync と作業のロック
+
+|`.aidev/tasks/`
+|`aidev task` のローカルキャッシュ
+
+|`.aidev/knowledge/.cache/`
+|agent との受け渡しファイル
+
+|`.aidev/workflows/*/runs/`
+|workflow の実行ログ
+|===
+
+一時的に現れるもの: `.aidev/policy.candidate.yaml`（承認すると消えます）、`.aidev/ejected.json`（`aidev eject` が書き、`aidev init` が消します）。
+
+=== 端末側（AIDEV_HOME）
+
+`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（kit 更新の確認結果）を置きます。kit 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。

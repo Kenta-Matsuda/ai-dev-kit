@@ -1,13 +1,17 @@
-# ai-dev-kit — wrapper repository CI.
+# ai-dev-kit — package CI gate.
 #
-# This pipeline is layer 5 of the permission design: the enforcement that sits
-# outside the AI. Layers 1 and 2 (the deny list and the runtime guard) can be
-# edited away locally; this one cannot, because the change that disables it is
-# itself a diff that this pipeline is required to approve.
+# Runs `aidev check` on every pull request of a package that uses ai-dev-kit.
+# This is the enforcement that sits outside the AI: the deny list and the
+# runtime guard can be edited away locally, but the diff that disables them is
+# itself something this pipeline is required to approve.
 #
-# Set this as a REQUIRED build-validation policy on the wrapper's default
-# branch. Without that, a drifted `.claude/**` merges cleanly and the whole
+# Set this as a REQUIRED build-validation policy on the package's default
+# branch. Without that, a hand-edited `.claude/**` merges cleanly and the whole
 # integrity model is advisory.
+#
+# The CLI is not part of the package; the pipeline clones the central kit and
+# runs it from there. Pin AIDEV_KIT_REF to a tag or commit when you want every
+# build to use the same kit version.
 
 trigger:
   branches:
@@ -23,12 +27,13 @@ pool:
 variables:
   - name: NODE_VERSION
     value: '20.x'
+  - name: AIDEV_KIT_URL
+    value: 'https://dev.azure.com/<org>/<project>/_git/ai-dev-kit'
+  - name: AIDEV_KIT_REF
+    value: 'main'
 
 steps:
   - checkout: self
-    # The 3-SHA model compares the submodule pointer against the Wiki's target,
-    # so a checkout without submodules cannot evaluate `submoduleSha` at all.
-    submodules: true
     fetchDepth: 0
 
   - task: NodeTool@0
@@ -36,34 +41,38 @@ steps:
     inputs:
       versionSpec: $(NODE_VERSION)
 
-  # CI executes the CLI version committed in the wrapper. The installer is for
-  # a developer's dedicated ai-dev-kit checkout and intentionally rejects a
-  # wrapper checkout.
-  - script: node ./cli/bin/aidev.js --version
-    displayName: 'Verify wrapper CLI'
+  - script: |
+      set -euo pipefail
+      git clone --quiet --depth 1 --branch "$(AIDEV_KIT_REF)" "$(AIDEV_KIT_URL)" "$(Pipeline.Workspace)/ai-dev-kit"
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" --version
+    displayName: 'Get ai-dev-kit'
 
   # Runtime, tooling and connectivity. Advisory: doctor reports environment
-  # facts (a missing PAT, a proxy) that are not the PR author's fault.
+  # facts (a missing token, a proxy) that are not the PR author's fault.
   - script: |
       set -euo pipefail
-      node ./cli/bin/aidev.js doctor
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" doctor
     displayName: 'aidev doctor'
     continueOnError: true
+    env:
+      AIDEV_NO_UPDATE_CHECK: '1'
 
   # The gate. Exit codes are the contract:
-  #   0 ok · 2 drift in .claude/** CLAUDE.md .mcp.json · 3 policy · 4 Wiki stale
-  # Nothing here interprets them further — a non-zero exit fails the build, and
-  # the exit code tells the author which of the four problems they have.
+  #   0 ok · 2 tool config drift · 3 policy · 4 Wiki missing or broken
   - script: |
       set -euo pipefail
-      node ./cli/bin/aidev.js check
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" check
     displayName: 'aidev check (required)'
+    env:
+      AIDEV_NO_UPDATE_CHECK: '1'
 
   - script: |
       set -euo pipefail
-      node ./cli/bin/aidev.js check --json > "$(Build.ArtifactStagingDirectory)/aidev-check.json" || true
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" check --json > "$(Build.ArtifactStagingDirectory)/aidev-check.json" || true
     displayName: 'Capture check report'
     condition: always()
+    env:
+      AIDEV_NO_UPDATE_CHECK: '1'
 
   - publish: $(Build.ArtifactStagingDirectory)
     artifact: aidev-check

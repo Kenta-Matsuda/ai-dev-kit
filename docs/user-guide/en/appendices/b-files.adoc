@@ -1,0 +1,88 @@
+[[files-and-state]]
+[appendix]
+== Files in the package
+
+The files {project-name} places in a package clone, and whether they are committed.
+
+=== Committed
+
+[cols="2,3,2",options="header"]
+|===
+|Path |Contents |Written by
+
+|`aidev.yaml`
+|Package settings
+|`aidev init`, humans
+
+|`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `.claude/settings.json`
+|Distributed agents, skills and hooks
+|`aidev init` / `aidev update`. Hand edits are drift
+
+|`CLAUDE.md`
+|Shared instructions for Claude
+|Same
+
+|`.mcp.json`
+|MCP server registration
+|Same
+
+|`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `AGENTS.md`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`
+|Only when `tools.default` lists `copilot` / `codex` / `kiro`: the instructions, agents and skills for each tool, generated from the same templates
+|Same. Removing the tool deletes them at the next `aidev update`
+
+|`.aidev/policy.yaml`
+|The approved write-permission policy
+|`aidev permission … --approve`, `aidev init`
+
+|`.aidev/materialized.json`
+|Hashes of the distributed files, used to detect drift
+|`aidev init` / `aidev update`
+
+|`.aidev/knowledge/index.md`, `overview.md`, pages
+|The LLM Wiki
+|The knowledge-builder agent
+
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|Wiki structure and progress
+|The CLI only
+
+|`.aidev/workflows/<name>/`
+|Workflow definitions and approvals
+|`aidev workflow`, humans
+
+|`.aidev/.gitignore`
+|Excludes the files listed under "Not committed"
+|`aidev init` / `aidev update`
+|===
+
+`.claude/settings.local.json` is personal and outside the kit's management.
+
+=== Not committed
+
+Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
+
+[cols="2,3",options="header"]
+|===
+|Path |Contents
+
+|`.aidev/cache/`
+|Remote-check cache, the temporary sync worktree, session records
+
+|`.aidev/leases/`, `.aidev/sync.lock`
+|Sync and work locks
+
+|`.aidev/tasks/`
+|Local cache for `aidev task`
+
+|`.aidev/knowledge/.cache/`
+|Files exchanged with the agent
+
+|`.aidev/workflows/*/runs/`
+|Workflow run logs
+|===
+
+Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aidev/ejected.json` (written by `aidev eject`, removed by `aidev init`).
+
+=== On this machine (AIDEV_HOME)
+
+Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from.

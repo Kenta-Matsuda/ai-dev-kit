@@ -1,0 +1,120 @@
+[[daily]]
+== Daily use
+
+There are three things to do day to day. Look at `aidev status` before you start. Run `aidev sync` when it says the Wiki is behind. Run `aidev update` when it says a newer kit is available.
+
+[[daily-status]]
+=== Reading aidev status
+
+[source,bash]
+----
+aidev status
+----
+
+The symbol and sentence on the second line tell you what to do next.
+
+[cols="3,2",options="header"]
+|===
+|Shown |What to do
+
+|`✅ the Wiki describes the code this work is based on.`
+|Nothing.
+
+|`⚠️ … has changed since the Wiki was generated … run "aidev sync"`
+|The code moved on and the Wiki is behind. Run xref:daily-sync[aidev sync] or wait for the nightly pipeline's PR. You can keep working.
+
+|`⚠️ N page(s) still await prose regeneration — run "aidev knowledge build".`
+|Some pages have no text yet. Run `aidev knowledge build`.
+
+|`⚠️ origin/main has moved ahead … Run "aidev sync"`
+|`main` is ahead of your working branch. `git pull` at a good moment, and sync if needed.
+
+|`⚠️ origin/main has new commits … that are not fetched yet`
+|Run `git fetch`, then `aidev status` again.
+
+|`ℹ️ remote unverified …`
+|The remote could not be reached (offline, proxy). Your local state is consistent, so you can keep working.
+
+|`❌ LLM Wiki has not been generated yet …`
+|There is no Wiki. **While this lasts, every write by the AI is blocked.** If `git pull` should bring it, pull. If not, ask the package owner or run `aidev knowledge build`.
+|===
+
+For other messages, see xref:troubleshooting-status[Troubleshooting].
+
+In the lines that follow, check that `tool config` says `matches the kit` and `policy` says `placed`. `DRIFT` means someone hand-edited `.claude/` or similar, or the kit is old (xref:daily-update[Updating the kit]). `policy missing` is fixed with `aidev permission configure --approve`.
+
+=== How the Wiki is used
+
+Following the instructions in `CLAUDE.md`, Claude reads `.aidev/knowledge/index.md` and `overview.md` before it reads the source. Every statement in the Wiki links to the file it is based on, and Claude confirms it there.
+
+You never need to fix the Wiki by hand. If you find a mistake, fix the source (a comment or the structure) and let the next sync pick it up. Hand edits are detected, and the next generation asks for `--force` (xref:knowledge-handedit[Why not to edit by hand]).
+
+[[daily-sync]]
+=== aidev sync — catch the Wiki up with the code
+
+Run it when `aidev status` says `run "aidev sync"`, or right after a package PR is merged. Most teams leave it to the nightly pipeline and run it by hand only when in a hurry.
+
+[source,bash]
+----
+aidev sync
+----
+
+sync does the following. **It never touches your checkout.**
+
+. Fetches `origin/main` and takes its tip as the target.
+. Checks the target out into a temporary worktree (`.aidev/cache/sync-worktree/`).
+. knowledge-builder rewrites only the pages that changed.
+. Commits to the `ai/wiki-<sha>` branch, pushes it, and opens a PR.
+
+[source,text]
+----
+✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
+✓ pushed ai/wiki-9f8e7d6c5b4a
+✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
+    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
+✓ sync lease released
+----
+
+Review the PR and merge it. After the merge, each member receives the Wiki with `git pull`.
+
+* `✓ the Wiki committed on origin/main already describes …; "git pull" to receive it.` → the latest Wiki is already merged. Run `git pull`.
+* Hosting is `generic`, or the token is not set → it pushes and asks you to open the PR by hand.
+* `✗ sync failed: …` → fix the cause and run `aidev sync --resume`. To start over, `aidev sync --abort`.
+
+[[daily-update]]
+=== aidev update — update the kit
+
+When a newer kit exists, running a command in the package shows this:
+
+[source,text]
+----
+⚠ a newer ai-dev-kit is available (9491efe → e0aa66c). Run "aidev update".
+  Update now, before running this command? (y/N):
+----
+
+`y` updates only the kit first. To also update the distributed files in the package (`.claude/` and so on), run this at the package root:
+
+[source,bash]
+----
+aidev update
+----
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.2.0 → 0.2.1 (9491efe → e0aa66c)
+✓ demo-pkg: updated 3 file(s)
+    ~ .claude/agents/knowledge-builder.md
+    ~ .claude/skills/knowledge-usage/SKILL.md
+    ~ CLAUDE.md
+    Review with "git diff", then commit so your team receives the update.
+----
+
+Review the diff, commit it and open a PR. After the merge, the other members get the same state with just `git pull`.
+
+* `✗ … file(s) were edited locally and were not replaced` → some files were hand-edited. Send the change to the kit as a PR, or replace them with the distributed version using `aidev update --force`.
+* To update every package registered on this machine at once, run `aidev update --all`.
+
+=== Related
+
+* xref:knowledge[LLM Wiki] — how generation works and how to resume
+* xref:cli-status[aidev status], xref:cli-sync[aidev sync], xref:cli-update[aidev update]

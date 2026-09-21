@@ -1,5 +1,5 @@
 'use strict';
-/** Unit tests for yaml, paths, config validation, leases. */
+/** Unit tests for yaml, paths, config validation (schema v2), leases. */
 
 const path = require('path');
 const fs = require('fs');
@@ -15,7 +15,7 @@ function run() {
 
   test('nested maps and lists', () => {
     const v = yaml.parse([
-      'version: 1',
+      'version: 2',
       'package:',
       '  name: my-pkg',
       '  include: ["a/**", "b/**"]',
@@ -23,7 +23,7 @@ function run() {
       '    - "**/node_modules/**"',
       '    - "**/vendor/**"',
     ].join('\n'));
-    eq(v.version, 1);
+    eq(v.version, 2);
     eq(v.package.name, 'my-pkg');
     eq(v.package.include, ['a/**', 'b/**']);
     eq(v.package.exclude, ['**/node_modules/**', '**/vendor/**']);
@@ -71,7 +71,7 @@ function run() {
   });
 
   test('round-trips through stringify', () => {
-    const src = { version: 1, protected: ['.claude/**', 'CLAUDE.md'], read_only: ['src/**'], nested: { a: 1, b: 'x y' } };
+    const src = { version: 1, protected: ['.claude/**', 'CLAUDE.md'], read_only: ['**'], nested: { a: 1, b: 'x y' } };
     const back = yaml.parse(yaml.stringify(src));
     eq(back, src);
   });
@@ -90,7 +90,7 @@ function run() {
   });
 
   test('".." is resolved lexically before matching', () => {
-    eq(P.normalizeRel('knowledge/../.claude/settings.json'), '.claude/settings.json');
+    eq(P.normalizeRel('.aidev/knowledge/../../.claude/settings.json'), '.claude/settings.json');
     eq(P.normalizeRel('a/b/../../c'), 'c');
   });
 
@@ -106,6 +106,13 @@ function run() {
     ok(P.matches('.claude/**', '.claude/settings.json'), 'child');
     ok(P.matches('.claude/**', '.claude/agents/x/y.md'), 'deep');
     ok(!P.matches('.claude/**', '.claudex/settings.json'), 'prefix must not leak');
+    ok(P.matches('.aidev/knowledge/**', '.aidev/knowledge/api/auth.md'), 'nested kit dir');
+    ok(!P.matches('.aidev/knowledge/**', '.aidev/policy.yaml'), 'sibling under .aidev is not the Wiki');
+  });
+
+  test('"**" alone matches every path in the repository', () => {
+    ok(P.matches('**', 'notes.md'), 'root file');
+    ok(P.matches('**', 'src/api/auth.ts'), 'nested file');
   });
 
   test('"*" stays within one segment', () => {
@@ -123,7 +130,7 @@ function run() {
   });
 
   test('traversal is matched against the resolved path', () => {
-    ok(P.matches('.claude/**', 'knowledge/../.claude/settings.json'), 'escape caught');
+    ok(P.matches('.claude/**', '.aidev/knowledge/../../.claude/settings.json'), 'escape caught');
   });
 
   test('firstMatch reports which pattern fired', () => {
@@ -132,28 +139,67 @@ function run() {
   });
 
   test('include/exclude interaction', () => {
-    ok(P.isIncluded('src/src/a.ts', ['src/src/**'], ['**/vendor/**']));
-    ok(!P.isIncluded('src/src/vendor/a.ts', ['src/src/**'], ['**/vendor/**']), 'exclude wins');
-    ok(!P.isIncluded('other/a.ts', ['src/src/**'], []), 'outside include');
+    ok(P.isIncluded('src/a.ts', ['src/**'], ['**/vendor/**']));
+    ok(!P.isIncluded('src/vendor/a.ts', ['src/**'], ['**/vendor/**']), 'exclude wins');
+    ok(!P.isIncluded('other/a.ts', ['src/**'], []), 'outside include');
     ok(P.isIncluded('anything', [], []), 'empty include = no restriction');
   });
 
-  suite('config: validation');
+  suite('config: validation (schema v2)');
 
   const base = {
-    version: 1,
+    version: 2,
     package: { name: 'p' },
-    azure_devops: { organization: 'o', project: 'pr', repository: 'r' },
+    hosting: { type: 'azure-devops', organization: 'o', project: 'pr', repository: 'r' },
   };
+  const clone = (o) => JSON.parse(JSON.stringify(o));
 
   test('defaults are filled in', () => {
-    const c = cfg.validateConfig(JSON.parse(JSON.stringify(base)));
-    eq(c.sync.tracking_branch, 'main');
+    const c = cfg.validateConfig(clone(base));
+    eq(c.version, 2);
+    eq(c.hosting.type, 'azure-devops');
+    eq(c.hosting.tracking_branch, 'main');
+    eq(c.hosting.auth_env, 'AZURE_DEVOPS_PAT');
+    eq(c.sync.tracking_branch, 'main', 'sync.tracking_branch mirrors hosting');
     eq(c.sync.remote_check_timeout_ms, 3000);
+    eq(c.sync.pr.target_branch, 'main');
     eq(c.task.lease_ttl_minutes, 120);
     eq(c.knowledge.max_files_per_dir, 20);
-    eq(c.model.agent, 'sonnet');
+    eq(c.knowledge.evidence.include, ['**']);
+    eq(c.tools.default, ['claude']);
+    eq(c.tools.agent, 'claude');
+    eq(c.tools.agent_model, 'sonnet');
     eq(c.self_evolution.enabled, true);
+  });
+
+  test('azure_devops and model.agent aliases are derived from hosting and tools', () => {
+    const c = cfg.validateConfig(clone(base));
+    eq(c.azure_devops.organization, 'o');
+    eq(c.azure_devops.project, 'pr');
+    eq(c.azure_devops.repository, 'r');
+    eq(c.azure_devops.auth_env, 'AZURE_DEVOPS_PAT');
+    eq(c.model.agent, 'sonnet', 'model.agent aliases tools.agent_model');
+    const g = cfg.validateConfig({ version: 2, package: { name: 'p' }, hosting: { type: 'generic' } });
+    eq(g.azure_devops, null, 'generic hosting has no Azure DevOps alias');
+    eq(g.hosting.auth_env, null);
+    eq(g.sync.tracking_branch, 'main');
+  });
+
+  test('hosting.type is validated and azure-devops needs its coordinates', () => {
+    throws(() => cfg.validateConfig({ ...clone(base), hosting: { type: 'gitlab' } }), /hosting\.type/);
+    throws(() => cfg.validateConfig({ version: 2, package: { name: 'p' }, hosting: { type: 'azure-devops', organization: 'o' } }),
+      /hosting\.project/);
+    throws(() => cfg.validateConfig({ version: 2, package: { name: 'p' }, hosting: { type: 'azure-devops', organization: 'o', project: 'pr' } }),
+      /hosting\.repository/);
+    // Omitted hosting defaults to generic, which needs nothing.
+    eq(cfg.validateConfig({ version: 2, package: { name: 'p' } }).hosting.type, 'generic');
+  });
+
+  test('tools.default and tools.agent only accept supported tools', () => {
+    throws(() => cfg.validateConfig({ ...clone(base), tools: { default: ['cursor'] } }), /unsupported tool/);
+    throws(() => cfg.validateConfig({ ...clone(base), tools: { agent: 'cursor' } }), /tools\.agent/);
+    throws(() => cfg.validateConfig({ ...clone(base), tools: { default: [] } }), /at least one tool/);
+    eq(cfg.validateConfig({ ...clone(base), tools: { default: 'claude' } }).tools.default, ['claude'], 'scalar default is accepted');
   });
 
   test('a model identifier is validated by shape, not against a list of models', () => {
@@ -166,8 +212,9 @@ function run() {
       'arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-profile',
       'my_foundry_deployment',
     ]) {
-      eq(cfg.validateConfig({ ...base, model: { agent: good } }).model.agent, good,
-        `rejected a legitimate model: ${good}`);
+      const c = cfg.validateConfig({ ...clone(base), tools: { agent_model: good } });
+      eq(c.tools.agent_model, good, `rejected a legitimate model: ${good}`);
+      eq(c.model.agent, good, `alias out of step for: ${good}`);
     }
   });
 
@@ -176,47 +223,78 @@ function run() {
       '--dangerously-skip-permissions', '-p', 'a b', 'x\ny', 'a;b', 'a&&b',
       'a|b', 'a$b', "a'b", 'x'.repeat(cfg.MODEL_MAX_LENGTH + 1),
     ]) {
-      throws(() => cfg.validateConfig({ ...base, model: { agent: bad } }),
-        /model\.agent/, `accepted an unsafe model: ${JSON.stringify(bad)}`);
+      throws(() => cfg.validateConfig({ ...clone(base), tools: { agent_model: bad } }),
+        /tools\.agent_model/, `accepted an unsafe model: ${JSON.stringify(bad)}`);
     }
+    throws(() => cfg.assertModel('-p'), /model/, 'assertModel applies the same shape check');
+    eq(cfg.assertModel(''), null, 'assertModel: empty means "let the tool decide"');
   });
 
   test('an explicitly empty model means "let Claude Code decide", not the default', () => {
     // Distinct from an absent key: absent takes the kit default, empty means the
     // CLI passes no --model at all and leaves the resolution to Claude Code.
-    eq(cfg.validateConfig({ ...base, model: { agent: '' } }).model.agent, null);
-    eq(cfg.validateConfig({ ...base, model: {} }).model.agent, 'sonnet');
+    const empty = cfg.validateConfig({ ...clone(base), tools: { agent_model: '' } });
+    eq(empty.tools.agent_model, null);
+    eq(empty.model.agent, null);
+    eq(cfg.validateConfig({ ...clone(base), tools: {} }).tools.agent_model, 'sonnet');
   });
 
-  test('model written as a scalar is refused rather than silently ignored', () => {
-    // `model: sonnet` is the obvious way to mis-write this; treating it as an
+  test('tools written as a scalar is refused rather than silently ignored', () => {
+    // `tools: claude` is the obvious way to mis-write this; treating it as an
     // empty mapping would drop the one thing the author asked for.
-    throws(() => cfg.validateConfig({ ...base, model: 'sonnet' }), /must be a mapping/);
-    throws(() => cfg.validateConfig({ ...base, model: ['sonnet'] }), /must be a mapping/);
+    throws(() => cfg.validateConfig({ ...clone(base), tools: 'claude' }), /must be a mapping/);
+    throws(() => cfg.validateConfig({ ...clone(base), tools: ['claude'] }), /must be a mapping/);
+    throws(() => cfg.validateConfig({ ...clone(base), hosting: 'azure-devops' }), /must be a mapping/);
   });
 
   test('required fields are enforced', () => {
-    throws(() => cfg.validateConfig({ version: 1, package: {} }), /package.name/);
-    throws(() => cfg.validateConfig({ version: 1, package: { name: 'p' }, azure_devops: { organization: 'o' } }), /project/);
-    throws(() => cfg.validateConfig({ ...base, version: 2 }), /unsupported version/);
+    throws(() => cfg.validateConfig({ version: 2, package: {} }), /package.name/);
+    throws(() => cfg.validateConfig({ version: 2, package: { name: 'p' }, hosting: { type: 'azure-devops', organization: 'o' } }), /project/);
+    throws(() => cfg.validateConfig({ ...clone(base), version: 1 }), /unsupported version/);
+    throws(() => cfg.validateConfig({ ...clone(base), version: 3 }), /unsupported version/);
+    throws(() => cfg.validateConfig(null), /must be a mapping/);
   });
 
   test('embedded credentials are refused', () => {
-    throws(() => cfg.validateConfig({ ...base, azure_devops: { ...base.azure_devops, pat: 'x' } }),
+    throws(() => cfg.validateConfig({ ...clone(base), hosting: { ...base.hosting, pat: 'x' } }),
       /must not be set/, 'explicit pat key');
-    throws(() => cfg.validateConfig({ ...base, azure_devops: { ...base.azure_devops, token: 'y' } }),
+    throws(() => cfg.validateConfig({ ...clone(base), hosting: { ...base.hosting, token: 'y' } }),
       /must not be set/, 'token key');
+    throws(() => cfg.validateConfig({ ...clone(base), hosting: { ...base.hosting, PASSWORD: 'z' } }),
+      /must not be set/, 'case-insensitive');
     throws(() => cfg.validateConfig({
-      ...base,
-      azure_devops: { ...base.azure_devops, organization: 'A'.repeat(52) },
+      ...clone(base),
+      hosting: { ...base.hosting, organization: 'A'.repeat(52) },
     }), /embedded credential/, 'credential-shaped value');
+    // The env var *name* is exempt from the shape check: it is not a secret.
+    eq(cfg.validateConfig({ ...clone(base), hosting: { ...base.hosting, auth_env: 'A'.repeat(52) } }).hosting.auth_env, 'A'.repeat(52));
   });
 
   test('numeric bounds are checked', () => {
-    throws(() => cfg.validateConfig({ ...base, knowledge: { max_files_per_dir: 0 } }), />= 1/);
-    throws(() => cfg.validateConfig({ ...base, sync: { lease_ttl_minutes: -5 } }), />= 1/);
-    throws(() => cfg.validateConfig({ ...base, task: { max_concurrent: 'many' } }), /integer/);
+    throws(() => cfg.validateConfig({ ...clone(base), knowledge: { max_files_per_dir: 0 } }), />= 1/);
+    throws(() => cfg.validateConfig({ ...clone(base), sync: { lease_ttl_minutes: -5 } }), />= 1/);
+    throws(() => cfg.validateConfig({ ...clone(base), task: { max_concurrent: 'many' } }), /integer/);
+    throws(() => cfg.validateConfig({ ...clone(base), knowledge: { agent_batch_size: 0 } }), />= 1/);
   });
+
+  test('knowledge.evidence.exclude inherits package.exclude unless set', () => {
+    const inherited = cfg.validateConfig({ ...clone(base), package: { name: 'p', exclude: ['**/vendor/**'] } });
+    eq(inherited.knowledge.evidence.exclude, ['**/vendor/**']);
+    const explicit = cfg.validateConfig({
+      ...clone(base), package: { name: 'p', exclude: ['**/vendor/**'] },
+      knowledge: { evidence: { include: ['src/**'], exclude: ['**/dist/**'] } },
+    });
+    eq(explicit.knowledge.evidence.include, ['src/**']);
+    eq(explicit.knowledge.evidence.exclude, ['**/dist/**']);
+  });
+
+  test('quality gates are plain command strings', () => {
+    const c = cfg.validateConfig({ ...clone(base), quality_gates: { lint: 'npm run lint', test: 'npm test' } });
+    eq(c.quality_gates, { lint: 'npm run lint', test: 'npm test' });
+    throws(() => cfg.validateConfig({ ...clone(base), quality_gates: { lint: { cmd: 'x' } } }), /quality_gates\.lint/);
+  });
+
+  suite('config: policy');
 
   test('policy always re-adds the protected floor', () => {
     const p = cfg.validatePolicy({ version: 1, protected: ['custom/**'] });
@@ -224,18 +302,60 @@ function run() {
     ok(p.protected.includes('custom/**'), 'custom kept');
   });
 
+  test('the protected floor covers every kit control surface', () => {
+    for (const must of ['.claude/**', 'CLAUDE.md', '.mcp.json', '.aidev/policy.yaml', '.aidev/leases/**',
+      '.aidev/sync.lock', '.aidev/materialized.json', '.aidev/.gitignore', '.aidev/ejected.json']) {
+      ok(cfg.ALWAYS_PROTECTED.includes(must), `ALWAYS_PROTECTED lacks ${must}`);
+    }
+    eq(cfg.LOCK_NAME, '.aidev/materialized.json');
+    eq(cfg.EJECT_MARKER_NAME, '.aidev/ejected.json');
+    eq(cfg.POLICY_REL, '.aidev/policy.yaml');
+    eq(cfg.SYNC_LOCK_REL, '.aidev/sync.lock');
+  });
+
   test('a policy that omits the floor cannot unprotect the kit', () => {
     const p = cfg.validatePolicy({ version: 1, protected: [] });
     ok(p.protected.includes('.claude/**'), '.claude still protected');
     ok(p.protected.includes('.aidev/sync.lock'), 'sync lock still protected');
+    ok(p.protected.includes('.aidev/materialized.json'), 'materialized record still protected');
+    eq(p.writable, [], 'no writable region is invented');
+  });
+
+  test('a policy of another version is rejected', () => {
+    throws(() => cfg.validatePolicy({ version: 2 }), /unsupported version/);
+    throws(() => cfg.validatePolicy({ version: 1, read_only: 'src/**' }), /must be a list/);
   });
 
   test('a missing policy file falls back closed, not open', () => {
     const fx = makeRepo({ withPolicy: false });
     try {
       const p = cfg.loadPolicy(fx.root);
+      ok(p._fallback, 'flagged as the built-in fallback');
       ok(p.protected.includes('.claude/**'), 'protected floor present');
-      eq(p.read_only, ['src/**']);
+      eq(p.read_only, ['**'], 'the whole PKG is read-only');
+      eq(p.writable, ['.aidev/knowledge/**', '.aidev/workflows/**', 'aidev.yaml']);
+      eq(p.writable_during_sync, ['.aidev/knowledge/**']);
+      eq(cfg.DEFAULT_POLICY_SCOPES.read_only, ['**']);
+      throws(() => cfg.loadPolicy(fx.root, { required: true }), /permission configure/);
+    } finally { fx.cleanup(); }
+  });
+
+  test('the fixture policy and config load with the documented scopes', () => {
+    const fx = makeRepo();
+    try {
+      const p = cfg.loadPolicy(fx.root);
+      ok(!p._fallback, 'read from disk');
+      eq(p.read_only, ['**']);
+      ok(p.writable.includes('.aidev/knowledge/**'));
+      ok(p.writable.includes('aidev.yaml'));
+      ok(p.protected.includes('config/secrets/**'), 'PKG-specific protection kept');
+      const c = cfg.loadConfig(fx.root);
+      eq(c.version, 2);
+      eq(c.package.include, ['src/**', 'docs/**', 'mod/**']);
+      eq(c.secrets_paths, ['config/secrets/**']);
+      eq(c.hosting.repository, 'my-pkg');
+      eq(cfg.loadConfig(path.join(fx.root, 'src'), { required: false }), null, 'absent config is null when optional');
+      throws(() => cfg.loadConfig(path.join(fx.root, 'src')), /aidev init/, 'absent config names the fix');
     } finally { fx.cleanup(); }
   });
 
@@ -267,6 +387,7 @@ function run() {
     const fx = makeRepo();
     try {
       leases.acquireSyncLease(fx.root, { targetSha: 'a'.repeat(40), originalSha: 'b'.repeat(40), ttlMinutes: 60 });
+      ok(fs.existsSync(path.join(fx.root, '.aidev', 'sync.lock')), 'lease lives at .aidev/sync.lock');
       throws(() => leases.acquireSyncLease(fx.root, { targetSha: 'c'.repeat(40) }), /already held/);
       // Force expiry and confirm it still refuses without an explicit resume.
       const p = cfg.syncLockPath(fx.root);
@@ -288,9 +409,10 @@ function run() {
       throws(() => leases.createWorkLease(fx.root, { taskId: 'wi-1', branch: 'ai/wi-1', allowedPaths: [] }),
         /at least one/, 'empty scope');
       const l = leases.createWorkLease(fx.root, {
-        taskId: 'wi-1', branch: 'ai/wi-1', allowedPaths: ['src/src/**'], ttlMinutes: 30,
+        taskId: 'wi-1', branch: 'ai/wi-1', allowedPaths: ['src/**'], ttlMinutes: 30,
       });
       eq(l.branch, 'ai/wi-1');
+      ok(fs.existsSync(path.join(fx.root, '.aidev', 'leases', 'wi-1.json')), 'lease lives under .aidev/leases/');
       eq(leases.readWorkLease(fx.root, 'wi-1').taskId, 'wi-1');
       eq(leases.listWorkLeases(fx.root).length, 1);
       ok(leases.releaseWorkLease(fx.root, 'wi-1'), 'released');
@@ -303,11 +425,22 @@ function run() {
     try {
       throws(() => leases.createWorkLease(fx.root, {
         taskId: 'wi-2', branch: 'ai/wi-2',
-        allowedPaths: ['src/config/secrets/**'],
-        secretsPaths: ['src/config/secrets/**'],
+        allowedPaths: ['config/secrets/**'],
+        secretsPaths: ['config/secrets/**'],
       }), /protected path/);
+      throws(() => leases.createWorkLease(fx.root, {
+        taskId: 'wi-2', branch: 'ai/wi-2',
+        allowedPaths: ['.claude/**'],
+        protectedPaths: [...cfg.ALWAYS_PROTECTED],
+      }), /protected path/, 'nor over the kit control surface');
     } finally { fx.cleanup(); }
   });
 }
 
 module.exports = { run };
+
+if (require.main === module) {
+  const { summary } = require('./harness');
+  run();
+  process.exit(summary() ? 0 : 1);
+}

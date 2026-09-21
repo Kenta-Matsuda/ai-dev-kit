@@ -1,6 +1,6 @@
 ---
 name: knowledge-usage
-description: knowledge/ のLLM Wikiの引き方と、ソースで再確認すべき条件。コードを調べる前に必ず参照する。
+description: .aidev/knowledge/ のLLM Wikiの引き方と、ソースで再確認すべき条件。コードを調べる前に必ず参照する。
 ---
 
 # knowledge-usage
@@ -9,12 +9,12 @@ Wikiは**ソースを読む前の地図**です。地図であって、領土で
 
 ## 引く順番
 
-1. `knowledge/index.md` — PKG全体の地図
+1. `.aidev/knowledge/index.md` — PKG全体の地図（構成の俯瞰は `.aidev/knowledge/overview.md`）
 2. 対象ディレクトリの `index.md` — その階層の責務
 3. 個別ページ — シグネチャ・依存・注意点
 4. **根拠リンク先の実ソース** — 判断に使う前にここまで来る
 
-いきなり `src/` を grep しないでください。Wikiを引けば、
+いきなりPKGのソースを grep しないでください。Wikiを引けば、
 どこを見ればよいかが分かり、読むトークンが大幅に減ります。
 
 ## ソースで再確認すべき条件
@@ -31,8 +31,12 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
 
 セッション開始時の3SHA表示を思い出してください。
 
-- `submoduleSha == knowledgeSha` → Wikiは手元のコードを説明している（内部整合）
-- `submoduleSha != knowledgeSha` → **Wikiは別のコードを説明している**。書き込みも止まる
+- `knowledgeSha == baseSha` → Wikiは手元のコードを説明している（内部整合）
+- `knowledgeSha` が `baseSha` より古い → **Wikiが古い**。警告。`aidev sync` で追従する
+- `trackingSha` が `baseSha` より先 → 追跡ブランチに追従遅れ。警告
+- Wikiが無い / manifest が読めない → **Wikiが信用できない**。エラー（exit 4）。書き込みも止まる
+
+現状は `aidev status` でいつでも確認できます。
 
 ## 食い違いを見つけたら
 
@@ -40,7 +44,7 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
 
 1. 食い違いの内容を記録する（どのページの、どの記述が、実際はどうか）
 2. ユーザーに報告する
-3. **Wikiを手で直さない** — `knowledge/` は生成物。手編集は次回生成で失われ、
+3. **Wikiを手で直さない** — `.aidev/knowledge/` は生成物。手編集は次回生成で失われ、
    `selfHashes` 不一致として警告される
 
 恒久的に直すなら、生成元（ソースのコメント・構造）を改善するか、
@@ -50,5 +54,5 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
 
 - Wikiの記述を、ソースで確認せずに「事実」として報告する
 - Wikiに書いていないことを「存在しない」と結論する
-- `knowledge/` を編集する
+- `.aidev/knowledge/` を編集する
 - 3SHAがエラー状態のまま作業を続ける

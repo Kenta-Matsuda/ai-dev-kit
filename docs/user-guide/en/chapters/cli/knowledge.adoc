@@ -1,0 +1,141 @@
+[[cli-knowledge]]
+== aidev knowledge
+
+Generates the LLM Wiki and shows its state.
+
+=== Synopsis
+
+[source,text]
+----
+aidev knowledge build [options]
+aidev knowledge status [options]
+----
+
+=== Description
+
+`build` generates the Wiki. It takes only the files that changed since the last run and the files the last run left unfinished (incremental), writes the manifest and inventory, then starts the knowledge-builder agent to write the prose. If it stops halfway, the same command continues where it left off.
+
+With `--no-agent` it writes only the manifest and inventory and leaves the prose ungenerated. This is for CI without Claude Code.
+
+It stops if any Wiki page was edited by hand (`--force` overwrites them).
+
+`status` shows the commit the Wiki describes, when it was generated, the number of pages, the number of pages without prose, and hand edits.
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--scope <path>`
+|Only (re)generate pages under this path; research still covers the whole PKG
+
+|`--full`
+|Regenerate every page instead of only what changed
+
+|`--dry-run`
+|Show what would be queued and written; write nothing
+
+|`--json`
+|Machine-readable output
+
+|`--force`
+|Overwrite Wiki pages that were edited by hand
+
+|`--no-remote`
+|`status`: skip the remote check
+
+|`--no-agent`
+|Write only the manifest and inventory; leave the prose for a later run
+
+|`--agent-name <name>`
+|Start this agent instead of knowledge-builder
+
+|`--agent-tool <tool>`
+|AI tool that runs the agent (`claude`, `copilot`, `codex`, `kiro`); only tools in `tools.default` of `aidev.yaml`. Default: `tools.agents.<name>.tool`, else `tools.agent`
+
+|`--agent-timeout <ms>`
+|Time budget per agent run (default 1800000 = 30 minutes)
+
+|`--agent-model <model>`
+|Model for the agent; `""` leaves the choice to the tool
+
+|`--agent-batch-size <n>`
+|Files handed to one agent run (default 20)
+
+|`--survey`
+|Always start by rewriting `overview.md` and `index.md`
+
+|`--no-survey`
+|Never rewrite `overview.md` and `index.md`
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|`build`: everything was generated (with `--no-agent`: the structure was written). `status`: the Wiki is healthy
+
+|1
+|`build`: the agent failed, ran out of time or stopped halfway (re-run to continue). Hand edits without `--force`. `--scope` matched no files
+
+|4
+|`status`: the Wiki is missing or broken
+|===
+
+=== Examples
+
+Generate (first time and updates alike; if it stops, re-run the same command):
+
+[source,bash]
+----
+aidev knowledge build
+----
+
+Only check what would be queued:
+
+[source,bash]
+----
+aidev knowledge build --dry-run
+----
+
+[source,text]
+----
+aidev knowledge build (dry run)
+  target               1a2b3c4
+  generation targets   163
+  ...
+  queued now           7
+✓ dry run complete; nothing was written.
+    would then run the knowledge-builder agent for 7 generation target(s) in 1 batch(es).
+----
+
+Regenerate only `src/api`, in smaller batches:
+
+[source,bash]
+----
+aidev knowledge build --scope src/api --agent-batch-size 10
+----
+
+Regenerate every page (discarding hand edits too):
+
+[source,bash]
+----
+aidev knowledge build --full --force
+----
+
+Show the state:
+
+[source,bash]
+----
+aidev knowledge status
+----
+
+=== See also
+
+* xref:knowledge[LLM Wiki] — how generation proceeds and how to resume
+* xref:cli-sync[aidev sync]
+* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `tools.agent_model`

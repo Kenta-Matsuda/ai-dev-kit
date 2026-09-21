@@ -7,10 +7,10 @@
  *
  *   sync lease  (.aidev/sync.lock)          — held by `aidev sync`, permits
  *                                             writes to knowledge/** while
- *                                             submoduleSha != knowledgeSha.
+ *                                             the Wiki is missing or broken.
  *   work lease  (.aidev/leases/<taskId>.json) — held by issue-to-pr, permits
  *                                             writes to a scoped subset of
- *                                             src/** on a dedicated branch.
+ *                                             the PKG on a dedicated branch.
  *
  * Both are TTL-bound and both are themselves protected paths, so an agent can
  * never mint or extend its own permission.
@@ -89,7 +89,7 @@ function acquireSyncLease(repoRoot, { targetSha, originalSha, taskId = null, ttl
     throw new AidevError(
       `a stale sync lease is present (${ev.reason}; target=${existing.targetSha}). ` +
       'Refusing to adopt it silently — run "aidev sync --resume" to verify and continue, ' +
-      'or "aidev sync --abort" to restore the original submodule SHA.');
+      'or "aidev sync --abort" to discard the unfinished sync.');
   }
   const lease = {
     schemaVersion: 1,
@@ -183,23 +183,23 @@ function releaseWorkLease(repoRoot, taskId) {
  * branch, and the path inside the leased scope. The branch check is what stops
  * a lease issued for one task from being reused on unrelated work.
  */
-function findAuthorizingWorkLease(repoRoot, rel, { submodulePath = 'src', now = Date.now() } = {}) {
+function findAuthorizingWorkLease(repoRoot, rel, { now = Date.now() } = {}) {
   const pathsMod = require('./paths');
   const leases = listWorkLeases(repoRoot);
   if (leases.length === 0) return { lease: null, reason: 'no work lease' };
   let branch = null;
-  try { branch = git.currentBranch(path.join(repoRoot, submodulePath)); } catch { branch = null; }
+  try { branch = git.currentBranch(repoRoot); } catch { branch = null; }
   let lastReason = 'no work lease covers this path';
   for (const lease of leases) {
     if (lease.kind !== 'work') continue;
     const ev = evaluateLease(lease, now);
     if (!ev.valid) { lastReason = `work lease ${lease.taskId} is ${ev.reason}`; continue; }
     if (lease.branch && branch && lease.branch !== branch) {
-      lastReason = `work lease ${lease.taskId} is scoped to branch ${lease.branch} but ${submodulePath} is on ${branch}`;
+      lastReason = `work lease ${lease.taskId} is scoped to branch ${lease.branch} but the checkout is on ${branch}`;
       continue;
     }
     if (lease.branch && !branch) {
-      lastReason = `work lease ${lease.taskId} requires branch ${lease.branch} but the submodule branch could not be determined`;
+      lastReason = `work lease ${lease.taskId} requires branch ${lease.branch} but the current branch could not be determined (detached HEAD?)`;
       continue;
     }
     if (pathsMod.matchesAny(lease.allowedPaths, rel)) {

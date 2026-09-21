@@ -1,0 +1,59 @@
+[[cli-doctor]]
+== aidev doctor
+
+端末と PKG の実行環境を診断します。
+
+=== 書式
+
+[source,text]
+----
+aidev doctor [--json]
+----
+
+=== 説明
+
+端末について、Node.js、git、`aidev` と kit の場所、新しい kit の有無、登録済み PKG 数、AI ツールの有無とバージョンを報告します。PKG の中では `aidev.yaml` の `tools.default` にある各ツールを、PKG の外では `claude` だけを調べます。PKG の中で実行すると、さらに `aidev.yaml`、`origin`、policy、agent を動かすツールとモデル、token 環境変数の有無（値は読みません）、proxy、remote への到達性、Wiki の状態を報告します。
+
+各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|`✗` が無い
+
+|1
+|`✗` が 1 つ以上ある
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev doctor
+----
+
+[source,text]
+----
+aidev doctor
+  ✓ node                   v22.17.1
+  ✓ git                    git version 2.44.0.windows.1
+  ✓ aidev                  0.2.0 @ C:\tools\ai-dev-kit
+  ✓ kit update             up to date
+  ✓ claude                 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
+  ✓ aidev.yaml             C:\work\demo-pkg
+  ✓ policy                 14 protected patterns
+  ⚠ env AZURE_DEVOPS_PAT   not set — Azure DevOps calls will fail
+  ✓ remote reachability    origin/main = 9f8e7d6
+  ✓ Wiki state             the Wiki describes the code this work is based on.
+
+⚠ 1 warning(s); nothing blocking.
+----
+
+=== 関連
+
+* xref:install[端末に aidev を入れる]
+* xref:troubleshooting-install[トラブルシューティング: インストール]

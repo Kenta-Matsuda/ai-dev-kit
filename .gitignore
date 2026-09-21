@@ -1,13 +1,10 @@
-# ai-dev-kit — wrapper repository ignores.
+# ai-dev-kit — central kit repository ignores.
 #
-# Two rules decide what is listed here:
-#   1. Anything holding a credential, or that could come to hold one, is ignored.
-#   2. Local state whose source of truth lives elsewhere (Azure DevOps, the
-#      remote, or this machine) is ignored — committing it would make the repo
-#      disagree with the system that actually owns the fact.
+# Runtime state of a package that uses the kit lives in that package under
+# .aidev/ and is ignored by the .aidev/.gitignore the CLI writes there; nothing
+# of that kind belongs in this repository.
 
-# --- personal and credential-bearing -----------------------------------------
-.claude/settings.local.json
+# --- credential-bearing ---------------------------------------------------------
 .env
 .env.*
 !.env.example
@@ -16,34 +13,22 @@
 *.pfx
 *.key
 
-# --- local runtime state (.aidev/) -------------------------------------------
-# policy.yaml is deliberately NOT ignored: it is reviewed, committed and shared.
-.aidev/cache/
-.aidev/tasks/
-.aidev/leases/
-.aidev/sync.lock
-
-# --- generated Wiki intermediates --------------------------------------------
-# knowledge/** itself IS committed; only the scratch area is not.
-knowledge/.cache/
-
-# --- workflow run logs --------------------------------------------------------
-# Logs can capture prompts, responses and environment values; keeping them out
-# of git is what makes it safe for a workflow to log verbosely.
-workflows/*/runs/
-
-# --- generated documentation -------------------------------------------------
+# --- generated documentation ------------------------------------------------------
 /build/docs/
+!ai-dev-kit-user-guide.html
 
-# --- tooling ------------------------------------------------------------------
+# --- tooling ----------------------------------------------------------------------
 node_modules/
 npm-debug.log*
 *.tsbuildinfo
 
-# --- OS and editor ------------------------------------------------------------
+# --- OS and editor ----------------------------------------------------------------
 .DS_Store
 Thumbs.db
 *.swp
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# --- personal ---------------------------------------------------------------------
+.claude/settings.local.json

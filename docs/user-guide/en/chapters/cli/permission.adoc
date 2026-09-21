@@ -1,0 +1,103 @@
+[[cli-permission]]
+== aidev permission
+
+Places and shows the write-permission policy.
+
+=== Synopsis
+
+[source,text]
+----
+aidev permission configure [--approve] [options]
+aidev permission reconfigure [--approve] [options]
+aidev permission show [--json]
+----
+
+=== Description
+
+The policy (`.aidev/policy.yaml`) is a file the AI cannot write, so it is placed in two steps: the CLI generates a **candidate** `.aidev/policy.candidate.yaml` from `aidev.yaml`, and a human reads it and places it with `--approve`.
+
+When placing with `--approve`, a change that protects less than the current policy counts as a **weakening** and stops with exit code 3 unless `--force` is given.
+
+There is no interactive editing of the candidate. Adjust it through `secrets_paths` in `aidev.yaml`.
+
+=== Subcommands
+
+[cols="1,4",options="header"]
+|===
+|Subcommand |Behaviour
+
+|`configure`
+|Write the candidate. Error if a policy already exists. `--approve` places it
+
+|`reconfigure`
+|Regenerate the candidate while a policy exists. `--approve` places it. A weakening also needs `--force`
+
+|`show`
+|Show the policy in force. If the file is missing, show the built-in minimal policy and exit 3
+|===
+
+=== Options
+
+[cols="2,3",options="header"]
+|===
+|Option |Description
+
+|`--approve`
+|Place the candidate as `.aidev/policy.yaml` and delete the candidate file
+
+|`--json`
+|Machine-readable output
+
+|`--force`
+|`configure`: regenerate the candidate even if a policy exists. `--approve`: place it even if it weakens the policy
+
+|`--dry-run`
+|Show the candidate without writing it
+|===
+
+=== Exit codes
+
+[cols="1,4",options="header"]
+|===
+|Code |Condition
+
+|0
+|The candidate was written, placed or shown
+
+|1
+|`aidev.yaml` cannot be read, or `configure` found an existing policy
+
+|3
+|`--approve` detected a weakening (without `--force`). `show` found no policy
+|===
+
+=== Examples
+
+After answering `N` during setup, read the candidate and place it:
+
+[source,bash]
+----
+cat .aidev/policy.candidate.yaml
+aidev permission configure --approve
+----
+
+Regenerate after changing `secrets_paths`:
+
+[source,bash]
+----
+aidev permission reconfigure
+git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
+aidev permission reconfigure --approve      # add --force when the diff weakens protection
+----
+
+Show the policy in force:
+
+[source,bash]
+----
+aidev permission show
+----
+
+=== See also
+
+* xref:permissions[Permissions and safety] — the four categories
+* xref:cli-hook[aidev hook] — the hook that makes the decision

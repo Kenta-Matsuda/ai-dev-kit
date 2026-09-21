@@ -26,7 +26,7 @@ Wikiとソースが食い違ったら**ソースが正**で、その乖離は報
 
 ```bash
 # 定義側ではなく「使っている側」を探す。ここを飛ばすと壊す
-grep -rn "functionName" src --include='*.ts' -l
+grep -rn "functionName" . --include='*.ts' -l --exclude-dir=node_modules --exclude-dir=.aidev
 ```
 
 漏れやすいのは次です。チェックリストとして使ってください。
@@ -80,9 +80,10 @@ grep -rn "functionName" src --include='*.ts' -l
 
 | 領域 | 可否 |
 | --- | --- |
-| `src/**` | 通常read-only。issue-to-pr の作業リース保持中のみ、許可パスに限り可 |
-| `knowledge/**` | `aidev sync` のsyncリース保持中のみ。手編集しない |
-| `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml` | **常に禁止** |
+| PKGのソース（`**`） | 通常read-only。issue-to-pr の作業リース保持中のみ、許可パスに限り可 |
+| `aidev.yaml`・`.aidev/workflows/**` | 書き込み可 |
+| `.aidev/knowledge/**` | CLIから起動された knowledge-builder、または `aidev sync` のsyncリース保持中のみ。手編集しない |
+| `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/leases/**`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
 | `secrets_paths` 該当 | **常に禁止**（リースがあっても） |
 
 計画が禁止領域を含むなら、**実装を始める前に**ユーザーへ報告します。

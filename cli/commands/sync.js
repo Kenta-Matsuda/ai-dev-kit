@@ -2,19 +2,17 @@
 /**
  * `aidev sync` — follow the PKG tracking branch forward.
  *
- * One event is handled: "the tracking branch now points at a different SHA".
- * Whether that came from the AI environment or from someone editing the PKG
- * directly is deliberately indistinguishable here — that is what keeps the
- * standalone path from rotting through disuse.
+ * One event is handled: "origin/<tracking_branch> now points at a commit the
+ * Wiki does not describe". Whether that came from an AI-made PR or from someone
+ * editing the PKG directly is deliberately indistinguishable here.
  *
- * Ordering is forced and cannot be rearranged:
+ * The developer's own checkout is never touched. Sync works in a temporary git
+ * worktree checked out at the target commit (.aidev/cache/sync-worktree/):
  *
- *   lease → bump → diff → regenerate → check → release → PR
+ *   lease → worktree at target → diff → rewrite inventory → (agent) → commit on
+ *   ai/wiki-<sha> → push → PR → remove worktree → release
  *
- * The lease must precede the bump because generation reads the checked-out
- * tree, so from the bump until regeneration completes the repository is by
- * definition in the `submoduleSha != knowledgeSha` error state — which would
- * otherwise block the only tool able to fix it.
+ * The committed Wiki reaches everyone through the usual PR and `git pull`.
  */
 
 const fs = require('fs');
@@ -22,12 +20,12 @@ const path = require('path');
 const crypto = require('crypto');
 const { EXIT, AidevError, KnowledgeError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
+const layout = require('../lib/layout');
 const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
 const leases = require('../lib/leases');
 const inventory = require('../lib/inventory');
 const knowledgeScope = require('../lib/knowledge-scope');
-const assets = require('../lib/assets');
 const ado = require('../lib/ado');
 const agentMod = require('../lib/agent');
 const ui = require('../lib/ui');
@@ -38,45 +36,46 @@ const FLAGS = {
   ...agentMod.AGENT_FLAGS,
 };
 
-/**
- * Immutable identity of one sync operation: re-running it must not create a
- * second commit or PR.
- */
+const FLAG_HELP = {
+  to: 'sync to this commit (must be reachable from the fetched tracking branch) instead of its tip',
+  'dry-run': 'fetch and show what would change; write nothing',
+  'no-pr': 'commit on the local ai/wiki-<sha> branch but do not push or open a PR',
+  resume: 'continue a sync that stopped and left its lease behind',
+  abort: 'discard a stopped sync: remove its worktree and release the lease',
+  'check-only': 'only report whether the tracking branch moved',
+  json: 'machine-readable output',
+  force: 'take over a stale lease or overwrite hand-edited Wiki pages',
+  ...agentMod.AGENT_FLAG_HELP,
+};
+
+const WORKTREE_REL = '.aidev/cache/sync-worktree';
+
 function operationKey(config, targetSha) {
-  const ado = config.azure_devops;
+  const h = config.hosting;
   return crypto.createHash('sha256')
-    .update([ado.organization, ado.project, ado.repository, targetSha, ado.wrapper_repository || ''].join('\0'))
+    .update([h.type, h.organization || '', h.project || '', h.repository || '', targetSha].join('\0'))
     .digest('hex').slice(0, 32);
 }
 
-/**
- * Stable identity of the sync *stream*: finds the same open PR even after the
- * target SHA moves on, so a superseding sync updates rather than duplicates.
- */
 function syncStreamId(config) {
-  const ado = config.azure_devops;
+  const h = config.hosting;
   return crypto.createHash('sha256')
-    .update([ado.organization, ado.project, ado.repository,
-      config.sync.tracking_branch, ado.wrapper_repository || ''].join('\0'))
+    .update([h.type, h.organization || '', h.project || '', h.repository || '', config.sync.tracking_branch].join('\0'))
     .digest('hex').slice(0, 32);
 }
 
 function syncBranchName(config, targetSha) {
-  return `ai/sync-${String(targetSha).slice(0, 12)}`;
+  return `ai/wiki-${String(targetSha).slice(0, 12)}`;
 }
 
-/** Marker carried in the PR description so a sync stream can find its own PR. */
 const STREAM_MARKER = '<!-- aidev:sync-stream ';
-
-function streamMarker(streamId) {
-  return `${STREAM_MARKER}${streamId} -->`;
-}
+function streamMarker(streamId) { return `${STREAM_MARKER}${streamId} -->`; }
 
 function prDescription({ streamId, opKey, targetSha, branch, diff, pending }) {
   return [
     streamMarker(streamId),
     '',
-    `Follows the PKG tracking branch \`${branch}\` forward to \`${targetSha}\`.`,
+    `Updates the LLM Wiki (\`${layout.KNOWLEDGE_REL}/\`) for \`${branch}\` at \`${targetSha}\`.`,
     '',
     '| | |',
     '| --- | --- |',
@@ -92,8 +91,8 @@ function prDescription({ streamId, opKey, targetSha, branch, diff, pending }) {
     `- renamed: ${diff.renamed}`,
     '',
     pending > 0
-      ? `> ⚠️ ${pending} Wiki generation target(s) still need prose regeneration (\`aidev knowledge build --refresh --agent\`).`
-      : '> The Wiki is regenerated and the three SHAs agree.',
+      ? `> ⚠️ ${pending} Wiki generation target(s) still need prose regeneration (\`aidev knowledge build\`).`
+      : '> The Wiki is regenerated and describes the target commit.',
     '',
     '**Merging is a human decision — this PR is never auto-completed.**',
     '',
@@ -101,106 +100,51 @@ function prDescription({ streamId, opKey, targetSha, branch, diff, pending }) {
   ].join('\n');
 }
 
-/**
- * Commit the bump and the Wiki diff onto the sync branch and push it.
- *
- * Returns { pushed, branch, reason }. A failure here is reported, not thrown:
- * the sync itself already succeeded and the working tree holds the result, so
- * the operator can push by hand rather than lose the regeneration.
- */
-function commitAndPush(repoRoot, prBranch, targetSha, remote) {
-  if (!gitMod.hasUncommittedChanges(repoRoot)) {
-    return { pushed: false, reason: 'nothing to commit — the working tree already matches the target' };
-  }
-
-  const startBranch = gitMod.currentBranch(repoRoot);
-  const co = gitMod.run(['checkout', '-B', prBranch], { cwd: repoRoot });
-  if (!co.ok) return { pushed: false, reason: `could not create branch ${prBranch}: ${co.stderr}` };
-
-  // Only the two things sync owns. `git add -A` would sweep up whatever else
-  // the operator happened to have in the tree.
-  for (const spec of ['src', 'knowledge']) {
-    if (fs.existsSync(path.join(repoRoot, spec))) {
-      gitMod.run(['add', '--', spec], { cwd: repoRoot });
-    }
-  }
-
-  const staged = gitMod.run(['diff', '--cached', '--quiet'], { cwd: repoRoot });
-  if (staged.ok) {
-    if (startBranch) gitMod.run(['checkout', startBranch], { cwd: repoRoot });
-    return { pushed: false, reason: 'no submodule or Wiki changes were staged' };
-  }
-
+/** Commit the Wiki in the worktree onto the sync branch; optionally push. */
+function commitAndPush(worktree, prBranch, targetSha, { push }) {
+  const co = gitMod.run(['checkout', '-B', prBranch], { cwd: worktree });
+  if (!co.ok) return { committed: false, pushed: false, reason: `could not create branch ${prBranch}: ${co.stderr}` };
+  gitMod.run(['add', '-A', '--', layout.KNOWLEDGE_REL, layout.AIDEV_GITIGNORE_REL], { cwd: worktree });
+  const staged = gitMod.run(['diff', '--cached', '--quiet'], { cwd: worktree });
+  if (staged.ok) return { committed: false, pushed: false, reason: 'the Wiki already matches the target; nothing to commit' };
   const message = [
-    `chore(sync): follow PKG to ${String(targetSha).slice(0, 12)}`,
+    `docs(wiki): describe ${String(targetSha).slice(0, 12)}`,
     '',
-    'Bumps the src/ submodule pointer and updates the generated Wiki to match.',
+    `Regenerates ${layout.KNOWLEDGE_REL}/ for the tracking branch.`,
     '',
     'Co-Authored-By: Claude Code <noreply@anthropic.com>',
   ].join('\n');
-
-  const commit = gitMod.run(['commit', '-m', message], { cwd: repoRoot });
-  if (!commit.ok) {
-    // Deliberately left checked out on prBranch with the changes staged: the
-    // regeneration is expensive, and switching back could discard it. Say so,
-    // so the operator is not silently standing on a branch they did not pick.
-    return { pushed: false, branch: prBranch,
-      reason: `commit failed on ${prBranch} (changes remain staged there): ${commit.stderr}` };
-  }
-
-  const push = gitMod.run(['push', '--set-upstream', remote, prBranch], { cwd: repoRoot });
-  if (!push.ok) {
-    return { pushed: false, committed: true, branch: prBranch,
-      reason: `push failed; the commit is on local branch ${prBranch}: ${push.stderr}` };
-  }
-  return { pushed: true, committed: true, branch: prBranch };
+  const commit = gitMod.run(['commit', '-m', message], { cwd: worktree });
+  if (!commit.ok) return { committed: false, pushed: false, reason: `commit failed: ${commit.stderr}` };
+  if (!push) return { committed: true, pushed: false, branch: prBranch };
+  const pushed = gitMod.run(['push', '--force-with-lease', '--set-upstream', 'origin', prBranch], { cwd: worktree });
+  if (!pushed.ok) return { committed: true, pushed: false, branch: prBranch, reason: `push failed: ${pushed.stderr}` };
+  return { committed: true, pushed: true, branch: prBranch };
 }
 
-/**
- * Create the wrapper PR, or update the one this sync stream already has open.
- *
- * Deduplication is by sync stream rather than by target SHA: when the tracking
- * branch moves while a sync PR is still open, the new target must supersede the
- * old PR instead of opening a second one for the same stream.
- */
-async function openWrapperPr(config, { prBranch, streamId, opKey, targetSha, diff, pending }) {
-  const repo = config.azure_devops.wrapper_repository;
-  if (!repo) {
-    return { ok: false, reason: 'azure_devops.wrapper_repository is not configured' };
+async function openPr(config, { prBranch, streamId, opKey, targetSha, diff, pending }) {
+  if (config.hosting.type !== 'azure-devops') {
+    return { ok: false, reason: `hosting.type is ${config.hosting.type}; open the pull request for ${prBranch} by hand` };
   }
-  const targetBranch = config.sync.wrapper_pr?.target_branch || 'main';
-  const description = prDescription({
-    streamId, opKey, targetSha, branch: config.sync.tracking_branch, diff, pending,
-  });
-
+  const repo = config.hosting.repository;
+  const targetBranch = config.sync.pr.target_branch;
+  const description = prDescription({ streamId, opKey, targetSha, branch: config.sync.tracking_branch, diff, pending });
   const open = await ado.listPullRequests(config, repo, { status: 'active', targetBranch });
   const mine = open.find((pr) => String(pr.description || '').includes(streamMarker(streamId)));
-
-  // Same stream, same branch: the target SHA did not move, so update in place.
   if (mine && String(mine.sourceRefName || '').endsWith(`/${prBranch}`)) {
     await ado.updatePullRequestDescription(config, repo, mine.pullRequestId, description);
     return { ok: true, updated: true, pullRequestId: mine.pullRequestId, url: mine.url };
   }
-
   const created = await ado.createPullRequest(config, repo, {
-    sourceBranch: prBranch,
-    targetBranch,
-    title: `chore(sync): follow PKG to ${String(targetSha).slice(0, 12)}`,
-    description,
-    reviewers: config.sync.wrapper_pr?.reviewers || [],
+    sourceBranch: prBranch, targetBranch,
+    title: `docs(wiki): describe ${String(targetSha).slice(0, 12)}`,
+    description, reviewers: config.sync.pr.reviewers,
   });
-  const result = { ok: true, created: true,
-    pullRequestId: created?.pullRequestId || null, url: created?.url || null };
-
-  // The stream had a PR open from an earlier target. Azure DevOps cannot
-  // re-point an existing PR at a new source branch, so the new SHA needs its
-  // own PR and the old one is annotated rather than left looking current.
-  // Closing it is a human decision, like every other merge-state change here.
+  const result = { ok: true, created: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null };
   if (mine) {
     try {
       await ado.updatePullRequestDescription(config, repo, mine.pullRequestId,
-        `${String(mine.description || '')}\n\n> ⚠️ Superseded by \`${prBranch}\`` +
-        `${result.pullRequestId ? ` (PR !${result.pullRequestId})` : ''}. Close this one after review.`);
+        `${String(mine.description || '')}\n\n> ⚠️ Superseded by \`${prBranch}\`${result.pullRequestId ? ` (PR !${result.pullRequestId})` : ''}. Close this one after review.`);
       result.superseded = { pullRequestId: mine.pullRequestId, branch: mine.sourceRefName };
     } catch (e) {
       result.supersedeWarning = `the previous PR !${mine.pullRequestId} could not be annotated: ${e.message}`;
@@ -209,20 +153,38 @@ async function openWrapperPr(config, { prBranch, streamId, opKey, targetSha, dif
   return result;
 }
 
+function worktreePath(repoRoot) { return layout.abs(repoRoot, WORKTREE_REL); }
+
+/** Ensure a worktree at `targetSha`, reusing one left by an interrupted sync. */
+function ensureWorktree(repoRoot, targetSha) {
+  const dir = worktreePath(repoRoot);
+  if (fs.existsSync(dir)) {
+    if (gitMod.headSha(dir) === targetSha) return { dir, reused: true };
+    gitMod.worktreeRemove(repoRoot, dir);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const added = gitMod.worktreeAdd(repoRoot, dir, targetSha);
+  if (!added.ok) throw new AidevError(`could not create a worktree for ${stateMod.short(targetSha)}: ${added.stderr}`);
+  return { dir, reused: false };
+}
+
+function removeWorktree(repoRoot) {
+  const dir = worktreePath(repoRoot);
+  if (!fs.existsSync(dir)) return;
+  gitMod.worktreeRemove(repoRoot, dir);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
 async function run(ctx) {
   const { repoRoot, flags } = ctx;
   const config = cfgMod.loadConfig(repoRoot);
-  const subDir = path.join(repoRoot, 'src');
   const branch = config.sync.tracking_branch;
+  const human = !flags.json;
+  if (!gitMod.isRepo(repoRoot)) throw new AidevError(`${repoRoot} is not a git repository`);
 
-  if (!fs.existsSync(subDir)) {
-    throw new AidevError('src/ submodule is not present — run "git submodule update --init --recursive"');
-  }
-
-  // ---- --abort: restore the recorded original SHA and release -------------
   if (flags.abort) return abort(repoRoot, flags);
 
-  // ---- --check-only: judge, write nothing ---------------------------------
   if (flags['check-only']) {
     const st = stateMod.computeState(repoRoot, config, { force: true });
     if (flags.json) ui.json(st); else ui.out(stateMod.formatSummary(st));
@@ -234,178 +196,122 @@ async function run(ctx) {
     const ev = leases.evaluateLease(existingLease);
     throw new AidevError(
       `a sync lease is present (${ev.valid ? 'active' : ev.reason}; target ${stateMod.short(existingLease.targetSha)}). ` +
-      'Continue it with "aidev sync --resume" or release it with "aidev sync --abort".');
+      'Continue it with "aidev sync --resume" or discard it with "aidev sync --abort".');
   }
-  if (flags.resume && !existingLease) {
-    ui.warn('no sync lease found; --resume has nothing to continue. Proceeding as a fresh sync.');
-  }
+  if (flags.resume && !existingLease) ui.warn('no sync lease found; --resume has nothing to continue. Proceeding as a fresh sync.');
 
-  ui.heading(`aidev sync${flags['dry-run'] ? ' (dry run)' : ''}${flags.resume ? ' (resume)' : ''}`);
+  if (human) ui.heading(`aidev sync${flags['dry-run'] ? ' (dry run)' : ''}${flags.resume ? ' (resume)' : ''}`);
 
-  // ---- 1. resolve targetSha from the tracking branch ----------------------
-  const fetched = gitMod.fetch(subDir, 'origin', branch);
-  if (!fetched.ok) {
-    throw new AidevError(`could not fetch origin/${branch} in src/: ${fetched.stderr}`);
-  }
-  const tip = gitMod.revParse(subDir, `origin/${branch}`);
+  // ---- 1. resolve targetSha from the tracking branch --------------------------
+  const fetched = gitMod.fetch(repoRoot, 'origin', branch);
+  if (!fetched.ok) throw new AidevError(`could not fetch origin/${branch}: ${fetched.stderr}`);
+  const tip = gitMod.revParse(repoRoot, `origin/${branch}`);
   if (!tip) throw new AidevError(`could not resolve origin/${branch}`);
 
   let targetSha = tip;
   if (flags.to) {
-    const wanted = gitMod.revParse(subDir, flags.to);
-    if (!wanted) throw new AidevError(`--to ${flags.to} is not a commit in src/`);
-    // Only a SHA reachable from the fetched tracking branch is allowed: an
-    // agent's branch tip is not a legitimate sync target.
-    if (!gitMod.isAncestor(subDir, wanted, tip)) {
-      throw new AidevError(
-        `--to ${stateMod.short(wanted)} is not reachable from origin/${branch}. ` +
-        'sync follows the tracking branch; an agent branch tip is never a valid target.');
+    const wanted = gitMod.revParse(repoRoot, flags.to);
+    if (!wanted) throw new AidevError(`--to ${flags.to} is not a commit in this repository`);
+    if (!gitMod.isAncestor(repoRoot, wanted, tip)) {
+      throw new AidevError(`--to ${stateMod.short(wanted)} is not reachable from origin/${branch}; sync follows the tracking branch only.`);
     }
     targetSha = wanted;
   }
+  if (existingLease && flags.resume && existingLease.targetSha && existingLease.targetSha !== targetSha && !flags.force) {
+    throw new AidevError(
+      `the held lease targets ${stateMod.short(existingLease.targetSha)} but origin/${branch} is now ${stateMod.short(targetSha)}. ` +
+      `Finish it with "aidev sync --resume --to ${existingLease.targetSha}", or "aidev sync --abort" and start again.`);
+  }
 
-  const originalSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
+  const kSha = stateMod.knowledgeSha(repoRoot);
   const opKey = operationKey(config, targetSha);
   const streamId = syncStreamId(config);
-  const kSha = stateMod.knowledgeSha(repoRoot);
+  const prBranch = syncBranchName(config, targetSha);
 
-  ui.table([
-    ['tracking branch', `origin/${branch}`],
-    ['current src', stateMod.short(originalSha)],
-    ['target', stateMod.short(targetSha)],
-    ['wiki describes', stateMod.short(kSha)],
-    ['operationKey', opKey],
-    ['syncStreamId', streamId],
-  ]);
+  if (human) {
+    ui.table([
+      ['tracking branch', `origin/${branch}`],
+      ['target', stateMod.short(targetSha)],
+      ['wiki describes', stateMod.short(kSha)],
+      ['sync branch', prBranch],
+    ]);
+  }
 
-  if (targetSha === originalSha && targetSha === kSha && !flags.force) {
-    ui.ok('already in sync; nothing to do.');
+  // The committed Wiki at the target already describes its source: nothing to do.
+  const targetManifest = readManifestAt(repoRoot, targetSha);
+  const targetK = targetManifest?.knowledgeSha;
+  if (!flags.force && gitMod.isSha(targetK) && gitMod.commitExists(repoRoot, targetK)
+    && !stateMod.sourceChanged(repoRoot, targetK, targetSha)) {
+    if (human) ui.ok(`the Wiki committed on origin/${branch} already describes ${stateMod.short(targetSha)}; "git pull" to receive it.`);
+    if (flags.json) ui.json({ ok: true, noop: true, targetSha, opKey, streamId });
+    return EXIT.OK;
+  }
+  if (!flags.force && gitMod.isSha(kSha) && gitMod.commitExists(repoRoot, kSha) && !stateMod.sourceChanged(repoRoot, kSha, targetSha)) {
+    if (human) ui.ok('already in sync; nothing to do.');
     if (flags.json) ui.json({ ok: true, noop: true, targetSha, opKey, streamId });
     return EXIT.OK;
   }
 
-  // ---- 2. compute the change set before touching anything -----------------
-  const previousManifest = inventory.readManifest(repoRoot);
-  const oldRecords = inventory.readInventory(repoRoot, previousManifest);
-  const newRecords = inventory.scanPackage(repoRoot, config, { ref: targetSha }) || [];
-  const evidenceRecords = knowledgeScope.scanEvidence(repoRoot, config, { ref: targetSha }) || [];
-  const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
-  const supportingEvidenceChanged = knowledgeScope.evidenceChanged(previousManifest?.evidence, evidenceState);
-  const diff = inventory.diffInventory(oldRecords, newRecords);
-
-  const currentTargets = new Set(newRecords.map((record) => record.path));
-  const generationSet = new Set(
-    [...diff.added, ...diff.modified].map((record) => record.path));
-  for (const pendingPath of previousManifest?.checkpoint?.pendingPaths || []) {
-    if (currentTargets.has(pendingPath)) generationSet.add(pendingPath);
+  // ---- 2. change set (dry run uses the local Wiki as the "before") ---------------
+  const preview = computeChangeSet(repoRoot, repoRoot, config, targetSha);
+  if (human) {
+    ui.out('');
+    ui.info(`generation target changes: +${preview.diff.added.length} ~${preview.diff.modified.length} -${preview.diff.removed.length} →${preview.diff.renamed.length} (=${preview.diff.unchanged.length})`);
+    ui.info(`repository evidence: ${preview.evidenceState.trackedFiles} tracked files`);
+    if (preview.supportingEvidenceChanged) ui.dim('    supporting code/config/test/CI changed (or has no prior fingerprint); all generation targets are queued.');
   }
-  if (supportingEvidenceChanged) {
-    for (const record of newRecords) generationSet.add(record.path);
-  }
-  const generationPaths = [...generationSet].sort();
-
-  ui.out('');
-  ui.info(`generation target changes: +${diff.added.length} ~${diff.modified.length} -${diff.removed.length} →${diff.renamed.length} (=${diff.unchanged.length})`);
-  ui.info(`repository evidence: ${evidenceState.trackedFiles} tracked files (${evidenceState.supportingFiles} outside generation targets)`);
-  if (supportingEvidenceChanged) {
-    ui.dim('    supporting code/config/test/CI changed (or has no prior fingerprint); all generation targets are queued.');
-  } else if (generationPaths.length === 0 && diff.renamed.length > 0) {
-    ui.dim('    generation-target renames only — no LLM calls required.');
-  }
-
-  const handEdits = inventory.detectHandEdits(repoRoot, oldRecords);
-  if (handEdits.length > 0) {
-    ui.warn(`${handEdits.length} Wiki page(s) were edited by hand; regeneration would overwrite them:`);
-    for (const h of handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
-    if (!flags.force) {
-      ui.dim('    Re-run with --force to proceed, or move those edits into the generator.');
-    }
-  }
-
   if (flags['dry-run']) {
     if (flags.json) {
-      ui.json({ ok: true, dryRun: true, targetSha, originalSha, opKey, streamId,
-        diff: { added: diff.added.length, modified: diff.modified.length, removed: diff.removed.length,
-          renamed: diff.renamed.length, unchanged: diff.unchanged.length },
-        generationPaths, evidence: evidenceState, evidenceChanged: supportingEvidenceChanged, handEdits });
+      ui.json({ ok: true, dryRun: true, targetSha, opKey, streamId, branch: prBranch,
+        diff: counts(preview.diff), generationPaths: preview.generationPaths, evidence: preview.evidenceState });
     } else ui.ok('dry run complete; nothing was written.');
     return EXIT.OK;
   }
 
-  // ---- 3. acquire the lease BEFORE the bump -------------------------------
+  // ---- 3. lease, worktree ----------------------------------------------------------
   let lease;
   if (existingLease && (flags.resume || flags.force)) {
-    // The tracking branch may have moved since the lease was taken. Adopting
-    // it blindly would bump src/ to the *new* tip while the lease still records
-    // the old one, so --abort would restore the wrong commit.
-    if (existingLease.targetSha && existingLease.targetSha !== targetSha) {
-      if (!flags.force) {
-        throw new AidevError(
-          `the held lease targets ${stateMod.short(existingLease.targetSha)} but origin/${branch} is now ` +
-          `${stateMod.short(targetSha)}. Finish the in-flight sync with ` +
-          `"aidev sync --resume --to ${existingLease.targetSha}", or release it with "aidev sync --abort" ` +
-          'and start again from the new tip.');
-      }
-      // --force: retarget, but keep originalSha so --abort still unwinds to the
-      // commit that was checked out before any bump happened.
-      ui.warn(`retargeting the held lease ${stateMod.short(existingLease.targetSha)} → ${stateMod.short(targetSha)} (--force)`);
-      lease = leases.acquireSyncLease(repoRoot, {
-        targetSha,
-        originalSha: existingLease.originalSha || originalSha,
-        ttlMinutes: config.sync.lease_ttl_minutes,
-        force: true,
-      });
-    } else {
-      lease = existingLease;
-      ui.ok(`continuing the existing lease (target ${stateMod.short(lease.targetSha)})`);
-    }
+    lease = existingLease.targetSha === targetSha ? existingLease
+      : leases.acquireSyncLease(repoRoot, { targetSha, originalSha: kSha, ttlMinutes: config.sync.lease_ttl_minutes, force: true });
+    if (human) ui.ok(`continuing the existing lease (target ${stateMod.short(lease.targetSha)})`);
   } else {
-    lease = leases.acquireSyncLease(repoRoot, {
-      targetSha, originalSha, ttlMinutes: config.sync.lease_ttl_minutes,
-    });
-    ui.ok(`acquired sync lease (ttl ${lease.ttlMinutes}m)`);
+    lease = leases.acquireSyncLease(repoRoot, { targetSha, originalSha: kSha, ttlMinutes: config.sync.lease_ttl_minutes });
+    if (human) ui.ok(`acquired sync lease (ttl ${lease.ttlMinutes}m)`);
   }
 
   try {
-    // ---- 4. bump the submodule -------------------------------------------
-    const co = gitMod.run(['checkout', '--detach', targetSha], { cwd: subDir });
-    if (!co.ok) throw new AidevError(`failed to check out ${stateMod.short(targetSha)} in src/: ${co.stderr}`);
-    ui.ok(`src bumped to ${stateMod.short(targetSha)}`);
+    const { dir: work, reused } = ensureWorktree(repoRoot, targetSha);
+    if (human) ui.ok(`${reused ? 'reusing' : 'created'} worktree at ${WORKTREE_REL} (${stateMod.short(targetSha)})`);
 
-    // ---- 5 & 6. record the new inventory ---------------------------------
-    // Prose regeneration is the knowledge-builder agent's job; the CLI owns the
-    // structured half — inventory, manifest and the checkpoint it resumes from.
-    const carried = new Map();
-    for (const r of [...diff.unchanged, ...diff.renamed]) {
-      carried.set(r.path, { pages: r.pages || [], selfHashes: r.selfHashes || {} });
+    // The "before" is what is committed at the target, which is what the PR diffs against.
+    const change = computeChangeSet(work, repoRoot, config, targetSha);
+    const { diff, newRecords, evidenceRecords, evidenceState, generationPaths, previousManifest } = change;
+
+    const handEdits = inventory.detectHandEdits(work, change.oldRecords);
+    if (handEdits.length > 0) {
+      if (human) {
+        ui.warn(`${handEdits.length} Wiki page(s) were edited by hand; regeneration would overwrite them:`);
+        for (const h of handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
+      }
+      if (!flags.force) throw new AidevError('hand-edited Wiki pages would be overwritten; re-run with --force or move the edits into the generator.');
     }
-    const records = newRecords.map((r) => ({
-      ...r,
-      pages: carried.get(r.path)?.pages || [],
-      selfHashes: carried.get(r.path)?.selfHashes || {},
-    }));
 
-    const shards = inventory.writeInventory(repoRoot, records, config.knowledge.inventory_shard_size);
+    // ---- 4. structured state in the worktree ------------------------------------
+    const carried = new Map();
+    for (const r of [...diff.unchanged, ...diff.renamed]) carried.set(r.path, { pages: r.pages || [], selfHashes: r.selfHashes || {} });
+    const records = newRecords.map((r) => ({ ...r, pages: carried.get(r.path)?.pages || [], selfHashes: carried.get(r.path)?.selfHashes || {} }));
+    const shards = inventory.writeInventory(work, records, config.knowledge.inventory_shard_size);
 
-    // Scenario 7: a source file that no longer exists must not leave its page
-    // behind. A stale page is worse than a missing one — it reads as current
-    // and describes code that is gone.
     let orphans = { deleted: [], skipped: [], staleIndexes: [] };
     if (diff.removed.length > 0) {
-      const pages = inventory.orphanedPages(diff.removed, records);
-      orphans = inventory.removeOrphanedPages(repoRoot, pages);
-      if (orphans.deleted.length > 0) {
-        ui.ok(`removed ${orphans.deleted.length} orphaned Wiki page(s)`);
-        for (const p of orphans.deleted.slice(0, 10)) ui.dim(`    - ${p}`);
-        if (orphans.deleted.length > 10) ui.dim(`    …and ${orphans.deleted.length - 10} more`);
-      }
-      for (const s of orphans.skipped) ui.warn(`kept ${s.page}: ${s.reason}`);
+      orphans = inventory.removeOrphanedPages(work, inventory.orphanedPages(diff.removed, records));
+      if (human && orphans.deleted.length > 0) ui.ok(`removed ${orphans.deleted.length} orphaned Wiki page(s)`);
     }
 
     const manifest = previousManifest || inventory.emptyManifest();
     manifest.schemaVersion = inventory.SCHEMA_VERSION;
     manifest.knowledgeSha = targetSha;
-    manifest.kitCommit = gitMod.headSha(repoRoot);
+    manifest.kitCommit = gitMod.headSha(ctx.installRoot);
     manifest.generatedAt = new Date().toISOString();
     manifest.inventoryShards = shards;
     manifest.stats = {
@@ -415,204 +321,157 @@ async function run(ctx) {
       evidenceFiles: evidenceState.trackedFiles,
     };
     manifest.evidence = evidenceState;
-    // Generation targets the builder still owes. Supporting evidence changes
-    // conservatively enqueue all targets because page-level dependencies are
-    // not known yet; a docs-only target set therefore still follows code.
-    manifest.checkpoint = {
-      completedShards: shards.length,
-      pendingPaths: generationPaths,
-      // An index that listed a now-deleted page still links to it, so the
-      // parents of every removed page owe a rewrite too.
-      staleIndexes: orphans.staleIndexes,
-    };
-    inventory.writeManifest(repoRoot, manifest);
-    ui.ok(`inventory rewritten (${records.length} files, ${shards.length} shard(s))`);
+    manifest.checkpoint = { pendingPaths: generationPaths, staleIndexes: orphans.staleIndexes };
+    inventory.writeManifest(work, manifest);
+    layout.ensureAidevGitignore(work);
+    if (human) ui.ok(`inventory rewritten (${records.length} targets, ${shards.length} shard(s))`);
 
-    if (manifest.checkpoint.pendingPaths.length > 0) {
-      ui.warn(`${manifest.checkpoint.pendingPaths.length} generation target(s) still need prose regeneration — run "aidev knowledge build --refresh --agent".`);
-    }
-    if (orphans.staleIndexes.length > 0) {
-      ui.warn(`${orphans.staleIndexes.length} parent index(es) still link to removed pages — the same refresh rewrites them.`);
-    }
+    const st = stateMod.computeState(work, config, { checkRemote: false });
+    if (st.severity === stateMod.SEVERITY.ERROR) throw new KnowledgeError(`post-sync verification failed: ${st.message}`);
 
-    // ---- 7. verify -------------------------------------------------------
-    const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
-    if (st.severity === stateMod.SEVERITY.ERROR) {
-      throw new KnowledgeError(`post-sync verification failed: ${st.message}`);
-    }
-    const drift = assets.detectDrift(repoRoot);
-    if (!drift.noLock && !drift.ok) {
-      ui.warn('kit-owned static files differ from .aidev-lock; the wrapper PR will fail CI until resolved.');
-    }
-    ui.ok('three SHAs agree locally');
-
-    // ---- 8. release, then prepare the wrapper PR -------------------------
-    leases.releaseSyncLease(repoRoot);
-    ui.ok('sync lease released');
-
-    // Prose generation runs here: after the lease is gone (so it cannot block a
-    // concurrent sync for the minutes an agent takes) but before the PR, so the
-    // generated pages land in the same commit the reviewer reads. The manifest
-    // already records targetSha, so the three SHAs agree and ordinary policy
-    // permits the agent's knowledge/** writes without a lease.
-    const pendingPaths = manifest.checkpoint.pendingPaths || [];
+    // ---- 5. prose (in the worktree) ----------------------------------------------
+    const pendingPaths = manifest.checkpoint.pendingPaths;
     let agentResult = { ran: false };
     if (pendingPaths.length > 0) {
       agentResult = await agentMod.runWikiAgent({
-        repoRoot,
-        config,
-        flags,
-        targetSha,
-        paths: pendingPaths,
-        evidence: {
-          paths: evidenceRecords.map((record) => record.path),
-          include: evidenceState.include,
-          exclude: evidenceState.exclude,
-          secretsPaths: config.secrets_paths,
-        },
-        human: !flags.json,
+        repoRoot: work, config, flags, targetSha, paths: pendingPaths,
+        evidence: { paths: evidenceRecords.map((r) => r.path), include: evidenceState.include, exclude: evidenceState.exclude, secretsPaths: config.secrets_paths },
+        human, fullRebuild: pendingPaths.length === newRecords.length,
       });
     }
-    // Re-read: the agent clears the paths it actually finished, so a partial
-    // run must still show the remainder rather than the list we handed it.
-    let afterManifest = null;
+    let after = null;
     let afterReadError = null;
-    try { afterManifest = inventory.readManifest(repoRoot); }
-    catch (e) { afterReadError = e; }
-    const observedPendingPaths = afterManifest?.checkpoint?.pendingPaths;
-    const actualSourceSha = gitMod.submoduleWorktreeSha(repoRoot, 'src') || gitMod.submoduleSha(repoRoot, 'src');
-    agentResult = agentMod.assessWikiProgress(agentResult, pendingPaths, observedPendingPaths, {
-      expectedTargetSha: targetSha,
-      actualTargetSha: afterReadError ? targetSha : afterManifest?.knowledgeSha,
-      actualSourceSha,
+    try { after = inventory.readManifest(work); } catch (e) { afterReadError = e; }
+    agentResult = agentMod.assessWikiProgress(agentResult, pendingPaths, after?.checkpoint?.pendingPaths, {
+      expectedTargetSha: targetSha, actualTargetSha: afterReadError ? targetSha : after?.knowledgeSha, actualSourceSha: gitMod.headSha(work),
     });
-    if (afterReadError) {
-      agentResult = { ...agentResult, reason: `Wiki manifest could not be read after Claude exited: ${afterReadError.message}` };
-    }
-
+    if (afterReadError) agentResult = { ...agentResult, reason: `Wiki manifest could not be read after Claude exited: ${afterReadError.message}` };
     let structuredOk = true;
     if (agentResult.checkpointInvalid) {
-      const canRestore = actualSourceSha === targetSha
-        && (!afterManifest || afterManifest.knowledgeSha === targetSha);
-      if (canRestore) {
+      if (!after || after.knowledgeSha === targetSha) {
         manifest.checkpoint = { ...manifest.checkpoint, pendingPaths: [...pendingPaths] };
-        inventory.writeManifest(repoRoot, manifest);
-        afterManifest = manifest;
+        inventory.writeManifest(work, manifest);
+        after = manifest;
         agentResult = { ...agentResult, checkpointRestored: true };
-      } else {
-        structuredOk = false;
-      }
+      } else structuredOk = false;
+    }
+    const pending = Array.isArray(after?.checkpoint?.pendingPaths) ? after.checkpoint.pendingPaths.length : pendingPaths.length;
+    agentMod.renderWikiProgress(agentResult, { human, resumeCommand: 'aidev sync --resume' });
+    if (human && pending > 0 && !agentResult.ran) {
+      ui.warn(`${pending} generation target(s) still need prose; the pull request will say so.`);
+      ui.dim(flags['no-agent']
+        ? '    Re-run without --no-agent to write it before opening the PR, or run "aidev knowledge build" after the merge.'
+        : '    Make the agent tool available and run "aidev sync --resume", or run "aidev knowledge build" after the merge.');
     }
 
-    const afterPendingPaths = afterManifest?.checkpoint?.pendingPaths;
-    const pending = Array.isArray(afterPendingPaths) ? afterPendingPaths.length : pendingPaths.length;
-    const publicationBlocked = !!agentResult.checkpointInvalid;
-    agentMod.renderWikiProgress(agentResult, {
-      human: !flags.json,
-      resumeCommand: 'aidev knowledge build --refresh --agent',
-    });
-
-    const prBranch = syncBranchName(config, targetSha);
-    const diffCounts = {
-      added: diff.added.length, modified: diff.modified.length,
-      removed: diff.removed.length, renamed: diff.renamed.length,
-    };
+    // ---- 6. commit, push, PR --------------------------------------------------------
     let pr = { attempted: false };
-
-    if (publicationBlocked) {
-      if (!flags.json) {
-        ui.fail('wrapper publication was skipped because the post-agent target/checkpoint is invalid.');
-        ui.dim('    Re-run the knowledge build after resolving the reported state; no branch or PR was created.');
-      }
+    let publish = { committed: false, pushed: false };
+    if (agentResult.checkpointInvalid) {
       pr = { attempted: false, blocked: true, reason: agentResult.reason };
-    } else if (flags['no-pr']) {
-      ui.info(`--no-pr: changes are in the working tree only. Branch would have been ${prBranch}.`);
-      pr = { attempted: false, reason: '--no-pr' };
-    } else if (!config.sync.auto_pr) {
-      ui.info(`sync.auto_pr is false, so no wrapper PR was opened. Branch would have been ${prBranch}.`);
-      pr = { attempted: false, reason: 'sync.auto_pr is false' };
+      if (human) ui.fail('publication skipped: the post-agent checkpoint is invalid. Resolve it and run "aidev sync --resume".');
     } else {
-      // Creating the PR needs the Azure DevOps API; without a PAT we stop at
-      // the working tree rather than pretending it succeeded.
-      const authEnv = config.azure_devops.auth_env;
-      if (!process.env[authEnv]) {
-        ui.warn(`${authEnv} is not set, so no wrapper PR was created.`);
-        ui.dim(`    Commit and push ${prBranch} yourself, or set ${authEnv} and re-run.`);
-        pr = { attempted: false, reason: `${authEnv} is not set` };
+      publish = commitAndPush(work, prBranch, targetSha, { push: !flags['no-pr'] });
+      if (!publish.committed) {
+        if (human) ui.info(publish.reason);
+      } else if (flags['no-pr']) {
+        if (human) ui.ok(`committed on local branch ${prBranch} (--no-pr: not pushed). Push it and open a PR when ready.`);
+        pr = { attempted: false, reason: '--no-pr', branch: prBranch };
+      } else if (!publish.pushed) {
+        if (human) ui.warn(`committed on ${prBranch} but not pushed: ${publish.reason}`);
+        pr = { attempted: false, reason: publish.reason, branch: prBranch };
       } else {
-        ui.out('');
-        ui.info(`wrapper PR: branch ${prBranch}, stream ${streamId}, operation ${opKey}`);
-
-        const pushed = commitAndPush(repoRoot, prBranch, targetSha, 'origin');
-        if (!pushed.pushed) {
-          ui.warn(`the sync branch was not pushed: ${pushed.reason}`);
-          ui.dim('    The regenerated Wiki and the bump are still in the working tree.');
-          pr = { attempted: false, reason: pushed.reason, committed: !!pushed.committed };
+        if (human) ui.ok(`pushed ${prBranch}`);
+        if (!config.sync.auto_pr) {
+          pr = { attempted: false, reason: 'sync.auto_pr is false', branch: prBranch };
+          if (human) ui.info('sync.auto_pr is false; open the pull request by hand.');
+        } else if (config.hosting.type === 'azure-devops' && !process.env[config.hosting.auth_env]) {
+          pr = { attempted: false, reason: `${config.hosting.auth_env} is not set`, branch: prBranch };
+          if (human) ui.warn(`${config.hosting.auth_env} is not set; open the pull request for ${prBranch} by hand.`);
         } else {
-          ui.ok(`pushed ${prBranch}`);
           try {
-            const res = await openWrapperPr(config, {
-              prBranch, streamId, opKey, targetSha, diff: diffCounts, pending,
-            });
-            if (!res.ok) {
-              ui.warn(`no wrapper PR was opened: ${res.reason}`);
-            } else if (res.created) {
-              ui.ok(`opened wrapper PR${res.pullRequestId ? ` !${res.pullRequestId}` : ''}`);
-            } else if (res.updated) {
-              ui.ok(`updated the existing wrapper PR !${res.pullRequestId} for this stream`);
-            }
-            if (res.superseded) {
-              ui.warn(`the earlier PR !${res.superseded.pullRequestId} for this stream targets an older SHA;`);
-              ui.dim('    it was annotated as superseded. Closing it is a human decision.');
-            }
-            if (res.supersedeWarning) ui.warn(res.supersedeWarning);
+            const res = await openPr(config, { prBranch, streamId, opKey, targetSha, diff: counts(diff), pending });
             pr = { attempted: true, ...res };
+            if (human) {
+              if (!res.ok) ui.info(res.reason);
+              else if (res.created) ui.ok(`opened pull request${res.pullRequestId ? ` !${res.pullRequestId}` : ''}${res.url ? ` ${res.url}` : ''}`);
+              else if (res.updated) ui.ok(`updated the existing pull request !${res.pullRequestId}`);
+              if (res.superseded) ui.warn(`the earlier PR !${res.superseded.pullRequestId} was annotated as superseded; closing it is a human decision.`);
+              if (res.supersedeWarning) ui.warn(res.supersedeWarning);
+            }
           } catch (e) {
-            // The sync itself succeeded and is pushed; failing the whole command
-            // now would hide that and invite a destructive re-run.
-            ui.fail(`the wrapper PR could not be created: ${e.message}`);
-            ui.dim(`    ${prBranch} is pushed — open the PR by hand, or re-run once the cause is fixed.`);
-            pr = { attempted: true, ok: false, reason: e.message };
+            pr = { attempted: true, ok: false, reason: e.message, branch: prBranch };
+            if (human) ui.fail(`the pull request could not be created: ${e.message}. ${prBranch} is pushed; open it by hand.`);
           }
         }
+        if (human) ui.dim('    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.');
       }
-      ui.dim('    Merging is always a human decision.');
     }
+
+    // ---- 7. clean up ----------------------------------------------------------------
+    removeWorktree(repoRoot);
+    leases.releaseSyncLease(repoRoot);
+    if (human) ui.ok('sync lease released');
 
     const commandOk = structuredOk && !(agentResult.ran && !agentResult.ok);
     if (flags.json) {
-      ui.json({ ok: commandOk, structuredOk, targetSha, originalSha, opKey, streamId, branch: prBranch,
-        pendingPages: pending, shards: shards.length, diff: diffCounts, pr, agent: agentResult });
+      ui.json({ ok: commandOk, structuredOk, targetSha, opKey, streamId, branch: prBranch,
+        committed: publish.committed, pushed: publish.pushed, pendingPages: pending, diff: counts(diff), pr, agent: agentResult });
     }
-    // The sync itself succeeded — src/ is bumped and the structured Wiki is
-    // consistent. A failed or incomplete agent only means prose is still owed,
-    // so it is reported through the exit code without unwinding any of that.
     return commandOk ? EXIT.OK : EXIT.GENERAL;
   } catch (e) {
-    // Leave the lease in place: the repository is mid-bump, and an operator
-    // must choose --resume or --abort. Silently releasing would strand writes.
     ui.fail(`sync failed: ${e.message}`);
-    ui.dim('    The sync lease was intentionally kept so the half-applied state is not hidden.');
-    ui.dim('    Run "aidev sync --resume" to continue, or "aidev sync --abort" to restore src/.');
+    ui.dim('    The sync lease and worktree were kept so the half-finished state is not hidden.');
+    ui.dim('    Run "aidev sync --resume" to continue, or "aidev sync --abort" to discard it.');
     throw e;
   }
 }
 
+/** The manifest committed at a commit, or null. */
+function readManifestAt(repoRoot, sha) {
+  const shown = gitMod.run(['show', `${sha}:${layout.KNOWLEDGE_REL}/manifest.json`], { cwd: repoRoot });
+  if (!shown.ok) return null;
+  try { return JSON.parse(shown.stdout); } catch { return null; }
+}
+
+/**
+ * Diff the Wiki found in `wikiRoot` against the PKG tree at `targetSha`
+ * (scanned from `scanRoot`, which holds the fetched objects).
+ */
+function computeChangeSet(wikiRoot, scanRoot, config, targetSha) {
+  let previousManifest = inventory.readManifest(wikiRoot);
+  if (previousManifest) {
+    const leftover = inventory.applyCompletions(wikiRoot, { targetSha: previousManifest.knowledgeSha, shardSize: config.knowledge.inventory_shard_size });
+    if (leftover.applied.length > 0) previousManifest = inventory.readManifest(wikiRoot);
+  }
+  const oldRecords = inventory.readInventory(wikiRoot, previousManifest);
+  const newRecords = inventory.scanPackage(scanRoot, config, { ref: targetSha }) || [];
+  const evidenceRecords = knowledgeScope.scanEvidence(scanRoot, config, { ref: targetSha }) || [];
+  const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
+  const supportingEvidenceChanged = knowledgeScope.evidenceChanged(previousManifest?.evidence, evidenceState);
+  const diff = inventory.diffInventory(oldRecords, newRecords);
+  const currentTargets = new Set(newRecords.map((r) => r.path));
+  const generationSet = new Set([...diff.added, ...diff.modified].map((r) => r.path));
+  for (const p of previousManifest?.checkpoint?.pendingPaths || []) if (currentTargets.has(p)) generationSet.add(p);
+  if (supportingEvidenceChanged) for (const r of newRecords) generationSet.add(r.path);
+  return {
+    previousManifest, oldRecords, newRecords, evidenceRecords, evidenceState,
+    supportingEvidenceChanged, diff, generationPaths: [...generationSet].sort(),
+  };
+}
+
+function counts(diff) {
+  return { added: diff.added.length, modified: diff.modified.length, removed: diff.removed.length, renamed: diff.renamed.length };
+}
+
 function abort(repoRoot, flags) {
   const lease = leases.readSyncLease(repoRoot);
+  removeWorktree(repoRoot);
   if (!lease) { ui.warn('no sync lease to abort.'); return EXIT.OK; }
-  const subDir = path.join(repoRoot, 'src');
-  if (lease.originalSha && gitMod.commitExists(subDir, lease.originalSha)) {
-    const co = gitMod.run(['checkout', '--detach', lease.originalSha], { cwd: subDir });
-    if (co.ok) ui.ok(`src restored to ${stateMod.short(lease.originalSha)}`);
-    else ui.fail(`could not restore src/: ${co.stderr}`);
-  } else {
-    ui.warn('the lease records no reachable original SHA; src/ was left as it is.');
-  }
   leases.releaseSyncLease(repoRoot);
-  ui.ok('sync lease released');
-  if (flags.json) ui.json({ ok: true, aborted: true, restoredTo: lease.originalSha || null });
+  ui.ok('sync lease released and the worktree removed; your checkout was never touched.');
+  if (flags.json) ui.json({ ok: true, aborted: true });
   return EXIT.OK;
 }
 
-module.exports = { run, FLAGS, operationKey, syncStreamId, syncBranchName, summary: 'PKG追跡ブランチの前進に追従' };
+module.exports = { run, FLAGS, FLAG_HELP, operationKey, syncStreamId, syncBranchName, WORKTREE_REL, summary: 'PKGのtracking branchに追従してWikiを更新しPRを作る' };

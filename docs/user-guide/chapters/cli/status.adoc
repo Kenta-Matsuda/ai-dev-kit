@@ -1,0 +1,72 @@
+[[cli-status]]
+== aidev status
+
+この PKG の状態を 1 画面で表示します。
+
+=== 書式
+
+[source,text]
+----
+aidev status [options]
+----
+
+=== 説明
+
+PKG 名・hosting・kit のバージョン、Wiki の状態（3 つのコミット SHA と 1 行の判定）、Wiki のページ数、配布ファイルの drift、policy の有無、手編集、進行中の sync を表示します。
+
+表示専用です。同じ検査を終了コードで返すのが xref:cli-check[aidev check] です。
+
+=== オプション
+
+[cols="2,3",options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|JSON で出力する
+
+|`--no-remote`
+|remote に接続しない（offline、CI）
+|===
+
+=== 終了コード
+
+[cols="1,4",options="header"]
+|===
+|コード |条件
+
+|0
+|表示した（状態が WARN や ERROR でも 0）
+
+|1
+|`aidev.yaml` が無い
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev status
+----
+
+[source,text]
+----
+aidev status — demo-pkg
+  hosting  azure-devops (demo-pkg), tracking origin/main
+  tools    claude
+  kit      0.2.0 @ 9491efe
+
+[ai-dev-kit] base=1a2b3c4  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ origin/main has moved ahead (9f8e7d6); work may continue. Run "aidev sync" to catch up.
+
+  Wiki         163 page(s) for 163 target(s)
+  tool config  matches the kit
+  policy       placed (14 protected paths)
+----
+
+`base` は今の作業が基づくコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。
+
+=== 関連
+
+* xref:daily-status[aidev status の読み方] — 表示ごとの対処
+* xref:cli-check[aidev check]

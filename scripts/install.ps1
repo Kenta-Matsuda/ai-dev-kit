@@ -65,10 +65,9 @@ $git = Get-Command git -ErrorAction SilentlyContinue
 if (-not $git) { Stop-Install 'git not found. Install git and re-run.' }
 Write-Ok ((& git --version).Trim())
 
-# The launcher must never be tied to a developer's PKG wrapper. `aidev update`
-# advances the entire checkout that supplies the CLI. Azure Pipelines gets a
-# compatibility exception for old wrapper pipelines; its launcher is ephemeral
-# and the pipeline never invokes self-update.
+# The launcher points at this checkout, and `aidev update` fast-forwards it.
+# It must therefore be a clone of ai-dev-kit itself — never a package that
+# merely uses the kit (those carry aidev.yaml / .aidev/).
 $RemoteNames = @()
 $RepoTopLevel = $null
 $CurrentBranch = $null
@@ -88,21 +87,15 @@ if ($ResolvedRepoRoot -ine $ResolvedTopLevel) {
   Stop-Install "the CLI directory must be the root of its Git checkout: $ResolvedRepoRoot"
 }
 if (-not ($RemoteNames -contains 'origin')) {
-  Stop-Install 'the dedicated ai-dev-kit checkout must have its central repository configured as origin.'
+  Stop-Install 'the ai-dev-kit checkout must have the central repository configured as origin (aidev update needs it).'
 }
-$HasWrapperMarker = (Test-Path -LiteralPath (Join-Path $RepoRoot 'aidev.yaml')) -or
-                    (Test-Path -LiteralPath (Join-Path $RepoRoot '.aidev-lock')) -or
-                    (Test-Path -LiteralPath (Join-Path $RepoRoot '.aidev-ejected'))
-$HasWrapperRemotes = ($RemoteNames -contains 'origin') -and ($RemoteNames -contains 'upstream')
-$LooksLikeWrapper = $HasWrapperMarker -or $HasWrapperRemotes
-$IsAzurePipeline = $env:TF_BUILD -eq 'True'
-if ($LooksLikeWrapper -and -not $IsAzurePipeline) {
-  Stop-Install 'this checkout looks like a wrapper. Clone ai-dev-kit into a separate stable directory and run its installer.'
+$LooksLikePackage = (Test-Path -LiteralPath (Join-Path $RepoRoot 'aidev.yaml')) -or
+                    (Test-Path -LiteralPath (Join-Path $RepoRoot '.aidev'))
+if ($LooksLikePackage) {
+  Stop-Install 'this looks like a package that uses ai-dev-kit, not the kit itself. Clone ai-dev-kit into a separate directory and run its installer.'
 }
-if ($LooksLikeWrapper) {
-  Write-Warn 'Azure Pipelines compatibility mode: installing an ephemeral wrapper CLI; self-update remains disabled.'
-} elseif ($CurrentBranch -ne 'main') {
-  Stop-Install "the dedicated ai-dev-kit checkout must be on branch main (currently $CurrentBranch)."
+if ($CurrentBranch -ne 'main') {
+  Stop-Install "the ai-dev-kit checkout must be on branch main (currently $CurrentBranch) so that aidev update can follow it."
 }
 
 if (-not (Test-Path -LiteralPath $EntryPoint)) {
