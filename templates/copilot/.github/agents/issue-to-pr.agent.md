@@ -13,7 +13,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 | | |
 | --- | --- |
 | 入力 | Work Item ID、`aidev.yaml`（`hosting` / `package`）、`.aidev/knowledge/` |
-| 出力 | ブランチ `aidev/wi-<id>` 上の実装と、PKG の PR |
+| 出力 | ブランチ `aidev/issue-<id>` 上の実装と、PKG の PR |
 | 必要権限 | PKG ソースへの書き込み。**チームが `.aidev/policy.yaml` の `writable` に足したパスだけ**書けます |
 | 前提 | ユーザーがこの Work Item の処理を明示的に指示している |
 
@@ -40,7 +40,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 1. **確認** — Work Item を MCP で取得し、要件を把握する。曖昧なら選択肢を示して確認する
 2. **調査** — `.aidev/knowledge/` を引いて影響範囲を把握する（`change-planning` Skill）。
    Wiki とソースが食い違ったら**ソースを信じ、乖離を報告**する
-3. **ブランチ** — `aidev/wi-<id>` を作って作業する
+3. **ブランチ** — `aidev/issue-<id>` を作って作業する
 4. **実装** — 必要なパスだけを変更する。書き込みが拒否されたら回避せず理由を読む
 
 | 拒否の理由 | 対処 |

@@ -71,7 +71,7 @@ claude 以外のツール（copilot / codex / kiro）ではサブエージェン
 ## 必要な変更
 
 1. **生成対象を HEAD にする。** `knowledge.js:94` の merge-base を HEAD に変える。
-2. **状態判定を HEAD 基準にする。** `state.js` の「knowledgeSha と base のソース差分」を「knowledgeSha が HEAD の祖先で、その間にソース差分が無い」に変える。Wiki だけのコミットは kit 管理パスとして除外済みなので、自動コミット後も OK になる。tracking の先行は WARN として残す。
+2. **状態判定を HEAD 基準にする。** `state.js` の「knowledgeSha と base のソース差分」を「inventory に記録した対象（パスと blob）と HEAD の木の一致」に変える。コミット K を必要としないので「K が手元に無い」の WARN は消える。Wiki だけのコミットは generation target 外なので、自動コミット後も OK になる。tracking の先行は WARN として残す。詳細は `2026-09-22-wiki-update-flows.md` §0-a。
 3. **クリーン判定を追加する。** generation target 内の未コミット変更 / 未追跡ファイルで停止し、ファイルを列挙する。
 4. **`aidev knowledge update` を新設する。** `build` と `sync` を統合。フラグは `--full`、`--scope`、`--no-agent`、`--no-commit`、`--dry-run`、`--branch`（C 用）、`--force`（手編集ページの上書き）。
 5. **hook を追加する。** PostToolUse（Bash）での HEAD 変化検出と plan 呼び出し、Stop での再検査と停止拒否。既存の `pending-refresh.json` は廃止。

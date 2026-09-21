@@ -46,7 +46,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 
 | 用途 | 名前 |
 | --- | --- |
-| issue-to-pr | `aidev/wi-<id>` |
+| issue-to-pr | `aidev/issue-<id>` |
 | 通常の機能開発 | `feature/<name>` |
 | Wiki同期 | `aidev/wiki-<sha12>`（`aidev sync` が生成。同期ストリームIDで既存PRを再利用） |
 

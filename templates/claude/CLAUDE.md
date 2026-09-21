@@ -91,7 +91,7 @@ aidev sync               # PKG の tracking branch に追従して Wiki を更�
 
 ## PR とマージ
 
-- ブランチは `aidev/wi-<id>`（issue-to-pr）、`aidev/wiki-<sha>`（sync）、または `feature/<name>`
+- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/wiki-<sha>`（sync）、または `feature/<name>`
 - **自動マージは禁止**です。PR は人間がマージします
 - PR を作る前に品質ゲートを通します
 - 秘密情報（PAT・トークン・鍵）をコミット・ログ・PR 本文に含めません

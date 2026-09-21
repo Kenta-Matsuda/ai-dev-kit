@@ -17,12 +17,13 @@
 判定の順序:
 
 1. manifest が無い → ERROR「Wiki 未生成。`aidev init` を実行」。書き込みは止まる（現状どおり）。
-2. K が手元に無いコミット → WARN「fetch かブランチ確認」。
-3. K と HEAD の間に PKG ソースの差分がある（kit 管理パスは除く）→ **BEHIND**「Wiki は K を説明している。HEAD より遅れ」。
-4. `checkpoint.pendingPaths` が残っている → PENDING「prose 未完了」。
-5. それ以外 → OK「Wiki は HEAD を説明している」。
+2. inventory に記録された対象（パスと blob）と HEAD の木（`git ls-tree -r HEAD` を `package.include` / `exclude` で絞ったもの）が一致しない → **BEHIND**「Wiki は K を説明している。HEAD より遅れ」。
+3. `checkpoint.pendingPaths` が残っている → PENDING「prose 未完了」。
+4. それ以外 → OK「Wiki は HEAD を説明している」。
 
-Wiki だけのコミット（`.aidev/knowledge/**`）は kit 管理パスなので手順 3 で差分に数えない。したがって自動コミット直後は OK になる。
+BEHIND の判定はコミット K を必要としない。inventory は「Wiki が説明した時点のファイル一覧と中身の指紋」なので、HEAD の木と直接比べられる。K のコミットが手元に無くても（fetch 前、force-push 後の GC）判定できるため、現状の「K が手元に無い → WARN、fetch かブランチ確認」は不要になる。K は「どのコミットを説明しているか」を人に示す情報として manifest に残す。
+
+Wiki だけのコミット（`.aidev/knowledge/**`）は generation target に含まれないので手順 2 で差分に数えない。したがって自動コミット直後は OK になる。
 
 ### 0-b. クリーン判定 `clean`
 
