@@ -132,7 +132,7 @@ function packageRemoval(pkgRoot, installRoot) {
   const commands = [];
   if (paths.length > 0) commands.push(`git rm -r -q -- ${paths.join(' ')}`);
   if (paths.includes('.aidev')) {
-    // git rm leaves the ignored runtime files (cache/, leases/ …) on disk.
+    // git rm leaves the ignored runtime files (cache/, sync.lock …) on disk.
     commands.push(process.platform === 'win32' ? 'Remove-Item -Recurse -Force .aidev' : 'rm -rf .aidev');
   }
   if (commands.length > 0) commands.push('git commit -m "chore: remove ai-dev-kit"');

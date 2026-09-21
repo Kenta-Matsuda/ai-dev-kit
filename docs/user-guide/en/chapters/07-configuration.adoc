@@ -128,9 +128,6 @@ quality_gates:                  # commands run after the AI edits a file
 |repository name
 |PKG name used in output.
 
-|`hosting.triage.labels` / `area_path`
-|`[]` / none
-|Work Item tags and Area Path the `issue-to-pr` agent treats as in scope.
 
 
 |`sync.auto_pr`
@@ -149,9 +146,6 @@ quality_gates:                  # commands run after the AI edits a file
 |`120`
 |How long the sync lock stays valid.
 
-|`task.*`
-|`.aidev/tasks`, `120`, `90`, `3`
-|`aidev task` cache directory, lease lifetime, retention days, concurrency.
 
 |`knowledge.max_files_per_dir`
 |`20`

@@ -25,11 +25,10 @@
 | prose Wiki agent | 実装済み（既定で起動、`--no-agent`で省略） | survey + batch起動、完了報告からCLIがhash / inventory / checkpointを更新、中断後は同じcommandで再開、Windows process tree kill、version検査、toolは`tools.agent` / `tools.agents.knowledge-builder` / `--agent-tool` | tool実行fileなしではskip。意味品質とcostは外部管理。完了報告protocolはclaude以外で実機未検証 |
 | 3SHA / sync lease | 実装済み | merge-base基準、source-tree比較、TTL lease、`--resume` / `--abort` | — |
 | `aidev sync` | 実装済み | fetch、no-op判定、一時worktree、inventory更新、任意agent、`ai/wiki-<sha12>` commit/push、Azure DevOps PR作成/更新/superseded注記 | `generic` hostingとtoken不在ではPR手動。旧PRの自動closeなし |
-| Azure Pipelines例 | 実装済み | check pipeline、scheduled sync pipeline（`--no-agent`）+ `task advance` | — |
+| Azure Pipelines例 | 実装済み | check pipeline、scheduled sync pipeline（`--no-agent`） | — |
 | Claude hooks | 部分実装 | SessionStart summary、guard-write（fail-closed）、quality-gate（PKG file編集時のみ）、Stop journal/queue記録 | queueを消費するrunnerなし。sandboxではない |
 | workflow scaffold / approval / run | 部分実装 | JS scaffold、content hash承認、iteration / time / same-failure / allowlist、resume、`agent:`定義と`ctx.agent()`（tool / model / timeout、残り時間で打ち切り、報告costの合計で`max_usd`停止） | token計測なし。USDはtoolが報告した分だけ（claude）。destructive前human gateなし。creator agent未接続 |
-| `aidev task` subcommands | 部分実装 | 既存cache JSONのlist / show / resume / advance / abandon、PKG PRの観測、Work Itemへのstate comment | 初期作成・work lease発行・cache再構築の公開経路なし。`WIKI_PR_OPEN`の観測は常に失敗する（下記） |
-| issue-to-pr orchestration | 未実装（agent定義あり） | agent promptとstate helper | Work Item入口、task作成、public work lease、E2E接続なし |
+| issue-to-pr | agent定義のみ | Work Itemの実装とPKG PR作成をagentが行う（`aidev agent run issue-to-pr`または対話）。マージ後のWikiは`aidev sync` | PKG sourceの書込はteamが`writable`を広げる必要がある。E2E検証なし。`aidev task`状態機械とwork leaseは0.5.0で撤去 |
 | self-evolution | 部分実装 | Stop hookがlocal journalを記録し`due`を計算 | 集約、提案作成、中央kitへのPRなし |
 | managed background refresh | 未実装 | `pending-refresh.json`を記録 | queueを消費するrunnerなし |
 | MCP launcher | 実装済み | config / env解決、固定版packageのstdio起動 | offline / registry unavailableでは起動不可。`generic`では使えない |
@@ -48,11 +47,11 @@
 - 「`knowledge build --no-agent`がproseを生成」: 構造だけ書き、proseはqueueに残る
 - 「`doctor`がAzure DevOps認証を検証」: 環境変数の有無まで
 - 「`sync`が手元のcheckoutを更新する」: 一時worktreeで作業し、結果はPRとして届く
-- 「issue-to-prはどの端末からでも再開可能」: cache再構築経路がない
+- 「issue-to-prがCLIの状態機械で進行管理される」: 状態機械（`aidev task`）とwork leaseは撤去済み
 - 「Stop hookが非同期でWikiを更新」: queue consumerがない
 - 「自己進化が自動でPRを作る」: local journal記録まで
 - 「workflowのtoken予算が強制される」: token計測がない。USDはtoolが報告した分（claude）だけで止まる
-- 「`aidev task start`でWork Itemを取り込む」: 存在しない
+
 - 「Copilot / Codex / Kiroを実機で検証済み」「Claude Code以外でpolicyが実行時に強制される」: adapterは公開仕様準拠で未検証、hookはclaudeのみ
 - 「GitHub / GitLabに対応」: 存在しない
 
@@ -62,57 +61,15 @@
 
 | 場所 | 内容 | 影響 |
 | --- | --- | --- |
-| `cli/commands/task.js` | state名`WIKI_PR_OPEN` / `WIKI_PR_ABANDONED`、record field `wikiPullRequestId`、`advanceOne`が`config.azure_devops.wrapper_repository`を読む | `wrapper_repository`はconfig v2に存在せず常に`undefined`のため、`WIKI_PR_OPEN`の`advance`は必ず「azure_devops.wrapper_repository is not configured」で失敗する。sync PR（`ai/wiki-*`）を観測する経路がない。`resume`の案内文「bump src/」「Wiki PR」も旧語彙。`hook.js`の`unsyncedTaskLines`と`ado.postStateComment`も同じstate名を使う |
+
 | `cli/commands/hook.js` `sessionStop` | `submoduleSha: st.submoduleSha`を記録しようとする | `computeState`に`submoduleSha`は無く常に`undefined`（JSONからは消える）。動作には影響しないが意図が失われている。commentの「README specifies async submission to the managed runner」「inside the submodule」「out of step with src/」も旧語彙 |
-| `cli/lib/errors.js` | header commentが`.aidev-lock`と`submoduleSha != knowledgeSha`を説明 | commentのみ。実際は`materialized.json`とWiki構造破損 |
-| `cli/lib/leases.js` | header commentが`submoduleSha`、`src/**`、「half-bumped submodule」を説明 | commentのみ |
-| `cli/lib/policy.js` | header commentの評価順序に`writable`段が無い | commentのみ。codeは`writable`を`read_only`より先に評価する |
+
 | `cli/commands/knowledge.js` | commentに「rename committed straight into the submodule」 | commentのみ |
 | `cli/commands/eject.js` | header commentが`src/`とsubmodule、`knowledge/`（`.aidev/`なし）を説明。`unwireHooks`のcommentが「現在はexec form」と述べる | commentのみ。shipped `settings.json`は文字列形式で、regexは両形式を扱う |
 | `cli/commands/workflow.js` | `steps.js` templateの`ctx.repoRoot`説明が「ラッパーリポジトリのルート」 | 生成されるfileの文言。PKG rootが正しい |
 | `package.json` | `description`がwrapper + submodule構成を説明、`files`に存在しない`.claude/` `CLAUDE.md` `.mcp.json`を列挙し`templates/`が無い | `private: true`なので配布には影響しない |
 | `manifest.kitCommit` | `knowledge build`はPKGのHEAD、`sync`はkit checkoutのHEADを書く | 意味が揺れている。どちらかに統一する |
-| `cli/commands/task.js` / `workflow.js` | `FLAGS`の`--force` `--no-remote`（task）、`--yes`（workflow）が未使用 | helpに出るが効かない |
-| `templates/claude-assets/settings.json` | deny listに`.aidev/.gitignore`と`.aidev/policy.candidate.yaml`が無い | guard-writeは`.aidev/.gitignore`をprotectedでdenyするので実害は小さい。候補fileはwritableでもない（`read_only: **`でdeny） |
-
-## issue-to-prのtarget design
-
-同梱agent `issue-to-pr`と`task`状態機械が前提にする流れです。E2Eの実装はありません。
-
-```text
-IMPLEMENTING
-    │ PKG PR作成
-    ▼
-PKG_PR_OPEN ── abandon ──> PKG_PR_ABANDONED
-    │ human merge + merge result SHA解決（PR APIのlastMergeCommit）
-    ▼
-PKG_PR_MERGED
-    │ aidev sync
-    ▼
-SYNCHRONIZING ── failure ──> SYNC_FAILED
-    │                           │ --resume
-    │<──────────────────────────┘
-    │ Wiki PR（ai/wiki-<sha12>）作成
-    ▼
-WIKI_PR_OPEN（現行code名: WIKI_PR_OPEN）── abandon ──> WIKI_PR_ABANDONED
-    │ human merge
-    ▼
-DONE
-
-any state ──> BLOCKED
-```
-
-完成条件:
-
-1. Work Item IDを入口に本文を外部データとして取得し、`hosting.triage`でopt-inを検証する公開command（例: `aidev task start <id>`。**未実装**）
-2. 専用branch `ai/wi-<id>`と許可pathを確定し、人間の承認後にCLIだけが`.aidev/leases/<taskId>.json`を作る経路
-3. `PKG_PR_OPEN`→`PKG_PR_MERGED`でPR APIの`lastMergeCommit`を使う（実装済み）
-4. `SYNCHRONIZING`以降でsync PR（`ai/wiki-<sha12>`、sync stream marker）を観測する。`wrapper_repository`参照を除去し、state名をWiki PRに改める
-5. task cacheが無くてもWork Item comment / PR metadataから状態を再構築する
-6. 同じ状態機械をuser resume、SessionStart、pipelineから呼ぶ（部分的に実装済み）
-7. PKG PRとWiki PRは人間がmergeし、自動mergeしない
-
-cacheに保持するのはID、branch、SHA、状態、履歴など導出・検証可能なmetadataだけとし、Work Item本文、diff、secretを保存しません。
+| `templates/claude/.claude/settings.json` | deny listに`.aidev/.gitignore`と`.aidev/policy.candidate.yaml`が無い | guard-writeは`.aidev/.gitignore`をprotectedでdenyするので実害は小さい。候補fileはwritableでもない（`read_only: **`でdeny） |
 
 ## self-evolutionのtarget design
 
@@ -142,7 +99,7 @@ inventoryは「どのpageがどのsupporting evidenceへ依存したか」を記
 
 - `.claude/settings.json`はmanaged settingsではなく利用者が変更できる。hooksを外す編集はdriftとして`check`が捕まえ、branch policyで止める前提
 - Bash path抽出は既知command / redirection中心で完全ではない。targetを1つも抽出できないBashはallowになる
-- work lease発行経路が無いため、`read_only`のPKG fileを対話sessionから編集する正規の方法は現在ない（`writable`へ手で追加するしかない）
+- `read_only`のPKG fileをagentに編集させる方法は、teamが`.aidev/policy.yaml`の`writable`へpathを足すことだけ（`aidev.yaml`から生成する項目はない）
 
 ### updateの前提
 

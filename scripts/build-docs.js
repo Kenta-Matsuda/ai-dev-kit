@@ -56,7 +56,6 @@ const REQUIRED_IDS = [
   'cli-sync',
   'cli-agent',
   'cli-permission',
-  'cli-task',
   'cli-workflow',
   'cli-apply',
   'cli-update',

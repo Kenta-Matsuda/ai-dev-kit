@@ -37,9 +37,6 @@ hosting:
   repository: my-pkg
   auth_env: AZURE_DEVOPS_PAT  # PATを保持する環境変数の名前
   tracking_branch: main
-  triage:
-    labels: ["ai-ready"]
-    area_path: "my-project\\Backend"
 
 tools:
   default: [claude, copilot]
@@ -67,11 +64,6 @@ sync:
   remote_check_ttl_minutes: 60
   lease_ttl_minutes: 120
 
-task:
-  cache_dir: .aidev/tasks
-  lease_ttl_minutes: 120
-  retention_days: 90
-  max_concurrent: 3
 
 self_evolution:
   enabled: true
@@ -99,7 +91,7 @@ quality_gates:
 | `include` | string[] | `[]`（`init`はtreeから提案） | Wiki generation targetのglob。空はinclude制限なし |
 | `exclude` | string[] | `[]`（`init`は依存物・生成物） | generation targetから除外するglob |
 
-pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。work leaseの許可範囲も`include` / `exclude`で再検証されます（`policy.js`の`work-lease-scope`）。
+pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。kit管理pathは他toolのconfig（`.github/agents/**`等、`layout.TOOL_CONFIG_GLOBS`）も含みます。
 
 ### `secrets_paths`
 
@@ -121,14 +113,12 @@ string[]、既定`[]`。次の3か所で効きます。
 | `repository` | string | `null` | `azure-devops`では必須。PRのrepository idとして使う |
 | `auth_env` | string | `AZURE_DEVOPS_PAT`（azure-devops）/ `null`（generic） | PATを保持する環境変数名 |
 | `tracking_branch` | string | `main` | Wikiが追従する`origin/<branch>` |
-| `triage.labels` | string[] | `[]` | Work Item opt-in用label（`ado.isOptedIn`が参照） |
-| `triage.area_path` | string | `null` | Work Item opt-in用area path |
 
 `hosting`直下のkeyのうち`pat` / `token` / `password` / `secret`（大文字小文字不問）は「must not be set」で拒否します。`auth_env`以外の文字列値が`^[A-Za-z0-9+/=]{40,}$`に一致すると「looks like an embedded credential」で拒否します。
 
 正規化後の`config`には互換aliasがあります。
 
-- `config.azure_devops` = `{organization, project, repository, auth_env, triage}`（`type`が`azure-devops`のとき）、それ以外は`null`。`ado.js`、`mcp.js`、`task.js`はこれを読む
+- `config.azure_devops` = `{organization, project, repository, auth_env}`（`type`が`azure-devops`のとき）、それ以外は`null`。`ado.js`、`mcp.js`はこれを読む
 - `config.sync.tracking_branch` = `hosting.tracking_branch`
 
 `generic`では`sync`はpushまで行い、PRは手動作成の案内になります。`mcp azure-devops`は起動できません。
@@ -172,14 +162,6 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 `auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`ai/wiki-<sha12>` branchに残ります。
 
-### `task`
-
-| key | 型 | 既定 | 範囲 | 説明 |
-| --- | --- | --- | --- | --- |
-| `cache_dir` | string | `.aidev/tasks` | — | task JSONのlocal cache（`.aidev/.gitignore`で除外） |
-| `lease_ttl_minutes` | int | `120` | 1〜10080 | work leaseのTTL（発行経路は未実装） |
-| `retention_days` | int | `90` | 1〜3650 | 検証のみ。参照するcodeはない |
-| `max_concurrent` | int | `3` | 1〜100 | 検証のみ。参照するcodeはない |
 
 ### `self_evolution`
 
@@ -206,7 +188,7 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 | --- | --- | --- |
 | `version` | int | `1`のみ |
 | `protected` | string[] | 常にdeny。`ALWAYS_PROTECTED`が無条件に合成される |
-| `read_only` | string[] | 有効なwork leaseのみ書込可 |
+| `read_only` | string[] | agentは書込不可（`writable`で個別に許可） |
 | `writable_during_sync` | string[] | 整合性ERRORかつ有効なsync leaseのときに書込可 |
 | `writable` | string[] | 通常時に書込可（`read_only`より先に評価） |
 
@@ -221,7 +203,8 @@ writable_during_sync: ['.aidev/knowledge/**']
 `config.ALWAYS_PROTECTED`:
 
 ```text
-.claude/**  CLAUDE.md  .mcp.json  .aidev/policy.yaml  .aidev/leases/**
+.claude/**  CLAUDE.md  .mcp.json  .github/copilot-instructions.md  .github/agents/**  .github/skills/**
+AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 .aidev/sync.lock  .aidev/materialized.json  .aidev/.gitignore  .aidev/ejected.json
 ```
 
@@ -268,8 +251,7 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 | `.aidev/ejected.json` | `eject` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
 | `.aidev/sync.lock` | `sync`、`knowledge build`（一時） | sync lease（`architecture.md` §5） |
-| `.aidev/leases/<id>.json` | `leases.createWorkLease` | work lease |
-| `.aidev/tasks/<id>.json` | `task advance/resume/abandon`（更新のみ） | `{taskId, state, workItemId, pkgBranch, pkgPullRequestId, mergedSha, wikiPullRequestId, operationKey, syncStreamId, note, updatedAt}` |
+
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
 | `.aidev/cache/pending-refresh.json` | `hook session-stop` | `{queuedAt, knowledgeSha, severity, action}` |
 | `.aidev/cache/evolution-journal.json` | `hook session-stop` | `{schemaVersion: 1, cadence, observations: [{at, signals[]}], due}` |

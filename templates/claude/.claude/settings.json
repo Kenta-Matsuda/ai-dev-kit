@@ -13,7 +13,6 @@
       "Edit(.kiro/steering/**)",
       "Edit(.kiro/agents/**)",
       "Edit(.aidev/policy.yaml)",
-      "Edit(.aidev/leases/**)",
       "Edit(.aidev/sync.lock)",
       "Edit(.aidev/materialized.json)",
       "Edit(.aidev/.gitignore)",

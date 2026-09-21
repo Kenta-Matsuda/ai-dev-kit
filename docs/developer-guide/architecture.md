@@ -25,13 +25,11 @@
    │  └─ .cache/                  agent plan、完了報告 done/（ignored）
    ├─ workflows/<name>/           workflow.yaml, steps.js, approval.json（runs/ はignored）
    ├─ sync.lock                   sync lease（ignored）
-   ├─ leases/<taskId>.json        work lease（ignored）
-   ├─ tasks/<taskId>.json         issue-to-pr task cache（ignored）
    └─ cache/                      remote-check.json, sync-worktree/, pending-refresh.json,
                                   evolution-journal.json（ignored）
 ```
 
-`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`leases/`、`tasks/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`update`、`sync`（worktree内）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
+`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`update`、`sync`（worktree内）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
 
 path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
 
@@ -127,10 +125,10 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
    - あり、かつ`writable_during_sync`一致 → allow `sync-lease`
    - あり、かつ不一致 → deny `sync-lease-scope`
 5. `writable`一致 → allow `writable`（Wiki・workflows・`aidev.yaml`は`read_only: ["**"]`の内側にあるため、read_onlyより先に評価する）
-6. `read_only`一致 → 有効なwork leaseがpathを許可し、checkoutがそのlease branch上なら allow `work-lease`。ただし`package.include`外 / `package.exclude`内なら deny `work-lease-scope`。leaseが無ければ deny `read-only`
+6. `read_only`一致 → deny `read-only`（agentはPKG sourceを書かない。teamが`writable`に足したpathだけが5で許可される）
 7. どれにも当たらない → allow `default`（既定policyは`read_only: ["**"]`なので、通常この分岐に到達するpathはない）
 
-`decideMany`は複数targetのうち最初のdenyで確定します。`policy.js`冒頭のcomment（1〜6の列挙）は`writable`段を省いているので、codeを正としてください。
+`decideMany`は複数targetのうち最初のdenyで確定します。
 
 ### 既定policy
 
@@ -141,7 +139,6 @@ protected:            # ALWAYS_PROTECTED + secrets_paths
   - "CLAUDE.md"
   - ".mcp.json"
   - ".aidev/policy.yaml"
-  - ".aidev/leases/**"
   - ".aidev/sync.lock"
   - ".aidev/materialized.json"
   - ".aidev/.gitignore"
@@ -215,15 +212,7 @@ remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.
 
 sync leaseがguardで効くのは、状態がERRORのときだけです（§3の第4段）。
 
-### work lease（`.aidev/leases/<taskId>.json`）
-
-```json
-{ "schemaVersion": 1, "kind": "work", "taskId": "wi-123", "workItemId": 123,
-  "branch": "ai/wi-123", "allowedPaths": ["src/api/**"], "acquiredAt": "…",
-  "ttlMinutes": 120, "approvedBy": null }
-```
-
-`createWorkLease`はbranch名が`ai/wi-<id>`であること、`allowedPaths`が空でないこと、secrets / protectedと重ならないことを要求します。`findAuthorizingWorkLease`は有効期限内で、checkoutが`branch`上（detached HEADは不可）で、pathが`allowedPaths`に一致するleaseを探します。work leaseを発行する公開CLI経路は現在ありません（`implementation-status.md`）。`task abandon`が解放します。
+leaseはこの1種類だけです。PKG sourceへのagentの書き込みは、teamが`.aidev/policy.yaml`の`writable`にpathを足すことで許可します（一時的な「work lease」の仕組みは0.5.0で撤去）。
 
 ## 6. Wiki: manifest、inventory、evidence、agent
 
@@ -367,7 +356,7 @@ agentの作業branch先端をそのままsync対象にしません。squash、re
 
 | event | matcher | 責務 |
 | --- | --- | --- |
-| SessionStart | — | `formatSummary`、sync / work leaseの状態、task cacheの要対応項目を`additionalContext`で返す |
+| SessionStart | — | `formatSummary`とsync leaseの状態を`additionalContext`で返す |
 | PreToolUse | `Write|Edit|MultiEdit|NotebookEdit|Bash` | `targetsFrom`でpathを集め`policy.decideMany`。deny理由を`permissionDecisionReason`へ |
 | PostToolUse | `Write|Edit|MultiEdit` | `quality_gates`のcommandをrepo rootで実行。編集対象がkit管理pathだけなら`skipped` |
 | Stop | — | `.aidev/cache/pending-refresh.json`と`evolution-journal.json`へ観測を記録 |

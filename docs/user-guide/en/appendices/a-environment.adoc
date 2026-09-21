@@ -9,7 +9,7 @@ Never write values into files. Set them in your shell profile, as user environme
 |Variable |Description
 
 |`AZURE_DEVOPS_PAT`
-|The Azure DevOps PAT. Used by `aidev sync` (opening pull requests), `aidev task` and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
+|The Azure DevOps PAT. Used by `aidev sync` (opening pull requests) and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
 
 |`AIDEV_HOME`
 |Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the kit update-check cache.
@@ -20,7 +20,8 @@ Never write values into files. Set them in your shell profile, as user environme
 |`AIDEV_CLAUDE_BIN`
 |Points directly at the Claude Code executable. Normally unset.
 
-|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN`
+|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` +
+`AIDEV_KIRO_BIN`
 |Likewise for the GitHub Copilot CLI (`copilot`), OpenAI Codex CLI (`codex`) and Kiro CLI (`kiro-cli`) executables.
 
 |`AIDEV_DEBUG`

@@ -60,7 +60,7 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 
 ### `aidev status`
 
-一画面の状態表示。`--json --no-remote`。`aidev.yaml`が無ければexit 1（ejected repositoryはその旨を表示）。それ以外はexit 0。表示: package / hosting / tools / kit（記録commitと実行中commitが違えば`update`を案内）、`formatSummary`、tracking先端のWikiが`ai/wiki-<sha12>` branch（localまたはorigin）に既にあるかの注記、Wiki統計、tool config（matches / DRIFT / not recorded）、policy、手編集page、inventory不整合、sync lease、有効なwork lease。
+一画面の状態表示。`--json --no-remote`。`aidev.yaml`が無ければexit 1（ejected repositoryはその旨を表示）。それ以外はexit 0。表示: package / hosting / tools / kit、tool config（適用commit、customised数、conflict、hooks欠落、`apply`の案内）、`formatSummary`、tracking先端のWikiが`ai/wiki-<sha12>` branch（localまたはorigin）に既にあるかの注記、Wiki統計、tool config（matches / DRIFT / not recorded）、policy、手編集page、inventory不整合、sync lease。
 
 `status.inspect(repoRoot, config, {checkRemote})`が`check`と共有する検査本体です。
 
@@ -129,20 +129,6 @@ CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、ま�
 - `--dry-run`は候補を表示するだけ（`--approve`と併用しても書かない）
 - `show`: 有効なpolicy（無ければ内蔵floor）を表示。policy fileが無ければexit 3
 
-### `aidev task list|show|resume|advance|abandon`
-
-```text
---json --all --dry-run --force --state <STATE> --reason <text> --no-remote
-```
-
-入口は既存の`.aidev/tasks/<taskId>.json`（`task.cache_dir`）です。cacheを作る公開commandはありません（`implementation-status.md`）。
-
-- `list`: 非terminalのtask。`--all`でterminalも
-- `show <id>`: state、work item、branch、PR id、merged SHA、operationKey、syncStreamId、次に取り得るstate
-- `advance [<id>]`: idなしで非terminal全件を順に進め、1件でも失敗すればexit 1（`--state`はid必須）。`PKG_PR_OPEN`はPR APIで完了/放棄を観測しmerge commit SHAをfetch後に検証、`PKG_PR_MERGED`→`SYNCHRONIZING`、`SYNCHRONIZING` / `SYNC_FAILED`は`computeState`で判定、`WIKI_PR_OPEN`はWiki PRを観測（現在は常に失敗する。`implementation-status.md`）。遷移後はWork Itemへstate commentをbest-effortで投稿
-- `resume <id>`: 変化が無くなるまで`advance`を繰り返し、次に人間/agentがすべきことと work leaseの状態を表示
-- `abandon <id>`: `WIKI_PR_OPEN`なら`WIKI_PR_ABANDONED`、それ以外は`PKG_PR_ABANDONED`へ。work leaseを解放。open PRには触れない
-- `--force`と`--no-remote`は`FLAGS`にありますが`task.js`内で参照されていません
 
 ### `aidev workflow new|approve|run|list`
 
@@ -183,9 +169,9 @@ kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新し�
 --yes --dry-run --json --force --keep-assets
 ```
 
-kit管理を解除します。既にejected（marker あり）なら`--force`なしでexit 0。`aidev.yaml` / `materialized.json` / `policy.yaml`のどれも無ければ`--force`なしで拒否。有効なsync lease / work leaseがあれば`--force`なしで拒否。
+kit管理を解除します。既にejected（marker あり）なら`--force`なしでexit 0。`aidev.yaml` / `materialized.json` / `policy.yaml`のどれも無ければ`--force`なしで拒否。有効なsync leaseがあれば`--force`なしで拒否。
 
-順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`leases/`、`cache/`、`tasks/`を削除 → `--keep-assets`でなければkit所有file（lockに記録されたfileと現在のtemplateが置くfile。teamが追加したfileは含まない）を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
+順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`cache/`を削除 → `--keep-assets`でなければkit所有file（lockに記録されたfileと現在のtemplateが置くfile。teamが追加したfileは含まない）を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
 
 ### `aidev uninstall`
 

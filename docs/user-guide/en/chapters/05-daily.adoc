@@ -20,16 +20,16 @@ The symbol and sentence on the second line tell you what to do next.
 |`✅ the Wiki describes the code this work is based on.`
 |Nothing.
 
-|`⚠️ … has changed since the Wiki was generated … run "aidev sync"`
+|`⚠️ … has changed since the Wiki was generated …`
 |The code moved on and the Wiki is behind. Run xref:daily-sync[aidev sync] or wait for the nightly pipeline's PR. You can keep working.
 
-|`⚠️ N page(s) still await prose regeneration — run "aidev knowledge build".`
+|`⚠️ N page(s) still await prose regeneration …`
 |Some pages have no text yet. Run `aidev knowledge build`.
 
 |`⚠️ origin/main has moved ahead … Run "aidev sync"`
 |`main` is ahead of your working branch. `git pull` at a good moment, and sync if needed.
 
-|`⚠️ origin/main has new commits … that are not fetched yet`
+|`⚠️ origin/main has new commits …`
 |Run `git fetch`, then `aidev status` again.
 
 |`ℹ️ remote unverified …`

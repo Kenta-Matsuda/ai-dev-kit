@@ -15,7 +15,7 @@ aidev <command> [subcommand] [options] [arguments]
 
 * オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
 * 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
-* `knowledge`、`agent`、`permission`、`task`、`workflow`、`hook`、`mcp` はサブコマンドが必須です。
+* `knowledge`、`agent`、`permission`、`workflow`、`hook`、`mcp` はサブコマンドが必須です。
 * PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。
 
 [[cli-common-options]]
@@ -92,8 +92,6 @@ aidev <command> [subcommand] [options] [arguments]
 |xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
 |書き込み権限 policy を置く・見る
 
-|xref:cli-task[`aidev task <list\|show\|resume\|advance\|abandon>`]
-|issue-to-pr タスクの進行状態を扱う
 
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |承認済みスクリプトを作る・実行する
@@ -146,7 +144,6 @@ include::agent.adoc[]
 
 include::permission.adoc[]
 
-include::task.adoc[]
 
 include::workflow.adoc[]
 

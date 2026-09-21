@@ -15,7 +15,7 @@ aidev <command> [subcommand] [options] [arguments]
 
 * Options are `--name` or `--name <value>`. `--name=value` also works.
 * An option the command does not accept is an error (`unknown option: --bogus`, exit code 1).
-* `knowledge`, `agent`, `permission`, `task`, `workflow`, `hook` and `mcp` require a subcommand.
+* `knowledge`, `agent`, `permission`, `workflow`, `hook` and `mcp` require a subcommand.
 * Commands for a PKG run inside the PKG clone (a subdirectory is fine; `init` needs the root).
 
 [[cli-common-options]]
@@ -92,8 +92,6 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 |xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
 |Place or show the write-permission policy
 
-|xref:cli-task[`aidev task <list\|show\|resume\|advance\|abandon>`]
-|Handle the state of issue-to-pr tasks
 
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |Create and run approved scripts
@@ -146,7 +144,6 @@ include::agent.adoc[]
 
 include::permission.adoc[]
 
-include::task.adoc[]
 
 include::workflow.adoc[]
 

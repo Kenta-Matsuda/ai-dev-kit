@@ -66,7 +66,7 @@ function run() {
   test('--help lists every command', () => {
     const r = aidev(['--help']);
     eq(r.code, EXIT.OK, 'exit');
-    for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'permission', 'task', 'workflow',
+    for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'workflow', 'apply',
       'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
       ok(new RegExp(`^\\s+${c}\\b`, 'm').test(r.stdout), `help mentions ${c}`);
     }
@@ -145,7 +145,7 @@ function run() {
   test('every command answers --help without needing a repository', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-bare-'));
     try {
-      for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'task', 'workflow',
+      for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'workflow',
         'apply', 'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
         const r = aidev([c, '--help'], { cwd: dir });
         eq(r.code, EXIT.OK, `${c} --help exit: ${r.stderr}`);
@@ -521,7 +521,7 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('guard-write denies read-only PKG source without a work lease', () => {
+  test('guard-write denies read-only PKG source', () => {
     const fx = makeRepo();
     try {
       const r = hook('guard-write', {

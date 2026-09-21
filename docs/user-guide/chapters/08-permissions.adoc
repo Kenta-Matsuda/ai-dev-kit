@@ -16,7 +16,7 @@
 
 |`read_only`
 |`**`（PKG 全体）
-|`issue-to-pr` agent が作業リースを持つ間だけ、許可パスに限り書けます。
+|agent は書けません。agent に編集させたいパスは `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
@@ -59,17 +59,17 @@
 
 [source,text]
 ----
-ai-dev-kit: "src/api/auth.ts" is read-only (**): no work lease. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
 ----
 
 hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます。
 
-[[permissions-lease]]
-=== AI がソースを編集できるのは作業リースの間だけ
+[[permissions-source]]
+=== ソースを agent に編集させるには
 
-`issue-to-pr` agent は、ユーザーが実行を承認した後に CLI から作業リース（ブランチ・許可パス・期限）を受け取り、その範囲でだけ編集します。リースは `aidev task abandon <id>` で解放でき、期限が切れても無効になります。
+既定では PKG のソースは `read_only` で、どの agent も書けません。`issue-to-pr` などに実装させたいときは、チームが `.aidev/policy.yaml` の `writable` に対象パス（例: `src/**`）を足し、コミットします。`protected` と `secrets_paths` はそれでも書けません。policy の変更は PR でレビューし、必要な期間だけ広げることを勧めます。
 
 [[permissions-commands]]
 === policy を置く・変える・見る

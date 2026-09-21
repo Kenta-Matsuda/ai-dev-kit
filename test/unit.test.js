@@ -163,7 +163,6 @@ function run() {
     eq(c.sync.tracking_branch, 'main', 'sync.tracking_branch mirrors hosting');
     eq(c.sync.remote_check_timeout_ms, 3000);
     eq(c.sync.pr.target_branch, 'main');
-    eq(c.task.lease_ttl_minutes, 120);
     eq(c.knowledge.max_files_per_dir, 20);
     eq(c.knowledge.evidence.include, ['**']);
     eq(c.tools.default, ['claude']);
@@ -273,7 +272,7 @@ function run() {
   test('numeric bounds are checked', () => {
     throws(() => cfg.validateConfig({ ...clone(base), knowledge: { max_files_per_dir: 0 } }), />= 1/);
     throws(() => cfg.validateConfig({ ...clone(base), sync: { lease_ttl_minutes: -5 } }), />= 1/);
-    throws(() => cfg.validateConfig({ ...clone(base), task: { max_concurrent: 'many' } }), /integer/);
+    throws(() => cfg.validateConfig({ ...clone(base), sync: { remote_check_timeout_ms: 'many' } }), /integer/);
     throws(() => cfg.validateConfig({ ...clone(base), knowledge: { agent_batch_size: 0 } }), />= 1/);
   });
 
@@ -303,7 +302,7 @@ function run() {
   });
 
   test('the protected floor covers every kit control surface', () => {
-    for (const must of ['.claude/**', 'CLAUDE.md', '.mcp.json', '.aidev/policy.yaml', '.aidev/leases/**',
+    for (const must of ['.claude/**', 'CLAUDE.md', '.mcp.json', '.aidev/policy.yaml',
       '.aidev/sync.lock', '.aidev/materialized.json', '.aidev/.gitignore', '.aidev/ejected.json']) {
       ok(cfg.ALWAYS_PROTECTED.includes(must), `ALWAYS_PROTECTED lacks ${must}`);
     }
@@ -361,13 +360,6 @@ function run() {
 
   suite('leases: lifecycle');
 
-  test('taskId cannot traverse', () => {
-    throws(() => leases.sanitizeTaskId('../etc/passwd'), /invalid taskId/);
-    throws(() => leases.sanitizeTaskId('a/b'), /invalid taskId/);
-    throws(() => leases.sanitizeTaskId(''), /required/);
-    eq(leases.sanitizeTaskId('wi-1234'), 'wi-1234');
-  });
-
   test('TTL expiry is computed from acquiredAt', () => {
     const t0 = Date.now();
     const lease = { acquiredAt: new Date(t0).toISOString(), ttlMinutes: 10 };
@@ -401,40 +393,6 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('work leases require an ai/wi-<id> branch and a non-empty scope', () => {
-    const fx = makeRepo();
-    try {
-      throws(() => leases.createWorkLease(fx.root, { taskId: 'wi-1', branch: 'main', allowedPaths: ['src/**'] }),
-        /ai\/wi-/, 'branch shape');
-      throws(() => leases.createWorkLease(fx.root, { taskId: 'wi-1', branch: 'ai/wi-1', allowedPaths: [] }),
-        /at least one/, 'empty scope');
-      const l = leases.createWorkLease(fx.root, {
-        taskId: 'wi-1', branch: 'ai/wi-1', allowedPaths: ['src/**'], ttlMinutes: 30,
-      });
-      eq(l.branch, 'ai/wi-1');
-      ok(fs.existsSync(path.join(fx.root, '.aidev', 'leases', 'wi-1.json')), 'lease lives under .aidev/leases/');
-      eq(leases.readWorkLease(fx.root, 'wi-1').taskId, 'wi-1');
-      eq(leases.listWorkLeases(fx.root).length, 1);
-      ok(leases.releaseWorkLease(fx.root, 'wi-1'), 'released');
-      eq(leases.listWorkLeases(fx.root).length, 0);
-    } finally { fx.cleanup(); }
-  });
-
-  test('a work lease cannot be minted over a secret path', () => {
-    const fx = makeRepo();
-    try {
-      throws(() => leases.createWorkLease(fx.root, {
-        taskId: 'wi-2', branch: 'ai/wi-2',
-        allowedPaths: ['config/secrets/**'],
-        secretsPaths: ['config/secrets/**'],
-      }), /protected path/);
-      throws(() => leases.createWorkLease(fx.root, {
-        taskId: 'wi-2', branch: 'ai/wi-2',
-        allowedPaths: ['.claude/**'],
-        protectedPaths: [...cfg.ALWAYS_PROTECTED],
-      }), /protected path/, 'nor over the kit control surface');
-    } finally { fx.cleanup(); }
-  });
 }
 
 module.exports = { run };

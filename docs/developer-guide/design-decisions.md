@@ -58,13 +58,13 @@
 
 **論点**: 「baseがknowledgeより進んでいる」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
 
-### D6: PKG fileは通常read-onlyで、issue-to-prのwork leaseだけが書き込める
+### D6: PKG fileは既定でread-onlyとし、teamが`writable`で広げる
 
-**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・`aidev.yaml`のみ。PKG fileへの書込は`ai/wi-<id>` branch上で有効なwork leaseがpathを許可する場合に限ります。leaseはCLIだけが作れ、lease fileは`ALWAYS_PROTECTED`です。
+**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・`aidev.yaml`のみ。PKG fileへの書込を許すのは、teamが`.aidev/policy.yaml`の`writable`にpathを足してcommitした場合だけです。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
 
-**理由**: agentが自分の権限を広げられない構造にするためです。leaseがsecrets / protectedより下に評価されるので、leaseで制御面へ到達することもできません。
+**理由**: agentが自分の権限を広げられない構造にするためです。`writable`はsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。
 
-**論点**: work leaseを発行する公開経路がまだ無く、対話sessionから小さな修正をagentに任せたいチームには制約が強い。短期leaseの発行command（例: `aidev lease grant --paths`）を追加するかは要検討です。
+**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。
 
 ### D7: 対応AI toolはClaude Codeのみとし、`tools.default`で宣言する
 
@@ -72,7 +72,7 @@
 
 **理由**: PreToolUse相当の強制機構を持つtoolがClaude Codeだけであり、同じ保証を約束できないtoolを「対応」と言わないためです。`tools.default`をschemaに置いたのは、将来adapterを足したときに設定fileの形を変えないためです。
 
-**論点**: 強制水準が低いtoolを追加する場合、issue-to-prやwork leaseをそのtoolで許可するか。
+**論点**: 強制水準が低いtoolを追加する場合、PKG sourceの編集をそのtoolで許可するか（0.3.0でadapterは追加済み。hookによる強制はclaudeのみ）。
 
 ### D8: hostingは`azure-devops`と`generic`の2種とする
 
@@ -118,10 +118,10 @@
 
 | 論点 | 内容 | 関連 |
 | --- | --- | --- |
-| 対話sessionでのPKG編集 | work lease以外の短期lease経路を提供するか | D6 |
+
 | policyのcustomize | `aidev.yaml`から`read_only` / `writable`を生成できるようにするか | D4 |
 | `base ahead of knowledge`の扱い | WARNのままか、`--strict`以外でもexit 2にするか | D5 |
-| task状態機械の改名 | `WRAPPER_PR_*`をWiki PRの語彙に改め、sync PRを観測する経路を作る | D11 |
+
 | 段階的配布 | `origin/main`のmergeが即時に全員へ通知される点を、tag pinやcanaryで緩和するか | D10 |
 | page単位のevidence依存 | supporting evidence変更時の全件再queueを減らす | D12 |
 | 追加tool / provider | 次に対応するtoolとhosting、強制水準の差の扱い | D7、D8 |

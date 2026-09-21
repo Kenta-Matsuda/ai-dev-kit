@@ -5,17 +5,17 @@
  * Every write flows through `decide()`. Precedence, highest first:
  *
  *   1. Paths outside the repository        → deny (ungovernable)
- *   2. Secrets and protected paths         → deny, unconditionally, even with
- *                                            a valid lease of either kind
+ *   2. Secrets and protected paths         → deny, unconditionally, even during a sync
  *   3. Consistency error + no sync lease   → deny everything
  *   4. Consistency error + sync lease      → allow knowledge/** only
  *   5. writable paths                      → allow (Wiki, workflows, aidev.yaml)
- *   6. read_only paths                     → allow only under a matching work
- *                                            lease (branch- and path-scoped)
+ *   6. read_only paths                     → deny
  *   7. otherwise                           → allow
  *
- * Rule 2 sitting above the leases is what makes a lease incapable of widening
- * into the kit's own control surface.
+ * Rule 2 sitting above the sync lease is what makes the lease incapable of
+ * widening into the kit's own control surface. PKG source is read-only for
+ * every agent; a team that wants an agent to edit it lists the paths under
+ * `writable` in the policy.
  */
 
 const pathsMod = require('./paths');
@@ -107,23 +107,9 @@ function decide(repoRoot, targetPath, {
   // ---- 6. read-only regions ------------------------------------------------
   const roHit = pathsMod.firstMatch(pol.read_only, rel);
   if (roHit) {
-    const found = leasesMod.findAuthorizingWorkLease(repoRoot, rel, { now });
-    if (found.lease) {
-      // Re-assert include/exclude so a lease cannot reach past package scope.
-      const inc = config?.package?.include || [];
-      const exc = config?.package?.exclude || [];
-      if (inc.length > 0 && !pathsMod.isIncluded(rel, inc, exc)) {
-        return deny(
-          `"${rel}" is outside package.include / inside package.exclude, so the work lease does not cover it`,
-          { rule: 'work-lease-scope', path: rel });
-      }
-      return allow(
-        `work lease ${found.lease.taskId} authorises "${rel}" on branch ${found.lease.branch}`,
-        { rule: 'work-lease', path: rel, lease: { kind: 'work', taskId: found.lease.taskId, branch: found.lease.branch } });
-    }
     return deny(
-      `"${rel}" is read-only (${roHit}): ${found.reason}. ` +
-      'issue-to-pr obtains a scoped, time-limited work lease after the user approves the run.',
+      `"${rel}" is read-only (${roHit}). ` +
+      'PKG source is not written by agents; to allow it, list the paths under writable in .aidev/policy.yaml.',
       { rule: 'read-only', path: rel, pattern: roHit });
   }
 

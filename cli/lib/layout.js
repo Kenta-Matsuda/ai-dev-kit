@@ -53,8 +53,6 @@ const KIT_MANAGED_GLOBS = Object.freeze([
 const AIDEV_GITIGNORE = [
   '# ai-dev-kit runtime state (regenerated; never commit)',
   'cache/',
-  'leases/',
-  'tasks/',
   'sync.lock',
   'knowledge/.cache/',
   'workflows/*/runs/',

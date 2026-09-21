@@ -72,7 +72,7 @@ LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向け
 |`✗ … ran out of time`
 |同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けるか、`aidev.yaml` の `knowledge.agent_timeout_ms` を増やします。
 
-|`⚠ … partial Wiki progress: 120/163 completed, 43 remain.`
+|`⚠ … partial Wiki progress: 120/163 completed …`
 |同じコマンドで再開します。
 
 |`✗ … made no Wiki progress: 0/20`

@@ -56,18 +56,9 @@ const CONTROL_FILES = Object.freeze([
   cfgMod.SYNC_LOCK_REL,
 ]);
 
-/**
- * Directories under .aidev that hold only kit runtime state.
- *
- * `.aidev/tasks` is the default `task.cache_dir`: a local cache of Work Item
- * ids, branch names and SHAs whose source of truth is Azure DevOps, so deleting
- * it loses nothing. A team that relocated cache_dir elsewhere keeps that path —
- * eject does not follow config into directories it did not choose.
- */
+/** Directories under .aidev that hold only kit runtime state (gitignored). */
 const CONTROL_DIRS = Object.freeze([
-  path.join('.aidev', 'leases'),
   path.join('.aidev', 'cache'),
-  path.join('.aidev', 'tasks'),
 ]);
 
 /**
@@ -205,21 +196,14 @@ function run(ctx) {
       '    Refusing to delete files from a directory that was never initialised. Use --force to override.');
   }
 
-  // An in-flight operation means someone else's work is mid-write. Ejecting
-  // would strand a sync with knowledge/** half-rewritten, or a work lease whose
-  // branch is still open.
+  // An in-flight sync means someone else's work is mid-write. Ejecting would
+  // strand it with knowledge/** half-rewritten.
   if (!flags.force) {
     const sync = leases.readSyncLease(repoRoot);
     if (sync && leases.evaluateLease(sync).valid) {
       throw new AidevError(
         'a sync is in progress; ejecting now would strand it mid-write.\n' +
         '    Finish it, or run "aidev sync --abort", then eject.');
-    }
-    const work = leases.listWorkLeases(repoRoot).filter((l) => leases.evaluateLease(l).valid);
-    if (work.length > 0) {
-      throw new AidevError(
-        `${work.length} active work lease(s): ${work.map((l) => l.taskId).join(', ')}.\n` +
-        '    Land or abandon those tasks ("aidev task abandon <id>") before ejecting.');
     }
   }
 

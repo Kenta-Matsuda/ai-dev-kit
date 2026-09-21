@@ -19,10 +19,11 @@
 |`this checkout looks like a wrapper`
 |PKG の中で installer を実行しています。kit の clone で実行します。
 
-|`the dedicated ai-dev-kit checkout must be on branch main`
+|`… checkout must be on branch main`
 |kit の clone で `git switch main` してから実行します。
 
-|`aidev doctor` で `⚠ claude not found on PATH` / `is too old`
+|`aidev doctor` で +
+`⚠ claude not found on PATH` / `is too old`
 |Claude Code {claude-min-version} 以上を入れます。Wiki の生成にはこれが必要です。
 |===
 
@@ -48,7 +49,7 @@
 |`tool config  CONFLICTS in N file(s)`
 |`aidev apply` の衝突が未解消です。該当ファイルのマーカー（`<<<<<<<` / `=======` / `>>>>>>>`）を解消し、`aidev apply` を実行して記録を更新し、コミットします。
 
-|`tool config  kit hooks missing from .claude/settings.json`
+|`tool config  kit hooks missing …`
 |kit の hooks が消えています。`aidev apply --force` で kit 版に戻すか、hooks を手で戻します。
 
 |`tool config  not recorded — run "aidev init"`
@@ -122,13 +123,13 @@
 |`⚠ N completion report(s) were rejected`
 |同じコマンドで再実行します。続くなら `--full`。
 
-|`✗ … left the Wiki checkpoint invalid: PKG checkout changed during generation`
+|`✗ … left the Wiki checkpoint invalid …`
 |生成中にブランチを切り替えました。ブランチを戻して再実行します。
 
-|`✗ N Wiki page(s) were edited by hand and would be overwritten`
+|`✗ N Wiki page(s) were edited by hand …`
 |`--force` を付けるか、編集内容をソース側に移します。
 
-|`✗ --scope <path> matched no files in generation targets`
+|`✗ --scope <path> matched no files …`
 |`aidev.yaml` の `package.include` に含まれるパスを指定します。
 |===
 
@@ -148,13 +149,13 @@
 |`✗ could not fetch origin/main`
 |`git fetch origin main` が通るか確認します（ネットワーク、認証、proxy）。
 
-|`⚠ AZURE_DEVOPS_PAT is not set; open the pull request … by hand`
+|`⚠ AZURE_DEVOPS_PAT is not set; …`
 |環境変数を設定して再実行するか、push 済みのブランチから手で PR を作ります。
 
-|`ℹ hosting.type is generic; open the pull request … by hand`
+|`ℹ hosting.type is generic; …`
 |正常です。手で PR を作ります。
 
-|`✓ the Wiki committed on origin/main already describes …`
+|`✓ the Wiki committed on origin/main …`
 |`git pull` します。
 
 |`✗ hand-edited Wiki pages would be overwritten`
@@ -168,8 +169,8 @@
 |===
 |症状 |対処
 
-|Claude が `… is read-only (**): no work lease` と報告
-|正常です。ソースの変更は `issue-to-pr` agent の作業リース経由か、人間が行います。
+|Claude が `… is read-only (**)` と報告
+|正常です。既定では agent は PKG のソースを書けません。編集させたいパスは `.aidev/policy.yaml` の `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
 
 |`… is protected (.claude/**)`
 |正常です。kit のファイルは kit への PR で変えます。
@@ -192,16 +193,17 @@
 |===
 |症状 |対処
 
-|`aidev status` の `tool config` 行に `newer templates available: "aidev apply"`
+|`tool config` 行に `newer templates available …`
 |都合のよいときに PKG で `aidev apply` し、差分をコミットして PR にします。
 
 |`aidev check` が終了コード 2 になった
 |`git pull`。それでも 2 なら、`aidev status` で衝突マーカーか hooks の欠落かを確認し、解消して `aidev apply` を実行します。
 
-|`✗ N file(s) need your attention` / `conflict markers were written`
+|`✗ N file(s) need your attention` +
+`conflict markers were written`
 |チームの編集と kit の変更が同じ箇所です。マーカーを解消して `aidev apply` を実行し、コミットします。kit 版にしてよければ `aidev apply --force` です。
 
-|`edited locally and the template it was based on … is not in the kit checkout's history`
+|`edited locally and the template it was based on …`
 |kit の clone に前回のコミットがありません（shallow clone など）。kit の clone で `git fetch --unshallow` するか、手で直すか `aidev apply --force` にします。
 
 |`✗ the kit checkout has diverged from origin/main`

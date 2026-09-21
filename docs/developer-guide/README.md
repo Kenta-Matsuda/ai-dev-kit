@@ -43,10 +43,10 @@
 | agent起動（batch、prompt、launcher） | `cli/lib/agent.js` |
 | `knowledge build` / `status` | `cli/commands/knowledge.js` |
 | sync（worktree、branch、PR） | `cli/commands/sync.js`、`cli/lib/ado.js` |
-| lease | `cli/lib/leases.js` |
+| sync lease | `cli/lib/leases.js` |
 | policy評価 | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
 | hooks | `cli/commands/hook.js`、`templates/claude/.claude/settings.json` |
-| task状態機械 | `cli/commands/task.js` |
+
 | workflow | `cli/commands/workflow.js` |
 | eject | `cli/commands/eject.js` |
 | uninstall | `cli/commands/uninstall.js` |

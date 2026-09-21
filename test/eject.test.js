@@ -423,17 +423,13 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('the local task cache is removed with the rest of the control surface', () => {
-    // .aidev/tasks is a cache whose source of truth is Azure DevOps, so leaving
-    // it behind strands stale Work Item state in a repo with no CLI to read it.
+  test('the runtime cache is removed with the rest of the control surface', () => {
     // .aidev/ itself stays: it still holds the Wiki and the marker.
     const fx = makeRepo();
     try {
-      write(path.join(fx.root, '.aidev', 'tasks', 'wi-1234.json'), '{"id":1234}\n');
-      write(path.join(fx.root, '.aidev', 'leases', 'wi-1234.json'), '{"kind":"work"}\n');
+      write(path.join(fx.root, '.aidev', 'cache', 'remote-check.json'), '{}\n');
       aidev(['eject', '--yes', '--force'], { cwd: fx.root });
-      ok(!fs.existsSync(path.join(fx.root, '.aidev', 'tasks')), 'task cache removed');
-      ok(!fs.existsSync(path.join(fx.root, '.aidev', 'leases')), 'leases removed');
+      ok(!fs.existsSync(path.join(fx.root, '.aidev', 'cache')), 'cache removed');
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge')), '.aidev/knowledge kept');
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'marker in place');
     } finally { fx.cleanup(); }

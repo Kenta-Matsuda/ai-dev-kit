@@ -36,11 +36,11 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 | --- | --- |
 | `aidev.yaml`, `.aidev/workflows/**` | 書き込み可 |
 | `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge build` から起動）のみ。手編集しない |
-| PKG のソース・テスト・設定 | **通常 read-only**。issue-to-pr が作業リースを持つ場合のみ、許可パスに限り可 |
+| PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
 | `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（ai-dev-kit 由来。`aidev update` が更新する） |
 | `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `AGENTS.md`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |
-| `.aidev/policy.yaml`, `.aidev/leases/**`, `.aidev/sync.lock`, `.aidev/materialized.json` | **常に禁止**（CLI のみが配置） |
-| `secrets_paths` 該当 | **常に禁止**（リースがあっても） |
+| `.aidev/policy.yaml`, `.aidev/sync.lock`, `.aidev/materialized.json` | **常に禁止**（CLI のみが配置） |
+| `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 
 **権限ファイルを自分で書き換えようとしないでください。** 権限の変更が必要だと判断したら、
 `aidev permission reconfigure` をユーザーが対話的に実行する必要がある旨を伝えます。
@@ -89,7 +89,6 @@ aidev status             # 3 SHA・Wiki の状態・drift を 1 画面で
 aidev check              # 同じ検査を終了コードで（0=ok / 2=drift / 3=権限 / 4=Wiki 不整合）
 aidev knowledge build    # Wiki を生成・更新（途中で止まっても同じコマンドで続き）
 aidev sync               # PKG の tracking branch に追従して Wiki を更新し PR を作る
-aidev task list          # issue-to-pr タスクの状態
 ```
 
 ---

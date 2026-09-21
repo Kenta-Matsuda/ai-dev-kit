@@ -5,7 +5,7 @@
  *
  *   0  success
  *   1  general error
- *   2  drift: materialised tool config disagrees with .aidev/materialized.json
+ *   2  drift: tool configuration record missing, conflict markers unresolved, or kit hooks removed
  *   3  permission policy violation
  *   4  wiki inconsistency: the Wiki is missing or structurally broken
  */
@@ -27,14 +27,8 @@ class AidevError extends Error {
   }
 }
 
-class DriftError extends AidevError {
-  constructor(message, detail) { super(message, EXIT.DRIFT, detail); this.name = 'DriftError'; }
-}
-class PermissionError extends AidevError {
-  constructor(message, detail) { super(message, EXIT.PERMISSION, detail); this.name = 'PermissionError'; }
-}
 class KnowledgeError extends AidevError {
   constructor(message, detail) { super(message, EXIT.KNOWLEDGE, detail); this.name = 'KnowledgeError'; }
 }
 
-module.exports = { EXIT, AidevError, DriftError, PermissionError, KnowledgeError };
+module.exports = { EXIT, AidevError, KnowledgeError };

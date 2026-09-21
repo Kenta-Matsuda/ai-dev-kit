@@ -40,7 +40,6 @@ function inspect(repoRoot, config, { checkRemote = true, installRoot = assets.DE
   const handEdits = inventory.detectHandEdits(repoRoot, records);
   const inconsistencies = inventory.validateInventoryConsistency(records);
   const syncLease = leases.readSyncLease(repoRoot);
-  const workLeases = leases.listWorkLeases(repoRoot).filter((l) => leases.evaluateLease(l).valid);
   const wikiBranch = st.trackingSha
     ? gitMod.revParse(repoRoot, `ai/wiki-${String(st.trackingSha).slice(0, 12)}`)
       || gitMod.revParse(repoRoot, `origin/ai/wiki-${String(st.trackingSha).slice(0, 12)}`)
@@ -48,7 +47,7 @@ function inspect(repoRoot, config, { checkRemote = true, installRoot = assets.DE
   return {
     state: st, config: configState, policy, manifest, records, handEdits, inconsistencies,
     syncLease: syncLease ? { ...syncLease, evaluation: leases.evaluateLease(syncLease) } : null,
-    workLeases, wikiBranchForTracking: wikiBranch,
+    wikiBranchForTracking: wikiBranch,
   };
 }
 
@@ -97,7 +96,6 @@ function run(ctx) {
       },
       policy: r.policy,
       syncLease: r.syncLease,
-      workLeases: r.workLeases.map((l) => ({ taskId: l.taskId, branch: l.branch })),
     });
     return EXIT.OK;
   }
@@ -134,9 +132,6 @@ function run(ctx) {
     ui.warn(r.syncLease.evaluation.valid
       ? `a sync is in progress (target ${stateMod.short(r.syncLease.targetSha)}).`
       : `a stale sync lease is present (${r.syncLease.evaluation.reason}). Run "aidev sync --resume" or "aidev sync --abort".`);
-  }
-  if (r.workLeases.length > 0) {
-    ui.info(`active work lease(s): ${r.workLeases.map((l) => `${l.taskId} → ${l.branch}`).join(', ')}`);
   }
   ui.out('');
   return EXIT.OK;

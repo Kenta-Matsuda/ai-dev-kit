@@ -19,10 +19,11 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`this checkout looks like a wrapper`
 |You ran the installer inside a PKG. Run it in the kit clone.
 
-|`the dedicated ai-dev-kit checkout must be on branch main`
+|`… checkout must be on branch main`
 |Run `git switch main` in the kit clone, then try again.
 
-|`aidev doctor` shows `⚠ claude not found on PATH` / `is too old`
+|`aidev doctor` shows +
+`⚠ claude not found on PATH` / `is too old`
 |Install Claude Code {claude-min-version} or newer. Generating the Wiki needs it.
 |===
 
@@ -48,7 +49,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`tool config  CONFLICTS in N file(s)`
 |An `aidev apply` conflict is unresolved. Resolve the markers (`<<<<<<<` / `=======` / `>>>>>>>`) in those files, run `aidev apply` to update the record, and commit.
 
-|`tool config  kit hooks missing from .claude/settings.json`
+|`tool config  kit hooks missing …`
 |The kit's hooks are gone. Restore them by hand or take the kit version with `aidev apply --force`.
 
 |`tool config  not recorded — run "aidev init"`
@@ -122,13 +123,13 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`⚠ N completion report(s) were rejected`
 |Run the same command again. If it persists, use `--full`.
 
-|`✗ … left the Wiki checkpoint invalid: PKG checkout changed during generation`
+|`✗ … left the Wiki checkpoint invalid …`
 |You switched branches during generation. Switch back and run again.
 
-|`✗ N Wiki page(s) were edited by hand and would be overwritten`
+|`✗ N Wiki page(s) were edited by hand …`
 |Add `--force`, or move the edits into the source.
 
-|`✗ --scope <path> matched no files in generation targets`
+|`✗ --scope <path> matched no files …`
 |Give a path that is inside `package.include` in `aidev.yaml`.
 |===
 
@@ -148,13 +149,13 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`✗ could not fetch origin/main`
 |Check that `git fetch origin main` works (network, credentials, proxy).
 
-|`⚠ AZURE_DEVOPS_PAT is not set; open the pull request … by hand`
+|`⚠ AZURE_DEVOPS_PAT is not set; …`
 |Set the environment variable and run again, or open the PR by hand from the pushed branch.
 
-|`ℹ hosting.type is generic; open the pull request … by hand`
+|`ℹ hosting.type is generic; …`
 |Normal. Open the PR by hand.
 
-|`✓ the Wiki committed on origin/main already describes …`
+|`✓ the Wiki committed on origin/main …`
 |Run `git pull`.
 
 |`✗ hand-edited Wiki pages would be overwritten`
@@ -168,8 +169,8 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |===
 |Symptom |What to do
 
-|Claude reports `… is read-only (**): no work lease`
-|Normal. Source changes go through the `issue-to-pr` agent's work lease, or a human makes them.
+|Claude reports `… is read-only (**)`
+|Normal. By default agents cannot write PKG source. Add the paths you want edited to `writable` in `.aidev/policy.yaml` (xref:permissions-source[Letting an agent edit source]).
 
 |`… is protected (.claude/**)`
 |Normal. Kit files are changed through a PR to the kit.
@@ -192,16 +193,17 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |===
 |Symptom |What to do
 
-|The `tool config` line of `aidev status` says `newer templates available: "aidev apply"`
+|`tool config` line says `newer templates available …`
 |When convenient, run `aidev apply` in the PKG, commit the diff and open a PR.
 
 |`aidev check` now exits with 2
 |`git pull`. If it is still 2, look at `aidev status` to see whether conflict markers or missing hooks are the cause, fix that, and run `aidev apply`.
 
-|`✗ N file(s) need your attention` / `conflict markers were written`
+|`✗ N file(s) need your attention` +
+`conflict markers were written`
 |The team's edit and the kit's change touch the same lines. Resolve the markers, run `aidev apply`, and commit. If the kit version is fine, run `aidev apply --force`.
 
-|`edited locally and the template it was based on … is not in the kit checkout's history`
+|`edited locally and the template it was based on …`
 |The kit clone lacks the previous commit (a shallow clone, for instance). Run `git fetch --unshallow` in the kit clone, fix the file by hand, or run `aidev apply --force`.
 
 |`✗ the kit checkout has diverged from origin/main`
@@ -215,7 +217,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |===
 |Symptom |What to do
 
-|PowerShell blocks `aidev.ps1` because of the execution policy
+|PowerShell blocks `aidev.ps1` (execution policy)
 |Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or call `aidev.cmd` explicitly.
 
 |The hooks cannot find `aidev`

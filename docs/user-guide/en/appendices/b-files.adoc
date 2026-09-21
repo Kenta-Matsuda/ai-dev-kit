@@ -68,11 +68,8 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |`.aidev/cache/`
 |Remote-check cache, the temporary sync worktree, session records
 
-|`.aidev/leases/`, `.aidev/sync.lock`
-|Sync and work locks
-
-|`.aidev/tasks/`
-|Local cache for `aidev task`
+|`.aidev/sync.lock`
+|The sync lock
 
 |`.aidev/knowledge/.cache/`
 |Files exchanged with the agent

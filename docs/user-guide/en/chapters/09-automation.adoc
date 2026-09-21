@@ -16,7 +16,7 @@ Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and c
 |Runs `aidev check` on every PR. Make it a **required build validation** in the branch policy of `main`. Without it, an edit that removes the hooks could be merged.
 
 |`pipelines/azure-pipelines-sync.yml`
-|Runs `aidev sync --no-agent` and `aidev task advance` daily at 18:00 UTC. With `--no-agent` only the structure is updated, and the PR notes that the prose is still pending. Remove `--no-agent` once the pipeline has Claude Code and a token budget. Set the variables `AZURE_DEVOPS_PAT`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`.
+|Runs `aidev sync --no-agent` daily at 18:00 UTC. With `--no-agent` only the structure is updated, and the PR notes that the prose is still pending. Remove `--no-agent` once the pipeline has Claude Code and a token budget. Set the variables `AZURE_DEVOPS_PAT`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`.
 |===
 
 The exit code of `aidev check` is the contract with CI.
@@ -38,37 +38,6 @@ The exit code of `aidev check` is the contract with CI.
 |The Wiki is missing or broken, or a previous sync stopped halfway.
 |===
 
-[[automation-task]]
-=== aidev task — progress of issue-to-pr tasks
-
-When the `issue-to-pr` agent implements a Work Item and opens a PR, its progress is recorded in `.aidev/tasks/<id>.json` (gitignored). `aidev task` reads that state and moves it forward.
-
-[source,text]
-----
-IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPEN → DONE
-----
-
-A human merges twice: at `PKG_PR_OPEN` (the code PR) and at `WIKI_PR_OPEN` (the Wiki PR).
-
-[%autowidth.stretch,options="header"]
-|===
-|Command |Action
-
-|`aidev task list`
-|Lists unfinished tasks.
-
-|`aidev task show <id>`
-|Shows the state and the states it can move to next.
-
-|`aidev task advance [<id>]`
-|Looks at the PR and moves one step. Without an id, processes every unfinished task (for the nightly pipeline).
-
-|`aidev task resume <id>`
-|Moves as far as it can and shows what a human or an agent does next.
-
-|`aidev task abandon <id>`
-|Abandons the task and releases the work lease. Does not close the PR.
-|===
 
 [[automation-workflow]]
 === aidev workflow — running approved scripts
@@ -108,4 +77,4 @@ How to write `steps.js` is explained in the scaffold's comments. The limits are 
 
 === Related
 
-* xref:cli-check[aidev check], xref:cli-sync[aidev sync], xref:cli-task[aidev task], xref:cli-workflow[aidev workflow]
+* xref:cli-check[aidev check], xref:cli-sync[aidev sync], xref:cli-workflow[aidev workflow]

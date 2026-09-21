@@ -21,7 +21,7 @@ description: 秘密情報の扱いと禁止パターン。コミット・ログ�
 | エラーメッセージ | 「`AZURE_DEVOPS_PAT` が未設定」は可。**値は出さない** |
 
 `aidev.yaml` の `secrets_paths` が該当領域を定義します。ここは
-**リースがあっても常に読み書き禁止**です（`aidev hook guard-write` が deny します）。
+**writable に含まれていても常に読み書き禁止**です（`aidev hook guard-write` が deny します）。
 
 ## 禁止パターン
 

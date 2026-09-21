@@ -56,7 +56,7 @@ aidev hook guard-write --input /tmp/hook.json
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**): no work lease. …"
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). PKG source is not written by agents; …"
   }
 }
 ----

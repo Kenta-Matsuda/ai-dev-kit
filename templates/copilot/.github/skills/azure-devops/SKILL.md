@@ -11,10 +11,9 @@ description: Work Item・ブランチ・PR・Pipeline の定型操作。MCP経�
 ## 呼び出し口
 
 - MCPサーバー `azure-devops`（`.mcp.json` → `aidev mcp azure-devops` が起動）
-- CLI（`aidev task ...`）— 状態機械を経由する操作はこちら
+- CLI（`aidev sync`）— Wiki の更新と Wiki PR の作成はこちら
 
-同じ事実を2通りで取りに行かないでください。**状態遷移を伴う操作は必ず `aidev task`** を通します。
-直接APIで状態を書き換えると、状態機械の記録と食い違います。
+Work Item の状態や PR の作成・更新は MCP で行い、Wiki の同期は `aidev sync` に任せてください。
 
 ## 原則: 状態はAPIが正本
 

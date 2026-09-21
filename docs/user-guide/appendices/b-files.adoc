@@ -68,11 +68,8 @@
 |`.aidev/cache/`
 |remote 確認のキャッシュ、sync の一時 worktree、セッションの記録
 
-|`.aidev/leases/`, `.aidev/sync.lock`
-|sync と作業のロック
-
-|`.aidev/tasks/`
-|`aidev task` のローカルキャッシュ
+|`.aidev/sync.lock`
+|sync のロック
 
 |`.aidev/knowledge/.cache/`
 |agent との受け渡しファイル

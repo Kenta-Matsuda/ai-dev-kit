@@ -49,9 +49,9 @@ PKGごとに違うのは主に「秘密情報の在処」と「書き換えて�
 | 原則 | 意味 |
 | --- | --- |
 | **既定は拒否** | 迷ったら禁止側に倒す。緩めるのは後からでもできる |
-| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/leases/**`・`.aidev/sync.lock`・`.aidev/materialized.json`・`.aidev/.gitignore`・`.aidev/ejected.json` は常に protected。CLIが強制的に再付与する |
+| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/sync.lock`・`.aidev/materialized.json`・`.aidev/.gitignore`・`.aidev/ejected.json` は常に protected。CLIが強制的に再付与する |
 | **秘密は protected へ** | `aidev.yaml` の `secrets_paths` は protected に昇格させる（read_onlyでは足りない） |
-| **PKG全体（`**`）は read_only** | 書き込みは issue-to-pr の作業リース経由のみ |
+| **PKG全体（`**`）は read_only** | agent に編集させたいパスだけを、チームの判断で `writable` に足す |
 | **`.aidev/knowledge/**` は writable_during_sync** | syncリース保持中（またはCLIが起動した knowledge-builder）だけ書ける |
 | **writable は最小限** | 既定は `.aidev/knowledge/**`・`.aidev/workflows/**`・`aidev.yaml` のみ |
 

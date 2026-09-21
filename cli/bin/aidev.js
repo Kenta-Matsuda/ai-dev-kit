@@ -19,7 +19,7 @@ const ui = require('../lib/ui');
 
 const COMMANDS = [
   'init', 'status', 'check', 'knowledge', 'sync',
-  'agent', 'permission', 'task', 'workflow', 'apply',
+  'agent', 'permission', 'workflow', 'apply',
   'update', 'doctor', 'eject', 'uninstall',
   'hook', 'mcp',
 ];
@@ -29,7 +29,6 @@ const SUBCOMMANDS = {
   knowledge: ['build', 'status'],
   agent: ['list', 'show', 'run'],
   permission: ['configure', 'reconfigure', 'show'],
-  task: ['list', 'show', 'resume', 'advance', 'abandon'],
   workflow: ['new', 'approve', 'run', 'list'],
   hook: ['session-start', 'guard-write', 'quality-gate', 'session-stop'],
   mcp: ['azure-devops'],
@@ -64,7 +63,7 @@ function usage() {
   ui.out('  usage: aidev <command> [subcommand] [options]');
   ui.out('');
   const groups = [
-    ['in a package clone', ['init', 'status', 'check', 'knowledge', 'sync', 'agent', 'permission', 'task', 'workflow', 'apply']],
+    ['in a package clone', ['init', 'status', 'check', 'knowledge', 'sync', 'agent', 'permission', 'workflow', 'apply']],
     ['this machine', ['update', 'doctor', 'eject', 'uninstall']],
     ['called by tools', ['hook', 'mcp']],
   ];

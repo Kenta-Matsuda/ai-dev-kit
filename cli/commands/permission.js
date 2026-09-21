@@ -31,7 +31,7 @@ function candidatePath(repoRoot) { return path.join(repoRoot, CANDIDATE_REL); }
  * Derive a candidate policy from aidev.yaml.
  *
  * Every entry is mechanically justified: the protected floor is constant, the
- * PKG is read-only because writes to it go through a work lease, and the
+ * PKG is read-only by default (a team widens `writable` deliberately), and the
  * secrets from aidev.yaml are promoted to protected so a policy edit alone can
  * never expose them.
  */
@@ -64,7 +64,7 @@ function renderCandidate(config, policy) {
     'protected:',
     ...policy.protected.map((p) => `  - "${p}"`),
     '',
-    '# PKG 本体。書き込みは issue-to-pr が取得する work lease 経由のみ。',
+    '# PKG 本体。既定では agent は書き込めない。許可するパスは writable に足す。',
     'read_only:',
     ...policy.read_only.map((p) => `  - "${p}"`),
     '',

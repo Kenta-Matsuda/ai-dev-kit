@@ -42,7 +42,6 @@ const ALWAYS_PROTECTED = Object.freeze([
   // it: an agent must never rewrite the instructions another tool will read.
   ...layout.ALL_TOOL_CONFIG_GLOBS,
   layout.POLICY_REL,
-  '.aidev/leases/**',
   layout.SYNC_LOCK_REL,
   layout.MATERIALIZED_REL,
   layout.AIDEV_GITIGNORE_REL,
@@ -53,9 +52,9 @@ const ALWAYS_PROTECTED = Object.freeze([
 ]);
 
 /**
- * The write scopes every policy starts from. The PKG is read-only for an agent
- * (issue-to-pr edits it under a work lease); the Wiki, workflows and the PKG's
- * own aidev.yaml are the places an agent is expected to write.
+ * The write scopes every policy starts from. The PKG is read-only for an agent;
+ * the Wiki, workflows and the PKG's own aidev.yaml are the places an agent is
+ * expected to write. A team widens `writable` deliberately, through the policy.
  */
 const DEFAULT_POLICY_SCOPES = Object.freeze({
   read_only: Object.freeze(['**']),
@@ -87,12 +86,6 @@ const DEFAULTS = Object.freeze({
     remote_check_timeout_ms: 3000,
     remote_check_ttl_minutes: 60,
     lease_ttl_minutes: 120,
-  },
-  task: {
-    cache_dir: '.aidev/tasks',
-    lease_ttl_minutes: 120,
-    retention_days: 90,
-    max_concurrent: 3,
   },
   knowledge: {
     max_files_per_dir: 20,
@@ -288,7 +281,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
       }
     }
   }
-  const triage = mapping(hosting.triage, 'hosting.triage');
   const hostingCfg = {
     type,
     organization: asString(hosting.organization, 'hosting.organization', null),
@@ -296,10 +288,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
     repository: asString(hosting.repository, 'hosting.repository', null),
     auth_env: asString(hosting.auth_env, 'hosting.auth_env', DEFAULTS.hosting.auth_env[type]),
     tracking_branch: asString(hosting.tracking_branch, 'hosting.tracking_branch', DEFAULTS.hosting.tracking_branch),
-    triage: {
-      labels: asArray(triage.labels, 'hosting.triage.labels'),
-      area_path: asString(triage.area_path, 'hosting.triage.area_path', null),
-    },
   };
 
   // ---- tools --------------------------------------------------------------
@@ -340,7 +328,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
 
   const sync = mapping(raw.sync, 'sync');
   const pr = mapping(sync.pr, 'sync.pr');
-  const task = mapping(raw.task, 'task');
   const knowledge = mapping(raw.knowledge, 'knowledge');
   const eve = mapping(raw.self_evolution, 'self_evolution');
   const gates = mapping(raw.quality_gates, 'quality_gates');
@@ -361,7 +348,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
       project: hostingCfg.project,
       repository: hostingCfg.repository,
       auth_env: hostingCfg.auth_env,
-      triage: hostingCfg.triage,
     } : null,
     tools: {
       default: toolList,
@@ -385,15 +371,6 @@ function validateConfig(raw, source = CONFIG_NAME) {
       lease_ttl_minutes: asInt(
         sync.lease_ttl_minutes, 'sync.lease_ttl_minutes',
         DEFAULTS.sync.lease_ttl_minutes, { min: 1, max: 10080 }),
-    },
-    task: {
-      cache_dir: asString(task.cache_dir, 'task.cache_dir', DEFAULTS.task.cache_dir),
-      lease_ttl_minutes: asInt(task.lease_ttl_minutes, 'task.lease_ttl_minutes',
-        DEFAULTS.task.lease_ttl_minutes, { min: 1, max: 10080 }),
-      retention_days: asInt(task.retention_days, 'task.retention_days',
-        DEFAULTS.task.retention_days, { min: 1, max: 3650 }),
-      max_concurrent: asInt(task.max_concurrent, 'task.max_concurrent',
-        DEFAULTS.task.max_concurrent, { min: 1, max: 100 }),
     },
     knowledge: {
       max_files_per_dir: asInt(knowledge.max_files_per_dir, 'knowledge.max_files_per_dir',

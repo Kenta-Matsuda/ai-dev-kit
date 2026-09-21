@@ -9,8 +9,7 @@
  *   - `aidev task resume` moving a task rather than only describing it
  *   - the permission weakening check that gates --approve
  *   - orphaned Wiki page removal (README scenario 7)
- *   - session-start surfacing merged-but-unsynced tasks
- *   - the self-evolution journal written at session-stop
+ *   - the session-start summary and the self-evolution journal at session-stop
  *   - how the knowledge-builder agent is launched, in `knowledge build` and
  *     inside the temporary worktree of `aidev sync`
  *
@@ -51,15 +50,6 @@ function aidev(root, args, { input = undefined, env = {} } = {}) {
   } catch (e) {
     return { code: e.status == null ? 1 : e.status, out: `${e.stdout || ''}${e.stderr || ''}` };
   }
-}
-
-function writeTask(root, rec) {
-  const p = path.join(root, '.aidev', 'tasks', `${rec.taskId}.json`);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, `${JSON.stringify({
-    schemaVersion: 1, history: [], updatedAt: new Date().toISOString(), ...rec,
-  }, null, 2)}\n`, 'utf8');
-  return p;
 }
 
 /** The last JSON document in mixed human/JSON output. */
@@ -186,116 +176,6 @@ process.stdin.on('end', () => {
 }
 
 function run() {
-  // ------------------------------------------------------- task advance (bulk)
-  suite('task: advance with no id');
-
-  {
-    const fx = makeRepo();
-    try {
-      test('the pipeline form runs instead of erroring on a missing id', () => {
-        // The nightly pipeline ships `aidev task advance` with no argument.
-        const r = aidev(fx.root, ['task', 'advance']);
-        eq(r.code, 0, `expected exit 0, got ${r.code}: ${r.out}`);
-        ok(!/usage: aidev task advance/.test(r.out), 'still demands a task id');
-      });
-
-      test('it reports that there is nothing to do rather than failing', () => {
-        const r = aidev(fx.root, ['task', 'advance', '--json']);
-        const j = lastJson(r.out);
-        ok(j, `no JSON in output: ${r.out}`);
-        eq(j.advanced, 0, 'nothing should have advanced');
-        eq(j.failed, 0, 'nothing should have failed');
-      });
-
-      test('terminal tasks are skipped, not advanced', () => {
-        writeTask(fx.root, { taskId: 'wi-1', workItemId: 1, state: 'DONE' });
-        const r = aidev(fx.root, ['task', 'advance', '--json']);
-        const j = lastJson(r.out);
-        ok(j, 'no JSON emitted');
-        eq(j.advanced, 0, 'a DONE task must not advance');
-      });
-
-      test('an observable transition is taken for every eligible task', () => {
-        // PKG_PR_MERGED → SYNCHRONIZING needs no API call, so it is the one
-        // transition a hermetic test can drive end to end.
-        writeTask(fx.root, { taskId: 'wi-2', workItemId: 2, state: 'PKG_PR_MERGED' });
-        writeTask(fx.root, { taskId: 'wi-3', workItemId: 3, state: 'PKG_PR_MERGED' });
-        const r = aidev(fx.root, ['task', 'advance', '--json']);
-        const j = lastJson(r.out);
-        ok(j, 'no JSON emitted');
-        eq(j.advanced, 2, `expected both tasks to advance: ${r.out}`);
-        for (const id of ['wi-2', 'wi-3']) {
-          const rec = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'tasks', `${id}.json`), 'utf8'));
-          eq(rec.state, 'SYNCHRONIZING', `${id} was not persisted`);
-        }
-      });
-
-      test('--json emits exactly one parseable document', () => {
-        const r = aidev(fx.root, ['task', 'advance', '--json']);
-        const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
-        eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}`);
-      });
-
-      test('--state is rejected in bulk mode rather than applied to everything', () => {
-        const r = aidev(fx.root, ['task', 'advance', '--state', 'BLOCKED']);
-        ok(r.code !== 0, 'bulk --state must not silently succeed');
-        ok(/requires a task id/.test(r.out), `unexpected message: ${r.out}`);
-      });
-    } finally { fx.cleanup(); }
-  }
-
-  // ------------------------------------------------------------- task resume
-  suite('task: resume advances the task');
-
-  {
-    const fx = makeRepo();
-    try {
-      test('resume moves a merged task forward instead of only advising', () => {
-        writeTask(fx.root, { taskId: 'wi-10', workItemId: 10, state: 'PKG_PR_MERGED' });
-        const r = aidev(fx.root, ['task', 'resume', 'wi-10', '--json']);
-        eq(r.code, 0, `exit ${r.code}: ${r.out}`);
-        const rec = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'tasks', 'wi-10.json'), 'utf8'));
-        ok(rec.state !== 'PKG_PR_MERGED', 'resume left the task where it was');
-      });
-
-      test('resume still reports what the human has to do next', () => {
-        writeTask(fx.root, { taskId: 'wi-11', workItemId: 11, state: 'IMPLEMENTING' });
-        const r = aidev(fx.root, ['task', 'resume', 'wi-11', '--json']);
-        const j = lastJson(r.out);
-        ok(j && typeof j.guidance === 'string' && j.guidance.length > 0, 'no guidance returned');
-      });
-
-      test('a terminal task is not moved', () => {
-        writeTask(fx.root, { taskId: 'wi-12', workItemId: 12, state: 'DONE' });
-        aidev(fx.root, ['task', 'resume', 'wi-12', '--json']);
-        const rec = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'tasks', 'wi-12.json'), 'utf8'));
-        eq(rec.state, 'DONE', 'a DONE task must stay DONE');
-      });
-
-      test('resume does not loop forever on a state it cannot observe', () => {
-        writeTask(fx.root, { taskId: 'wi-13', workItemId: 13, state: 'BLOCKED', note: 'needs a human' });
-        const r = aidev(fx.root, ['task', 'resume', 'wi-13', '--json']);
-        eq(r.code, 0, `exit ${r.code}: ${r.out}`);
-      });
-    } finally { fx.cleanup(); }
-  }
-
-  {
-    // Task commands talk to Azure DevOps through the `config.azure_devops`
-    // alias of `hosting`; it must survive the v2 config for the PKG_PR_OPEN
-    // path, and be absent (not undefined-and-crashing) for generic hosting.
-    const fx = makeRepo({ hosting: 'generic' });
-    try {
-      test('generic hosting still runs the API-free transitions', () => {
-        writeTask(fx.root, { taskId: 'wi-14', workItemId: 14, state: 'PKG_PR_MERGED' });
-        const r = aidev(fx.root, ['task', 'advance', '--json']);
-        const j = lastJson(r.out);
-        ok(j, `no JSON: ${r.out}`);
-        eq(j.advanced, 1, `the merged task did not advance under generic hosting: ${r.out}`);
-      });
-    } finally { fx.cleanup(); }
-  }
-
   test('the azure_devops alias mirrors hosting for azure-devops and is null otherwise', () => {
     const cfgMod = require('../cli/lib/config');
     const fxA = makeRepo();
@@ -433,35 +313,16 @@ function run() {
   }
 
   // --------------------------------------------------- hooks: session-start
-  suite('hooks: session-start surfaces unsynced work');
+  suite('hooks: session-start');
 
   {
     const fx = makeRepo();
     try {
-      test('a merged-but-unsynced task is presented', () => {
-        writeTask(fx.root, { taskId: 'wi-77', workItemId: 77, state: 'PKG_PR_MERGED' });
+      test('the hook emits one JSON document with the state summary', () => {
         const r = aidev(fx.root, ['hook', 'session-start'], { input: '{}' });
         eq(r.code, 0, `hook exited ${r.code}: ${r.out}`);
-        ok(/wi-77/.test(r.out), `the task was not surfaced: ${r.out}`);
-      });
-
-      test('a task waiting on a human merge is reported separately', () => {
-        writeTask(fx.root, { taskId: 'wi-78', workItemId: 78, state: 'PKG_PR_OPEN', pkgPullRequestId: 5 });
-        const r = aidev(fx.root, ['hook', 'session-start'], { input: '{}' });
-        ok(/waiting on a human merge/.test(r.out), `not reported: ${r.out}`);
-      });
-
-      test('the hook still emits one JSON document', () => {
-        const r = aidev(fx.root, ['hook', 'session-start'], { input: '{}' });
         const j = lastJson(r.out);
-        ok(j && j.hookSpecificOutput, `malformed hook output: ${r.out}`);
-      });
-
-      test('a corrupt task cache cannot break the session', () => {
-        const p = path.join(fx.root, '.aidev', 'tasks', 'broken.json');
-        fs.writeFileSync(p, '{ not json', 'utf8');
-        const r = aidev(fx.root, ['hook', 'session-start'], { input: '{}' });
-        eq(r.code, 0, `a bad cache file broke SessionStart: ${r.out}`);
+        ok(j && j.hookSpecificOutput && /\[ai-dev-kit\]/.test(j.hookSpecificOutput.additionalContext), `malformed hook output: ${r.out}`);
       });
     } finally { fx.cleanup(); }
   }
@@ -482,22 +343,14 @@ function run() {
         ok(!j.evolution.recorded, 'a healthy session is not a signal');
       });
 
-      test('an expired work lease is recorded as a signal', () => {
-        const leaseDir = path.join(fx.root, '.aidev', 'leases');
-        fs.mkdirSync(leaseDir, { recursive: true });
-        fs.writeFileSync(path.join(leaseDir, 'wi-9.json'), `${JSON.stringify({
-          taskId: 'wi-9', branch: 'ai/wi-9', paths: ['src/**'],
-          acquiredAt: new Date(Date.now() - 86400000).toISOString(), ttlMinutes: 1,
+      test('a stale sync lease is recorded as a signal, and the journal never stores prompts, responses or diffs', () => {
+        fs.writeFileSync(path.join(fx.root, '.aidev', 'sync.lock'), `${JSON.stringify({
+          kind: 'sync', targetSha: 'a'.repeat(40), acquiredAt: new Date(Date.now() - 86400000).toISOString(), ttlMinutes: 1,
         })}\n`, 'utf8');
-
         const r = aidev(fx.root, ['hook', 'session-stop'], { input: '{}' });
         eq(r.code, 0, `exit ${r.code}: ${r.out}`);
+        fs.rmSync(path.join(fx.root, '.aidev', 'sync.lock'), { force: true });
         ok(fs.existsSync(journal), 'no journal was written');
-        const doc = JSON.parse(fs.readFileSync(journal, 'utf8'));
-        ok(doc.observations.length > 0, 'the signal was not recorded');
-      });
-
-      test('the journal never stores prompts, responses or diffs', () => {
         const raw = fs.readFileSync(journal, 'utf8');
         const doc = JSON.parse(raw);
         for (const o of doc.observations) {

@@ -9,7 +9,7 @@
 |変数 |説明
 
 |`AZURE_DEVOPS_PAT`
-|Azure DevOps の PAT。`aidev sync`（PR 作成）、`aidev task`、MCP サーバーが使います。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
+|Azure DevOps の PAT。`aidev sync`（PR 作成）と MCP サーバーが使います。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
 
 |`AIDEV_HOME`
 |端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と kit 更新確認のキャッシュを置きます。
@@ -20,7 +20,8 @@
 |`AIDEV_CLAUDE_BIN`
 |Claude Code の実行ファイルを直接指定します。通常は未設定です。
 
-|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN`
+|`AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` +
+`AIDEV_KIRO_BIN`
 |同じく GitHub Copilot CLI（`copilot`）、OpenAI Codex CLI（`codex`）、Kiro CLI（`kiro-cli`）の実行ファイルを直接指定します。
 
 |`AIDEV_DEBUG`

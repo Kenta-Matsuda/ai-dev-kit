@@ -16,7 +16,7 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |PR ごとに `aidev check` を実行します。`main` の branch policy で **必須の build validation** にしてください。これが無いと hook を外す編集がマージできてしまいます。
 
 |`pipelines/azure-pipelines-sync.yml`
-|毎日 18:00 UTC に `aidev sync --no-agent` と `aidev task advance` を実行します。`--no-agent` なので構造だけ更新し、本文は PR に「未生成」と記されます。pipeline に Claude Code と token 予算を用意できたら `--no-agent` を外します。変数 `AZURE_DEVOPS_PAT`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。
+|毎日 18:00 UTC に `aidev sync --no-agent` を実行します。`--no-agent` なので構造だけ更新し、本文は PR に「未生成」と記されます。pipeline に Claude Code と token 予算を用意できたら `--no-agent` を外します。変数 `AZURE_DEVOPS_PAT`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。
 |===
 
 `aidev check` の終了コードが CI の契約です。
@@ -38,37 +38,6 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |Wiki が無い・壊れている、または前回の sync が途中で止まっています。
 |===
 
-[[automation-task]]
-=== aidev task — issue-to-pr の進行状態
-
-`issue-to-pr` agent が Work Item を実装して PR を作ると、進行状態が `.aidev/tasks/<id>.json`（gitignore 済み）に記録されます。`aidev task` はその状態を見て進めます。
-
-[source,text]
-----
-IMPLEMENTING → PKG_PR_OPEN → PKG_PR_MERGED → SYNCHRONIZING → WIKI_PR_OPEN → DONE
-----
-
-人間がマージするのは `PKG_PR_OPEN`（コードの PR）と `WIKI_PR_OPEN`（Wiki の PR）の 2 回です。
-
-[%autowidth.stretch,options="header"]
-|===
-|コマンド |動作
-
-|`aidev task list`
-|未完了のタスクを一覧します。
-
-|`aidev task show <id>`
-|状態と次に取り得る状態を表示します。
-
-|`aidev task advance [<id>]`
-|PR の状態を見て 1 段階進めます。id を省くと未完了タスクをすべて処理します（夜間 pipeline 用）。
-
-|`aidev task resume <id>`
-|進められるところまで進め、次に人間または agent がすることを表示します。
-
-|`aidev task abandon <id>`
-|タスクを放棄し、作業リースを解放します。PR は閉じません。
-|===
 
 [[automation-workflow]]
 === aidev workflow — 承認済みスクリプトの実行
@@ -108,4 +77,4 @@ aidev workflow run nightly-tests
 
 === 関連
 
-* xref:cli-check[aidev check]、xref:cli-sync[aidev sync]、xref:cli-task[aidev task]、xref:cli-workflow[aidev workflow]
+* xref:cli-check[aidev check]、xref:cli-sync[aidev sync]、xref:cli-workflow[aidev workflow]

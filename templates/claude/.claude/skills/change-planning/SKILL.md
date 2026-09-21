@@ -80,11 +80,11 @@ grep -rn "functionName" . --include='*.ts' -l --exclude-dir=node_modules --exclu
 
 | 領域 | 可否 |
 | --- | --- |
-| PKGのソース（`**`） | 通常read-only。issue-to-pr の作業リース保持中のみ、許可パスに限り可 |
+| PKGのソース（`**`） | 既定はread-only。チームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
 | `aidev.yaml`・`.aidev/workflows/**` | 書き込み可 |
 | `.aidev/knowledge/**` | CLIから起動された knowledge-builder、または `aidev sync` のsyncリース保持中のみ。手編集しない |
-| `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/leases/**`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
-| `secrets_paths` 該当 | **常に禁止**（リースがあっても） |
+| `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
+| `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 
 計画が禁止領域を含むなら、**実装を始める前に**ユーザーへ報告します。
 書き始めてから deny されるのは、時間の無駄です。

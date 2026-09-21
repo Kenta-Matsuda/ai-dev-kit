@@ -422,7 +422,7 @@ function run() {
   // .aidev/.gitignore, so every clone gets them without editing its own root
   // .gitignore.
   test('.aidev/.gitignore keeps runtime state out of git', () => {
-    for (const p of ['cache/', 'leases/', 'tasks/', 'sync.lock', 'knowledge/.cache/', 'workflows/*/runs/']) {
+    for (const p of ['cache/', 'sync.lock', 'knowledge/.cache/', 'workflows/*/runs/']) {
       ok(layout.AIDEV_GITIGNORE.includes(p), `.aidev/.gitignore does not list ${p}`);
     }
   });

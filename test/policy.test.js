@@ -32,11 +32,6 @@ function decide(fx, p, extra = {}) {
   return policy.decide(fx.root, p, { ...ctx(fx), ...extra });
 }
 
-/** Put the clone on the leased branch: work leases are branch-scoped. */
-function checkoutTaskBranch(fx, id = '1234') {
-  git(['checkout', '-q', '-b', `ai/wi-${id}`], fx.root);
-}
-
 function run() {
   suite('policy: protected paths');
 
@@ -44,7 +39,7 @@ function run() {
     const fx = makeRepo();
     try {
       for (const p of ['.claude/settings.json', '.claude/agents/x.md', 'CLAUDE.md', '.mcp.json',
-        '.aidev/policy.yaml', '.aidev/sync.lock', '.aidev/materialized.json', '.aidev/leases/wi-1.json',
+        '.aidev/policy.yaml', '.aidev/sync.lock', '.aidev/materialized.json',
         '.aidev/ejected.json', '.aidev/.gitignore']) {
         const d = decide(fx, p);
         eq(d.decision, 'deny', `${p} should be denied`);
@@ -245,130 +240,15 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  suite('policy: read-only PKG and work leases');
+  suite('policy: read-only PKG');
 
-  test('PKG source is read-only without a lease', () => {
+  test('PKG source is read-only for agents', () => {
     const fx = makeRepo();
     try {
       const d = decide(fx, 'src/api/auth.ts');
       eq(d.decision, 'deny');
       eq(d.rule, 'read-only');
-      ok(/no work lease/.test(d.reason), d.reason);
-    } finally { fx.cleanup(); }
-  });
-
-  test('a scoped work lease on the right branch permits the write', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', workItemId: 1234, branch: 'ai/wi-1234',
-        allowedPaths: ['src/**'], ttlMinutes: 120,
-      });
-      const d = decide(fx, 'src/api/auth.ts');
-      eq(d.decision, 'allow', d.reason);
-      eq(d.rule, 'work-lease');
-      eq(d.lease, { kind: 'work', taskId: 'wi-1234', branch: 'ai/wi-1234' });
-      eq(decide(fx, 'src/api/brand-new.ts').decision, 'allow', 'new files inside the scope too');
-    } finally { fx.cleanup(); }
-  });
-
-  test('a work lease does not apply on a different branch', () => {
-    const fx = makeRepo();
-    try {
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['src/**'],
-      });
-      // The clone is still on main, not the leased branch.
-      const d = decide(fx, 'src/api/auth.ts');
-      eq(d.decision, 'deny');
-      eq(d.rule, 'read-only');
-      ok(/scoped to branch/.test(d.reason), d.reason);
-
-      // A detached HEAD cannot satisfy a branch-scoped lease either.
-      git(['checkout', '-q', '--detach'], fx.root);
-      const det = decide(fx, 'src/api/auth.ts');
-      eq(det.decision, 'deny');
-      ok(/could not be determined/.test(det.reason), det.reason);
-    } finally { fx.cleanup(); }
-  });
-
-  test('a work lease does not reach outside its allowed paths', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['src/api/**'],
-      });
-      eq(decide(fx, 'src/api/auth.ts').decision, 'allow');
-      const outside = decide(fx, 'docs/readme.md');
-      eq(outside.decision, 'deny', 'outside lease scope');
-      eq(outside.rule, 'read-only');
-      ok(/no work lease covers/.test(outside.reason), outside.reason);
-    } finally { fx.cleanup(); }
-  });
-
-  test('a work lease never overrides secrets or protection', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['**'],
-      });
-      const d = decide(fx, 'config/secrets/key.pem');
-      eq(d.decision, 'deny');
-      eq(d.rule, 'secrets');
-      const prot = decide(fx, '.claude/settings.json');
-      eq(prot.decision, 'deny');
-      eq(prot.rule, 'protected');
-      const lease = decide(fx, '.aidev/leases/wi-1234.json');
-      eq(lease.decision, 'deny', 'a lease cannot extend itself');
-      eq(lease.rule, 'protected');
-    } finally { fx.cleanup(); }
-  });
-
-  test('an expired work lease stops authorising', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['src/**'], ttlMinutes: 60,
-      });
-      const lp = leases.leasePath(fx.root, 'wi-1234');
-      const l = JSON.parse(fs.readFileSync(lp, 'utf8'));
-      l.acquiredAt = new Date(Date.now() - 120 * 60000).toISOString();
-      fs.writeFileSync(lp, JSON.stringify(l));
-      const d = decide(fx, 'src/api/auth.ts');
-      eq(d.decision, 'deny');
-      eq(d.rule, 'read-only');
-      ok(/expired/.test(d.reason), d.reason);
-    } finally { fx.cleanup(); }
-  });
-
-  test('package.exclude and package.include still apply under a work lease', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['**'],
-      });
-      const excluded = decide(fx, 'src/node_modules/pkg/index.js');
-      eq(excluded.decision, 'deny');
-      eq(excluded.rule, 'work-lease-scope');
-      const notIncluded = decide(fx, 'README.md');
-      eq(notIncluded.decision, 'deny', 'outside package.include');
-      eq(notIncluded.rule, 'work-lease-scope');
-      eq(decide(fx, 'docs/readme.md').rule, 'work-lease', 'inside package.include');
-    } finally { fx.cleanup(); }
-  });
-
-  test('a work lease does not change the answer for writable regions', () => {
-    const fx = makeRepo();
-    try {
-      checkoutTaskBranch(fx);
-      leases.createWorkLease(fx.root, {
-        taskId: 'wi-1234', branch: 'ai/wi-1234', allowedPaths: ['**'],
-      });
+      ok(/list the paths under writable/.test(d.reason), d.reason);
       eq(decide(fx, '.aidev/knowledge/x.md').rule, 'writable');
       eq(decide(fx, 'aidev.yaml').rule, 'writable');
     } finally { fx.cleanup(); }

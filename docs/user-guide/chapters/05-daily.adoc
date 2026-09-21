@@ -20,16 +20,16 @@ aidev status
 |`✅ the Wiki describes the code this work is based on.`
 |何もしなくて構いません。
 
-|`⚠️ … has changed since the Wiki was generated … run "aidev sync"`
+|`⚠️ … has changed since the Wiki was generated …`
 |コードが進んで Wiki が古くなっています。xref:daily-sync[aidev sync] を実行するか、夜間 pipeline の PR を待ちます。作業は続けられます。
 
-|`⚠️ N page(s) still await prose regeneration — run "aidev knowledge build".`
+|`⚠️ N page(s) still await prose regeneration …`
 |本文が未生成のページがあります。`aidev knowledge build` を実行します。
 
 |`⚠️ origin/main has moved ahead … Run "aidev sync"`
 |`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで `git pull` し、必要なら sync します。
 
-|`⚠️ origin/main has new commits … that are not fetched yet`
+|`⚠️ origin/main has new commits …`
 |`git fetch` してから `aidev status` をもう一度実行します。
 
 |`ℹ️ remote unverified …`

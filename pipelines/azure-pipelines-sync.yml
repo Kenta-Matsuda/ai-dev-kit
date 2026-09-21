@@ -79,11 +79,6 @@ steps:
       AIDEV_NO_UPDATE_CHECK: '1'
       AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
 
-  # Advance any issue-to-pr task whose PKG PR a human merged since the last run.
-  - script: |
-      set -euo pipefail
-      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" task advance
-    displayName: 'aidev task advance'
     condition: succeededOrFailed()
     env:
       AIDEV_NO_UPDATE_CHECK: '1'

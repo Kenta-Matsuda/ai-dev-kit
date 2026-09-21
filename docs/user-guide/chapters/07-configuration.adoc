@@ -131,9 +131,6 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 |リポジトリ名
 |表示に使う PKG 名。
 
-|`hosting.triage.labels` / `area_path`
-|`[]` / 無し
-|`issue-to-pr` agent が対象とみなす Work Item のタグと Area Path。
 
 
 |`sync.auto_pr`
@@ -152,9 +149,6 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 |`120`
 |sync の作業ロックの有効時間。
 
-|`task.*`
-|`.aidev/tasks`, `120`, `90`, `3`
-|`aidev task` のキャッシュ場所、リースの有効時間、保持日数、同時実行数。
 
 |`knowledge.max_files_per_dir`
 |`20`

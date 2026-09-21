@@ -72,7 +72,7 @@ To resume, always run the **same command**. Finished work is saved.
 |`✗ … ran out of time`
 |Run the same command again. If it keeps happening, add `--agent-batch-size 10` or raise `knowledge.agent_timeout_ms` in `aidev.yaml`.
 
-|`⚠ … partial Wiki progress: 120/163 completed, 43 remain.`
+|`⚠ … partial Wiki progress: 120/163 completed …`
 |Run the same command again.
 
 |`✗ … made no Wiki progress: 0/20`

@@ -16,7 +16,7 @@
 
 |`read_only`
 |`**` (the whole PKG)
-|Writable only while the `issue-to-pr` agent holds a work lease, and only on the paths that lease allows.
+|Agents cannot write here. Add the paths you want an agent to edit to `writable` (xref:permissions-source[Letting an agent edit source]).
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
@@ -59,17 +59,17 @@ When a write is denied, Claude receives a reason like these.
 
 [source,text]
 ----
-ai-dev-kit: "src/api/auth.ts" is read-only (**): no work lease. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
 ----
 
 An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge.
 
-[[permissions-lease]]
-=== The AI edits source only under a work lease
+[[permissions-source]]
+=== Letting an agent edit source
 
-After you approve a run, the `issue-to-pr` agent receives a work lease from the CLI (branch, allowed paths, expiry) and edits only within it. `aidev task abandon <id>` releases the lease, and an expired lease is invalid.
+By default the PKG source is `read_only` and no agent can write it. To let `issue-to-pr` or another agent implement changes, the team adds the paths (for example `src/**`) to `writable` in `.aidev/policy.yaml` and commits it. `protected` paths and `secrets_paths` stay unwritable regardless. Review policy changes in a PR and widen them only for as long as needed.
 
 [[permissions-commands]]
 === Placing, changing and viewing the policy

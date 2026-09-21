@@ -119,9 +119,7 @@ function buildConfigYaml(v) {
       `  project: ${q(v.hosting.project)}`,
       `  repository: ${q(v.hosting.repository)}`,
       '  # The PAT itself lives in this environment variable, never in this file.',
-      `  auth_env: ${v.hosting.auth_env}`,
-      '  triage:',
-      '    labels: ["ai-ready"]');
+      `  auth_env: ${v.hosting.auth_env}`);
   } else if (v.hosting.repository) {
     hostingLines.push(`  repository: ${q(v.hosting.repository)}`);
   }
@@ -376,7 +374,7 @@ async function run(ctx) {
     say.out('');
     say.info('permission policy for this package (what the AI may write):');
     say.dim(`    writable: ${candidate.writable.join(', ')}`);
-    say.dim('    read-only: everything else in the package (issue-to-pr edits it under a work lease)');
+    say.dim('    read-only: everything else in the package (widen "writable" in .aidev/policy.yaml to change this)');
     say.dim(`    protected: ${candidate.protected.length} path(s), including secrets_paths`);
     let approve = !!flags.approve;
     if (!approve && interactive) {

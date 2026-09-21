@@ -22,7 +22,7 @@ const stateMod = require('../lib/state');
 const leases = require('../lib/leases');
 const ui = require('../lib/ui');
 
-const FLAGS = { input: 'string', json: 'boolean' };
+const FLAGS = { input: 'string' };
 
 /** Tools whose payload names a file to be written. */
 const PATH_FIELDS = ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath'];
@@ -148,17 +148,6 @@ function sessionStart(ctx) {
       ? `⏳ a sync is in progress (target ${stateMod.short(sync.targetSha)}); only .aidev/knowledge/** is writable.`
       : `⚠️ a stale sync lease is present (${ev.reason}). Run "aidev sync --resume" or "aidev sync --abort".`);
   }
-  const work = leases.listWorkLeases(repoRoot).filter((l) => leases.evaluateLease(l).valid);
-  if (work.length > 0) {
-    lines.push(`🔑 active work lease(s): ${work.map((l) => `${l.taskId}→${l.branch}`).join(', ')}`);
-  }
-
-  // Restart point 2 of 3: a task whose PKG PR was merged days ago is invisible
-  // otherwise, because the session that opened it is long gone. Read from the
-  // local cache only — a SessionStart hook has no budget for an API round trip,
-  // and `aidev task advance` re-verifies against the API before moving anything.
-  for (const line of unsyncedTaskLines(repoRoot, config)) lines.push(line);
-
   if (st.severity === stateMod.SEVERITY.ERROR) {
     lines.push('❌ writes are blocked until the LLM Wiki exists and is readable.');
   }
@@ -167,47 +156,13 @@ function sessionStart(ctx) {
   return EXIT.OK;
 }
 
-/**
- * Tasks that are waiting on something the user can act on now.
- *
- * Cache-only and fully defensive: the cache is gitignored local state that may
- * be absent, partial or stale, and a SessionStart hook that throws would break
- * every session in the repository.
- */
-function unsyncedTaskLines(repoRoot, config) {
-  let records;
-  try {
-    records = require('./task').listTasks(repoRoot, config);
-  } catch { return []; }
-  if (!Array.isArray(records) || records.length === 0) return [];
-
-  const actionable = {
-    PKG_PR_MERGED: 'merged but not yet synced — run "aidev sync"',
-    SYNC_FAILED: 'a sync failed — run "aidev sync --resume" or "aidev sync --abort"',
-    SYNCHRONIZING: 'a sync is unfinished — run "aidev sync --resume"',
-  };
-  const out = [];
-  const hits = records.filter((r) => r && actionable[r.state]);
-  for (const r of hits.slice(0, 5)) {
-    out.push(`ℹ️ task ${r.taskId}: ${actionable[r.state]}`);
-  }
-  if (hits.length > 5) out.push(`ℹ️ …and ${hits.length - 5} more (see "aidev task list")`);
-
-  // Merge gates are reported separately: nothing to run, a human must merge.
-  const waiting = records.filter((r) => r && (r.state === 'PKG_PR_OPEN' || r.state === 'WIKI_PR_OPEN'));
-  if (waiting.length > 0) {
-    out.push(`⏳ ${waiting.length} task(s) waiting on a human merge — "aidev task advance" re-checks the API.`);
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------- quality-gate
 
 /**
  * Run the configured format/lint/typecheck commands.
  *
- * Commands come from `quality_gates` in aidev.yaml and run inside the
- * submodule via the platform shell. This is PKG-owned configuration, executed
+ * Commands come from `quality_gates` in aidev.yaml and run at the PKG root
+ * via the platform shell. This is PKG-owned configuration, executed
  * on the developer's own machine — it is not a trust boundary, and nothing
  * from a Work Item or the network reaches it.
  */
@@ -316,14 +271,12 @@ function recordEvolutionObservation(repoRoot, config) {
 
   const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
   const staleWiki = st.severity === stateMod.SEVERITY.ERROR;
-  const staleLeases = leases.listWorkLeases(repoRoot).filter((l) => !leases.evaluateLease(l).valid).length;
   const syncLease = leases.readSyncLease(repoRoot);
 
   // Signals worth a human's attention, in the terms the README asks for:
   // evidence of rework, wasted calls or friction — not "the session ended".
   const signals = [];
-  if (staleWiki) signals.push('session ended with the Wiki out of step with src/');
-  if (staleLeases > 0) signals.push(`${staleLeases} expired work lease(s) were left behind`);
+  if (staleWiki) signals.push('session ended with the Wiki out of step with the PKG');
   if (syncLease && !leases.evaluateLease(syncLease).valid) signals.push('a stale sync lease was left behind');
 
   if (signals.length === 0) {
