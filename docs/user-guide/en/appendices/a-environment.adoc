@@ -9,7 +9,7 @@ Never write values into files. Set them in your shell profile, as user environme
 |Variable |Description
 
 |`AZURE_DEVOPS_PAT`
-|The Azure DevOps PAT. Used by `aidev sync` (opening pull requests) and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
+|The Azure DevOps PAT. Used by `aidev knowledge update` on the tracking branch (opening pull requests) and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
 
 |`AIDEV_HOME`
 |Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the kit update-check cache.
@@ -44,7 +44,10 @@ Never write values into files. Set them in your shell profile, as user environme
 
 |`AIDEV_KIT_URL` / `AIDEV_KIT_REF` +
 `AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
-|Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly sync.
+|Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly Wiki update.
+
+|`ANTHROPIC_API_KEY`
+|The API key `pipelines/azure-pipelines-wiki.yml` hands to Claude Code. Not needed on a developer's machine, where Claude Code's own login is used.
 |===
 
 === Examples

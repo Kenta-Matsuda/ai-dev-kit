@@ -1,0 +1,85 @@
+# ai-dev-kit — scheduled Wiki catch-up for the tracking branch.
+#
+# Developers bring the Wiki to HEAD on their own branches (the hooks do it
+# after each commit, or they run `aidev knowledge update`), and the Wiki commit
+# travels in their pull request. When something is merged without it, the
+# tracking branch falls behind. This pipeline runs `aidev knowledge update` on
+# the tracking branch on a clock; the CLI publishes the result as
+# `aidev/wiki-<sha12>` with a pull request that a human merges.
+#
+# Bot permissions, deliberately minimal:
+#   - push branches named aidev/wiki-* on this package
+#   - create pull requests on this package
+# NOT push to the default branch. This pipeline opens a PR; a human merges it.
+#
+# The Wiki is only published when its prose is complete, so the agent must be
+# able to run here: install the AI tool named by `tools.agent` in aidev.yaml
+# (Claude Code by default) and give the job its credentials. Without it the
+# run stops with "prose owed" and publishes nothing.
+
+trigger: none          # never on push: this is a clock, not a reaction
+pr: none
+
+schedules:
+  - cron: "0 18 * * *"           # daily, 18:00 UTC
+    displayName: 'Nightly Wiki catch-up'
+    branches:
+      include: [main]
+    always: true                 # run even when the package had no commits
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: NODE_VERSION
+    value: '20.x'
+  - name: AIDEV_KIT_URL
+    value: 'https://dev.azure.com/<org>/<project>/_git/ai-dev-kit'
+  - name: AIDEV_KIT_REF
+    value: 'main'
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    # The bot's token must reach `git push` for the aidev/wiki-* branch.
+    persistCredentials: true
+
+  - task: NodeTool@0
+    displayName: 'Use Node $(NODE_VERSION)'
+    inputs:
+      versionSpec: $(NODE_VERSION)
+
+  - script: |
+      set -euo pipefail
+      git clone --quiet --depth 1 --branch "$(AIDEV_KIT_REF)" "$(AIDEV_KIT_URL)" "$(Pipeline.Workspace)/ai-dev-kit"
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" --version
+    displayName: 'Get ai-dev-kit'
+
+  - script: |
+      set -euo pipefail
+      git config user.email "$(AIDEV_BOT_EMAIL)"
+      git config user.name  "$(AIDEV_BOT_NAME)"
+    displayName: 'Configure bot identity'
+    env:
+      AIDEV_BOT_EMAIL: $(AIDEV_BOT_EMAIL)
+      AIDEV_BOT_NAME: $(AIDEV_BOT_NAME)
+
+  - script: |
+      set -euo pipefail
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" status --no-remote || true
+    displayName: 'Report state'
+    env:
+      AIDEV_NO_UPDATE_CHECK: '1'
+
+  # On the tracking branch `knowledge update` works in a temporary worktree,
+  # runs the knowledge-builder, commits on aidev/wiki-<sha12>, pushes and
+  # opens (or updates) the pull request. It is a no-op when the Wiki already
+  # describes HEAD.
+  - script: |
+      set -euo pipefail
+      node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" knowledge update --branch
+    displayName: 'aidev knowledge update'
+    env:
+      AIDEV_NO_UPDATE_CHECK: '1'
+      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+      ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)

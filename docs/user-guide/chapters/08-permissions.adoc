@@ -1,7 +1,7 @@
 [[permissions]]
 == 権限と安全性
 
-{project-name} は、AI が PKG の中で **書いてよい場所** を `.aidev/policy.yaml`（policy）に定め、Claude Code の hook で毎回の書き込みを検査します。ソースは通常 read-only です。token はファイルに書かず、環境変数だけで渡します。
+{project-name} は、AI が PKG の中で **書いてよい場所** を `.aidev/policy.yaml`（policy）に定め、AI ツールの hook で毎回の書き込みを検査します。ソースは通常 read-only です。token はファイルに書かず、環境変数だけで渡します。
 
 [[permissions-policy]]
 === policy の区分
@@ -20,7 +20,7 @@
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
-|Wiki が壊れている・無いときに、sync の間だけ書けます。
+|Wiki が無い・読めないときに、`aidev knowledge update` が構造を書き直す間だけ書けます。
 
 |`writable`
 |`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/conventions/**`, `aidev.yaml`
@@ -32,12 +32,12 @@
 |`aidev` が起動した agent `<name>` だけが追加で書けるパス。`branch` を書くと、そのブランチ（glob）に checkout しているときだけ有効です。
 |===
 
-判定は上から順です。リポジトリ外、`secrets_paths`、`protected` は常に拒否。Wiki が無い間は（sync 中の `.aidev/knowledge/**` を除き）すべて拒否。その後 `writable` → `agents.<name>` → `read_only` の順に見て、最初に当たった区分で決まります。
+判定は上から順です。リポジトリ外、`secrets_paths`、`protected` は常に拒否。Wiki が無い間は（`aidev knowledge update` が書く `.aidev/knowledge/**` を除き）すべて拒否。その後 `writable` → `agents.<name>` → `read_only` の順に見て、最初に当たった区分で決まります。
 
 [[permissions-hooks]]
 === hook が何をするか
 
-配布される `.claude/settings.json` は 4 つの hook を登録します。
+配布される hook 設定（Claude Code は `.claude/settings.json`、GitHub Copilot CLI は `.github/hooks/aidev.json`、OpenAI Codex CLI は `.codex/hooks.json`、Kiro CLI は `.kiro/agents/aidev.json`）は 5 つの hook を登録します。実機で検証済みなのは Claude Code です。
 
 [cols="1,1,3",options="header"]
 |===
@@ -45,7 +45,7 @@
 
 |SessionStart
 |`aidev hook session-start`
-|Wiki の状態と進行中の作業をセッションのコンテキストに入れます。
+|Wiki の状態と進行中の publish をセッションのコンテキストに入れます。
 
 |PreToolUse（Write / Edit / Bash など）
 |`aidev hook guard-write`
@@ -53,23 +53,27 @@
 
 |PostToolUse（Write / Edit）
 |`aidev hook quality-gate`
-|PKG のファイルを編集した後、`quality_gates` のコマンドを実行し、失敗の出力を Claude に返します。
+|PKG のファイルを編集した後、`quality_gates` のコマンドを実行し、失敗の出力を AI に返します。
+
+|PostToolUse（Bash）
+|`aidev hook after-bash`
+|コミットで HEAD が変わり Wiki が遅れたら、構造を更新し、本文が必要なら knowledge-builder をサブエージェントで起動するようセッションに指示します（xref:knowledge-hook-flow[コミット後に何が起きるか]）。
 
 |Stop
 |`aidev hook session-stop`
-|通常の環境では何もしません（ai-dev-kit 開発者の端末でだけ意味を持つ内部 hook です）。
+|Wiki が HEAD より遅れたままなら 1 回だけ終了を拒否して同じ指示を出します。ai-dev-kit 開発者の端末ではさらに振り返りを求めます。
 |===
 
-拒否されると、Claude には次のような理由が返ります。
+拒否されると、AI には次のような理由が返ります。
 
 [source,text]
 ----
 ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents by default; this session was not started by the CLI as a named agent; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
-ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge update" …
 ----
 
-hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます。
+hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます（検査するのは `.claude/settings.json` です）。
 
 [[permissions-source]]
 === ソースを agent に編集させるには

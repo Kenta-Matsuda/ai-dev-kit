@@ -38,13 +38,16 @@
 |PKG のルートに移動します。未導入なら xref:setup-owner[導入担当者の手順]。
 
 |`❌ LLM Wiki has not been generated yet`
-|`git pull`。それでも無ければ `aidev knowledge build`。この間、AI の書き込みは止まります。
+|`git pull`。それでも無ければ `aidev init`（または `aidev knowledge update`）。この間、AI の書き込みは止まります。
 
-|`⚠️ … has changed since the Wiki was generated`
-|`aidev sync`、または夜間 pipeline の PR がマージされてから `git pull`。
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD`
+|`aidev knowledge update`。AI ツールの中なら次のコミット後に hook が始めます。
 
 |`⚠️ N page(s) still await prose regeneration`
-|`aidev knowledge build`。
+|`aidev knowledge update`。hook の指示が出ていればそのとおりに進め、最後に `aidev knowledge update --no-agent`。
+
+|`⚠️ origin/main has moved ahead`
+|区切りの良いところで merge か rebase をし、`aidev knowledge update`。
 
 |`tool config  CONFLICTS in N file(s)`
 |`aidev apply` の衝突が未解消です。該当ファイルのマーカー（`<<<<<<<` / `=======` / `>>>>>>>`）を解消し、`aidev apply` を実行して記録を更新し、コミットします。
@@ -58,11 +61,11 @@
 |`policy  missing`
 |`aidev permission configure --approve`。
 
-|`⚠ a stale sync lease is present`
-|前回の sync が途中で止まっています。`aidev sync --resume` で続けるか、`aidev sync --abort` で捨てます。
+|`⚠ a stale publish lease is present`
+|tracking branch への publish が途中で止まっています。`aidev knowledge update` で続けるか、`aidev knowledge update --abort` で捨てます。
 
 |`⚠ N Wiki page(s) edited by hand since generation`
-|編集を捨ててよければ次の build / sync に `--force` を付けます。残したい内容はソース側に移します。
+|編集を捨ててよければ次の `aidev knowledge update` に `--force` を付けます。残したい内容はソース側に移します。
 
 |`ℹ️ remote unverified`
 |remote に届きません。作業は続けられます。proxy の設定を確認します。
@@ -93,15 +96,19 @@
 
 |4
 |`LLM Wiki has not been generated yet`
-|`aidev knowledge build` を実行してコミットします。
+|`aidev knowledge update` を実行します（完了すると自分でコミットします）。
 
 |4
 |`N inventory inconsistency/ies`
-|`aidev knowledge build --full`。
+|`aidev knowledge update --full`。
 
 |4
-|`a stale sync lease is present`
-|`aidev sync --resume` または `aidev sync --abort`。
+|`a stale publish lease is present`
+|`aidev knowledge update` で続けるか、`aidev knowledge update --abort`。
+
+|2（`--strict`）
+|`the Wiki describes … but N file(s) differ at HEAD` / `N page(s) still await prose`
+|`aidev knowledge update` を実行し、Wiki のコミットを同じ PR に入れます。
 |===
 
 [[troubleshooting-agent]]
@@ -111,8 +118,11 @@
 |===
 |症状 |対処
 
+|`N generation target(s) have uncommitted changes; the Wiki describes commits only`
+|列挙されたファイルをコミット（または stash）してから再実行します。
+
 |`⚠ the knowledge-builder agent did not run`
-|`aidev doctor` の `claude` 行を直し、同じコマンドを再実行します。
+|`aidev doctor` の AI ツールの行を直し、同じコマンドを再実行します。
 
 |`✗ the knowledge-builder agent ran out of time`
 |同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けます。
@@ -124,7 +134,13 @@
 |同じコマンドで再実行します。続くなら `--full`。
 
 |`✗ … left the Wiki checkpoint invalid …`
-|生成中にブランチを切り替えました。ブランチを戻して再実行します。
+|生成中にブランチを切り替えたか、コミットしました。元の HEAD に戻して再実行するか、新しい HEAD で `aidev knowledge update` を実行します。
+
+|`⚠ N generation target(s) still need prose; the Wiki was not committed.`
+|本文が残っています。同じコマンドで再開します。hook の流れなら、残りの batch をサブエージェントに渡してから `aidev knowledge update --no-agent`。
+
+|hook の指示が出たのにセッションが Wiki を更新しない
+|`aidev knowledge update` を手で実行します。Stop hook の拒否は 1 回だけなので、2 回目の終了は通ります。
 
 |`✗ N Wiki page(s) were edited by hand …`
 |`--force` を付けるか、編集内容をソース側に移します。
@@ -133,33 +149,35 @@
 |`aidev.yaml` の `package.include` に含まれるパスを指定します。
 |===
 
-[[troubleshooting-sync]]
-=== aidev sync
+[[troubleshooting-publish]]
+=== tracking branch への publish
+
+`main` の上で `aidev knowledge update` を実行したとき（または `--branch`）の表示です。
 
 [%autowidth.stretch,options="header"]
 |===
 |症状 |対処
 
-|`✗ a sync lease is present`
-|`aidev sync --resume`（続行）か `aidev sync --abort`（破棄）。
+|`✗ an interrupted publish is present (…; target …)`
+|別の HEAD に対する publish が途中で止まっています。`aidev knowledge update --abort` で捨てるか、`--force` で引き継ぎます。同じ HEAD なら同じコマンドで続きます。
 
-|`✗ the held lease targets … but origin/main is now …`
-|表示どおり `aidev sync --resume --to <sha>` で前回分を終えるか、`--abort` してやり直します。
+|`✗ the Wiki is not complete (N target(s) still queued); nothing was published.`
+|本文が残っています。同じコマンドで同じ worktree の続きを行うか、`--abort` で捨てます。
 
-|`✗ could not fetch origin/main`
-|`git fetch origin main` が通るか確認します（ネットワーク、認証、proxy）。
+|`✗ publish failed: …`
+|原因を直して同じコマンドで続けます。lease と worktree は残っています。やり直すなら `--abort`。
 
 |`⚠ AZURE_DEVOPS_PAT is not set; …`
 |環境変数を設定して再実行するか、push 済みのブランチから手で PR を作ります。
 
-|`ℹ hosting.type is generic; …`
+|`ℹ hosting.type is generic; …` / `ℹ sync.auto_pr is false; …`
 |正常です。手で PR を作ります。
 
-|`✓ the Wiki committed on origin/main …`
-|`git pull` します。
+|`✓ the Wiki already describes …; nothing to do.`
+|`main` の Wiki は最新です。PR 待ちなら `aidev status` にブランチ名が出ます。マージ後に `git pull`。
 
-|`✗ hand-edited Wiki pages would be overwritten`
-|`aidev sync --force`。
+|`✗ --branch publishes a commit; it cannot be combined with --no-commit`
+|`--no-commit` を外します。
 |===
 
 [[troubleshooting-permission]]
@@ -182,7 +200,7 @@
 |正常です。kit のファイルは kit への PR で変えます。
 
 |`Wiki consistency error … All writes are blocked`
-|`aidev knowledge build`。
+|Wiki が無いか読めません。`aidev knowledge update`（または `git pull` で受け取る）。
 
 |`policy could not be evaluated (…); write blocked`
 |`aidev permission show` で確認し、`aidev permission reconfigure --approve` で置き直します。

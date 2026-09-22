@@ -19,7 +19,7 @@ aidev eject --yes [--keep-assets] [--force] [--json]
 
 eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外してください。`aidev init` で再導入できます。
 
-対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。進行中の sync（有効な sync lease）があると `--force` 無しでは拒否します。
+対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。tracking branch への publish が進行中（有効な lease がある）だと `--force` 無しでは拒否します。
 
 === オプション
 
@@ -37,7 +37,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |JSON で出力する
 
 |`--force`
-|eject 済みでも、進行中の sync があっても実行する
+|eject 済みでも、publish が進行中でも実行する
 
 |`--keep-assets`
 |kit が置いたツール設定ファイルを残す
@@ -53,7 +53,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |eject した。既に eject 済み。`--dry-run`
 
 |1
-|`--yes` が無い。管理の痕跡が無い。進行中の sync がある
+|`--yes` が無い。管理の痕跡が無い。publish が進行中
 |===
 
 === 例

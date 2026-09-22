@@ -10,7 +10,7 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、3SHA（source-tree比較）、sync lease、Wiki inventory / manifest v3とbatch agent実行、worktreeベースのsync、hooks、policy評価順序（agent単位の許可を含む）、workflow、MCP、update、self-evolution |
+| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`knowledge update`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（agent単位の許可を含む）、workflow、MCP、update、self-evolution |
 | [cli-reference.md](cli-reference.md) | 全command・subcommand・option・終了code。`aidev <cmd> --help`と一致させる |
 | [configuration-reference.md](configuration-reference.md) | `aidev.yaml` schema v2（`validateConfig` / `DEFAULTS`）、`.aidev/policy.yaml`（`agents`を含む）、`DEFAULT_POLICY_SCOPES`、model解決、環境変数、CLIが書く各fileの形 |
 | [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未実装の台帳、既知の不整合、保守時の完了条件 |
@@ -24,7 +24,7 @@
 3. **生成物の読者を混ぜない。** `.aidev/knowledge/`は対象PKGをAIへ説明する派生情報であり、本kitの保守資料ではない。
 4. **認証情報を例へ埋め込まない。** 例では環境変数名（`hosting.auth_env`）だけを示す。`validateConfig`はtokenらしき値を拒否する。
 5. **安全機構を過大評価しない。** hooksは補助防御であり、最小権限のtoken、`aidev check`を必須にしたCI、branch policy、人間レビューが最終防御となる。
-6. **撤去した語彙を持ち込まない。** wrapper repository、`src/` submodule、`.aidev-lock`、`aidev kit apply`、`aidev plan`、`aidev task`、work lease、`submoduleSha` / `remoteSha`、`pending-refresh.json`、`self_evolution`設定は現在のcodeに存在しない。codeのcommentに残っている箇所は`implementation-status.md`の「既知の不整合」に列挙している。
+6. **撤去した語彙を持ち込まない。** wrapper repository、`src/` submodule、`.aidev-lock`、`aidev kit apply`、`aidev plan`、`aidev task`、work lease、`submoduleSha` / `remoteSha`、`pending-refresh.json`、`self_evolution`設定、`aidev sync`、`aidev knowledge build` / `status`、`--resume` / `--to` / `--check-only`（2026-09-22に`aidev knowledge update`と`aidev status`へ統合）は現在のcodeに存在しない。codeのcommentに残っている箇所は`implementation-status.md`の「既知の不整合」に列挙している。
 
 ## ソース上の主な正本
 
@@ -38,15 +38,15 @@
 | AI tool adapter（registry、binary解決、argv、結果のparse） | `cli/lib/tools.js` |
 | tool configの適用・検査 | `cli/lib/assets.js`、`cli/commands/apply.js`、`templates/<tool>/` |
 | self-update | `cli/commands/update.js` |
-| 3SHA | `cli/lib/state.js`、`cli/lib/git.js` |
-| Wiki manifest / inventory / 完了報告 | `cli/lib/inventory.js` |
+| Wiki整合判定（head / knowledge / tracking） | `cli/lib/state.js`、`cli/lib/inventory.js`（`compareWithTree`）、`cli/lib/git.js` |
+| Wiki manifest / inventory / 完了報告 / clean-tree検査 | `cli/lib/inventory.js` |
 | evidence scope | `cli/lib/knowledge-scope.js` |
 | agent起動（batch、prompt、launcher、`AIDEV_AGENT`） | `cli/lib/agent.js`、`cli/commands/agent.js` |
-| `knowledge build` / `status` | `cli/commands/knowledge.js` |
-| sync（worktree、branch、PR） | `cli/commands/sync.js`、`cli/lib/ado.js` |
-| sync lease | `cli/lib/leases.js` |
+| `knowledge update`（構造、prose、commit、plan.json） | `cli/commands/knowledge.js` |
+| publish（worktree、`aidev/wiki-<sha12>`、PR） | `cli/commands/knowledge.js`（`publish`）、`cli/lib/ado.js` |
+| publish lease | `cli/lib/leases.js` |
 | policy評価（agent単位の許可を含む） | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
-| hooks | `cli/commands/hook.js`、`templates/claude/.claude/settings.json` |
+| hooks（after-bash / session-stopを含む）とtool adapter | `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json` |
 | workflow | `cli/commands/workflow.js` |
 | self-evolution（kit開発者のみ） | `cli/commands/evolve.js`、`cli/agents/evolution.md`、`cli/commands/hook.js`（`sessionStop`） |
 | self-evolution（kit開発者向け） | `cli/commands/evolve.js`、`cli/agents/evolution.md`、`cli/commands/hook.js`（`session-stop`） |

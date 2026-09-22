@@ -12,7 +12,7 @@ aidev status [options]
 
 === Description
 
-Shows the PKG name, hosting, tools and kit version, the Wiki state (three commit SHAs and a one-line verdict), the number of Wiki pages, the tool configuration state (kit applied, number of edited files, conflicts, missing hooks), whether the policy is present and its per-agent grants, hand edits, and any sync in progress.
+Shows the PKG name, hosting, tools and kit version, the Wiki state (the three commits `head` / `knowledge` / `tracking` and a one-line verdict), the number of Wiki pages and of pages without prose, the tool configuration state (kit applied, number of edited files, conflicts, missing hooks), whether the policy is present and its per-agent grants, hand edits, and any publish in progress.
 
 Display only. xref:cli-check[aidev check] runs the same checks and returns them as an exit code.
 
@@ -56,15 +56,15 @@ aidev status — demo-pkg
   tools    claude
   kit      {aidev-version} @ 9491efe
 
-[ai-dev-kit] base=1a2b3c4  knowledge=1a2b3c4  tracking=9f8e7d6
-⚠️ origin/main has moved ahead (9f8e7d6); work may continue. Run "aidev sync" to catch up.
+[ai-dev-kit] head=9f8e7d6  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev knowledge update".
 
   Wiki         163 page(s) for 163 target(s)
   tool config  applied from kit 9491efe, 1 file(s) customised
   policy       placed (14 protected paths; agent grants: issue-to-pr → src/** on aidev/issue-*)
 ----
 
-`base` is the commit your current work is based on, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`.
+`head` is the commit your checkout is at, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`. The verdict compares the inventory with the tree at HEAD, so the line is `✅` even when the `knowledge` SHA differs, as long as the content is the same. When the Wiki of `main` is waiting in a PR on an `aidev/wiki-<sha12>` branch, a line says so.
 
 === See also
 

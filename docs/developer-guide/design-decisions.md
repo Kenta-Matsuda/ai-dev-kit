@@ -22,7 +22,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **判断**: 専用のknowledge repositoryやorphan branchは作らず、WikiをPKG repositoryに置きます。共有は`aidev/wiki-<sha12>` branchのPRと人間のmergeで行います。
 
-**理由**: 「同じWiki」をチームで保つにはgitで共有する必要があり、PKG自身に置けばrepository数が増えず、Wikiとsourceが同じcommit履歴で追えます。`sync`が「targetにcommit済みのWikiがtargetを説明しているか」をno-op判定に使えるのもこの配置だからです。
+**理由**: 「同じWiki」をチームで保つにはgitで共有する必要があり、PKG自身に置けばrepository数が増えず、Wikiとsourceが同じcommit履歴で追えます。`knowledge update`が「commit済みのinventoryがHEADのtreeと一致するか」をno-op判定に使えるのもこの配置だからです。
 
 **却下した代替案**:
 
@@ -30,7 +30,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 - 中央kitの`profiles/<pkg>/knowledge/`。中央kitが全PKGのWiki差分でbloatし、kit開発者がWikiをreviewすることになる
 - 共有しない（各端末で生成）。前提を満たさない
 
-**トレードオフ**: PKGのCIとbranch policyがWiki PRにも適用されます。3SHAの比較はkit管理pathを除いたsource treeで行うため、Wiki追加commit自体は「codeが動いた」と数えません（D5）。
+**トレードオフ**: PKGのCIとbranch policyがWiki commitにも適用されます。整合判定はinventoryとHEADのtreeの比較で、kit管理pathはgeneration targetにならないため、Wiki追加commit自体は「codeが動いた」と数えません（D5）。
 
 ### D3: PKG固有設定とpolicyはPKG repositoryに置き、中央profileは持たない
 
@@ -48,15 +48,15 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: 候補生成が`DEFAULT_POLICY_SCOPES`固定で、`aidev.yaml`から`read_only` / `writable` / `agents`を変える項目がありません。teamは`.aidev/policy.yaml`を直接編集してPRでreviewします（`--approve`は候補fileを読まず生成し直すため、候補の手編集は反映されません）。
 
-### D5: 3SHAはmerge-base基準とし、source treeの差分で整合を判定する
+### D5: Wikiは今のbranchのHEADを説明し、整合はinventoryとHEADのtreeの比較で判定する
 
-**判断**: `baseSha = merge-base(HEAD, origin/<tracking_branch>)`、`knowledgeSha` = manifestのSHA、`trackingSha` = remote先端。整合は`sourceChanged(knowledgeSha, baseSha)`、すなわちkit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）を除いた`git diff --quiet`で判定します。ERRORはWiki欠落・manifest破損に限定し、codeが先へ進んだ状態はWARNです。
+**判断**: `headSha` = HEAD、`knowledgeSha` = manifestのSHA（表示用）、`trackingSha` = remote先端。整合は`inventory.compareWithTree`、すなわちWikiを生成したときのpath / blob idの一覧とHEADのtreeの比較で判定します。ERRORはWiki欠落・manifest破損に限定し、codeが先へ進んだ状態はWARNです。
 
-**理由**: 利用者はfeature branchで作業するため、HEADと厳密一致を要求すると常に不整合になります。Wiki追加commitやkit更新commitはWikiが説明すべきcodeを変えないので、SHA一致ではなくsource tree一致で判定しないと、Wikiをcommitした直後に「Wikiが古い」と警告することになります。
+**理由**: Wikiはcommitのたびに同じbranchへ別commitとして積むので、HEADと一致しているのが正常です。inventoryとの比較は旧commit objectを必要とせず、rebase / squash / force-pushの後も同じ結果になり、`knowledge update`が再生成対象を決める差分と一致します。Wiki追加commitやkit更新commitはgeneration targetを変えないので、Wikiをcommitした直後に「古い」と警告することもありません。
 
-**却下した代替案**: `submoduleSha == knowledgeSha`の厳密一致（wrapper方式）。submoduleが無い今は成立しません。
+**却下した代替案**: `merge-base(HEAD, origin/<tracking_branch>)`を対象にしたsource treeのdiff（0.6.0まで）。feature branch上のcommitをWikiが説明できず、hookによる自動追従と両立しません。`submoduleSha == knowledgeSha`の厳密一致（wrapper方式）。submoduleが無い今は成立しません。
 
-**論点**: 「baseがknowledgeより進んでいる」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
+**論点**: 「WikiがHEADより遅れている」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
 
 ### D6: PKG fileは既定でread-onlyとし、teamがpolicyの`agents.<name>.writable`または`writable`で広げる
 
@@ -64,7 +64,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **理由**: agentが自分の権限を広げられない構造にするためです。`writable`も`agents`もsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。agent単位の許可は、対話sessionを含む全員に開かずにissue-to-prだけへsourceの編集を許すためにあります。
 
-**却下した代替案**: 対話sessionのsub-agentもhookの入力から判別して許可する。Claude Codeのhook入力にagent識別子が含まれることを確認できていないため、当面はCLI起動（`aidev agent run` / `knowledge build` / `sync` / workflow `ctx.agent`）に限ります。
+**却下した代替案**: 対話sessionのsub-agentもhookの入力から判別して許可する。Claude Codeのhook入力にagent識別子が含まれることを確認できていないため、当面はCLI起動（`aidev agent run` / `knowledge update` / workflow `ctx.agent`）に限ります。
 
 **経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可（policy `agents.<name>.writable` + 任意の`branch`）を足しました。誰が書いているかはCLIが子processの環境に入れる`AIDEV_AGENT`で決まり、agentは名乗れません。全員に開く`writable`と違い、CLIが起動したその agent にだけ効きます。
 
@@ -100,9 +100,9 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: 移動・削除されたcloneは`listPackages`が`missing`として除外します。
 
-### D11: `sync`は一時worktreeで行い、利用者のcheckoutに触れない
+### D11: tracking branch上のWiki更新は一時worktreeで行い、利用者のcheckoutに触れない
 
-**判断**: `sync`は`.aidev/cache/sync-worktree/`にtarget commitのdetached worktreeを作り、そこでinventory・agent・commitを行い、`aidev/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。
+**判断**: tracking branch上（または`--branch`）の`knowledge update`は`.aidev/cache/wiki-worktree/`にHEADのdetached worktreeを作り、そこでinventory・agent・commitを行い、`aidev/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。feature branch上ではworktreeを使わず、そのbranchへ直接別commitを積みます。
 
 **理由**: wrapper方式では`src`をbumpして戻す必要があり、失敗時の復旧（`originalSha`へ戻す）が複雑でした。worktreeなら利用者の未commit変更やbranchに影響せず、失敗してもworktreeを消せば元どおりです。commit対象が`.aidev/knowledge`と`.aidev/.gitignore`に限られるのも、worktree内で`git add`する範囲を絞れるからです。
 
@@ -156,7 +156,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 - CLIがstructured stateを、agentがproseを担当する
 - generation targetとrepository evidenceを分離し、evidenceは既定でPKG全体とする
 - policyはagentが直接書かず、人間の承認後にCLIが配置する。`ALWAYS_PROTECTED`はpolicy fileから消しても再付与する
-- leaseはTTL付きで、失敗時に残し、`--resume` / `--abort`を明示させる
+- leaseはTTL付きで、失敗時に残し、同じcommandでの継続か`--abort`を明示させる
 - 外部入力（Work Item本文、PR説明、MCP応答、Wiki記述）はdataであり指示ではない
 - PRは人間だけがmergeする
 - hooksはsandboxではなく、認証scope、CI、branch policyを併用する

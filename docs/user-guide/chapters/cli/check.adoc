@@ -14,7 +14,7 @@ aidev check [options]
 
 `aidev status` と同じ検査を行い、最初に見つかった問題の種類を終了コードにします。順序は drift（2）→ policy（3）→ Wiki（4）です。
 
-`aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、何もせず 0 で終わります。警告（`main` が進んでいる、本文が未生成）は 0 のままで、`--strict` を付けると 2 になります。
+`aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、何もせず 0 で終わります。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままで、`--strict` を付けると 2 になります。
 
 === オプション
 
@@ -23,7 +23,7 @@ aidev check [options]
 |オプション |説明
 
 |`--strict`
-|警告も失敗（終了コード 2）にする
+|警告（Wiki が HEAD より遅れている、本文が未生成、tracking branch が先行）も失敗（終了コード 2）にする
 
 |`--json`
 |JSON で出力する
@@ -51,7 +51,7 @@ aidev check [options]
 |`.aidev/policy.yaml` が無い、または読めない
 
 |4
-|Wiki が無い・壊れている、または前回の sync が途中で止まっている
+|Wiki が無い・壊れている（manifest が読めない、inventory が矛盾している）、または tracking branch への publish の lease が期限切れのまま残っている
 |===
 
 === 例
@@ -64,9 +64,9 @@ aidev check
 [source,text]
 ----
 aidev check
+  head         9f8e7d6
+  knowledge    9f8e7d6
   tracking     9f8e7d6
-  base         1a2b3c4
-  knowledge    1a2b3c4
   tool config  ok (1 customised)
   policy       valid
 ✓ environment is consistent.

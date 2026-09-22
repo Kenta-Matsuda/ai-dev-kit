@@ -90,7 +90,7 @@ references:
 | `include` | string[] | `[]`（`init`はtreeから提案） | Wiki generation targetのglob。空はinclude制限なし |
 | `exclude` | string[] | `[]`（`init`は依存物・生成物） | generation targetから除外するglob |
 
-pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。kit管理pathは他toolのconfig（`.github/agents/**`等、`layout.TOOL_CONFIG_GLOBS`）も含みます。
+pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。kit管理pathは他toolのconfig（`.github/agents/**`、`.github/hooks/**`、`.codex/**`等、`layout.TOOL_CONFIG_GLOBS`）も含みます。`knowledge update`のclean-tree検査（`inventory.dirtyTargets`）もこの`include` / `exclude`に一致するpathだけを見ます。
 
 ### `secrets_paths`
 
@@ -120,7 +120,7 @@ string[]、既定`[]`。次の3か所で効きます。
 - `config.azure_devops` = `{organization, project, repository, auth_env}`（`type`が`azure-devops`のとき）、それ以外は`null`。`ado.js`、`mcp.js`はこれを読む
 - `config.sync.tracking_branch` = `hosting.tracking_branch`
 
-`generic`では`sync`はpushまで行い、PRは手動作成の案内になります。`mcp azure-devops`は起動できません。
+`generic`ではtracking branch上の`knowledge update`（publish）はpushまで行い、PRは手動作成の案内になります。`mcp azure-devops`は起動できません。
 
 ### `tools`
 
@@ -150,14 +150,16 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 ### `sync`
 
+section名は歴史的なもので、`aidev sync`というcommandはありません。tracking branch上の`aidev knowledge update`（publish経路、`--branch`）とremote確認の設定です。
+
 | key | 型 | 既定 | 範囲 | 説明 |
 | --- | --- | --- | --- | --- |
 | `auto_pr` | bool | `true` | — | push後にPRを作成/更新する。falseなら手動作成を案内 |
-| `pr.target_branch` | string | `hosting.tracking_branch` | — | sync PRのtarget |
+| `pr.target_branch` | string | `hosting.tracking_branch` | — | Wiki更新PRのtarget |
 | `pr.reviewers` | string[] | `[]` | — | PR作成時のreviewer id |
 | `remote_check_timeout_ms` | int | `3000` | 100〜60000 | `ls-remote`のtimeout |
 | `remote_check_ttl_minutes` | int | `60` | 0〜10080 | remote確認cacheのTTL。0でcacheしない |
-| `lease_ttl_minutes` | int | `120` | 1〜10080 | sync leaseのTTL |
+| `lease_ttl_minutes` | int | `120` | 1〜10080 | publish lease（`.aidev/sync.lock`）のTTL |
 
 `auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`aidev/wiki-<sha12>` branchに残ります。
 
@@ -171,7 +173,7 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 ### `references`
 
-topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapping。`aidev agent run`とworkflowの`ctx.agent()`が、taskの末尾に「# Reference documents」sectionとしてtopicごとのfile一覧を付けます（`agent.resolveReferences`）。agentは自分のtopicの文書を先に読み、記述はcodeで検証する、という契約です（convention-builderは`conventions`、test-writerは`testing`）。`knowledge build` / `sync`のknowledge-builderには渡しません（evidenceで全fileを見るため）。
+topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapping。`aidev agent run`とworkflowの`ctx.agent()`が、taskの末尾に「# Reference documents」sectionとしてtopicごとのfile一覧を付けます（`agent.resolveReferences`）。agentは自分のtopicの文書を先に読み、記述はcodeで検証する、という契約です（convention-builderは`conventions`、test-writerは`testing`）。`knowledge update`のknowledge-builderには渡しません（evidenceで全fileを見るため）。
 
 - 要素はfileまたはdirectory。directoryは再帰的にtext file（dot始まりと`node_modules`を除く、上限200）を列挙する
 - `secrets_paths`に一致するpathは列挙せず「Not available」に書く。無いpathも同様（errorにはしない。`agent run`が警告を出す）
@@ -187,7 +189,7 @@ topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapp
 | `version` | int | `1`のみ |
 | `protected` | string[] | 常にdeny。`ALWAYS_PROTECTED`が無条件に合成される |
 | `read_only` | string[] | agentは書込不可（`writable`で個別に許可） |
-| `writable_during_sync` | string[] | 整合性ERRORかつ有効なsync leaseのときに書込可 |
+| `writable_during_sync` | string[] | 整合性ERRORかつ有効なpublish lease（`.aidev/sync.lock`）のときに書込可 |
 | `writable` | string[] | 通常時に書込可（`read_only`より先に評価） |
 | `agents.<name>.writable` | string[] | CLIが起動したagent `<name>`（子processの`AIDEV_AGENT`）にだけ追加で書込可。`protected` / secretsより下位 |
 | `agents.<name>.branch` | string | 任意。checkoutのbranchがこのglobに一致するときだけ上の許可が効く |
@@ -224,7 +226,7 @@ globの意味（`paths.js`）: `*`は1 segment内、`?`は1文字、`**`は0個�
 ## model解決の優先順位
 
 ```text
-CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2つは`--no-agent`で省略）:
+CLI起動agent（knowledge update / agent run / workflow ctx.agent。knowledge updateは`--no-agent`で省略）:
   tool:  --agent-tool / --tool / workflow agent.tool  >  tools.agents.<name>.tool  >  tools.agent  >  tools.default[0]
   model: --agent-model / --model / workflow agent.model  >  tools.agents.<name>.model  >  tools.agent_model  >  DEFAULTS（sonnet）
   空文字 → model flag を渡さずtool側の解決に任せる
@@ -239,7 +241,7 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 
 | 変数 | 読む場所 | 意味 |
 | --- | --- | --- |
-| `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`mcp.js`、`sync`、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
+| `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`mcp.js`、`knowledge update`（publish）、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
 | `AIDEV_HOME` | `home.js` | registryとupdate cacheの場所 |
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
@@ -248,6 +250,7 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 | `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
 | `AIDEV_DEBUG` | `aidev.js` | internal errorのstack traceを表示 |
 | `CLAUDE_PROJECT_DIR` | `aidev.js`（`hook`のみ） | repo root探索の起点 |
+| `ANTHROPIC_API_KEY` | （CLIは読まない） | `pipelines/azure-pipelines-wiki.yml`がClaude Codeの子processへ渡すsecret variable |
 | `HTTPS_PROXY` / `https_proxy` | `doctor` | 表示のみ |
 | `NO_COLOR` | `ui.js` | 色を無効化 |
 | `XDG_DATA_HOME` / `LOCALAPPDATA` | `home.js` | `AIDEV_HOME`の既定を決める |
@@ -261,19 +264,35 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 | `.aidev/materialized.json` | `init`、`apply` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
 | `.aidev/ejected.json` | `eject` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
-| `.aidev/sync.lock` | `sync`、`knowledge build`（一時） | sync lease（`architecture.md` §5） |
+| `.aidev/sync.lock` | `knowledge update`（publish中は保持、ERROR状態の構造更新中は一時） | publish lease（`architecture.md` §5） |
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
+| `.aidev/cache/last-head.json` | `hook session-start` / `after-bash` | `{sha, at}`。after-bashがHEADの変化を検出する基準 |
+| `.aidev/cache/wiki-stop.json` | `hook session-stop`（`stop_hook_active`を持たないtool、現在はkiro） | `{sha, at}`。同じHEADで2回目のStopを通すためのguard。通したときに消す |
+| `.aidev/knowledge/.cache/plan.json` | `knowledge update`（prose未完了時。残り0で削除） | `{schemaVersion: 2, targetSha, mode, hasOverview, generationScope, generationTargets, batches, evidence: {include, exclude, paths, excludedSecretPatterns}, maxFilesPerDir, reportDir, finish}`。hookがsessionのsubagentに渡す |
 | `.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md` | `agent.runAgent`（`prompt: 'file'`のtool） | agentへ渡すprompt file |
 | `.aidev/cache/evolution/<session>.md` | Claude session（Stop hookの指示で。kit開発者端末のみ） | 振り返り（事実 / 無駄と原因 / kit への提案 / 提案しないこと）。`aidev evolve run`が`done/`へ移す。`--auto`時は`<file>.evolve-launched` markerも置く |
 | `AIDEV_HOME/developer.json` | `aidev evolve enable` | `{schemaVersion: 1, enabled: true, autoEvolve, enabledAt}` |
 | `AIDEV_HOME/cache/evolve/<yyyymmdd>/`、`<yyyymmdd>-input/` | `aidev evolve run` | kit checkoutのworktree（branch `aidev/evolve-<yyyymmdd>`）と、そこへ渡す振り返りのcopy |
-| `.aidev/cache/sync-worktree/` | `sync` | 一時git worktree |
+| `.aidev/cache/wiki-worktree/` | `knowledge update`（publish） | HEADのdetached worktree。成功時と`--abort`で削除、失敗時は残す |
 | `.aidev/knowledge/.cache/agent-task-*.json` | `agent.prepareTask` | 大きいplan（`schemaVersion: 2`） |
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |
 | `.aidev/workflows/<name>/approval.json` | `workflow approve` | `{schemaVersion: 1, name, hash, approvedAt, approvedBy, limits, cost, commands}` |
 | `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`checkpoint.json` |
 | `AIDEV_HOME/registry.json` | `init`、`update`、`eject` | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |
+
+## toolごとのhook設定file
+
+`aidev hook <name> --tool <id>`を呼ぶfileです。`tools.default`に応じて`templates/<tool>/`から実体化され、kit管理path（`ALWAYS_PROTECTED`）です。
+
+| tool | file | 前提 |
+| --- | --- | --- |
+| `claude` | `.claude/settings.json`（`hooks`。PostToolUseの`Bash` matcherが`after-bash`） | — |
+| `copilot` | `.github/hooks/aidev.json`（`bash` / `powershell`の両方に同じcommand、`timeoutSec`） | subagent内ではhookが動かない |
+| `codex` | `.codex/hooks.json` | `~/.codex/config.toml`で`projects."<path>".trust_level = "trusted"`（初回の`codex`起動時に回答） |
+| `kiro` | `.kiro/agents/aidev.json`（agent定義内の`hooks`。`postToolUse`の`execute_bash` matcherが`after-bash`） | `kiro-cli chat --agent aidev`で起動する。subagent内ではhookが動かず、`postToolUse`のstdoutは捨てられる |
+
+`check`がhooks欠落として検査するのは`.claude/settings.json`だけです（`inspectConfig.hooksMissing`）。
 
 ## 設定を追加するとき
 

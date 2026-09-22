@@ -38,13 +38,16 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Move to the PKG root. If it is not set up yet, see xref:setup-owner[Package owner steps].
 
 |`❌ LLM Wiki has not been generated yet`
-|`git pull`. If it is still missing, run `aidev knowledge build`. AI writes are blocked until then.
+|`git pull`. If it is still missing, run `aidev init` (or `aidev knowledge update`). AI writes are blocked until then.
 
-|`⚠️ … has changed since the Wiki was generated`
-|Run `aidev sync`, or wait for the nightly pipeline's PR to be merged and then `git pull`.
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD`
+|Run `aidev knowledge update`. Inside an AI tool session, the hook starts it after your next commit.
 
 |`⚠️ N page(s) still await prose regeneration`
-|Run `aidev knowledge build`.
+|Run `aidev knowledge update`. If the hook gave instructions, follow them and finish with `aidev knowledge update --no-agent`.
+
+|`⚠️ origin/main has moved ahead`
+|Merge or rebase at a good moment, then `aidev knowledge update`.
 
 |`tool config  CONFLICTS in N file(s)`
 |An `aidev apply` conflict is unresolved. Resolve the markers (`<<<<<<<` / `=======` / `>>>>>>>`) in those files, run `aidev apply` to update the record, and commit.
@@ -58,11 +61,11 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`policy  missing`
 |Run `aidev permission configure --approve`.
 
-|`⚠ a stale sync lease is present`
-|A previous sync stopped halfway. Continue with `aidev sync --resume` or discard it with `aidev sync --abort`.
+|`⚠ a stale publish lease is present`
+|A publish to the tracking branch stopped halfway. Continue with `aidev knowledge update` or discard it with `aidev knowledge update --abort`.
 
 |`⚠ N Wiki page(s) edited by hand since generation`
-|If the edits can be dropped, add `--force` to the next build / sync. Move anything worth keeping into the source.
+|If the edits can be dropped, add `--force` to the next `aidev knowledge update`. Move anything worth keeping into the source.
 
 |`ℹ️ remote unverified`
 |The remote is unreachable. You can keep working. Check your proxy settings.
@@ -93,15 +96,19 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 
 |4
 |`LLM Wiki has not been generated yet`
-|Run `aidev knowledge build` and commit.
+|Run `aidev knowledge update` (it commits on its own once complete).
 
 |4
 |`N inventory inconsistency/ies`
-|Run `aidev knowledge build --full`.
+|Run `aidev knowledge update --full`.
 
 |4
-|`a stale sync lease is present`
-|Run `aidev sync --resume` or `aidev sync --abort`.
+|`a stale publish lease is present`
+|Continue with `aidev knowledge update`, or `aidev knowledge update --abort`.
+
+|2 (`--strict`)
+|`the Wiki describes … but N file(s) differ at HEAD` / `N page(s) still await prose`
+|Run `aidev knowledge update` and put the Wiki commit in the same PR.
 |===
 
 [[troubleshooting-agent]]
@@ -111,8 +118,11 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |===
 |Symptom |What to do
 
+|`N generation target(s) have uncommitted changes; the Wiki describes commits only`
+|Commit (or stash) the listed files, then run again.
+
 |`⚠ the knowledge-builder agent did not run`
-|Fix the `claude` line in `aidev doctor` and run the same command again.
+|Fix the AI tool's line in `aidev doctor` and run the same command again.
 
 |`✗ the knowledge-builder agent ran out of time`
 |Run the same command again. If it keeps happening, add `--agent-batch-size 10`.
@@ -124,7 +134,13 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Run the same command again. If it persists, use `--full`.
 
 |`✗ … left the Wiki checkpoint invalid …`
-|You switched branches during generation. Switch back and run again.
+|You switched branches or committed during generation. Go back to the original HEAD and run again, or run `aidev knowledge update` for the new HEAD.
+
+|`⚠ N generation target(s) still need prose; the Wiki was not committed.`
+|Prose is still pending. Run the same command again. In the hook flow, hand the remaining batches to the subagent, then `aidev knowledge update --no-agent`.
+
+|The hook gave instructions but the session did not update the Wiki
+|Run `aidev knowledge update` by hand. The Stop hook refuses only once; the second stop passes.
 
 |`✗ N Wiki page(s) were edited by hand …`
 |Add `--force`, or move the edits into the source.
@@ -133,33 +149,35 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Give a path that is inside `package.include` in `aidev.yaml`.
 |===
 
-[[troubleshooting-sync]]
-=== aidev sync
+[[troubleshooting-publish]]
+=== Publishing to the tracking branch
+
+Messages from `aidev knowledge update` run on `main` (or with `--branch`).
 
 [%autowidth.stretch,options="header"]
 |===
 |Symptom |What to do
 
-|`✗ a sync lease is present`
-|`aidev sync --resume` (continue) or `aidev sync --abort` (discard).
+|`✗ an interrupted publish is present (…; target …)`
+|A publish for another HEAD stopped halfway. Discard it with `aidev knowledge update --abort` or take it over with `--force`. For the same HEAD, the same command continues.
 
-|`✗ the held lease targets … but origin/main is now …`
-|As shown: finish the previous run with `aidev sync --resume --to <sha>`, or `--abort` and start over.
+|`✗ the Wiki is not complete (N target(s) still queued); nothing was published.`
+|Prose is still pending. Run the same command to continue in the same worktree, or `--abort` to discard it.
 
-|`✗ could not fetch origin/main`
-|Check that `git fetch origin main` works (network, credentials, proxy).
+|`✗ publish failed: …`
+|Fix the cause and run the same command again. The lease and worktree are kept. To start over, `--abort`.
 
 |`⚠ AZURE_DEVOPS_PAT is not set; …`
 |Set the environment variable and run again, or open the PR by hand from the pushed branch.
 
-|`ℹ hosting.type is generic; …`
+|`ℹ hosting.type is generic; …` / `ℹ sync.auto_pr is false; …`
 |Normal. Open the PR by hand.
 
-|`✓ the Wiki committed on origin/main …`
-|Run `git pull`.
+|`✓ the Wiki already describes …; nothing to do.`
+|The Wiki of `main` is current. If it is waiting in a PR, `aidev status` names the branch. `git pull` after the merge.
 
-|`✗ hand-edited Wiki pages would be overwritten`
-|Run `aidev sync --force`.
+|`✗ --branch publishes a commit; it cannot be combined with --no-commit`
+|Drop `--no-commit`.
 |===
 
 [[troubleshooting-permission]]
@@ -182,7 +200,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Normal. Kit files are changed through a PR to the kit.
 
 |`Wiki consistency error … All writes are blocked`
-|Run `aidev knowledge build`.
+|The Wiki is missing or unreadable. Run `aidev knowledge update` (or receive it with `git pull`).
 
 |`policy could not be evaluated (…); write blocked`
 |Check with `aidev permission show` and replace the policy with `aidev permission reconfigure --approve`.

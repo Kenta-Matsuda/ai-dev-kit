@@ -18,9 +18,9 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 * kit のテンプレートから、選んだツールの設定ファイル（`claude` なら `.claude/**`、`CLAUDE.md`、`.mcp.json`）を置き、`.aidev/materialized.json` にハッシュを記録する。既に記録がある clone では置かず、状態を報告するだけ
 * この clone を端末に登録する
 * `.aidev/policy.yaml` が無ければ候補を表示し、`Place this policy now? (y/N)` と尋ねる
-* Wiki が無ければ `Build the LLM Wiki now? (Y/n)` と尋ね、生成する。未完成の Wiki があれば続きから再開する
+* Wiki が無ければ `Build the LLM Wiki now? (Y/n)` と尋ね、生成する。未完成の Wiki があれば続きから再開する。生成は `aidev knowledge update --no-commit` と同じで、結果は作業ツリーに残る。コミットはあなたが行う
 
-初めての導入では Wiki の生成が既定です。設定は既にあるのに Wiki が無い clone（チームの PR が未マージ）では、既定は「生成しない」です。`--wiki` / `--no-wiki` で質問を省けます。初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で kit 版に置き換えます。
+初めての導入では Wiki の生成が既定です。agent を動かすツール（`aidev.yaml` の `tools.agent`）が無いと、構造だけ書いて本文が未生成のまま終了コード 1 で終わります。ツールを入れてから `aidev init` をもう一度実行するか、`--no-wiki` で省きます。設定は既にあるのに Wiki が無い clone（チームの PR が未マージ）では、既定は「生成しない」です。`--wiki` / `--no-wiki` で質問を省けます。初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で kit 版に置き換えます。
 
 質問は stdin が端末で、`--yes` も `--json` も無いときだけ行います。
 
@@ -91,7 +91,7 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 |成功
 
 |1
-|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない。Wiki の生成が途中で止まった（`aidev init` の再実行で続行）
+|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない。Wiki の本文が未生成のまま（agent のツールが無い、生成が途中で止まった。`aidev init` の再実行で続行）
 
 |2
 |初回に、既存の `.claude/**`、`CLAUDE.md`、`.mcp.json` などが kit のテンプレートと違う（`--force` で置き換え）

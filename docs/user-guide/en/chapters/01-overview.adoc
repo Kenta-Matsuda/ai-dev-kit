@@ -6,7 +6,7 @@
 After adopting it, you have three things:
 
 * **The same setup** — `.claude/` (agents, skills, hooks), `CLAUDE.md` and `.mcp.json` are shared by the whole team. They come from the kit's templates and the team may edit them. `aidev apply` takes in new templates, merging with edits; `aidev check` stops only unresolved conflicts and missing hooks.
-* **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. Claude reads them before it reads the source. When the code moves on, `aidev sync` catches the Wiki up and opens a PR.
+* **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. The AI reads them before it reads the source. When you commit code, a hook brings the Wiki to HEAD and commits it on the same branch as a separate commit.
 * **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only, and the team can grant writes per agent.
 
 === Who does what
@@ -28,7 +28,7 @@ After adopting it, you have three things:
 === What it does not do
 
 * It never merges a PR. A human always merges.
-* Claude Code is the AI tool verified against the real binary. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI can be started through adapters that follow each tool's non-interactive mode, but the kit maintainers have not checked them against the real tools. Runtime enforcement of the write policy through hooks exists for Claude Code only.
+* Claude Code is the AI tool verified against the real binary. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI can be started through adapters that follow each tool's non-interactive mode, but the kit maintainers have not checked them against the real tools. Hook configuration is placed for all four tools, but only Claude Code is verified against the real binary.
 * The only supported hostings are Azure DevOps and `generic` (git only; PRs by hand).
 * It is not a sandbox. The hook and the policy stop slips. The real protection is the token's permissions and the branch policy.
 

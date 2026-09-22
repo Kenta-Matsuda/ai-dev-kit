@@ -60,7 +60,7 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |permission: the policy is missing or broken, or approval was refused
 
 |4
-|wiki: the Wiki is missing or broken, or the previous sync stopped halfway
+|wiki: the Wiki is missing or broken, or a publish to the tracking branch stopped halfway
 |===
 
 [[cli-commands]]
@@ -80,11 +80,8 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |xref:cli-check[`aidev check`]
 |Return the consistency check as an exit code (for CI)
 
-|xref:cli-knowledge[`aidev knowledge <build\|status>`]
-|Generate the LLM Wiki, or show its state
-
-|xref:cli-sync[`aidev sync`]
-|Follow `main`, update the Wiki and open a PR
+|xref:cli-knowledge[`aidev knowledge update`]
+|Bring the LLM Wiki to HEAD and commit it as its own commit (a PR on the tracking branch)
 
 |xref:cli-agent[`aidev agent <list\|show\|run>`]
 |Start a bundled agent with the configured AI tool
@@ -125,7 +122,7 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |Command |Summary
 
 |xref:cli-hook[`aidev hook <…>`]
-|Internal command called by Claude Code hooks
+|Internal command called by the AI tool's hooks
 
 |xref:cli-mcp[`aidev mcp azure-devops`]
 |Internal command started from `.mcp.json`
@@ -138,8 +135,6 @@ include::status.adoc[]
 include::check.adoc[]
 
 include::knowledge.adoc[]
-
-include::sync.adoc[]
 
 include::agent.adoc[]
 

@@ -94,11 +94,11 @@ references:                     # existing documents handed to agents (text only
 
 |`tools.default`
 |`["claude"]`
-|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/` and `.github/skills/`; `codex` gets `AGENTS.md`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev apply` (kept if they were edited).
+|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/`, `.github/skills/` and `.github/hooks/`; `codex` gets `AGENTS.md` and `.codex/`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev apply` (kept if they were edited).
 
 |`tools.agent`
 |First entry of `default`
-|Tool `aidev` starts agents with (`aidev knowledge build`, `aidev sync`, `aidev agent run`, `ctx.agent` in workflows). Must be listed in `tools.default`.
+|Tool `aidev` starts agents with (`aidev knowledge update`, `aidev agent run`, `ctx.agent` in workflows). Must be listed in `tools.default`.
 
 |`tools.agent_model`
 |`sonnet`
@@ -141,11 +141,11 @@ references:                     # existing documents handed to agents (text only
 
 |`sync.auto_pr`
 |`true`
-|`false` makes `aidev sync` push but not open a PR.
+|`false` makes `aidev knowledge update` on the tracking branch push but not open a PR.
 
 |`sync.pr.target_branch` / `reviewers`
 |`tracking_branch` / `[]`
-|Target branch and reviewers for the sync PR.
+|Target branch and reviewers for the Wiki update PR.
 
 |`sync.remote_check_timeout_ms` / `remote_check_ttl_minutes`
 |`3000` / `60`
@@ -153,7 +153,7 @@ references:                     # existing documents handed to agents (text only
 
 |`sync.lease_ttl_minutes`
 |`120`
-|How long the sync lock stays valid.
+|How long the lease of a publish to the tracking branch (`.aidev/sync.lock`) stays valid.
 
 |`knowledge.max_files_per_dir`
 |`20`

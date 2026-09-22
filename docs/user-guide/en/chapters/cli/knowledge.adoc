@@ -1,25 +1,33 @@
 [[cli-knowledge]]
 == aidev knowledge
 
-Generates the LLM Wiki and shows its state.
+Brings the LLM Wiki to HEAD and commits it as its own commit.
 
 === Synopsis
 
 [source,text]
 ----
-aidev knowledge build [options]
-aidev knowledge status [options]
+aidev knowledge update [options]
 ----
 
 === Description
 
-`build` generates the Wiki. It takes only the files that changed since the last run and the files the last run left unfinished (incremental), writes the manifest and inventory, then starts the knowledge-builder agent to write the prose. If it stops halfway, the same command continues where it left off.
+Updates the Wiki for the HEAD of the branch you are on. Only the files that changed since last time and the ones left unfinished are queued (incremental). It deletes the pages of removed files, writes the inventory and manifest, then starts the knowledge-builder agent once per batch to write the prose. When everything is done it commits `.aidev/knowledge/` (and `.aidev/.gitignore`) alone as `aidev: update Wiki for <sha12>`.
 
-With `--no-agent` it writes only the manifest and inventory and leaves the prose ungenerated. This is for CI without Claude Code.
+If generation targets (`package.include` in `aidev.yaml`) have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the kit's configuration files are dirty.
 
-It stops if any Wiki page was edited by hand (`--force` overwrites them).
+While prose is still pending, the exit code is 1 and nothing is committed. The remaining batches are written to `.aidev/knowledge/.cache/plan.json`. Run the same command again to continue from the checkpoint.
 
-`status` shows the commit the Wiki describes, when it was generated, the number of pages, the number of pages without prose, and hand edits.
+`--no-agent` writes only the inventory and manifest and leaves the prose pending (exit code 1). Use it to finish after subagents wrote the prose on the hook's instructions: it records the completion reports and commits when nothing is left.
+
+Hand-edited Wiki pages stop the command (`--force` overwrites them).
+
+[[cli-knowledge-publish]]
+==== On the tracking branch
+
+With `main` (the tracking branch) checked out, or with `--branch`, it updates in a temporary worktree at `.aidev/cache/wiki-worktree/`, commits on the branch `aidev/wiki-<sha12>`, pushes it and opens a PR (on Azure DevOps when `sync.auto_pr` is `true` and the PAT is set; with `generic` hosting you open it by hand). Your checkout is never touched. It pushes only when the prose is complete.
+
+If it fails part way, the lease (`.aidev/sync.lock`) and the worktree stay. The same command continues; `--abort` discards them.
 
 === Options
 
@@ -28,37 +36,46 @@ It stops if any Wiki page was edited by hand (`--force` overwrites them).
 |Option |Description
 
 |`--scope <path>`
-|Only (re)generate pages under this path; research still covers the whole PKG
+|Regenerate only the pages under this path. Research still covers the whole PKG
 
 |`--full`
 |Regenerate every page instead of only what changed
 
 |`--dry-run`
-|Show what would be queued and written; write nothing
+|Show what would be queued; write nothing
 
 |`--json`
 |Machine-readable output
 
 |`--force`
-|Overwrite Wiki pages that were edited by hand
+|Overwrite hand-edited Wiki pages. Take over the lease of an interrupted publish
 
-|`--no-remote`
-|`status`: skip the remote check
+|`--no-commit`
+|Leave the updated Wiki in the working tree instead of committing it
+
+|`--branch`
+|Update in a temporary worktree, commit on `aidev/wiki-<sha12>` and open a PR (automatic on the tracking branch)
+
+|`--no-push`
+|With `--branch`: commit on the local `aidev/wiki-<sha12>` branch but do not push or open a PR
+
+|`--abort`
+|Discard an interrupted `--branch` publish (remove its worktree and release the lease)
 
 |`--no-agent`
-|Write only the manifest and inventory; leave the prose for a later run
+|Write only the inventory and manifest; leave the prose for later. Completion reports, if any, are recorded
 
 |`--agent-name <name>`
 |Start this agent instead of knowledge-builder
 
 |`--agent-tool <tool>`
-|AI tool that runs the agent (`claude`, `copilot`, `codex`, `kiro`); only tools in `tools.default` of `aidev.yaml`. Default: `tools.agents.<name>.tool`, else `tools.agent`
+|AI tool that runs the agent (`claude`, `copilot`, `codex`, `kiro`). Must be in `tools.default` of `aidev.yaml`. Default: `tools.agents.<name>.tool`, else `tools.agent`
 
 |`--agent-timeout <ms>`
 |Time budget per agent run (default 1800000 = 30 minutes)
 
 |`--agent-model <model>`
-|Model for the agent; `""` leaves the choice to the tool
+|Model for the agent. `""` leaves the choice to the tool
 
 |`--agent-batch-size <n>`
 |Files handed to one agent run (default 20)
@@ -77,65 +94,77 @@ It stops if any Wiki page was edited by hand (`--force` overwrites them).
 |Code |Condition
 
 |0
-|`build`: everything was generated (with `--no-agent`: the structure was written). `status`: the Wiki is healthy
+|The Wiki describes HEAD and was committed, or nothing needed doing. `--dry-run`, `--abort`
 
 |1
-|`build`: the agent failed, ran out of time or stopped halfway (re-run to continue). Hand edits without `--force`. `--scope` matched no files
-
-|4
-|`status`: the Wiki is missing or broken
+|Prose is still pending (`--no-agent`, or the agent failed, timed out or stopped part way; run again to continue). Generation targets have uncommitted changes. Hand edits without `--force`. Nothing matches `--scope`. A publish for another target is interrupted (`--abort` or `--force`)
 |===
 
 === Examples
 
-Generate (first time and updates alike; if it stops, re-run the same command):
+Update (if it stops, run the same command again):
 
 [source,bash]
 ----
-aidev knowledge build
+aidev knowledge update
 ----
 
-Only check what would be queued:
+Only see what would be queued:
 
 [source,bash]
 ----
-aidev knowledge build --dry-run
+aidev knowledge update --dry-run
 ----
 
 [source,text]
 ----
-aidev knowledge build (dry run)
-  target               1a2b3c4
+aidev knowledge update (dry run)
+  target               9f8e7d6 (HEAD of feature/login)
+  wiki describes       1a2b3c4
   generation targets   163
   ...
   queued now           7
 ✓ dry run complete; nothing was written.
-    would then run the knowledge-builder agent for 7 generation target(s) in 1 batch(es).
+    would then run the knowledge-builder agent with Claude Code for 7 generation target(s) in 1 batch(es).
+----
+
+Record the reports and commit after subagents wrote the prose on the hook's instructions:
+
+[source,bash]
+----
+aidev knowledge update --no-agent
 ----
 
 Regenerate only `src/api`, in smaller batches:
 
 [source,bash]
 ----
-aidev knowledge build --scope src/api --agent-batch-size 10
+aidev knowledge update --scope src/api --agent-batch-size 10
 ----
 
-Regenerate every page (discarding hand edits too):
-
-[source,bash]
-----
-aidev knowledge build --full --force
-----
-
-Show the state:
+Regenerate every page, dropping hand edits:
 
 [source,bash]
 ----
-aidev knowledge status
+aidev knowledge update --full --force
+----
+
+Update the Wiki of `main` through a PR (what the nightly pipeline does):
+
+[source,bash]
+----
+aidev knowledge update --branch
+----
+
+Discard an interrupted publish:
+
+[source,bash]
+----
+aidev knowledge update --abort
 ----
 
 === See also
 
-* xref:knowledge[LLM Wiki] — how generation proceeds and how to resume
-* xref:cli-sync[aidev sync]
-* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `tools.agent_model`
+* xref:knowledge[The LLM Wiki] — reading the state, what happens after a commit, resuming
+* xref:cli-hook[aidev hook] — `after-bash` and `session-stop`
+* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `sync.*`, `tools.agent_model`

@@ -53,7 +53,7 @@ const REQUIRED_IDS = [
   'cli-status',
   'cli-check',
   'cli-knowledge',
-  'cli-sync',
+  'cli-knowledge-publish',
   'cli-agent',
   'cli-permission',
   'cli-workflow',

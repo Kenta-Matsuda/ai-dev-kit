@@ -6,7 +6,7 @@
 導入すると、次の 3 つがそろいます。
 
 * **同じ設定** — `.claude/`（agents・skills・hooks）、`CLAUDE.md`、`.mcp.json` をチーム全員で共有します。kit のテンプレートから置かれ、チームが編集できます。新しいテンプレートは `aidev apply` で取り込み、編集済みならマージします。`aidev check` は未解消の衝突と hooks の欠落だけを止めます。
-* **LLM Wiki** — `.aidev/knowledge/` に、コードの構造と役割を説明する Markdown ページを生成します。Claude はソースを読む前にここを引きます。コードが進んだら `aidev sync` が追従し、PR を作ります。
+* **LLM Wiki** — `.aidev/knowledge/` に、コードの構造と役割を説明する Markdown ページを生成します。AI はソースを読む前にここを引きます。コードをコミットしたら hook が Wiki を HEAD に追従させ、同じブランチに別のコミットとして積みます。
 * **書き込みの制限** — `.aidev/policy.yaml` に「AI が書いてよい場所」を定め、hook が毎回の書き込みを検査します。ソースは通常 read-only で、チームが agent ごとに許可を足せます。
 
 === 誰が何をするか
@@ -28,7 +28,7 @@
 === しないこと
 
 * PR をマージしません。マージは常に人間が行います。
-* 実機で検証済みの AI ツールは Claude Code です。GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI は各ツールの非対話モードに沿ったアダプタで起動できますが、kit の保守者は実機で確認していません。hooks による書き込み policy の実行時強制は Claude Code だけです。
+* 実機で検証済みの AI ツールは Claude Code です。GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI は各ツールの非対話モードに沿ったアダプタで起動できますが、kit の保守者は実機で確認していません。hook の設定は 4 つのツールすべてに置きますが、実機で確認しているのは Claude Code だけです。
 * 対応する hosting は Azure DevOps と `generic`（git のみ。PR は手動）だけです。
 * サンドボックスではありません。hook と policy は「うっかり」を止める仕組みです。最終的な守りは token の権限と branch policy です。
 

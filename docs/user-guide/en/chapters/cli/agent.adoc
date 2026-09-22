@@ -14,7 +14,7 @@ aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout 
 
 === Description
 
-Hands one task to a bundled agent (`agents-creator`, `convention-builder`, `issue-to-pr`, `knowledge-builder`, `permission-setting`, `test-writer`, `workflow-creator`) through the same launcher that `aidev knowledge build` and `aidev sync` use. The agent runs inside the PKG clone with the same configuration files, hooks and policy as an interactive session.
+Hands one task to a bundled agent (`agents-creator`, `convention-builder`, `issue-to-pr`, `knowledge-builder`, `permission-setting`, `test-writer`, `workflow-creator`) through the same launcher that `aidev knowledge update` uses. The agent runs inside the PKG clone with the same configuration files, hooks and policy as an interactive session.
 
 The tool and model are chosen in this order:
 

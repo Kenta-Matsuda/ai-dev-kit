@@ -1,25 +1,33 @@
 [[cli-knowledge]]
 == aidev knowledge
 
-LLM Wiki を生成し、状態を見ます。
+LLM Wiki を HEAD に追従させ、別コミットとして積みます。
 
 === 書式
 
 [source,text]
 ----
-aidev knowledge build [options]
-aidev knowledge status [options]
+aidev knowledge update [options]
 ----
 
 === 説明
 
-`build` は Wiki を生成します。前回から変わったファイルと前回未完了のファイルだけを対象にし（差分）、manifest と inventory を書いてから knowledge-builder agent を起動して本文を書きます。途中で止まっても、同じコマンドで続きから再開できます。
+今いるブランチの HEAD に合わせて Wiki を更新します。前回から変わったファイルと前回未完了のファイルだけを対象にし（差分）、消えたファイルのページを削除し、inventory と manifest を書いてから knowledge-builder agent を batch ごとに起動して本文を書きます。すべて終わったら `.aidev/knowledge/`（と `.aidev/.gitignore`）だけを `aidev: update Wiki for <sha12>` としてコミットします。
 
-`--no-agent` を付けると manifest と inventory だけを書き、本文は未生成のまま残します。Claude Code が無い CI 向けです。
+生成対象（`aidev.yaml` の `package.include`）に未コミットの変更があると、そのファイルを列挙して止まります。先にコミットするか stash します。`.aidev/knowledge/` や kit の設定ファイルが汚れているのは構いません。
+
+本文が残っている間は終了コード 1 で、コミットしません。`.aidev/knowledge/.cache/plan.json` に残りの batch が書かれます。同じコマンドをもう一度実行すると checkpoint から続きます。
+
+`--no-agent` は inventory と manifest だけを書き、本文は未生成のまま残します（終了コード 1）。hook の指示でサブエージェントが本文を書いたあとの仕上げに使います。このとき完了報告を取り込み、残りが無ければコミットします。
 
 手編集された Wiki ページがあると止まります（`--force` で上書き）。
 
-`status` は Wiki が説明しているコミット、生成日時、ページ数、未生成のページ数、手編集を表示します。
+[[cli-knowledge-publish]]
+==== tracking branch の上で実行したとき
+
+`main`（tracking branch）を checkout している場合、または `--branch` を付けた場合は、一時 worktree `.aidev/cache/wiki-worktree/` で更新し、`aidev/wiki-<sha12>` ブランチにコミットして push し、PR を作ります（Azure DevOps で `sync.auto_pr` が `true` かつ PAT があるとき。`generic` hosting では手で作ります）。あなたの checkout は触りません。本文が完成したときだけ push します。
+
+途中で失敗すると lease（`.aidev/sync.lock`）と worktree が残ります。同じコマンドで続き、`--abort` で捨てます。
 
 === オプション
 
@@ -40,13 +48,22 @@ aidev knowledge status [options]
 |JSON で出力する
 
 |`--force`
-|手編集された Wiki ページを上書きする
+|手編集された Wiki ページを上書きする。中断した publish の lease を引き継ぐ
 
-|`--no-remote`
-|`status`: remote に接続しない
+|`--no-commit`
+|コミットせず、更新した Wiki を作業ツリーに残す
+
+|`--branch`
+|一時 worktree で更新し、`aidev/wiki-<sha12>` ブランチにコミットして PR を作る（tracking branch 上では自動）
+
+|`--no-push`
+|`--branch` と併用: ローカルの `aidev/wiki-<sha12>` にコミットするだけで、push と PR はしない
+
+|`--abort`
+|中断した `--branch` の publish を捨てる（worktree を消し、lease を解放する）
 
 |`--no-agent`
-|manifest と inventory だけ書き、本文は後回しにする
+|inventory と manifest だけ書き、本文は後回しにする。完了報告があれば取り込む
 
 |`--agent-name <name>`
 |knowledge-builder の代わりにこの agent を起動する
@@ -77,65 +94,77 @@ aidev knowledge status [options]
 |コード |条件
 
 |0
-|`build`: すべて生成した（`--no-agent` なら構造を書いた）。`status`: Wiki が正常
+|Wiki が HEAD を説明していてコミットした、または何もする必要が無かった。`--dry-run`、`--abort`
 
 |1
-|`build`: agent が失敗・時間切れ・途中で止まった（再実行で続行できる）。手編集があり `--force` が無い。`--scope` に一致するファイルが無い
-
-|4
-|`status`: Wiki が無い、または壊れている
+|本文が未完了（`--no-agent`、agent の失敗・時間切れ・途中終了。再実行で続行できる）。生成対象に未コミットの変更がある。手編集があり `--force` が無い。`--scope` に一致するファイルが無い。別の target の publish が中断したまま（`--abort` か `--force`）
 |===
 
 === 例
 
-生成する（初回も更新も同じ。止まっても同じコマンドで再開）:
+更新する（止まっても同じコマンドで再開）:
 
 [source,bash]
 ----
-aidev knowledge build
+aidev knowledge update
 ----
 
 何が対象になるか確認だけする:
 
 [source,bash]
 ----
-aidev knowledge build --dry-run
+aidev knowledge update --dry-run
 ----
 
 [source,text]
 ----
-aidev knowledge build (dry run)
-  target               1a2b3c4
+aidev knowledge update (dry run)
+  target               9f8e7d6 (HEAD of feature/login)
+  wiki describes       1a2b3c4
   generation targets   163
   ...
   queued now           7
 ✓ dry run complete; nothing was written.
-    would then run the knowledge-builder agent for 7 generation target(s) in 1 batch(es).
+    would then run the knowledge-builder agent with Claude Code for 7 generation target(s) in 1 batch(es).
+----
+
+hook の指示でサブエージェントが本文を書いたあと、報告を取り込んでコミットする:
+
+[source,bash]
+----
+aidev knowledge update --no-agent
 ----
 
 `src/api` 配下だけを、小さい batch で作り直す:
 
 [source,bash]
 ----
-aidev knowledge build --scope src/api --agent-batch-size 10
+aidev knowledge update --scope src/api --agent-batch-size 10
 ----
 
 全ページを作り直す（手編集も捨てる）:
 
 [source,bash]
 ----
-aidev knowledge build --full --force
+aidev knowledge update --full --force
 ----
 
-状態を見る:
+`main` の Wiki を PR で更新する（夜間 pipeline と同じ）:
 
 [source,bash]
 ----
-aidev knowledge status
+aidev knowledge update --branch
+----
+
+中断した publish を捨てる:
+
+[source,bash]
+----
+aidev knowledge update --abort
 ----
 
 === 関連
 
-* xref:knowledge[LLM Wiki] — 生成の進み方と再開
-* xref:cli-sync[aidev sync]
-* xref:configuration[aidev.yaml リファレンス] — `package.include`、`knowledge.*`、`tools.agent_model`
+* xref:knowledge[LLM Wiki] — 状態の読み方、コミット後の流れ、再開
+* xref:cli-hook[aidev hook] — `after-bash` と `session-stop`
+* xref:configuration[aidev.yaml リファレンス] — `package.include`、`knowledge.*`、`sync.*`、`tools.agent_model`

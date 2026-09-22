@@ -60,7 +60,7 @@ aidev <command> [subcommand] [options] [arguments]
 |permission: policy が無い・壊れている、または承認を拒否した
 
 |4
-|wiki: Wiki が無い・壊れている、または前回の sync が途中で止まっている
+|wiki: Wiki が無い・壊れている、または tracking branch への publish が途中で止まっている
 |===
 
 [[cli-commands]]
@@ -80,11 +80,8 @@ aidev <command> [subcommand] [options] [arguments]
 |xref:cli-check[`aidev check`]
 |整合性を終了コードで返す（CI 用）
 
-|xref:cli-knowledge[`aidev knowledge <build\|status>`]
-|LLM Wiki を生成する・状態を見る
-
-|xref:cli-sync[`aidev sync`]
-|`main` に追従して Wiki を更新し、PR を作る
+|xref:cli-knowledge[`aidev knowledge update`]
+|LLM Wiki を HEAD に追従させ、別コミットとして積む（tracking branch 上では PR）
 
 |xref:cli-agent[`aidev agent <list\|show\|run>`]
 |同梱 agent を設定済みの AI ツールで起動する
@@ -125,7 +122,7 @@ aidev <command> [subcommand] [options] [arguments]
 |コマンド |要約
 
 |xref:cli-hook[`aidev hook <…>`]
-|Claude Code の hook から呼ばれる内部コマンド
+|AI ツールの hook から呼ばれる内部コマンド
 
 |xref:cli-mcp[`aidev mcp azure-devops`]
 |`.mcp.json` から起動される内部コマンド
@@ -138,8 +135,6 @@ include::status.adoc[]
 include::check.adoc[]
 
 include::knowledge.adoc[]
-
-include::sync.adoc[]
 
 include::agent.adoc[]
 

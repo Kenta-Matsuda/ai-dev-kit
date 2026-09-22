@@ -12,7 +12,7 @@ aidev status [options]
 
 === 説明
 
-PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（3 つのコミット SHA と 1 行の判定）、Wiki のページ数、ツール設定の状態（適用した kit、編集済みファイル数、衝突、hooks の欠落）、policy の有無と agent ごとの許可、手編集、進行中の sync を表示します。
+PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（`head` / `knowledge` / `tracking` の 3 つのコミットと 1 行の判定）、Wiki のページ数と未生成のページ数、ツール設定の状態（適用した kit、編集済みファイル数、衝突、hooks の欠落）、policy の有無と agent ごとの許可、手編集、進行中の publish を表示します。
 
 表示専用です。同じ検査を終了コードで返すのが xref:cli-check[aidev check] です。
 
@@ -56,15 +56,15 @@ aidev status — demo-pkg
   tools    claude
   kit      {aidev-version} @ 9491efe
 
-[ai-dev-kit] base=1a2b3c4  knowledge=1a2b3c4  tracking=9f8e7d6
-⚠️ origin/main has moved ahead (9f8e7d6); work may continue. Run "aidev sync" to catch up.
+[ai-dev-kit] head=9f8e7d6  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev knowledge update".
 
   Wiki         163 page(s) for 163 target(s)
   tool config  applied from kit 9491efe, 1 file(s) customised
   policy       placed (14 protected paths; agent grants: issue-to-pr → src/** on aidev/issue-*)
 ----
 
-`base` は今の作業が基づくコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。
+`head` は今の checkout のコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。判定は inventory と HEAD の木の比較で行うので、`knowledge` の SHA が一致しなくても内容が同じなら `✅` です。`main` の Wiki が `aidev/wiki-<sha12>` ブランチで PR 待ちのときは、その旨を 1 行添えます。
 
 === 関連
 

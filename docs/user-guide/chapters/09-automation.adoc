@@ -15,9 +15,11 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |`pipelines/azure-pipelines-check.yml`
 |PR ごとに `aidev check` を実行します。`main` の branch policy で **必須の build validation** にしてください。これが無いと hook を外す編集がマージできてしまいます。
 
-|`pipelines/azure-pipelines-sync.yml`
-|毎日 18:00 UTC に `aidev sync --no-agent` を実行します。`--no-agent` なので構造だけ更新し、本文は PR に「未生成」と記されます。pipeline に Claude Code と token 予算を用意できたら `--no-agent` を外します。変数 `AZURE_DEVOPS_PAT`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。
+|`pipelines/azure-pipelines-wiki.yml`
+|毎日 18:00 UTC に `main` で `aidev knowledge update --branch` を実行します。Wiki 無しでマージされた分を拾い、`aidev/wiki-<sha12>` ブランチにコミットして PR を作ります。本文が完成したときだけ publish するので、pipeline に agent のツール（`tools.agent`。既定は Claude Code）とその認証情報が必要です。変数 `AZURE_DEVOPS_PAT`、`ANTHROPIC_API_KEY`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。Wiki が既に `main` の HEAD を説明していれば何もしません。
 |===
+
+開発者がコミットのたびに Wiki を追従させていれば、この pipeline は保険です。
 
 `aidev check` の終了コードが CI の契約です。
 
@@ -26,7 +28,7 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |終了コード |意味
 
 |0
-|整合しています。警告（`main` が進んでいる、本文が未生成）は 0 のままです。`--strict` で 2 になります。
+|整合しています。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままです。`--strict` で 2 になります。
 
 |2
 |ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev apply` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えています。チームがファイルを編集しただけなら 0 です。
@@ -35,7 +37,7 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |`.aidev/policy.yaml` が無い、または壊れています。
 
 |4
-|Wiki が無い・壊れている、または前回の sync が途中で止まっています。
+|Wiki が無い・壊れている、または tracking branch への publish の lease が期限切れのまま残っています。
 |===
 
 [[automation-workflow]]
@@ -76,4 +78,4 @@ aidev workflow run nightly-tests
 
 === 関連
 
-* xref:cli-check[aidev check]、xref:cli-sync[aidev sync]、xref:cli-workflow[aidev workflow]
+* xref:cli-check[aidev check]、xref:cli-knowledge[aidev knowledge]、xref:cli-workflow[aidev workflow]

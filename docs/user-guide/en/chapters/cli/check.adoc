@@ -14,7 +14,7 @@ aidev check [options]
 
 Runs the same checks as `aidev status` and turns the first problem found into the exit code. The order is drift (2) → policy (3) → Wiki (4).
 
-In a directory without `aidev.yaml`, and in an ejected repository, it does nothing and exits 0. Warnings (`main` has moved ahead, prose not yet generated) stay at 0; with `--strict` they become 2.
+In a directory without `aidev.yaml`, and in an ejected repository, it does nothing and exits 0. Warnings (the Wiki is behind HEAD, prose not yet generated, `main` has moved ahead) stay at 0; with `--strict` they become 2.
 
 === Options
 
@@ -23,7 +23,7 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 |Option |Description
 
 |`--strict`
-|Treat warnings as failures (exit code 2)
+|Treat warnings (Wiki behind HEAD, pending prose, tracking branch ahead) as failures (exit code 2)
 
 |`--json`
 |Machine-readable output
@@ -51,7 +51,7 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 |`.aidev/policy.yaml` is missing or cannot be read
 
 |4
-|The Wiki is missing or broken, or the previous sync stopped halfway
+|The Wiki is missing or broken (unreadable manifest, inconsistent inventory), or the lease of a publish to the tracking branch expired and was left behind
 |===
 
 === Examples
@@ -64,9 +64,9 @@ aidev check
 [source,text]
 ----
 aidev check
+  head         9f8e7d6
+  knowledge    9f8e7d6
   tracking     9f8e7d6
-  base         1a2b3c4
-  knowledge    1a2b3c4
   tool config  ok (1 customised)
   policy       valid
 ✓ environment is consistent.

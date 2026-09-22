@@ -15,9 +15,11 @@ Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and c
 |`pipelines/azure-pipelines-check.yml`
 |Runs `aidev check` on every PR. Make it a **required build validation** in the branch policy of `main`. Without it, an edit that removes the hooks could be merged.
 
-|`pipelines/azure-pipelines-sync.yml`
-|Runs `aidev sync --no-agent` daily at 18:00 UTC. With `--no-agent` only the structure is updated, and the PR notes that the prose is still pending. Remove `--no-agent` once the pipeline has Claude Code and a token budget. Set the variables `AZURE_DEVOPS_PAT`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`.
+|`pipelines/azure-pipelines-wiki.yml`
+|Runs `aidev knowledge update --branch` on `main` daily at 18:00 UTC. It picks up what was merged without a Wiki, commits on the branch `aidev/wiki-<sha12>` and opens a PR. It publishes only when the prose is complete, so the pipeline needs the agent tool (`tools.agent`, Claude Code by default) and its credentials. Set the variables `AZURE_DEVOPS_PAT`, `ANTHROPIC_API_KEY`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`. It does nothing when the Wiki already describes the HEAD of `main`.
 |===
+
+When developers bring the Wiki to HEAD with every commit, this pipeline is a safety net.
 
 The exit code of `aidev check` is the contract with CI.
 
@@ -26,7 +28,7 @@ The exit code of `aidev check` is the contract with CI.
 |Exit code |Meaning
 
 |0
-|Consistent. Warnings (`main` moved ahead, prose pending) still return 0; `--strict` turns them into 2.
+|Consistent. Warnings (Wiki behind HEAD, prose pending, `main` moved ahead) still return 0; `--strict` turns them into 2.
 
 |2
 |The tool configuration record (`.aidev/materialized.json`) is missing, `aidev apply` conflict markers remain, or the kit's hooks are gone from `.claude/settings.json`. Files the team merely edited still return 0.
@@ -35,7 +37,7 @@ The exit code of `aidev check` is the contract with CI.
 |`.aidev/policy.yaml` is missing or broken.
 
 |4
-|The Wiki is missing or broken, or a previous sync stopped halfway.
+|The Wiki is missing or broken, or the lease of a publish to the tracking branch expired and was left behind.
 |===
 
 [[automation-workflow]]
@@ -76,4 +78,4 @@ How to write `steps.js` is explained in the scaffold's comments. The limits are 
 
 === Related
 
-* xref:cli-check[aidev check], xref:cli-sync[aidev sync], xref:cli-workflow[aidev workflow]
+* xref:cli-check[aidev check], xref:cli-knowledge[aidev knowledge], xref:cli-workflow[aidev workflow]

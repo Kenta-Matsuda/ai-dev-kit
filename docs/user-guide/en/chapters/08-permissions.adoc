@@ -1,7 +1,7 @@
 [[permissions]]
 == Permissions and safety
 
-{project-name} defines **where the AI may write** inside the PKG in `.aidev/policy.yaml` (the policy), and a Claude Code hook checks every write against it. Source code is read-only by default. Tokens are never written to files; they are passed only through environment variables.
+{project-name} defines **where the AI may write** inside the PKG in `.aidev/policy.yaml` (the policy), and a hook of the AI tool checks every write against it. Source code is read-only by default. Tokens are never written to files; they are passed only through environment variables.
 
 [[permissions-policy]]
 === The policy categories
@@ -20,7 +20,7 @@
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
-|Writable only during a sync, when the Wiki is missing or broken.
+|When the Wiki is missing or unreadable, writable only while `aidev knowledge update` rewrites the structure.
 
 |`writable`
 |`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/conventions/**`, `aidev.yaml`
@@ -32,12 +32,12 @@
 |Extra paths that only the agent `<name>` started by `aidev` may write. With `branch`, the grant applies only while that branch (a glob) is checked out.
 |===
 
-Rules are checked top to bottom. Paths outside the repository, `secrets_paths` and `protected` paths are always denied. While there is no Wiki, everything is denied (except `.aidev/knowledge/**` during a sync). After that, `writable` → `agents.<name>` → `read_only` are checked in that order, and the first match decides.
+Rules are checked top to bottom. Paths outside the repository, `secrets_paths` and `protected` paths are always denied. While there is no Wiki, everything is denied (except `.aidev/knowledge/**` while `aidev knowledge update` writes it). After that, `writable` → `agents.<name>` → `read_only` are checked in that order, and the first match decides.
 
 [[permissions-hooks]]
 === What the hooks do
 
-The distributed `.claude/settings.json` registers four hooks.
+The distributed hook configuration (`.claude/settings.json` for Claude Code, `.github/hooks/aidev.json` for GitHub Copilot CLI, `.codex/hooks.json` for OpenAI Codex CLI, `.kiro/agents/aidev.json` for Kiro CLI) registers five hooks. Claude Code is the tool verified against the real binary.
 
 [cols="1,1,3",options="header"]
 |===
@@ -45,7 +45,7 @@ The distributed `.claude/settings.json` registers four hooks.
 
 |SessionStart
 |`aidev hook session-start`
-|Puts the Wiki state and any work in progress into the session context.
+|Puts the Wiki state and any publish in progress into the session context.
 
 |PreToolUse (Write / Edit / Bash, …)
 |`aidev hook guard-write`
@@ -53,23 +53,27 @@ The distributed `.claude/settings.json` registers four hooks.
 
 |PostToolUse (Write / Edit)
 |`aidev hook quality-gate`
-|After the AI edits a PKG file, runs the `quality_gates` commands and returns failure output to Claude.
+|After the AI edits a PKG file, runs the `quality_gates` commands and returns failure output to the AI.
+
+|PostToolUse (Bash)
+|`aidev hook after-bash`
+|When a commit moved HEAD and the Wiki fell behind, updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent (xref:knowledge-hook-flow[What happens after a commit]).
 
 |Stop
 |`aidev hook session-stop`
-|Does nothing in an ordinary environment (an internal hook that only matters on an ai-dev-kit developer's machine).
+|While the Wiki is behind HEAD, refuses to stop once and repeats the instructions. On an ai-dev-kit developer's machine it also asks for a reflection.
 |===
 
-When a write is denied, Claude receives a reason like these.
+When a write is denied, the AI receives a reason like these.
 
 [source,text]
 ----
 ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents by default; this session was not started by the CLI as a named agent; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
-ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge update" …
 ----
 
-An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge.
+An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge (the file checked is `.claude/settings.json`).
 
 [[permissions-source]]
 === Letting an agent edit source

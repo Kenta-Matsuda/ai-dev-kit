@@ -1,42 +1,76 @@
 [[cli-hook]]
 == aidev hook
 
-Internal command called by Claude Code hooks. Not meant to be run by hand.
+Internal command called by the AI tool's hooks. Not meant to be run by hand.
 
 === Synopsis
 
 [source,text]
 ----
-aidev hook session-start
-aidev hook guard-write [--input <file>]
-aidev hook quality-gate [--input <file>]
-aidev hook session-stop
+aidev hook session-start [--tool <tool>]
+aidev hook guard-write [--input <file>] [--tool <tool>]
+aidev hook quality-gate [--input <file>] [--tool <tool>]
+aidev hook after-bash [--input <file>] [--tool <tool>]
+aidev hook session-stop [--input <file>] [--tool <tool>]
 ----
 
 === Description
 
-Claude Code starts it from the distributed `.claude/settings.json`. It reads the hook input (JSON) on stdin and writes its decision (JSON) to stdout. To try it out, pass an input file with `--input <file>`.
+The AI tool starts it from the hook configuration the kit places. It reads the hook input (JSON) on stdin and writes its decision (JSON) to stdout. To try it out, pass an input file with `--input <file>`. It touches neither the network nor an LLM, so it stays within the tool's hook timeout (30 seconds by default).
 
 [%autowidth.stretch,options="header"]
 |===
-|Subcommand |What it does
+|Subcommand |When |What it does
 
 |`session-start`
-|Returns the Wiki state and any work in progress as session context
+|Session start
+|Returns the Wiki state (`[ai-dev-kit] head=… knowledge=… tracking=…` and the verdict) and any publish in progress as session context
 
 |`guard-write`
+|Before a write
 |Checks the target path against the policy and returns `allow` / `deny` with a reason. Returns `deny` when it cannot decide
 
 |`quality-gate`
-|Runs `quality_gates` after a package file was edited and returns the output of failures
+|After a file edit
+|Runs `quality_gates` after a PKG file was edited and returns the output of failures
+
+|`after-bash`
+|After a shell command
+|When HEAD changed, the Wiki is behind and the tree is clean, does the structural update (inventory, manifest, removed pages). A rename-only change is committed right away. When prose is needed, writes `.aidev/knowledge/.cache/plan.json` and tells the session to start the knowledge-builder subagent per batch and then run `aidev knowledge update --no-agent`. When generation targets have uncommitted changes, it only names them and does nothing else
 
 |`session-stop`
-|Does nothing in an ordinary environment (an internal hook that runs only on an ai-dev-kit developer's machine)
+|Session end
+|When the Wiki is behind HEAD (or its prose is unfinished) on a clean tree, refuses to stop once and repeats the `after-bash` instructions. The second stop passes with a warning. A tree with uncommitted changes never blocks. On an ai-dev-kit developer's machine it also asks for a reflection
+|===
+
+=== Hook configuration per tool
+
+`--tool` shapes the output for the tool. The default is `claude`.
+
+[%autowidth.stretch,options="header"]
+|===
+|Tool |Hook configuration |Notes
+
+|Claude Code
+|`.claude/settings.json`
+|Verified against the real binary. `after-bash` runs from the `PostToolUse` hook with the `Bash` matcher
+
+|GitHub Copilot CLI
+|`.github/hooks/aidev.json`
+|Hooks do not run inside subagents, so the knowledge-builder is confined to `.aidev/knowledge/**` by its agent definition. Not verified
+
+|OpenAI Codex CLI
+|`.codex/hooks.json`
+|The project must be trusted: answer at the first `codex` launch, or set `projects."<path>".trust_level = "trusted"` in `~/.codex/config.toml`. Not verified
+
+|Kiro CLI
+|`.kiro/agents/aidev.json`
+|Hooks live in the agent definition, so start with `kiro-cli chat --agent aidev`. `postToolUse` cannot inject context, so the Stop hook carries the instructions. Hooks do not run inside subagents. Not verified
 |===
 
 === Exit codes
 
-0 whenever a decision was returned (also for `deny`; the decision is inside the JSON). 1 for an unknown hook name.
+0 whenever a decision was returned (also for `deny`; the decision is inside the JSON). 1 for an unknown hook name or `--tool`.
 
 === Example
 
@@ -63,5 +97,6 @@ aidev hook guard-write --input /tmp/hook.json
 
 === See also
 
+* xref:knowledge-hook-flow[The LLM Wiki: what happens after a commit]
 * xref:permissions-hooks[Permissions and safety: what the hooks do]
 * xref:configuration[aidev.yaml reference] — `quality_gates`

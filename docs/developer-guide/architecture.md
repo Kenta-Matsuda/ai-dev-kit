@@ -15,7 +15,7 @@
 │  ├─ settings.json               hooks / deny / ask
 │  ├─ agents/  skills/
 │  └─ settings.local.json         個人設定。kit所有ではなくdrift検出から除外
-├─ .github/  AGENTS.md  .kiro/    tools.default に copilot / codex / kiro があるときだけ（§2）
+├─ .github/  AGENTS.md  .codex/  .kiro/   tools.default に copilot / codex / kiro があるときだけ（§2）
 └─ .aidev/
    ├─ .gitignore                  CLIが書く。runtime stateをgitから外す
    ├─ policy.yaml                 承認済みpolicy（CLIだけが配置）
@@ -23,17 +23,17 @@
    ├─ materialized.json           適用したtemplateとfileのhash record、未解消conflict（applyのmerge基準）
    ├─ ejected.json                aidev eject の marker（通常は存在しない）
    ├─ knowledge/                  LLM Wiki（manifest.json, inventory/, index.md, overview.md, pages）
-   │  └─ .cache/                  agent plan、完了報告 done/（ignored）
+   │  └─ .cache/                  plan.json（hook経路のbatch計画）、agent task、完了報告 done/（ignored）
    ├─ conventions/                開発規約（convention-builder が生成、teamがreviewしてcommit。index.md, coding.md, testing.md, review.md）
    ├─ workflows/<name>/           workflow.yaml, steps.js, approval.json（runs/ はignored）
-   ├─ sync.lock                   sync lease（ignored）
-   └─ cache/                      remote-check.json, sync-worktree/, agents/（prompt file）,
-                                  evolution/<session>.md（kit開発者端末の振り返り）（ignored）
+   ├─ sync.lock                   publish lease（ignored）
+   └─ cache/                      remote-check.json, last-head.json, wiki-stop.json, wiki-worktree/,
+                                  agents/（prompt file）, evolution/<session>.md（kit開発者端末の振り返り）（ignored）
 ```
 
-`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`apply`、`sync`（worktree内）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
+`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`apply`、`knowledge update`（worktree内でも）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
 
-path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、全toolの`TOOL_CONFIG_GLOBS`: `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.github/copilot-instructions.md`、`.github/agents/**`、`.github/skills/**`、`AGENTS.md`、`.kiro/steering/**`、`.kiro/agents/**`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
+path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、全toolの`TOOL_CONFIG_GLOBS`: `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.github/copilot-instructions.md`、`.github/agents/**`、`.github/skills/**`、`.github/hooks/**`、`AGENTS.md`、`.codex/**`、`.kiro/steering/**`、`.kiro/agents/**`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
 
 ### 端末側: kit checkoutと`AIDEV_HOME`
 
@@ -54,9 +54,9 @@ toolごとに`templates/<tool>/`があり、PKG rootにそのまま重なるtree
 | tool | template tree（PKGでの位置と同じ） |
 | --- | --- |
 | `claude` | `templates/claude/.claude/**`、`templates/claude/CLAUDE.md`、`templates/claude/.mcp.json` |
-| `copilot` | `templates/copilot/.github/copilot-instructions.md`、`.github/agents/<agent>.agent.md`、`.github/skills/<skill>/**` |
-| `codex` | `templates/codex/AGENTS.md` |
-| `kiro` | `templates/kiro/.kiro/steering/ai-dev-kit.md`、`.kiro/agents/<agent>.json` |
+| `copilot` | `templates/copilot/.github/copilot-instructions.md`、`.github/agents/<agent>.agent.md`、`.github/skills/<skill>/**`、`.github/hooks/aidev.json` |
+| `codex` | `templates/codex/AGENTS.md`、`.codex/hooks.json` |
+| `kiro` | `templates/kiro/.kiro/steering/ai-dev-kit.md`、`.kiro/agents/<agent>.json`、`.kiro/agents/aidev.json`（hooksを持つ主担当agent） |
 
 treeはkit保守者が手で揃えます（toolごとの差はtemplateから生成できないため）。claude以外のtreeは実機未検証で、fileの先頭にその旨を書いています。`layout.TOOL_CONFIG_GLOBS`がkit所有pathの正本で、`isKitManaged` / `ALWAYS_PROTECTED` / `settings.json`のdeny listはこれに従います。`.claude/settings.local.json`は個人設定で常に除外です（`STATIC_EXCLUDE`）。
 
@@ -166,56 +166,57 @@ agents: {}            # 候補は空。teamが policy.yaml に直接書く（例
 
 `extractBashTargets`はredirection（`>`、`>>`）と既知の書込command（`rm mv cp tee truncate install shred dd chmod chown ln mkdir rmdir touch sed -i patch`）のoperandを拾います。sandboxではなく、明らかな回避を捕まえる補助です。targetが1つも取れなければallow（「no filesystem target identified」）になります。
 
-## 4. 3つのSHA
+## 4. Wikiの整合判定（head / knowledge / tracking）
 
-`state.computeState(repoRoot, config, { checkRemote, force })`が返す3値です。
+Wikiは**今のbranchのHEAD**を説明します。`state.computeState(repoRoot, config, { checkRemote, force })`が返す主な値は次のとおりです。
 
 | 値 | 実体 | 意味 |
 | --- | --- | --- |
-| `trackingSha` | `origin/<tracking_branch>`の先端（remote `ls-remote`、不可なら手元のremote-tracking ref） | Wikiが次に説明すべきcode |
-| `baseSha` | `merge-base(HEAD, origin/<tracking_branch>)`。remote-tracking refが無ければHEAD | 今の作業が立脚するtracking commit |
-| `knowledgeSha` | `.aidev/knowledge/manifest.json`の`knowledgeSha` | Wikiが説明するcommit |
+| `headSha` | checkoutのHEAD | Wikiが説明すべきcode |
+| `knowledgeSha` | `.aidev/knowledge/manifest.json`の`knowledgeSha` | Wikiを生成したときのHEAD。**情報のみ**で、判定の根拠にはしない |
+| `trackingSha` | `origin/<tracking_branch>`の先端（remote `ls-remote`、不可なら手元のremote-tracking ref） | tracking branchが先へ進んだことを警告するためだけに使う |
+| `baseSha` | `merge-base(HEAD, origin/<tracking_branch>)`。remote-tracking refが無ければHEAD | tracking先行の判定（`sourceChanged(baseSha, localTrackingSha)`）にだけ使う |
 
-feature branch上ではHEADとtracking branchが違うのが正常なので、整合性は`HEAD == knowledgeSha`ではなく「Wikiは今の作業の土台を説明しているか」で判定します。比較は**source treeの差分**です。`state.sourceChanged(repoRoot, a, b)`は`git diff --quiet a b -- . :(exclude)<kit-managed>`で、kit管理path（`KIT_MANAGED_GLOBS`: `aidev.yaml`、`.aidev`、全toolの設定file）を除いた変更の有無を返します。Wikiを追加しただけのcommitやkit更新commitは「codeが動いた」と数えません。commitが手元に無い場合は「変更あり」に倒します。
+整合は**inventory（Wikiを生成したときのpathとblob idの一覧）とHEADのtree**の比較です（`inventory.compareWithTree(repoRoot, config, records, { ref: 'HEAD' })`が`{ behind, changed, added, modified, removed, renamed }`を返す）。旧commit objectを必要としないので、fetch・rebase・squash・force-pushの後でも同じ判定になり、`aidev knowledge update`が再生成対象を決める差分と一致します。`knowledgeSha`がHEADと違っても内容が同じならOKです（Wiki追加commitやkit更新commitはgeneration targetを変えないので「遅れ」になりません）。`state.sourceChanged(repoRoot, a, b)`（kit管理pathを除いた`git diff --quiet`）はtracking先行の判定にだけ残っています。
 
 ### severity（判定順）
 
 | 条件 | severity | message要旨 |
 | --- | --- | --- |
-| manifestが無い | ERROR | Wiki未生成、`knowledge build` |
+| manifestが無い | ERROR | Wiki未生成。`aidev init`（または`knowledge update`） |
 | HEADが解決できない | ERROR | commitが無い |
 | manifestに有効な`knowledgeSha`が無い | ERROR | manifest破損 |
-| `knowledgeSha`のcommitが手元に無い | WARN | fetch / branch確認 / sync |
-| `sourceChanged(knowledgeSha, baseSha)` | WARN | 土台のcodeが変わった、`aidev sync` |
-| `checkpoint.pendingPaths`が残っている | WARN | prose未完了、`knowledge build` |
+| HEADのtreeを列挙できない | ERROR | 比較不能 |
+| inventoryとHEADのtreeが違う（`behind.behind`） | WARN | Wikiが遅れている（`+a ~m -r →n`）。`aidev knowledge update` |
+| `checkpoint.pendingPaths`が残っている | WARN | prose未完了。`aidev knowledge update` |
 | remote確認を要求したが到達不能 | UNKNOWN | local状態は整合 |
-| 手元の`origin/<branch>`が`baseSha`より先で、source差分あり | WARN | tracking branchが先行（fetch済み） |
+| 手元の`origin/<branch>`が`baseSha`より先で、source差分あり | WARN | tracking branchが先行。merge / rebaseしてから`knowledge update` |
 | remoteの先端が手元のremote-tracking refと違う | WARN | 未fetchの新commit |
-| それ以外 | OK | Wikiは土台を説明している |
+| それ以外 | OK | WikiはHEADを説明している |
 
-ERRORは**構造破損のみ**です。PreToolUse guardは`checkRemote: false`で判定するため、networkがERRORを作ることはありません。`formatSummary`は`[ai-dev-kit] base=… knowledge=… tracking=…`の1行とicon付きmessageを返し、SessionStart hookと`status`が表示します。
+ERRORは**構造破損のみ**です。PreToolUse guardは`checkRemote: false`で判定するため、networkがERRORを作ることはありません。`formatSummary`は`[ai-dev-kit] head=… knowledge=… tracking=…`の1行とicon付きmessageを返し、SessionStart hookと`status`が表示します。戻り値の`wikiBehind`、`behind`（件数）、`pendingPages`、`hasWiki`をhookの`needsFollowUp`（`hasWiki && !ERROR && (wikiBehind || pendingPages > 0)`）が使います。
 
-remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.remote_check_timeout_ms`で打ち切り、結果を`.aidev/cache/remote-check.json`に`sync.remote_check_ttl_minutes`だけcacheします。`force: true`（`doctor`、`sync --check-only`）はcacheを無視します。
+remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.remote_check_timeout_ms`で打ち切り、結果を`.aidev/cache/remote-check.json`に`sync.remote_check_ttl_minutes`だけcacheします。`force: true`（`doctor`）はcacheを無視します。
 
 ### `aidev check`の変換
 
-`check`は`status.inspect`と同じ検査を行い、tool config（record欠落・未解消conflict・kit hooks欠落 → exit 2）→ policy（exit 3）→ Wiki（exit 4）の順で最初の問題のcodeを返します。exit 4はERROR severity、inventory不整合（同じpageに異なるhash）、期限切れsync leaseです。`--strict`は他に問題が無いときWARNをexit 2へ昇格します。`.aidev/ejected.json`がある、または`aidev.yaml`が無いrepositoryはexit 0です。
+`check`は`status.inspect`と同じ検査を行い、tool config（record欠落・未解消conflict・kit hooks欠落 → exit 2）→ policy（exit 3）→ Wiki（exit 4）の順で最初の問題のcodeを返します。exit 4はERROR severity、inventory不整合（同じpageに異なるhash）、期限切れpublish leaseです。`--strict`は他に問題が無いときWARN（Wiki behind HEAD、pending prose、tracking先行）をexit 2へ昇格します。`.aidev/ejected.json`がある、または`aidev.yaml`が無いrepositoryはexit 0です。
 
 ## 5. lease
 
 leaseはsync leaseの1種類だけです（work leaseは0.5.0で撤去）。fileは`ALWAYS_PROTECTED`なので、agentが自分でleaseを作る・延長することはできません。`evaluateLease`は`acquiredAt + ttlMinutes`で期限を判定し、壊れた記録は無効扱いです。
 
-### sync lease（`.aidev/sync.lock`）
+### publish lease（`.aidev/sync.lock`）
 
 ```json
 { "schemaVersion": 1, "kind": "sync", "targetSha": "…", "originalSha": "…",
   "taskId": null, "acquiredAt": "…", "ttlMinutes": 120, "pid": 12345 }
 ```
 
-`acquireSyncLease`は有効なleaseがあれば拒否し、期限切れでも黙って引き継がず`--resume` / `--abort`を案内します（`force`でのみ上書き）。保持者は次の2つです。
+file名と`kind`は歴史的にsyncのままです。保持者は`aidev knowledge update`の2経路です。
 
-- `aidev sync`: worktree作成から後片付けまで保持し、成功時に解放、失敗時は残す
-- `aidev knowledge build`: 状態がERRORかつWikiが存在するとき、inventory/manifestを書く間だけ取得して即解放する。ERROR状態で`knowledge/**`を書ける唯一の経路がsync leaseなので、buildが自分で取らないとsyncしか出口が無くなる（自己deadlock）。agent起動はlease解放後、manifestが`targetSha`へ進んでWARN/OKになってから行う
+- publish経路（tracking branch上、または`--branch`）: worktree作成から後片付けまで保持し、成功時に解放、失敗時は残す。既存leaseの`targetSha`がHEADと同じならそのまま継続（同じcommandの再実行）、違えば`--abort`（破棄）か`--force`（引き継ぎ）を要求する
+- in-place経路（`updateInPlace`）: 状態がERRORかつWikiが存在するとき、inventory/manifestを書く間だけ取得して即解放する。ERROR状態で`knowledge/**`を書ける唯一の経路がこのleaseなので、updateが自分で取らないと出口が無くなる（自己deadlock）。agent起動はlease解放後、manifestが`targetSha`へ進んでWARN/OKになってから行う
 
 sync leaseがguardで効くのは、状態がERRORのときだけです（§3の第4段）。
 
@@ -227,8 +228,12 @@ LLM Wikiは正本ではなくPKG sourceから再生成できる派生情報で�
 
 | 担当 | 責務 |
 | --- | --- |
-| CLI | generation target走査、evidence走査とfingerprint、mask、blob hash diff、inventory shard、manifest、checkpoint、page hash、agentのbatch起動、完了報告の取り込み、orphan page削除 |
-| knowledge-builder | evidenceを調査してprose pageと`index.md` / `overview.md`を書き、対象ごとに完了報告を残す。manifest / inventoryは書かない |
+| CLI | clean-tree検査、generation target走査、evidence走査とfingerprint、mask、blob hash diff、inventory shard、manifest、checkpoint、page hash、agentのbatch起動（またはhook経路の`plan.json`）、完了報告の取り込み、orphan page削除、`.aidev/knowledge/`のcommit |
+| knowledge-builder | evidenceを調査してprose pageと`index.md` / `overview.md`を書き、対象ごとに完了報告を残す。manifest / inventoryは書かない。commitもしない |
+
+### clean-treeの規則
+
+Wikiは「commitされた木」だけを説明します。`inventory.dirtyTargets(root, config)`（`git status --porcelain`をgeneration targetに絞ったもの。kit管理pathと`.aidev/knowledge/`は除外）に1件でもあれば、`knowledge update`はpathを列挙してexit 1、hookはpathを挙げるだけで何もしません。`.aidev/knowledge/`やtool設定fileの汚れは問いません（Wiki commitはそれらだけをstageするため）。
 
 ### generation targetとevidence
 
@@ -256,7 +261,7 @@ LLM Wikiは正本ではなくPKG sourceから再生成できる派生情報で�
 }
 ```
 
-`kitCommit`は`knowledge build`も`sync`もkit checkoutのHEAD（Wikiを生成したkitの版）です。`state.knowledgeSha`は`knowledgeSha`が無ければ`targetSha`も読みますが、書き手は常に`knowledgeSha`です。
+`knowledgeSha`は生成時のHEADで、表示用です（整合判定はinventoryとHEADのtreeの比較。§4）。`kitCommit`はkit checkoutのHEAD（Wikiを生成したkitの版）です。`state.knowledgeSha`は`knowledgeSha`が無ければ`targetSha`も読みますが、書き手は常に`knowledgeSha`です。
 
 ### inventory record（`.aidev/knowledge/inventory/NN.json`）
 
@@ -270,9 +275,9 @@ LLM Wikiは正本ではなくPKG sourceから再生成できる派生情報で�
 }
 ```
 
-recordは`path`順にsortし、`knowledge.inventory_shard_size`件ごとに`00.json`, `01.json`…へ分割します。`diffInventory`は旧recordと新scanをpathとblobで突き合わせ、`added` / `modified` / `removed` / `renamed`（同一blob・別path、prose再生成不要）/ `unchanged`を返します。旧commit objectが無くても（GC、force-push後でも）差分が取れるのがblob方式の理由です。`selfHashes`はpage手編集の検出に使い、`detectHandEdits`が`modified` / `missing`を返します。`knowledge build`と`sync`は`modified`があると`--force`なしで停止します。
+recordは`path`順にsortし、`knowledge.inventory_shard_size`件ごとに`00.json`, `01.json`…へ分割します。`diffInventory`は旧recordと新scanをpathとblobで突き合わせ、`added` / `modified` / `removed` / `renamed`（同一blob・別path、prose再生成不要）/ `unchanged`を返します。旧commit objectが無くても（GC、force-push後でも）差分が取れるのがblob方式の理由です。`selfHashes`はpage手編集の検出に使い、`detectHandEdits`が`modified` / `missing`を返します。`knowledge update`は`modified`があると`--force`なしで停止します。`compareWithTree`は同じrecordをHEADのtreeと突き合わせて整合判定に使います（§4）。
 
-`removed`だけが参照していたpageは`orphanedPages`で求め、`removeOrphanedPages`が`.aidev/knowledge/`内に限って削除し、親`index.md`を`staleIndexes`へ記録します。`index.md`はorphanにしません。orphan削除は現在`sync`だけが行います。
+`removed`だけが参照していたpageは`orphanedPages`で求め、`removeOrphanedPages`が`.aidev/knowledge/`内に限って削除し、親`index.md`を`staleIndexes`へ記録します。`index.md`はorphanにしません。
 
 ### batch実行と完了報告
 
@@ -284,7 +289,27 @@ recordは`path`順にsortし、`knowledge.inventory_shard_size`件ごとに`00.j
 4. 各run終了後、CLIが`inventory.applyCompletions`で報告を読み、pageが`.aidev/knowledge/`内の実在fileであることを検証してsha256を計算し、recordの`pages` / `selfHashes`を置き換え、共有pageのhashを全recordへ揃え、`checkpoint.pendingPaths`から除く。取り込んだ報告と拒否した報告は削除する。manifestが無い・checkpointが無い・`knowledgeSha`が`targetSha`と違う場合は報告を残したまま`manifestInvalid`を返す
 5. batchの全対象が報告済みなら次へ。timeout、process失敗、報告不足（exit 0だが未報告あり）なら停止する。完了分はすでにcheckpointに反映済み
 
-`knowledge build`と`sync`は開始時にも`done/`に残っている報告を取り込むため、Ctrl-Cで止めた実行の成果も次回へ引き継がれます。promptが8 KiBを超える場合、planは`.aidev/knowledge/.cache/agent-task-<sha12>-<label>.json`（`schemaVersion: 2`、`mode`、`generationTargets`、`evidence.paths`）へ書き、promptはそのfileを指します。
+`knowledge update`は開始時にも`done/`に残っている報告を取り込むため、Ctrl-Cで止めた実行やhook経路のsubagentの成果も次回へ引き継がれます。promptが8 KiBを超える場合、planは`.aidev/knowledge/.cache/agent-task-<sha12>-<label>.json`（`schemaVersion: 2`、`mode`、`generationTargets`、`evidence.paths`）へ書き、promptはそのfileを指します。
+
+### hook経路の`plan.json`
+
+対話toolのsession内では、CLIはagentを自分で起動しません（hookの時間予算にLLMは収まらない）。`updateInPlace`はprose未完了のとき`.aidev/knowledge/.cache/plan.json`（`writePlanFile`）を書き、残り0で消します。
+
+```json
+{
+  "schemaVersion": 2, "targetSha": "…", "mode": "generate", "hasOverview": true,
+  "generationScope": null, "generationTargets": ["src/a.ts", "…"],
+  "batches": [["src/a.ts", "…"], ["…"]],
+  "evidence": { "include": ["**"], "exclude": ["…"], "paths": ["…"], "excludedSecretPatterns": ["…"] },
+  "maxFilesPerDir": 20, "reportDir": ".aidev/knowledge/.cache/done", "finish": "aidev knowledge update --no-agent"
+}
+```
+
+hookはこのfileの`batches`数とともに「batch *i*ごとにknowledge-builderをsubagentとして起動し、`reportDir`へ完了報告を書かせ、全部終わったら`finish`を実行する」とsessionに指示します（§8）。subagentは通常のbatch runと同じ契約で報告を書き、`finish`（`--no-agent`）が`applyCompletions`で取り込んでcommitします。
+
+### commit
+
+prose完了（`remaining === 0`かつagent失敗なし）で、`commit`が要求されていれば`commitWiki(root, targetSha)`: `git add -A -- .aidev/knowledge .aidev/.gitignore` → stageが空なら`committed: false` → `git commit -m "aidev: update Wiki for <sha12>"`（本文に「Generated by ai-dev-kit; review it like any other change in this pull request.」）。source commitはdeveloperの、Wiki commitはkitのもので、同じbranch・同じPRに並びます。`--no-commit`（`init`もこれ）は作業treeに残します。prose未完了ならcommitせずexit 1で、同じcommandがcheckpointから続きます。
 
 ### 結果の判定
 
@@ -312,70 +337,103 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 
 `aidev agent run`と`ctx.agent()`は、`agent.resolveReferences(repoRoot, config)`が返す「# Reference documents」sectionをtaskの末尾に付けます。topicごとのfile一覧（directoryは再帰列挙）と、渡せなかったpath（無い、`secrets_paths`に一致、text fileが無いdirectory）の一覧です。中身は渡さず、pathだけを渡してagentに読ませます（agentの読み取りはpolicyとhookが検査するため）。Excel / Word / PDFは`validateConfig`が拒否し、textへの書き出しを求めます。詳細は`configuration-reference.md`の`references`。
 
-## 7. `aidev sync`
+## 7. `aidev knowledge update`
 
-利用者のcheckoutには触れません。処理はすべて一時worktreeで行い、結果は`aidev/wiki-<sha12>` branchのcommitとPRとして共有されます。
+3つの部分（structure / prose / commit）を、単独で実行・再開・省略できるように分けています（`cli/commands/knowledge.js`）。
 
 ```text
- 1. origin/<tracking_branch> をfetchし、先端（または --to で指定した到達可能なcommit）をtargetに決定
- 2. targetにcommitされたWikiがtargetのsourceを既に説明している → no-op（"git pull"を案内）
-    手元のWikiのknowledgeShaとtargetにsource差分が無い → no-op
- 3. change set算出（dry-runは手元のWikiを"before"にして表示して終了）
- 4. sync leaseを取得（--resume / --force で既存leaseを引き継ぐ）
- 5. .aidev/cache/sync-worktree/ にtargetでdetached worktreeを作る（中断時のworktreeは同一SHAなら再利用）
- 6. worktree内のWikiを"before"として change set を再計算。手編集pageがあれば --force なしで停止
- 7. worktree内でinventory shard / manifest を書き直し、orphan pageを削除、.aidev/.gitignoreを確保
- 8. worktree内で computeState（ERRORなら失敗）
- 9. --no-agent でなければ worktree を cwd として knowledge-builder を batch 起動し、完了報告を取り込む
-10. worktree内で aidev/wiki-<sha12> を checkout -B し、.aidev/knowledge と .aidev/.gitignore だけを stage して commit
-11. --no-pr でなければ push --force-with-lease --set-upstream origin <branch>
-12. sync.auto_pr が true、hosting が azure-devops、auth env が設定済みならPRを作成/更新。それ以外は手動作成を案内
-13. worktreeを削除し、leaseを解放
+ 0. clean-tree検査（generation targetに未commit変更があればpathを列挙して停止）
+ 1. done/ に残る完了報告を取り込む（前回のCtrl-Cやsubagentの成果）
+ 2. HEADのtreeを走査し、記録済みinventoryとdiff（added / modified / removed / renamed）。
+    evidence fingerprintが変わっていれば全targetを再queue。checkpoint.pendingPaths は常に再queue
+ 3. inventoryがHEADと一致し、queueも構造変更も無ければ no-op（未commitの完成Wikiがあればcommitして終了）
+ 4. 手編集pageがあれば --force なしで停止
+ 5. orphan page削除 → inventory shard → manifest（knowledgeSha = HEAD、checkpoint.pendingPaths）→ .aidev/.gitignore
+ 6. --no-agent でなければ knowledge-builder を batch 起動し、報告を取り込む
+ 7. 残りがあれば .aidev/knowledge/.cache/plan.json を書き、exit 1（commitしない）。無ければplan.jsonを消す
+ 8. 残り0なら .aidev/knowledge と .aidev/.gitignore だけを stage して "aidev: update Wiki for <sha12>" をcommit
+    （--no-commit なら作業treeに残す）
 ```
 
-失敗（例外）時はleaseとworktreeを残し、`--resume`か`--abort`を案内します。`--abort`はworktreeを削除してleaseを解放するだけで、checkoutは変更しません。`--check-only`はremote cacheを無視して状態を表示します。
+呼び出し元は3つです。`aidev knowledge update`（人間、CI）、`aidev init`（`commit: false`）、hook（`updateInPlace`を`--no-agent --json`相当で。§8）。
 
-### target SHAの制約
+### publish経路（tracking branch上、`--branch`）
 
-agentの作業branch先端をそのままsync対象にしません。squash、rebase、reviewerの追加commitでmerge後SHAが変わるためです。`--to`はfetch済みtracking branchから到達可能なcommitだけを受け付けます。`--resume`時にleaseの`targetSha`とtracking先端が違えば`--resume --to <leaseのSHA>`か`--abort`を要求します。
+protected branchには直接commitできないので、`update()`はcheckoutのbranchが`sync.tracking_branch`のとき（`--no-commit` / `--dry-run`でなければ）、または`--branch`で`publish()`へ分岐します。利用者のcheckoutには触れません。
+
+```text
+ 1. publish lease（.aidev/sync.lock）を取得。既存leaseがHEADと同じtargetなら継続、違えば --abort / --force を要求
+ 2. .aidev/cache/wiki-worktree/ にHEADでdetached worktreeを作る（同一SHAなら再利用、違えば作り直す）
+ 3. worktree内で上記 0〜7 を commit: false で実行
+ 4. no-op → worktree削除・lease解放でexit 0
+    prose未完了 → 何もpushせずexit 1（lease / worktreeは残す。同じcommandで継続、--abort で破棄）
+ 5. worktree内で aidev/wiki-<sha12> を checkout -B し、commitWiki
+ 6. --no-push でなければ push --force-with-lease --set-upstream origin <branch>
+ 7. sync.auto_pr が true、hosting が azure-devops、auth env が設定済みならPRを作成/更新。それ以外は手動作成を案内
+ 8. worktreeを削除し、leaseを解放
+```
+
+例外時はleaseとworktreeを残します。`--abort`はworktreeを削除してleaseを解放するだけで、checkoutは変更しません。`--resume` / `--to` / `--check-only`はありません（継続は同じcommand、targetは常にHEAD、状態は`aidev status`）。
 
 ### 識別子とPR
 
 - operation key: `hosting.type`、organization、project、repository、target SHAのsha256先頭32桁
-- sync stream ID: 同じ材料でtarget SHAの代わりに`tracking_branch`
-- PR descriptionに`<!-- aidev:sync-stream <id> -->`を埋め、同じstreamのopen PRを検索する。同じsource branchならdescriptionを更新、branchが変わっていれば新PRを作り旧PRへ「Superseded」注記を追記する。closeは人間が行う
-- PRのtarget branchは`sync.pr.target_branch`、reviewerは`sync.pr.reviewers`
+- wiki stream ID: 同じ材料でtarget SHAの代わりに`tracking_branch`
+- PR descriptionに`<!-- aidev:wiki-stream <id> -->`を埋め、同じstreamのopen PRを検索する。同じsource branchならdescriptionを更新、branchが変わっていれば新PRを作り旧PRへ「Superseded」注記を追記する。closeは人間が行う
+- PRのtitleはcommit messageの1行目、target branchは`sync.pr.target_branch`、reviewerは`sync.pr.reviewers`
 
 ### 主要scenario
 
 | scenario | 処理 |
 | --- | --- |
-| tracking branchへのmerge / direct push | `status`がWARN。`sync`が同じ経路で収束 |
-| force-push / 旧commitがGC済み | inventory blobとtarget treeを比較するため影響なし |
-| renameのみ | 同一blobで`renamed`、LLM再生成なし |
+| feature branchでのcommit | after-bash hookが構造を更新し、subagentがprose、`--no-agent`がcommit（§8）。手動なら`knowledge update` |
+| tracking branchへのmerge（Wiki commitを含む） | inventoryがHEADと一致するのでno-op |
+| tracking branchへのmerge（Wikiなし） | `status`がWARN。夜間pipelineまたは手動の`knowledge update --branch`が`aidev/wiki-<sha12>`のPRを作る |
+| force-push / rebase / squash / 旧commitがGC済み | inventory blobとHEAD treeを比較するため影響なし |
+| renameのみ | 同一blobで`renamed`、prose再生成なし。hook経路ではhookがそのままcommit |
 | generation target外のsource変更 | evidence fingerprint差分で全target再queue |
 | 削除 | orphan page削除、親indexを`staleIndexes`へ |
-| kit更新やWiki追加だけのcommit | `sourceChanged`が偽なのでno-op |
+| kit更新やWiki追加だけのcommit | generation targetが変わらないのでno-op |
+| generation targetに未commit変更 | pathを列挙して停止（hookは案内だけ） |
 | Wiki手編集 | `selfHashes`差分で停止、`--force`で破棄 |
-| sync途中の失敗 | lease / worktreeを残し`--resume` / `--abort` |
+| prose未完了 | plan.jsonを書きexit 1。同じcommandがcheckpointから継続 |
+| publish途中の失敗 | lease / worktreeを残し、同じcommandで継続 / `--abort` |
 | 同じtargetの再実行 | worktree再利用、同一branchへ`--force-with-lease` |
 | open PR中に新target | 新branch・新PR、旧PRへsuperseded注記 |
-| tracking branchに既にWikiがある | no-op、`git pull`を案内 |
+| tracking branchのWikiがPR待ち | `status`が`aidev/wiki-<sha12>`の存在を注記 |
 
 ## 8. hooks
 
-同梱`.claude/settings.json`は次のeventを`aidev hook <name>`（文字列形式、PATH上の`aidev`）へ接続します。`CLAUDE_PROJECT_DIR`が設定されていればrepo root探索の起点にします。
+同梱のhook設定は次のeventを`aidev hook <name> [--tool <id>]`（文字列形式、PATH上の`aidev`）へ接続します。`CLAUDE_PROJECT_DIR`が設定されていればrepo root探索の起点にします。hookはnetworkにもLLMにも触れず（`session-start`だけTTL cacheと3秒timeoutのremote確認）、toolのhook timeout（既定30秒）に収まります。
 
-| event | matcher | 責務 |
+| event（claudeの名前） | matcher | 責務 |
 | --- | --- | --- |
-| SessionStart | — | `formatSummary`とsync leaseの状態を`additionalContext`で返す |
+| SessionStart | — | `formatSummary`とpublish leaseの状態、Wikiが遅れていれば追従の予告を`additionalContext`で返す。HEADを`.aidev/cache/last-head.json`に記録 |
 | PreToolUse | `Write|Edit|MultiEdit|NotebookEdit|Bash` | `targetsFrom`でpathを集め`policy.decideMany`。deny理由を`permissionDecisionReason`へ |
 | PostToolUse | `Write|Edit|MultiEdit` | `quality_gates`のcommandをrepo rootで実行。編集対象がkit管理pathだけなら`skipped` |
-| Stop | — | kit開発者端末（`home.readDeveloper`）でだけ動く。transcriptを集計し、閾値（tool call 30回 / 出力20k tokens）を超えた未振り返りのsessionに`decision: block`で振り返り（`.aidev/cache/evolution/<session>.md`）を書かせる。それ以外は何もしない（§13 self-evolution） |
+| PostToolUse | `Bash` | **after-bash**。HEADが`last-head.json`と違い、`needsFollowUp`（Wiki behind または prose pending）なら`followUp`（下記） |
+| Stop | — | **session-stop**。`needsFollowUp`かつcleanなら1回だけ`decision: block`で`followUp`の指示を返す。2回目（claude / copilot / codexは`stop_hook_active`、kiroはkitの`.aidev/cache/wiki-stop.json`で判定）は警告付きで通す。dirtyなら止めない。その後、kit開発者端末（`home.readDeveloper`）でだけtranscriptを集計し、閾値超えの未振り返りsessionに`decision: block`で振り返りを書かせる（§13） |
 
-guard-writeはfail-closedです。payloadがJSONでない、policyが読めない、例外が出た、いずれもdenyを返します（exit 0のまま）。hookはnetworkに触れず、`session-start`だけTTL cacheと3秒timeoutのremote確認を行います。
+### `followUp`（after-bash / session-stop共通）
 
-Stop hookはWiki更新を起動しません。利用者の端末では`{ok: true, skipped}`を返すだけで、fileも書きません。
+1. `inventory.dirtyTargets`に1件でもあれば`dirty`: pathを最大8件挙げて「commitすればWikiは更新される」と伝えるだけ
+2. cleanなら`knowledge.updateInPlace`を`{ 'no-agent': true, json: true }`・`commit: true`で実行（構造更新。§7の0〜5と7〜8）
+3. 残り0なら`committed`: rename-onlyや報告取り込みだけで完成した場合はhookがその場でcommitした旨（またはすでにHEADを説明している旨）を伝える
+4. 残りがあれば`plan`: `plan.json`のbatch数と`finish`（`aidev knowledge update --no-agent`）を含む`planInstructions`を返す。「batchごとに`knowledge-builder`をsubagent起動（`adapter.subagentHint`でtoolごとの言い回し）→ 全部終わったら`finish` → まだ残りと言われたら再起動。Wiki pageを手で編集しない、manifest / inventoryに触らない」
+5. 例外は`error`として文面に含める（hookは落とさない）
+
+### tool adapter（`tools.HOOK_ADAPTERS`）
+
+`hook.js`はtool idを見ず、adapterに出力の形と「subagentの起動の仕方」を委ねます。
+
+| tool | 設定file | event名 | subagent内でhook | 備考 |
+| --- | --- | --- | --- | --- |
+| `claude` | `.claude/settings.json` | SessionStart / PreToolUse / PostToolUse / Stop | 動く | 実機検証済み。`hookSpecificOutput`形式、`stop_hook_active` |
+| `copilot` | `.github/hooks/aidev.json` | sessionStart / preToolUse / postToolUse / agentStop | 動かない | `additionalContext` / `permissionDecision`をtop levelに置く。knowledge-builderは`.github/agents/`の定義で`.aidev/knowledge/**`に限定。未検証 |
+| `codex` | `.codex/hooks.json` | SessionStart / PreToolUse / PostToolUse / Stop | 動く | claudeと同じ形。projectが`~/.codex/config.toml`で`trust_level = "trusted"`である必要。未検証 |
+| `kiro` | `.kiro/agents/aidev.json` | agentSpawn / preToolUse / postToolUse / stop | 動かない | hooksはagent定義内なので`kiro-cli chat --agent aidev`で起動。`agentSpawn`のstdoutはraw textとしてcontextになるが`postToolUse`のstdoutは捨てられるため、指示はStop hookが担う。deny時はexit 2。`stop_hook_active`が無いのでkitのstop guardを使う。未検証 |
+
+guard-writeはfail-closedです。payloadがJSONでない、policyが読めない、例外が出た、いずれもdenyを返します。Stop hookは利用者の端末でも動きますが、Wikiが遅れていなければ`{ok: true, skipped}`を返すだけです。
 
 ## 9. workflow runner
 
@@ -402,7 +460,7 @@ Stop hookはWiki更新を起動しません。利用者の端末では`{ok: true
   managed settings > claude --model / ANTHROPIC_MODEL > .claude/settings.local.json
   > .claude/settings.json（kitが "sonnet" を配布）> ~/.claude/settings.json
 
-CLI起動agent（aidev knowledge build, aidev sync, aidev agent run, workflow ctx.agent）:
+CLI起動agent（aidev knowledge update, aidev agent run, workflow ctx.agent）:
   tool:  --agent-tool / --tool / workflow agent.tool
          > aidev.yaml tools.agents.<name>.tool > aidev.yaml tools.agent > tools.default[0]
          （tools.default に無い tool は assertToolEnabled が拒否）
@@ -428,11 +486,12 @@ CLI起動agent（aidev knowledge build, aidev sync, aidev agent run, workflow ct
 - self-evolution: `cli/commands/evolve.js`、`cli/agents/evolution.md`、`cli/commands/hook.js`（`sessionStop`）、`cli/lib/home.js`（developer marker）
 - tool config: `cli/lib/assets.js`（`templates/<tool>/`のtreeを`applyTemplates`で適用。3-way merge、conflict marker、lock schema 4、`inspectConfig`）、`cli/commands/apply.js`
 - config / policy: `cli/lib/config.js`、`cli/lib/policy.js`、`cli/lib/paths.js`
-- state: `cli/lib/state.js`、`cli/lib/git.js`
+- state（head / knowledge / tracking、inventoryとHEADの比較）: `cli/lib/state.js`、`cli/lib/inventory.js`（`compareWithTree`、`dirtyTargets`）、`cli/lib/git.js`
 - lease: `cli/lib/leases.js`
-- Wiki: `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/lib/agent.js`、`cli/commands/knowledge.js`
-- sync: `cli/commands/sync.js`、`cli/lib/ado.js`
-- hooks: `cli/commands/hook.js`、`templates/claude/.claude/settings.json`
+- Wiki: `cli/lib/inventory.js`、`cli/lib/knowledge-scope.js`、`cli/lib/agent.js`、`cli/commands/knowledge.js`（`updateInPlace`、`writePlanFile`、`commitWiki`）
+- publish（worktree、`aidev/wiki-<sha12>`、PR）: `cli/commands/knowledge.js`（`publish`）、`cli/lib/ado.js`
+- hooks: `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json`
+- pipeline: `pipelines/azure-pipelines-check.yml`、`pipelines/azure-pipelines-wiki.yml`
 - workflow: `cli/commands/workflow.js`
 - MCP: `cli/commands/mcp.js`、`templates/claude/.mcp.json`
 - update: `cli/commands/update.js`、`cli/bin/aidev.js`

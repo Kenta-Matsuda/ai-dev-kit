@@ -94,11 +94,11 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 |`tools.default`
 |`["claude"]`
-|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`、`codex` は `AGENTS.md`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev apply` で消えます（編集済みなら残ります）。
+|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`・`.github/hooks/`、`codex` は `AGENTS.md`・`.codex/`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev apply` で消えます（編集済みなら残ります）。
 
 |`tools.agent`
 |`default` の先頭
-|`aidev` が agent を起動するときのツール（`aidev knowledge build`、`aidev sync`、`aidev agent run`、workflow の `ctx.agent`）。`tools.default` にあるものだけ。
+|`aidev` が agent を起動するときのツール（`aidev knowledge update`、`aidev agent run`、workflow の `ctx.agent`）。`tools.default` にあるものだけ。
 
 |`tools.agent_model`
 |`sonnet`
@@ -141,11 +141,11 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 |`sync.auto_pr`
 |`true`
-|`false` にすると `aidev sync` は push まで行い、PR を作りません。
+|`false` にすると、tracking branch 上の `aidev knowledge update` は push まで行い、PR を作りません。
 
 |`sync.pr.target_branch` / `reviewers`
 |`tracking_branch` / `[]`
-|sync の PR の宛先と reviewer。
+|Wiki 更新の PR の宛先と reviewer。
 
 |`sync.remote_check_timeout_ms` / `remote_check_ttl_minutes`
 |`3000` / `60`
@@ -153,7 +153,7 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 |`sync.lease_ttl_minutes`
 |`120`
-|sync の作業ロックの有効時間。
+|tracking branch への publish の lease（`.aidev/sync.lock`）の有効時間。
 
 |`knowledge.max_files_per_dir`
 |`20`

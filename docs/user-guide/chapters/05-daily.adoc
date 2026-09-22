@@ -1,7 +1,7 @@
 [[daily]]
 == 日常の使い方
 
-毎日することは 3 つです。作業前に `aidev status` を見る。Wiki が古いと言われたら `aidev sync`。kit が新しいと言われたら `aidev update`。
+毎日することは 3 つです。作業前に `aidev status` を見る。コミットしたら hook の指示どおり Wiki を追従させる（手動なら `aidev knowledge update`）。kit が新しいと言われたら `aidev update`。
 
 [[daily-status]]
 === aidev status の読み方
@@ -17,17 +17,17 @@ aidev status
 |===
 |表示 |すること
 
-|`✅ the Wiki describes the code this work is based on.`
+|`✅ the Wiki describes HEAD (…)`
 |何もしなくて構いません。
 
-|`⚠️ … has changed since the Wiki was generated …`
-|コードが進んで Wiki が古くなっています。xref:daily-sync[aidev sync] を実行するか、夜間 pipeline の PR を待ちます。作業は続けられます。
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev knowledge update"`
+|コードが進んで Wiki が古くなっています。AI ツールの中なら次のコミット後に hook が更新を始めます。今すぐなら xref:daily-wiki[aidev knowledge update]。作業は続けられます。
 
-|`⚠️ N page(s) still await prose regeneration …`
-|本文が未生成のページがあります。`aidev knowledge build` を実行します。
+|`⚠️ N page(s) still await prose regeneration`
+|本文が未生成のページがあります。`aidev knowledge update` を実行します（hook の指示が出ていればそのとおりに）。
 
-|`⚠️ origin/main has moved ahead … Run "aidev sync"`
-|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで `git pull` し、必要なら sync します。
+|`⚠️ origin/main has moved ahead …`
+|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで merge か rebase をし、`aidev knowledge update` を実行します。
 
 |`⚠️ origin/main has new commits …`
 |`git fetch` してから `aidev status` をもう一度実行します。
@@ -36,7 +36,7 @@ aidev status
 |remote に届きませんでした（offline や proxy）。手元は整合しているので作業は続けられます。
 
 |`❌ LLM Wiki has not been generated yet …`
-|Wiki がありません。**この間、AI の書き込みはすべて止まります。** `git pull` で来るはずなら pull します。来ないなら導入担当者に確認するか、`aidev knowledge build` を実行します。
+|Wiki がありません。**この間、AI の書き込みはすべて止まります。** `git pull` で来るはずなら pull します。来ないなら導入担当者に確認するか、`aidev init` を実行します。
 |===
 
 その他の表示は xref:troubleshooting-status[トラブルシューティング] を見てください。
@@ -45,41 +45,37 @@ aidev status
 
 === Wiki の使われ方
 
-Claude は `CLAUDE.md` の指示に従い、ソースを読む前に `.aidev/knowledge/index.md` と `overview.md` を読みます。Wiki の各記述は根拠ファイルへのリンクを持ち、Claude はリンク先で裏を取ります。
+AI は `CLAUDE.md` の指示に従い、ソースを読む前に `.aidev/knowledge/index.md` と `overview.md` を読みます。Wiki の各記述は根拠ファイルへのリンクを持ち、AI はリンク先で裏を取ります。
 
-あなたが Wiki を手で直す必要はありません。間違いを見つけたら、ソース側（コメントや構造）を直して、次の sync で反映させます。手編集は検出され、次の生成で `--force` を求められます（xref:knowledge-handedit[手編集しない理由]）。
+あなたが Wiki を手で直す必要はありません。間違いを見つけたら、ソース側（コメントや構造）を直して、次の更新で反映させます。手編集は検出され、次の生成で `--force` を求められます（xref:knowledge-handedit[手編集しない理由]）。
 
-[[daily-sync]]
-=== aidev sync — Wiki をコードに追従させる
+[[daily-wiki]]
+=== Wiki をコードに追従させる
 
-`aidev status` が `run "aidev sync"` と言ったとき、または PKG の PR がマージされた直後に実行します。多くのチームは夜間 pipeline に任せ、手動で実行するのは急ぐときだけです。
+Wiki は今いるブランチの HEAD を説明します。コードをコミットするたびに、Wiki も同じブランチに別のコミットとして積みます。
+
+AI ツールのセッションで `git commit` すると、hook が構造を更新し、本文が必要ならセッションに「knowledge-builder をサブエージェントで起動し、終わったら `aidev knowledge update --no-agent` を実行する」と指示します。セッションがそのとおりに進めると、`.aidev/knowledge/` が `aidev: update Wiki for <sha12>` としてコミットされます。Wiki が遅れたままセッションを終えようとすると 1 回だけ止められます。
+
+手動で行うなら次を実行します。生成対象に未コミットの変更があると止まるので、先にコミットします。
 
 [source,bash]
 ----
-aidev sync
+aidev knowledge update
 ----
-
-sync は次のことをします。**あなたの checkout は触りません。**
-
-. `origin/main` を fetch し、先端を target にします。
-. 一時 worktree（`.aidev/cache/sync-worktree/`）に target を checkout します。
-. 変更のあったページだけ knowledge-builder が書き直します。
-. `aidev/wiki-<sha>` ブランチにコミットして push し、PR を開きます。
 
 [source,text]
 ----
-✓ knowledge-builder completed 7/7 queued generation target(s) ($0.6210)
-✓ pushed aidev/wiki-9f8e7d6c5b4a
-✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
-    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
-✓ sync lease released
+✓ manifest and 1 shard(s) written for 9f8e7d6
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ batch 1/1 complete: 7/7 in 4m 2s ($0.5533)
+✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
 ----
 
-PR をレビューしてマージします。マージ後、各メンバーは `git pull` で Wiki を受け取ります。
+ソースのコミットと Wiki のコミットを同じ PR に入れ、レビューする人は両方を見ます。生成された Wiki のレビューはあなたの責任です。kit は PR をマージしません。
 
-* `✓ the Wiki committed on origin/main already describes …; "git pull" to receive it.` → 既に最新の Wiki がマージ済みです。`git pull` します。
-* hosting が `generic`、または token が未設定 → push まで行い、PR は手で作るよう案内されます。
-* `✗ sync failed: …` → 原因を直して `aidev sync --resume`。やり直すなら `aidev sync --abort`。
+* 途中で止まったら同じコマンドで再開します。
+* `main` の上で実行すると、`aidev/wiki-<sha12>` ブランチにコミットして PR を作ります（xref:knowledge-publish[tracking branch の上で更新する]）。
+* 夜間 pipeline が `main` の Wiki を PR にしているチームでは、マージ後に `git pull` で受け取ります。
 
 [[daily-update]]
 === aidev update — kit を更新する
@@ -135,5 +131,5 @@ aidev apply
 
 === 関連
 
-* xref:knowledge[LLM Wiki] — 生成の仕組みと再開
-* xref:cli-status[aidev status]、xref:cli-sync[aidev sync]、xref:cli-update[aidev update]、xref:cli-apply[aidev apply]
+* xref:knowledge[LLM Wiki] — 状態の読み方、コミット後の流れ、再開
+* xref:cli-status[aidev status]、xref:cli-knowledge[aidev knowledge]、xref:cli-update[aidev update]、xref:cli-apply[aidev apply]
