@@ -126,6 +126,16 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: 閾値の初期値。`--auto`（Stop hookから`evolve run`を起動）を既定にするか。GitHub側のPR作成をagentの`gh` / MCP任せにしたままでよいか。
 
+### D14: 開発規約は`.aidev/conventions/`に置き、agentが根拠付きで生成してteamがcommitする
+
+**判断**: convention-builder agentがWikiと根拠sourceから規約を`[確定]`（toolが強制）/ `[慣習]`（多数派、件数付き）/ `[未統一]`（割れている、teamの判断待ち）/ `[提案]`（現状の規約ではない）の区分で`.aidev/conventions/`（`index.md`、`coding.md`、`testing.md`、`review.md`）へ書きます。既定policyで`writable`です。既存pageの`## チーム決定`以下はagentが変更しません。test-writer agentは`testing.md`を前提に読みます。
+
+**理由**: `.aidev/knowledge/**`は生成物で、手編集禁止・syncでのorphan削除の対象なので、teamが決めた規約の置き場になりません。`.claude/**`とCLAUDE.mdはkit所有でPKG固有の内容を置けず、置けばdriftです。PKG sourceは既定read-onlyで、置き場がPKGごとに違うと他のagentが見つけられません。`.aidev/`はPKG固有設定の置き場として既に定義されています（D3）。
+
+**却下した代替案**: Wiki内のpage（上記）。CLAUDE.mdへの追記（kit所有）。PKGの`docs/`配下（agent grantが要り、置き場が固定できない）。agent専用grantだけで書けるようにする（人間の手編集と対話sessionの追記を妨げる割に、内容はgit diffでreviewされる）。
+
+**論点**: `## チーム決定`以外を再生成で上書きする運用でよいか。SessionStart hookが規約の有無を表示すべきか。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |

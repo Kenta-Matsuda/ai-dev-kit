@@ -24,6 +24,7 @@ const MATERIALIZED_REL = '.aidev/materialized.json';
 const EJECT_MARKER_REL = '.aidev/ejected.json';
 const SYNC_LOCK_REL = '.aidev/sync.lock';
 const WORKFLOWS_REL = '.aidev/workflows';
+const CONVENTIONS_REL = '.aidev/conventions';
 const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
 
 /**
@@ -90,6 +91,6 @@ function ensureAidevGitignore(repoRoot) {
 
 module.exports = {
   CONFIG_NAME, AIDEV_DIR, KNOWLEDGE_REL, POLICY_REL, POLICY_CANDIDATE_REL, MATERIALIZED_REL,
-  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
+  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, CONVENTIONS_REL, AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
   TOOL_CONFIG_GLOBS, ALL_TOOL_CONFIG_GLOBS, KIT_MANAGED_GLOBS, isKitManaged, toPosix, abs, ensureAidevGitignore,
 };

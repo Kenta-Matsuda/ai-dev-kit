@@ -183,7 +183,7 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 ```js
 read_only:            ['**']
-writable:             ['.aidev/knowledge/**', '.aidev/workflows/**', 'aidev.yaml']
+writable:             ['.aidev/knowledge/**', '.aidev/workflows/**', '.aidev/conventions/**', 'aidev.yaml']
 writable_during_sync: ['.aidev/knowledge/**']
 ```
 

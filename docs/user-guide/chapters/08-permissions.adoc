@@ -23,7 +23,7 @@
 |Wiki が壊れている・無いときに、sync の間だけ書けます。
 
 |`writable`
-|`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/conventions/**`, `aidev.yaml`
 |通常時に、どの agent も対話セッションも書けます。
 
 |`agents.<name>.writable` +
@@ -82,6 +82,9 @@ agents:
   issue-to-pr:
     writable: ["src/**", "tests/**"]
     branch: "aidev/issue-*"     # 任意。このブランチ上でだけ有効
+  test-writer:
+    writable: ["tests/**"]
+    branch: "aidev/tests-*"
 ----
 
 この許可は、`aidev agent run issue-to-pr "..."` のように **`aidev` が起動した agent にだけ** 効きます（`aidev` が起動時に agent 名を hook に伝えるためで、agent が自分で名乗ることはできません）。人が `claude` で対話中にサブエージェントとして呼んだ場合は、agent 名を確実に知る手段が無いため read-only のままです。`branch` を書くと、そのブランチに checkout しているときだけ書けます。

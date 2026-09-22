@@ -24,6 +24,7 @@
    ├─ ejected.json                aidev eject の marker（通常は存在しない）
    ├─ knowledge/                  LLM Wiki（manifest.json, inventory/, index.md, overview.md, pages）
    │  └─ .cache/                  agent plan、完了報告 done/（ignored）
+   ├─ conventions/                開発規約（convention-builder が生成、teamがreviewしてcommit。index.md, coding.md, testing.md, review.md）
    ├─ workflows/<name>/           workflow.yaml, steps.js, approval.json（runs/ はignored）
    ├─ sync.lock                   sync lease（ignored）
    └─ cache/                      remote-check.json, sync-worktree/, agents/（prompt file）,
@@ -152,9 +153,12 @@ writable_during_sync:
 writable:
   - ".aidev/knowledge/**"
   - ".aidev/workflows/**"
+  - ".aidev/conventions/**"
   - "aidev.yaml"
 agents: {}            # 候補は空。teamが policy.yaml に直接書く（例: issue-to-pr: { writable: ["src/**"], branch: "aidev/issue-*" }）
 ```
+
+`.aidev/conventions/**`が既定で`writable`なのは、convention-builder（`aidev agent run convention-builder`）が書く開発規約の置き場だからです。生成物はCLIが検査せず、teamが`git diff`でreviewしてcommitします（D14）。test-writerはPKGのtest pathを書くので、issue-to-prと同じく`agents.test-writer.writable`（必要なら`branch: "aidev/tests-*"`）をteamが足します。
 
 候補は`permission.buildCandidate(config)`が`aidev.yaml`から機械生成します。agentは使いません。`--approve`は候補fileを読まず生成し直すので、teamの追加（`writable` / `agents`）は`.aidev/policy.yaml`を直接編集してPRでreviewします。policy fileが無い場合、`loadPolicy`は上記と同じ内容の`_fallback: true`を返します（未初期化repoが無防備にならない）。
 

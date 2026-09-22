@@ -20,6 +20,7 @@ clone の中で作業します。`aidev` CLI が hooks・権限・LLM Wiki を�
 - `.aidev/knowledge/index.md` — この PKG の LLM Wiki の入口（**ソースを読む前にここを引く**）
 - `.aidev/knowledge/overview.md` — リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）
 - `aidev.yaml` — PKG 固有設定（生成対象・秘密領域・hosting）
+- `.aidev/conventions/index.md` — この PKG の開発規約（あれば。convention-builder が根拠付きで生成し、チームがレビューしたもの）
 
 Wiki は**正本ではなく派生情報**です。記述には根拠ファイルへのリンクがあります。
 実装判断に使う前に、リンク先の実ソースで裏を取ってください。Wiki とソースが食い違う場合、
@@ -34,7 +35,7 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 
 | 領域 | 可否 |
 | --- | --- |
-| `aidev.yaml`, `.aidev/workflows/**` | 書き込み可 |
+| `aidev.yaml`, `.aidev/workflows/**`, `.aidev/conventions/**` | 書き込み可 |
 | `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge build` から起動）のみ。手編集しない |
 | PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable`、または agent ごとの `agents.<name>.writable`（CLI が起動した agent にだけ効く）に足したパスだけ可 |
 | `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（ai-dev-kit 由来。`aidev update` が更新する） |
@@ -95,7 +96,7 @@ aidev sync               # PKG の tracking branch に追従して Wiki を更�
 
 ## PR とマージ
 
-- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/wiki-<sha>`（sync）、または `feature/<name>`
+- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/tests-<slug>`（test-writer）、`aidev/wiki-<sha>`（sync）、または `feature/<name>`
 - **自動マージは禁止**です。PR は人間がマージします
 - PR を作る前に品質ゲートを通します
 - 秘密情報（PAT・トークン・鍵）をコミット・ログ・PR 本文に含めません

@@ -14,7 +14,7 @@ aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout 
 
 === 説明
 
-`aidev knowledge build` や `aidev sync` が起動するのと同じ経路で、同梱 agent（`agents-creator`、`issue-to-pr`、`knowledge-builder`、`permission-setting`、`workflow-creator`）に 1 つの仕事を渡します。agent は PKG の clone の中で、対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。
+`aidev knowledge build` や `aidev sync` が起動するのと同じ経路で、同梱 agent（`agents-creator`、`convention-builder`、`issue-to-pr`、`knowledge-builder`、`permission-setting`、`test-writer`、`workflow-creator`）に 1 つの仕事を渡します。agent は PKG の clone の中で、対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。
 
 ツールとモデルは次の順で決まります。
 
@@ -95,6 +95,8 @@ aidev agent run issue-to-pr "Work Item 42 を実装して PR を作って"   # p
 aidev agent run knowledge-builder --prompt-file task.md --model opus
 ----
 
+aidev agent run convention-builder                                     # .aidev/conventions/ に開発規約を書く。git diff でレビューして PR に
+aidev agent run test-writer "src/services/order.ts のユニットテストを書いて"   # policy の agents.test-writer に書いたパスにテストを足し PR を作る
 === 関連
 
 * xref:configuration[aidev.yaml リファレンス] — `tools.default`、`tools.agent`、`tools.agents`

@@ -53,12 +53,12 @@ const ALWAYS_PROTECTED = Object.freeze([
 
 /**
  * The write scopes every policy starts from. The PKG is read-only for an agent;
- * the Wiki, workflows and the PKG's own aidev.yaml are the places an agent is
+ * the Wiki, workflows, conventions and the PKG's own aidev.yaml are the places an agent is
  * expected to write. A team widens `writable` deliberately, through the policy.
  */
 const DEFAULT_POLICY_SCOPES = Object.freeze({
   read_only: Object.freeze(['**']),
-  writable: Object.freeze([`${layout.KNOWLEDGE_REL}/**`, `${layout.WORKFLOWS_REL}/**`, layout.CONFIG_NAME]),
+  writable: Object.freeze([`${layout.KNOWLEDGE_REL}/**`, `${layout.WORKFLOWS_REL}/**`, `${layout.CONVENTIONS_REL}/**`, layout.CONFIG_NAME]),
   writable_during_sync: Object.freeze([`${layout.KNOWLEDGE_REL}/**`]),
 });
 

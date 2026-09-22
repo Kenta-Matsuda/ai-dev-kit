@@ -330,13 +330,14 @@ function run() {
   suite('assets: bundled agents');
 
   const AGENTS = [
-    'agents-creator', 'issue-to-pr', 'knowledge-builder',
+    'agents-creator', 'convention-builder', 'issue-to-pr', 'knowledge-builder',
+    'test-writer',
     'workflow-creator', 'permission-setting',
   ];
   const AGENT_DIR = `${CLAUDE_TEMPLATES}/agents`;
   const agentFiles = listMd(AGENT_DIR);
 
-  test('all five documented agents ship', () => {
+  test('all seven documented agents ship', () => {
     const missing = AGENTS.filter((a) => !agentFiles.includes(`${a}.md`));
     ok(missing.length === 0, `missing agents: ${missing.join(', ') || '(none)'}`);
   });

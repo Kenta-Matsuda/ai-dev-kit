@@ -139,6 +139,7 @@ function policyYaml() {
     'writable:',
     '  - ".aidev/knowledge/**"',
     '  - ".aidev/workflows/**"',
+    '  - ".aidev/conventions/**"',
     '  - "aidev.yaml"',
     '',
   ].join('\n');

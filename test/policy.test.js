@@ -9,7 +9,8 @@
  *
  * Layout under test: the PKG is the repository itself. `read_only: ["**"]`
  * makes every PKG file read-only; `writable` opens the Wiki
- * (.aidev/knowledge/**), the workflows (.aidev/workflows/**) and aidev.yaml.
+ * (.aidev/knowledge/**), the workflows (.aidev/workflows/**), the conventions
+ * (.aidev/conventions/**) and aidev.yaml.
  */
 
 const fs = require('fs');

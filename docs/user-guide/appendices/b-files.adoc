@@ -50,6 +50,10 @@
 |workflow の定義と承認記録
 |`aidev workflow`、人間
 
+|`.aidev/conventions/`
+|この PKG の開発規約（`index.md`、`coding.md`、`testing.md`、`review.md`）
+|convention-builder agent が生成し、人間がレビューしてコミット。`## チーム決定` の下は人間だけが書く
+
 |`.aidev/.gitignore`
 |下の「コミットしないもの」を除外する
 |`aidev init` / `aidev apply`

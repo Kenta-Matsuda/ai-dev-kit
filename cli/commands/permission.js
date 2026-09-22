@@ -82,7 +82,7 @@ function renderCandidate(config, policy) {
     '# ctx.agent）にだけ効く。branch を書くと、その glob に一致するブランチ上でだけ有効。',
     '# protected と secrets_paths はここに書いても書けない。',
     ...(Object.keys(policy.agents || {}).length === 0
-      ? ['# agents:', '#   issue-to-pr:', '#     writable: ["src/**", "tests/**"]', '#     branch: "aidev/issue-*"']
+      ? ['# agents:', '#   issue-to-pr:', '#     writable: ["src/**", "tests/**"]', '#     branch: "aidev/issue-*"', '#   test-writer:', '#     writable: ["tests/**"]', '#     branch: "aidev/tests-*"']
       : ['agents:', ...Object.entries(policy.agents).flatMap(([name, g]) => [
         `  ${name}:`,
         `    writable: [${g.writable.map((p) => `"${p}"`).join(', ')}]`,

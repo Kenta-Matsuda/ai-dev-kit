@@ -96,3 +96,4 @@ Make sure `aidev check` says `✓ environment is consistent.` before you push. `
 
 * Add `aidev check` to CI, keep the Wiki up to date every night → xref:automation-ci[Automation: CI]
 * Run lint / test after the AI edits files → `quality_gates` in xref:configuration[aidev.yaml reference]
+* Write down the development conventions of this package, with evidence → `aidev agent run convention-builder` (xref:cli-agent[aidev agent]). It writes under `.aidev/conventions/`; review with `git diff` and open a PR. Like building the Wiki, one person does this for the team

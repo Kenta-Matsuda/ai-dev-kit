@@ -96,3 +96,4 @@ git push -u origin feature/ai-dev-kit
 
 * CI に `aidev check` を入れる、夜間に Wiki を追従させる → xref:automation-ci[自動化: CI]
 * AI が編集した後に lint / test を走らせる → xref:configuration[aidev.yaml リファレンス] の `quality_gates`
+* この PKG の開発規約を根拠付きで書き出す → `aidev agent run convention-builder`（xref:cli-agent[aidev agent]）。`.aidev/conventions/` に書かれるので、`git diff` でレビューして PR にします。Wiki の生成と同じく、導入担当者が 1 人で行う手順です

@@ -23,7 +23,7 @@
 |Writable only during a sync, when the Wiki is missing or broken.
 
 |`writable`
-|`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/conventions/**`, `aidev.yaml`
 |Writable at any time, by every agent and every interactive session.
 
 |`agents.<name>.writable` +
@@ -82,6 +82,9 @@ agents:
   issue-to-pr:
     writable: ["src/**", "tests/**"]
     branch: "aidev/issue-*"     # optional: only on this branch
+  test-writer:
+    writable: ["tests/**"]
+    branch: "aidev/tests-*"
 ----
 
 A grant applies only to an agent that **`aidev` started**, such as `aidev agent run issue-to-pr "..."` (`aidev` tells the hook which agent it started; an agent cannot claim a name for itself). A sub-agent called from an interactive `claude` session stays read-only, because there is no reliable way to know its name there. With `branch`, writes are allowed only while that branch is checked out.

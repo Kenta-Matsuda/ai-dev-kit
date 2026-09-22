@@ -14,7 +14,7 @@ aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout 
 
 === Description
 
-Hands one task to a bundled agent (`agents-creator`, `issue-to-pr`, `knowledge-builder`, `permission-setting`, `workflow-creator`) through the same launcher that `aidev knowledge build` and `aidev sync` use. The agent runs inside the PKG clone with the same configuration files, hooks and policy as an interactive session.
+Hands one task to a bundled agent (`agents-creator`, `convention-builder`, `issue-to-pr`, `knowledge-builder`, `permission-setting`, `test-writer`, `workflow-creator`) through the same launcher that `aidev knowledge build` and `aidev sync` use. The agent runs inside the PKG clone with the same configuration files, hooks and policy as an interactive session.
 
 The tool and model are chosen in this order:
 
@@ -95,6 +95,8 @@ aidev agent run issue-to-pr "Implement work item 42 and open a PR"   # may edit 
 aidev agent run knowledge-builder --prompt-file task.md --model opus
 ----
 
+aidev agent run convention-builder                                     # writes the conventions under .aidev/conventions/; review with git diff, then open a PR
+aidev agent run test-writer "Write unit tests for src/services/order.ts"   # adds tests under the paths granted to agents.test-writer and opens a PR
 === See also
 
 * xref:configuration[aidev.yaml reference] — `tools.default`, `tools.agent`, `tools.agents`
