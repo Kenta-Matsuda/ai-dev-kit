@@ -460,8 +460,11 @@ async function runWorkflow(ctx) {
 
     agentRuns++;
     log(`agent ${agentName} via ${tool}${model ? ` (${model})` : ''} starting (budget ${agentMod.formatDuration(timeoutMs)})`);
+    // The same reference documents an "aidev agent run" would pass.
+    const refs = agentMod.resolveReferences(repoRoot, config);
+    const fullPrompt = refs.text ? `${prompt.trimEnd()}\n\n${refs.text}\n` : prompt;
     const res = await agentMod.runAgent({
-      repoRoot, installRoot, tool, agent: agentName, prompt, model, timeoutMs,
+      repoRoot, installRoot, tool, agent: agentName, prompt: fullPrompt, model, timeoutMs,
       label: `wf-${name}-${agentName}`,
       onProgress: flags.json ? null : ({ elapsedMs }) => ui.dim(`    agent ${agentName}: ${agentMod.formatDuration(elapsedMs)} elapsed…`),
     });

@@ -37,6 +37,7 @@ const { AidevError } = require('./errors');
 const cfgMod = require('./config');
 const toolsMod = require('./tools');
 const inventory = require('./inventory');
+const pathsMod = require('./paths');
 const ui = require('./ui');
 
 /** The agent that owns Wiki prose. */
@@ -912,10 +913,97 @@ async function runWikiAgent({
   return summary;
 }
 
+/**
+ * Resolve `references` from aidev.yaml against the checkout: each entry is a
+ * text file or a directory of them. Secret paths are left out (and said so),
+ * missing paths are reported rather than silently dropped, so the agent knows
+ * the team meant to point it at something. Returns { entries, files, text }
+ * where `text` is the prompt section (empty string when nothing is listed).
+ */
+const REFERENCE_DIR_LIMIT = 200;
+
+function resolveReferences(repoRoot, config) {
+  const refs = config && config.references ? config.references : {};
+  const secrets = cfgMod.secretGlobs(config);
+  const entries = [];
+  const files = [];
+  const seen = new Set();
+  const addFile = (topic, rel) => {
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    files.push({ topic, path: rel });
+  };
+  for (const [topic, list] of Object.entries(refs)) {
+    for (const rel of list) {
+      if (pathsMod.matchesAny(secrets, rel)) { entries.push({ topic, path: rel, status: 'secret' }); continue; }
+      const abs = path.join(repoRoot, rel);
+      let st = null;
+      try { st = fs.statSync(abs); } catch { st = null; }
+      if (!st) { entries.push({ topic, path: rel, status: 'missing' }); continue; }
+      if (st.isFile()) { entries.push({ topic, path: rel, status: 'file' }); addFile(topic, rel); continue; }
+      const found = [];
+      walkTextFiles(abs, rel, found, secrets);
+      entries.push({ topic, path: rel, status: 'dir', count: found.length });
+      for (const f of found) addFile(topic, f);
+    }
+  }
+  return { entries, files, text: referencesText(entries, files) };
+}
+
+function walkTextFiles(absDir, relDir, out, secrets) {
+  let names = [];
+  try { names = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return; }
+  names.sort((a, b) => a.name.localeCompare(b.name));
+  for (const d of names) {
+    if (out.length >= REFERENCE_DIR_LIMIT) return;
+    if (d.name.startsWith('.') || d.name === 'node_modules') continue;
+    const rel = `${relDir}/${d.name}`;
+    if (pathsMod.matchesAny(secrets, rel)) continue;
+    if (d.isDirectory()) { walkTextFiles(path.join(absDir, d.name), rel, out, secrets); continue; }
+    if (!d.isFile()) continue;
+    if (cfgMod.NON_TEXT_REFERENCE_EXTENSIONS.includes(path.extname(d.name).toLowerCase())) continue;
+    out.push(rel);
+  }
+}
+
+function referencesText(entries, files) {
+  if (entries.length === 0) return '';
+  const lines = [
+    '# Reference documents',
+    '',
+    'The team listed these documents in aidev.yaml (`references`). Read the ones for your',
+    'topic before the code. They are important sources but may be out of date: verify every',
+    'claim you rely on against the code, the configuration and the existing tests, and report',
+    'where a document and the repository disagree instead of choosing silently.',
+    '',
+  ];
+  const byTopic = new Map();
+  for (const f of files) {
+    if (!byTopic.has(f.topic)) byTopic.set(f.topic, []);
+    byTopic.get(f.topic).push(f.path);
+  }
+  for (const [topic, paths] of byTopic) {
+    lines.push(`## ${topic}`, '');
+    for (const p of paths) lines.push(`- ${p}`);
+    lines.push('');
+  }
+  const missing = entries.filter((e) => e.status === 'missing');
+  const secret = entries.filter((e) => e.status === 'secret');
+  const empty = entries.filter((e) => e.status === 'dir' && e.count === 0);
+  if (missing.length || secret.length || empty.length) {
+    lines.push('## Not available', '');
+    for (const e of missing) lines.push(`- ${e.path} (${e.topic}): listed in aidev.yaml but not in the checkout`);
+    for (const e of empty) lines.push(`- ${e.path} (${e.topic}): directory holds no text files`);
+    for (const e of secret) lines.push(`- ${e.path} (${e.topic}): matches secrets_paths; not read`);
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
 module.exports = {
   DEFAULT_AGENT, DEFAULT_BATCH_SIZE, DEFAULT_TIMEOUT_MS, MAX_INLINE_PROMPT_BYTES, HEARTBEAT_MS, MIN_CLAUDE_VERSION,
   EXIT_SIGTERM, PROMPT_DIR_REL, AGENT_FLAGS, AGENT_FLAG_HELP,
   versionAtLeast, assertAgentName, assertTool, assertToolEnabled, toolLabel, formatDuration, summarizeResult,
-  buildPrompt, buildArgv, writePromptFile, prepareTask, writeTaskFile, chunk, runAgent,
+  buildPrompt, buildArgv, writePromptFile, prepareTask, writeTaskFile, chunk, runAgent, resolveReferences,
   assessWikiProgress, renderWikiProgress, resolveOptions, runWikiAgent,
 };

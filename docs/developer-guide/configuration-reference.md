@@ -68,6 +68,10 @@ quality_gates:
   lint: npm run lint
   typecheck: npm run typecheck
   test: npm test
+
+references:
+  conventions: [docs/coding-guide.md]
+  testing: [docs/testing.md, CONTRIBUTING.md]
 ```
 
 ### 全体の規則
@@ -164,6 +168,15 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 - 実在し、非対話で終了するcommandだけを指定する
 - watch modeや開発serverを指定しない
 - 値はPKG所有の設定で、開発者自身の端末で実行される。信頼境界ではない
+
+### `references`
+
+topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapping。`aidev agent run`とworkflowの`ctx.agent()`が、taskの末尾に「# Reference documents」sectionとしてtopicごとのfile一覧を付けます（`agent.resolveReferences`）。agentは自分のtopicの文書を先に読み、記述はcodeで検証する、という契約です（convention-builderは`conventions`、test-writerは`testing`）。`knowledge build` / `sync`のknowledge-builderには渡しません（evidenceで全fileを見るため）。
+
+- 要素はfileまたはdirectory。directoryは再帰的にtext file（dot始まりと`node_modules`を除く、上限200）を列挙する
+- `secrets_paths`に一致するpathは列挙せず「Not available」に書く。無いpathも同様（errorにはしない。`agent run`が警告を出す）
+- **Excel / Word / PDF等（`config.NON_TEXT_REFERENCE_EXTENSIONS`）は`validateConfig`で拒否**する。AI toolはtextしか読めないので、Markdown / CSV / textに書き出したfileをcommitしてそれを載せる。directory内のこれらのfileは黙って除外する
+- `..`を含むpathと絶対pathは拒否
 
 ## `.aidev/policy.yaml`（schema version 1）
 

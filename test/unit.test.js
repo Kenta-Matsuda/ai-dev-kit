@@ -292,6 +292,18 @@ function run() {
     throws(() => cfg.validateConfig({ ...clone(base), quality_gates: { lint: { cmd: 'x' } } }), /quality_gates\.lint/);
   });
 
+  test('references are repo-relative text files or directories, grouped by topic', () => {
+    const c = cfg.validateConfig({ ...clone(base), references: { conventions: ['docs/guide.md', './docs/rules/'], testing: ['CONTRIBUTING.md'] } });
+    eq(c.references, { conventions: ['docs/guide.md', 'docs/rules'], testing: ['CONTRIBUTING.md'] });
+    eq(cfg.validateConfig(clone(base)).references, {}, 'absent means none');
+    // Office formats are refused up front with the fix in the message: agents read text only.
+    throws(() => cfg.validateConfig({ ...clone(base), references: { conventions: ['docs/rules.xlsx'] } }), /not a text file.*export it to Markdown/);
+    throws(() => cfg.validateConfig({ ...clone(base), references: { testing: ['docs/plan.docx'] } }), /\.docx/);
+    throws(() => cfg.validateConfig({ ...clone(base), references: { conventions: ['../x.md'] } }), /inside the repository/);
+    throws(() => cfg.validateConfig({ ...clone(base), references: { 'Bad Topic': ['a.md'] } }), /topic names/);
+    throws(() => cfg.validateConfig({ ...clone(base), references: { testing: 'a.md' } }), /references\.testing must be a list/);
+  });
+
   suite('config: policy');
 
   test('policy always re-adds the protected floor', () => {

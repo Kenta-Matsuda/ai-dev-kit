@@ -52,6 +52,10 @@ knowledge:
 quality_gates:                  # commands run after the AI edits a file
   lint: npm run lint
   test: npm test
+
+references:                     # existing documents handed to agents (text only)
+  conventions: [docs/coding-guide.md]
+  testing: [docs/testing.md, CONTRIBUTING.md]
 ----
 
 === Keys you are likely to change
@@ -115,6 +119,10 @@ quality_gates:                  # commands run after the AI edits a file
 |`quality_gates.<name>`
 |none
 |Commands run at the PKG root after the AI edits a PKG file. On failure the output is returned to Claude. 120 seconds per command.
+
+|`references.<topic>`
+|none
+|Paths of existing documents (files or directories, relative to the PKG root) that `aidev agent run` hands to the agent as reference material. `convention-builder` reads `conventions` first, `test-writer` reads `testing` first. Agents treat these as important sources that may be out of date: they verify them against the code and report where the two disagree. **Excel, Word and PDF files cannot be given as they are.** The AI tools read text only, so export them to Markdown or CSV, commit that, and list the exported file (listing an `.xlsx` or similar is a configuration error).
 |===
 
 === Keys you normally leave alone

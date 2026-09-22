@@ -62,6 +62,17 @@ const DEFAULT_POLICY_SCOPES = Object.freeze({
   writable_during_sync: Object.freeze([`${layout.KNOWLEDGE_REL}/**`]),
 });
 
+/**
+ * File formats that cannot be handed to an agent as reference material. The
+ * AI tools read text; an Excel sheet, Word document or PDF has to be exported
+ * to Markdown / CSV / text first, and that exported file is what goes into
+ * `references`.
+ */
+const NON_TEXT_REFERENCE_EXTENSIONS = Object.freeze([
+  '.xlsx', '.xlsm', '.xls', '.docx', '.doc', '.pptx', '.ppt', '.pdf',
+  '.zip', '.7z', '.gz', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg',
+]);
+
 /** Hosting providers the CLI knows how to talk to. */
 const HOSTING_TYPES = Object.freeze(['azure-devops', 'generic']);
 
@@ -329,6 +340,7 @@ function validateConfig(raw, source = CONFIG_NAME) {
   const pr = mapping(sync.pr, 'sync.pr');
   const knowledge = mapping(raw.knowledge, 'knowledge');
   const gates = mapping(raw.quality_gates, 'quality_gates');
+  const references = mapping(raw.references, 'references');
 
   const cfg = {
     version,
@@ -396,7 +408,28 @@ function validateConfig(raw, source = CONFIG_NAME) {
       })(),
     },
     quality_gates: {},
+    references: {},
   };
+  // Reference documents the team points agents at, by topic. Repo-relative
+  // text files or directories; a spreadsheet or office document is refused
+  // here so the fix (export it to text and commit that) is found at config
+  // time, not in an agent's output.
+  for (const [topic, v] of Object.entries(references)) {
+    if (!/^[a-z][a-z0-9_-]{0,39}$/.test(topic)) {
+      throw new AidevError(`${source}: references.${topic}: topic names are lowercase letters, digits, "-" or "_"`);
+    }
+    cfg.references[topic] = asArray(v, `references.${topic}`).map((p) => {
+      const rel = p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+      if (!rel || path.isAbsolute(rel) || rel.split('/').includes('..')) {
+        throw new AidevError(`${source}: references.${topic}: "${p}" must be a path inside the repository`);
+      }
+      const ext = path.extname(rel).toLowerCase();
+      if (NON_TEXT_REFERENCE_EXTENSIONS.includes(ext)) {
+        throw new AidevError(`${source}: references.${topic}: "${p}" is not a text file. Agents cannot read ${ext} files; export it to Markdown, CSV or plain text, commit that file, and list it here instead`);
+      }
+      return rel;
+    });
+  }
   // Older call sites read the agent model here.
   cfg.model = { agent: cfg.tools.agent_model };
   for (const [k, v] of Object.entries(gates)) {
@@ -533,7 +566,7 @@ function tmpDir() { return os.tmpdir(); }
 
 module.exports = {
   CONFIG_NAME, LOCK_NAME, POLICY_REL, SYNC_LOCK_REL, EJECT_MARKER_NAME, ALWAYS_PROTECTED, DEFAULTS,
-  DEFAULT_POLICY_SCOPES, HOSTING_TYPES, TOOLS, MODEL_MAX_LENGTH,
+  DEFAULT_POLICY_SCOPES, HOSTING_TYPES, TOOLS, MODEL_MAX_LENGTH, NON_TEXT_REFERENCE_EXTENSIONS,
   configPath, policyPath, lockPath, syncLockPath, ejectMarkerPath, readEjectMarker,
   loadConfig, validateConfig, loadPolicy, validatePolicy, loadLock, saveLock,
   readTextIfExists, readJsonIfExists, writeFileAtomic, writeJsonAtomic,

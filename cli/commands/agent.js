@@ -128,10 +128,12 @@ function show(ctx) {
   const tool = flags.tool != null ? agentMod.assertTool(flags.tool, '--tool') : settings.tool;
   const model = flags.model != null ? cfgMod.assertModel(flags.model, '--model') : settings.model;
   const cmd = previewCommand({ tool, agent: agent.name, model });
+  const refs = agentMod.resolveReferences(repoRoot, config);
   const doc = {
     name: agent.name, description: agent.description, file: agent.file,
     claudeTools: agent.tools, tool, model, command: cmd,
     enabled: !config || config.tools.default.includes(tool),
+    references: refs.entries,
   };
   if (flags.json) { ui.json(doc); return EXIT.OK; }
   ui.heading(`aidev agent show ${agent.name}`);
@@ -142,6 +144,8 @@ function show(ctx) {
     ['model', model || 'tool default (no model flag)'],
     ['prompt via', cmd.promptVia === 'stdin' ? 'stdin' : 'a file under .aidev/cache/agents/ named on the command line'],
     ['command', [cmd.bin, ...cmd.argv].join(' ')],
+    ['references', refs.entries.length === 0 ? 'none (aidev.yaml references)'
+      : refs.entries.map((e) => `${e.path} (${e.topic}${e.status === 'dir' ? `, ${e.count} files` : e.status === 'file' ? '' : `, ${e.status}`})`).join('\n')],
   ]);
   if (!cmd.verified) {
     ui.warn(`the ${toolsMod.getTool(tool).label} adapter is not verified against the real tool by the kit maintainers;`);
@@ -199,10 +203,17 @@ async function runOne(ctx) {
     return EXIT.OK;
   }
 
-  const prompt = readPrompt(flags, positionals);
+  const task = readPrompt(flags, positionals);
+  const refs = agentMod.resolveReferences(repoRoot, config);
+  const prompt = refs.text ? `${task.trimEnd()}\n\n${refs.text}\n` : task;
   if (human) {
     ui.heading(`aidev agent run ${agent.name}`);
     ui.info(`starting ${agent.name} with ${label}${model ? ` (${model})` : ''}; budget ${agentMod.formatDuration(timeoutMs)}`);
+    if (refs.files.length > 0) ui.dim(`    references: ${refs.files.length} file(s) from aidev.yaml (${[...new Set(refs.files.map((f) => f.topic))].join(', ')})`);
+    for (const e of refs.entries) {
+      if (e.status === 'missing') ui.warn(`references.${e.topic}: ${e.path} is not in the checkout`);
+      if (e.status === 'secret') ui.warn(`references.${e.topic}: ${e.path} matches secrets_paths and is not passed`);
+    }
   }
   const res = await agentMod.runAgent({
     repoRoot, installRoot, tool, agent: agent.name, prompt, model, timeoutMs, label: 'run',
@@ -211,6 +222,7 @@ async function runOne(ctx) {
 
   const doc = {
     ok: !!res.ok, agent: agent.name, tool, model, timeoutMs,
+    references: refs.entries,
     result: res.result == null ? null : String(res.result),
     reason: res.ok ? null : (res.reason || null),
     skipped: !!res.skipped, timedOut: !!res.timedOut, exitCode: res.exitCode ?? null,

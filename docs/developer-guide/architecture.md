@@ -308,6 +308,10 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 - timeoutではWindowsで`taskkill /T /F`によりprocess tree全体を止め、それ以外はSIGTERM→5秒後SIGKILL
 - 起動失敗（ENOENT）は`skipped`として構造化結果は保持したまま報告し、例外にはしない
 
+### 参照文書（`aidev.yaml`の`references`）
+
+`aidev agent run`と`ctx.agent()`は、`agent.resolveReferences(repoRoot, config)`が返す「# Reference documents」sectionをtaskの末尾に付けます。topicごとのfile一覧（directoryは再帰列挙）と、渡せなかったpath（無い、`secrets_paths`に一致、text fileが無いdirectory）の一覧です。中身は渡さず、pathだけを渡してagentに読ませます（agentの読み取りはpolicyとhookが検査するため）。Excel / Word / PDFは`validateConfig`が拒否し、textへの書き出しを求めます。詳細は`configuration-reference.md`の`references`。
+
 ## 7. `aidev sync`
 
 利用者のcheckoutには触れません。処理はすべて一時worktreeで行い、結果は`aidev/wiki-<sha12>` branchのcommitとPRとして共有されます。

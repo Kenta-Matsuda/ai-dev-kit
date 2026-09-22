@@ -170,6 +170,14 @@ function buildConfigYaml(v) {
     '#   lint: npm run lint',
     '#   test: npm test',
     '',
+    '# Documents "aidev agent run" hands to every agent as reference material, by topic',
+    '# (convention-builder reads "conventions", test-writer reads "testing"). Text files or',
+    '# directories of them, relative to the repo root. Excel / Word / PDF cannot be listed:',
+    '# export them to Markdown or CSV, commit that, and list the exported file.',
+    '# references:',
+    '#   conventions: [docs/coding-guide.md]',
+    '#   testing: [docs/testing.md, CONTRIBUTING.md]',
+    '',
   ].join('\n');
 }
 

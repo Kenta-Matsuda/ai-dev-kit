@@ -26,6 +26,8 @@ Only tools listed in `tools.default` can be used. Naming another tool stops with
 
 An agent started by `aidev agent run` gets the grant written under `agents.<name>` in `.aidev/policy.yaml` (paths of PKG source it may write, and an optional branch condition). The grant does not apply when a person calls the agent as a sub-agent in an interactive session (xref:permissions-source[Letting an agent edit source]).
 
+Documents listed under `references` in `aidev.yaml` are appended to the task as a "Reference documents" section, grouped by topic. Missing paths and paths under `secrets_paths` are not passed; they are listed as unavailable and warned about. Only text files can be passed: export Excel, Word and PDF files to Markdown or CSV first (see `references` in the xref:configuration[aidev.yaml reference]). `show` prints the list that would be passed.
+
 How the task reaches the tool differs. Claude Code receives it on standard input and selects the agent with `--agent <name>`. GitHub Copilot CLI and Kiro CLI receive one command-line sentence pointing at a task file written under `.aidev/cache/agents/`, and also select the agent by name. OpenAI Codex CLI cannot select an agent by name, so the task file starts with the agent's definition.
 
 The adapters other than Claude Code follow each tool's published non-interactive mode, but the kit maintainers have not checked them against the real tools. Use `run --dry-run` or `show` to see the exact command line before relying on one.
@@ -93,10 +95,10 @@ aidev agent show knowledge-builder --tool copilot
 aidev agent run issue-to-pr "Triage work item 42 and propose an implementation plan" --dry-run
 aidev agent run issue-to-pr "Implement work item 42 and open a PR"   # may edit the paths granted under agents.issue-to-pr in the policy
 aidev agent run knowledge-builder --prompt-file task.md --model opus
-----
-
 aidev agent run convention-builder                                     # writes the conventions under .aidev/conventions/; review with git diff, then open a PR
 aidev agent run test-writer "Write unit tests for src/services/order.ts"   # adds tests under the paths granted to agents.test-writer and opens a PR
+----
+
 === See also
 
 * xref:configuration[aidev.yaml reference] — `tools.default`, `tools.agent`, `tools.agents`

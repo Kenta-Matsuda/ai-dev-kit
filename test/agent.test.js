@@ -251,6 +251,54 @@ function run() {
         ok(!/# Agent:/.test(text), 'a tool with named agents does not get the definition inlined');
       });
 
+      test('run appends the references from aidev.yaml as paths, by topic; missing, secret and non-text entries are not passed', () => {
+        reset();
+        const yamlPath = path.join(fx.root, 'aidev.yaml');
+        const original = fs.readFileSync(yamlPath, 'utf8');
+        const w = (rel, s) => { fs.mkdirSync(path.dirname(path.join(fx.root, rel)), { recursive: true }); fs.writeFileSync(path.join(fx.root, rel), s); };
+        w('docs/testing.md', '# how we test\n');
+        w('docs/conventions/a.md', '# a\n');
+        w('docs/conventions/sub/b.txt', 'b\n');
+        w('docs/conventions/sheet.xlsx', 'not text');
+        w('config/secrets/notes.md', 'secret');
+        fs.writeFileSync(yamlPath, original + [
+          'references:',
+          '  testing: [docs/testing.md, docs/missing.md]',
+          '  conventions: [docs/conventions, config/secrets/notes.md]',
+          '',
+        ].join('\n'));
+        try {
+          const s = lastJson(aidev(fx.root, ['agent', 'show', 'test-writer', '--json']).out);
+          eq(s.references.map((e) => [e.topic, e.path, e.status]), [
+            ['testing', 'docs/testing.md', 'file'], ['testing', 'docs/missing.md', 'missing'],
+            ['conventions', 'docs/conventions', 'dir'], ['conventions', 'config/secrets/notes.md', 'secret'],
+          ]);
+          const r = aidev(fx.root, ['agent', 'run', 'knowledge-builder', 'refresh the wiki', '--json'], { env: env({ STUB_MODE: 'text' }) });
+          eq(r.code, 0, r.out);
+          const text = fs.readFileSync(promptOut, 'utf8');
+          ok(/# Task\n\nrefresh the wiki\n\n# Reference documents/.test(text), text);
+          ok(/## testing\n\n- docs\/testing\.md\n/.test(text), text);
+          ok(/## conventions\n\n- docs\/conventions\/a\.md\n- docs\/conventions\/sub\/b\.txt\n/.test(text), text);
+          ok(!text.includes('sheet.xlsx'), 'non-text files inside a directory are left out');
+          ok(/## Not available\n\n- docs\/missing\.md \(testing\): listed in aidev\.yaml but not in the checkout\n- config\/secrets\/notes\.md \(conventions\): matches secrets_paths/.test(text), text);
+          ok(!/secret\n/.test(text), 'the contents of the files are never inlined');
+        } finally {
+          fs.writeFileSync(yamlPath, original);
+          for (const rel of ['docs/testing.md', 'docs/conventions', 'config/secrets/notes.md']) fs.rmSync(path.join(fx.root, rel), { recursive: true, force: true });
+        }
+      });
+
+      test('an office document under references is a configuration error that names the fix', () => {
+        const yamlPath = path.join(fx.root, 'aidev.yaml');
+        const original = fs.readFileSync(yamlPath, 'utf8');
+        fs.writeFileSync(yamlPath, original + 'references:\n  conventions: [docs/rules.xlsx]\n');
+        try {
+          const r = aidev(fx.root, ['agent', 'show', 'test-writer']);
+          eq(r.code, 1, r.out);
+          ok(/docs\/rules\.xlsx.*not a text file.*export it to Markdown/.test(r.out), r.out);
+        } finally { fs.writeFileSync(yamlPath, original); }
+      });
+
       test('run through Codex: the agent definition is inlined because Codex has no named agents', () => {
         reset();
         const r = aidev(fx.root, ['agent', 'run', 'knowledge-builder', 'x', '--tool', 'codex', '--model', '', '--json'], { env: env({ STUB_MODE: 'text' }) });
