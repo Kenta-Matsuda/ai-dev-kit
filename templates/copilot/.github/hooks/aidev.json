@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "type": "command", "bash": "aidev hook session-start --tool copilot", "powershell": "aidev hook session-start --tool copilot", "timeoutSec": 30 }
+    ],
+    "preToolUse": [
+      { "type": "command", "bash": "aidev hook guard-write --tool copilot", "powershell": "aidev hook guard-write --tool copilot", "timeoutSec": 30 }
+    ],
+    "postToolUse": [
+      { "type": "command", "bash": "aidev hook quality-gate --tool copilot", "powershell": "aidev hook quality-gate --tool copilot", "timeoutSec": 150 },
+      { "type": "command", "bash": "aidev hook after-bash --tool copilot", "powershell": "aidev hook after-bash --tool copilot", "timeoutSec": 30 }
+    ],
+    "agentStop": [
+      { "type": "command", "bash": "aidev hook session-stop --tool copilot", "powershell": "aidev hook session-stop --tool copilot", "timeoutSec": 30 }
+    ]
+  }
+}

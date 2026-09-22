@@ -34,8 +34,8 @@ const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
  */
 const TOOL_CONFIG_GLOBS = Object.freeze({
   claude: Object.freeze(['.claude/**', 'CLAUDE.md', '.mcp.json']),
-  copilot: Object.freeze(['.github/copilot-instructions.md', '.github/agents/**', '.github/skills/**']),
-  codex: Object.freeze(['AGENTS.md']),
+  copilot: Object.freeze(['.github/copilot-instructions.md', '.github/agents/**', '.github/skills/**', '.github/hooks/**']),
+  codex: Object.freeze(['AGENTS.md', '.codex/**']),
   kiro: Object.freeze(['.kiro/steering/**', '.kiro/agents/**']),
 });
 

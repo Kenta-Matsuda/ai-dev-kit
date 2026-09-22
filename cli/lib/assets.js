@@ -52,7 +52,7 @@ const LOCK_SCHEMA = 4;
 const CONFLICT_RE = /^(<{7}|={7}|>{7})( |\r?$)/m;
 
 /** Hook commands the kit wires into Claude Code; `check` refuses a settings.json without them. */
-const KIT_HOOK_RE = /"aidev hook (session-start|guard-write|quality-gate|session-stop)"/g;
+const KIT_HOOK_RE = /"aidev hook (session-start|guard-write|quality-gate|after-bash|session-stop)"/g;
 
 /** A validated, de-duplicated tool list; unknown ids are dropped, empty means the default. */
 function normalizeTools(tools) {

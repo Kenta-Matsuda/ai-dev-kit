@@ -149,7 +149,7 @@ function buildConfigYaml(v) {
     '# whose write policy is enforced at runtime through hooks.',
     'tools:',
     `  default: [${v.tools.map(q).join(', ')}]`,
-    '  # Tool that runs agents the CLI starts (aidev knowledge build, aidev sync,',
+    '  # Tool that runs agents the CLI starts (aidev knowledge update,',
     '  # aidev agent run, workflows). Must be one of tools.default.',
     `  agent: ${q(v.tools[0])}`,
     '  # Model for those agents. "" passes no model flag and lets the tool decide.',
@@ -452,7 +452,7 @@ async function run(ctx) {
     }
     if (doBuild) {
       say.out('');
-      const r = await knowledge.build({ ...ctx, flags: { json: !!flags.json } }, config, { silent: !!flags.json });
+      const r = await knowledge.update({ ...ctx, flags: { json: !!flags.json } }, config, { silent: !!flags.json, commit: false });
       wikiCode = r.code;
       wikiComplete = r.code === EXIT.OK;
       steps.push({ step: 'knowledge', action: 'built', ok: wikiComplete, result: r.json });

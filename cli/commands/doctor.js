@@ -66,7 +66,7 @@ function run(ctx) {
     const version = resolved.ok ? toolsMod.checkVersion(resolved, process.env) : null;
     const tag = tool.verified ? '' : ' (adapter not verified against the real tool by the kit maintainers)';
     if (!resolved.ok) add(id, 'warn', resolved.reason);
-    else if (version.missing) add(id, 'warn', `${tool.label} not found on PATH — needed to run agents (aidev knowledge build, aidev agent run)`);
+    else if (version.missing) add(id, 'warn', `${tool.label} not found on PATH — needed to run agents (aidev knowledge update, aidev agent run)`);
     else if (!version.ok) add(id, 'warn', version.reason);
     else add(id, 'ok', `${tool.label} ${version.version || ''} (${resolved.source})${tag}`.replace('  ', ' '));
   }
@@ -85,7 +85,7 @@ function run(ctx) {
 
     add('git repository', gitMod.isRepo(repoRoot) ? 'ok' : 'fail', gitMod.isRepo(repoRoot) ? repoRoot : 'not a git repository');
     const origin = gitMod.remoteUrl(repoRoot, 'origin');
-    add('remote origin', origin ? 'ok' : 'warn', origin || 'missing — sync and the tracking branch need it');
+    add('remote origin', origin ? 'ok' : 'warn', origin || 'missing — publishing the Wiki and the tracking branch need it');
 
     try {
       const pol = cfgMod.loadPolicy(repoRoot, { required: true });

@@ -78,7 +78,7 @@ function renderCandidate(config, policy) {
     'writable:',
     ...policy.writable.map((p) => `  - "${p}"`),
     '',
-    '# agent ごとの追加許可。CLI が起動した agent（aidev agent run、knowledge build、workflow の',
+    '# agent ごとの追加許可。CLI が起動した agent（aidev agent run、knowledge update、workflow の',
     '# ctx.agent）にだけ効く。branch を書くと、その glob に一致するブランチ上でだけ有効。',
     '# protected と secrets_paths はここに書いても書けない。',
     ...(Object.keys(policy.agents || {}).length === 0

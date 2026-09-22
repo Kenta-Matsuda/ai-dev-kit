@@ -308,7 +308,7 @@ function run() {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test('eject refuses while a sync lease is live', () => {
+  test('eject refuses while a publish lease is live', () => {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'sync.lock'), JSON.stringify({
@@ -317,7 +317,7 @@ function run() {
       }));
       const r = aidev(['eject', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
-      ok(/sync/i.test(r.stderr), 'explains why');
+      ok(/publish/i.test(r.stderr), 'explains why');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'nothing removed');
     } finally { fx.cleanup(); }
   });

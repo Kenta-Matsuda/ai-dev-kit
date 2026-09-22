@@ -293,6 +293,54 @@ function validateInventoryConsistency(records) {
   return problems;
 }
 
+// ------------------------------------------------------- working tree checks
+
+/**
+ * Generation targets with uncommitted changes (modified, staged, deleted or
+ * untracked). The Wiki describes a commit, so it is only updated when the
+ * files it describes are exactly what HEAD holds. Kit-managed paths and the
+ * Wiki itself are ignored: a half-written Wiki is the normal state during an
+ * update, and aidev.yaml or tool config are not described by any page.
+ *
+ * Returns repo-relative paths, sorted; an unreadable status fails closed by
+ * returning a single pseudo entry so callers refuse rather than proceed.
+ */
+function dirtyTargets(repoRoot, config) {
+  const entries = git.statusEntries(repoRoot);
+  if (entries == null) return ['(git status failed: the working tree could not be read)'];
+  const include = config?.package?.include || [];
+  const exclude = config?.package?.exclude || [];
+  const out = new Set();
+  for (const entry of entries) {
+    const rel = pathsMod.normalizeRel(entry.path);
+    if (!rel || layout.isKitManaged(rel)) continue;
+    if (!pathsMod.isIncluded(rel, include, exclude)) continue;
+    out.add(rel);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Compare the recorded inventory with the tree at `ref` (HEAD by default):
+ * the structured answer to "does the Wiki describe this commit?". No old
+ * commit object is needed, so this works after a fetch, a rebase or a
+ * force-push alike. Returns null when the tree cannot be listed.
+ */
+function compareWithTree(repoRoot, config, records, { ref = 'HEAD' } = {}) {
+  const current = scanPackage(repoRoot, config, { ref });
+  if (current == null) return null;
+  const diff = diffInventory(records || [], current);
+  return {
+    added: diff.added.length,
+    modified: diff.modified.length,
+    removed: diff.removed.length,
+    renamed: diff.renamed.length,
+    unchanged: diff.unchanged.length,
+    changed: diff.changed,
+    behind: diff.changed > 0,
+  };
+}
+
 // ------------------------------------------------------- completion reports
 
 /**
@@ -491,4 +539,5 @@ module.exports = {
   diffInventory, detectHandEdits, hashPage, validateInventoryConsistency,
   orphanedPages, removeOrphanedPages,
   collectCompletions, applyCompletions, countPendingReports,
+  dirtyTargets, compareWithTree,
 };

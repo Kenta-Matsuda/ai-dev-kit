@@ -202,8 +202,8 @@ function run(ctx) {
     const sync = leases.readSyncLease(repoRoot);
     if (sync && leases.evaluateLease(sync).valid) {
       throw new AidevError(
-        'a sync is in progress; ejecting now would strand it mid-write.\n' +
-        '    Finish it, or run "aidev sync --abort", then eject.');
+        'a Wiki publish is in progress; ejecting now would strand it mid-write.\n' +
+        '    Finish it, or run "aidev knowledge update --abort", then eject.');
     }
   }
 

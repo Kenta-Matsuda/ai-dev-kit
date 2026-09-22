@@ -366,7 +366,7 @@ function run() {
   const SKILLS = [
     'repository-discovery', 'knowledge-usage', 'test-and-verify', 'secure-coding',
     'azure-devops', 'change-planning', 'code-review', 'commit-and-pr',
-    'knowledge-sync', 'failure-triage',
+    'knowledge-update', 'failure-triage',
   ];
 
   const SKILL_DIR = path.join(ROOT, ...CLAUDE_TEMPLATES.split('/'), 'skills');
@@ -380,7 +380,7 @@ function run() {
   });
 
   test('the renamed submodule-sync skill is gone', () => {
-    ok(!fs.existsSync(path.join(SKILL_DIR, 'submodule-sync')), 'submodule-sync was replaced by knowledge-sync');
+    ok(!fs.existsSync(path.join(SKILL_DIR, 'submodule-sync')) && !fs.existsSync(path.join(SKILL_DIR, 'knowledge-sync')), 'submodule-sync and knowledge-sync were replaced by knowledge-update');
   });
 
   for (const name of SKILLS) {
@@ -401,7 +401,7 @@ function run() {
     'scripts/install.sh',
     'scripts/install.ps1',
     'pipelines/azure-pipelines-check.yml',
-    'pipelines/azure-pipelines-sync.yml',
+    'pipelines/azure-pipelines-wiki.yml',
     '.gitignore',
     '.gitattributes',
   ]) {
@@ -758,7 +758,7 @@ function run() {
       ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'the fixture already had aidev.yaml; the test would prove nothing');
       ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')), 'the fixture already had settings.json');
 
-      const r = aidev(['init', '--yes'], fx.root);
+      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
       eq(r.code, 0, `init failed: ${r.out}`);
 
       // aidev.yaml: schema v2, hosting inferred as generic from the local origin.
@@ -808,7 +808,7 @@ function run() {
   test('init --approve places the policy directly', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--approve'], fx.root);
+      const r = aidev(['init', '--yes', '--approve', '--no-wiki'], fx.root);
       eq(r.code, 0, `init failed: ${r.out}`);
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy placed');
       ok(!fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'no dangling candidate');
@@ -821,7 +821,7 @@ function run() {
   test('init --json on a fresh clone reports the first-time steps', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--json'], fx.root);
+      const r = aidev(['init', '--yes', '--json', '--no-wiki'], fx.root);
       eq(r.code, 0, r.out);
       const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
       eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}: ${r.out}`);
@@ -834,10 +834,9 @@ function run() {
       ok(names.includes('materialized.json:write'), `recorded: ${names}`);
       ok(names.includes('registry:registered'), `registered: ${names}`);
       ok(names.includes('policy:candidate'), `candidate: ${names}`);
-      // A first-time init builds the Wiki. Without Claude Code (the harness points
-      // AIDEV_CLAUDE_BIN at nothing) only the structured half is written, which is
-      // still a successful build step; the prose stays queued for the next init.
-      ok(names.includes('knowledge:built'), `wiki built: ${names}`);
+      // --no-wiki: the Wiki is left for a later init (the agent integration
+      // suite covers the build itself).
+      ok(names.includes('knowledge:pending'), `wiki left pending: ${names}`);
     } finally { fx.cleanup(); }
   });
 
@@ -856,9 +855,9 @@ function run() {
   test('init is idempotent and reports nothing to do the second time', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes'], fx.root).code, 0);
+      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
       const cfgBefore = fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8');
-      const r = aidev(['init', '--yes', '--json'], fx.root);
+      const r = aidev(['init', '--yes', '--json', '--no-wiki'], fx.root);
       eq(r.code, 0, r.out);
 
       // The stdout contract every other command keeps: exactly one JSON document.
@@ -883,11 +882,11 @@ function run() {
   test('a later init leaves an edited tool file alone; apply --force restores it', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes'], fx.root).code, 0);
+      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
       const target = path.join(fx.root, '.claude', 'settings.json');
       fs.writeFileSync(target, '{"hooks":{}}\n');
 
-      const r = aidev(['init', '--yes'], fx.root);
+      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
       eq(r.code, 0, `init failed on an edited file: ${r.out}`);
       eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the edit');
       ok(/hooks are missing/.test(r.out), `init did not warn about the missing hooks: ${r.out}`);
@@ -905,10 +904,10 @@ function run() {
       const target = path.join(fx.root, '.claude', 'settings.json');
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, '{"hooks":{}}\n');
-      const r = aidev(['init', '--yes'], fx.root);
+      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
       eq(r.code, 2, `expected exit 2, got ${r.code}: ${r.out}`);
       eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the file');
-      eq(aidev(['init', '--yes', '--force'], fx.root).code, 0, 'init --force did not recover');
+      eq(aidev(['init', '--yes', '--force', '--no-wiki'], fx.root).code, 0, 'init --force did not recover');
       ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not place the kit version');
     } finally { fx.cleanup(); }
   });
@@ -916,7 +915,7 @@ function run() {
   test('init honours explicit flags over inference', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--name', 'explicit', '--hosting', 'azure-devops',
+      const r = aidev(['init', '--yes', '--no-wiki', '--name', 'explicit', '--hosting', 'azure-devops',
         '--org', 'o', '--project', 'p', '--repository', 'r', '--include', 'src/**',
         '--tracking-branch', 'develop', '--agent-model', 'opus'], fx.root);
       eq(r.code, 0, r.out);
@@ -935,7 +934,7 @@ function run() {
   test('init with azure-devops hosting needs the three coordinates', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--hosting', 'azure-devops'], fx.root);
+      const r = aidev(['init', '--yes', '--no-wiki', '--hosting', 'azure-devops'], fx.root);
       ok(r.code !== 0, 'refused');
       ok(/organization|--org/.test(r.out), `names what is missing: ${r.out}`);
       ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'nothing half-written');
@@ -947,7 +946,7 @@ function run() {
     // the git toplevel), so nothing kit-owned can land inside src/.
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes'], path.join(fx.root, 'src'));
+      const r = aidev(['init', '--yes', '--no-wiki'], path.join(fx.root, 'src'));
       eq(r.code, 0, r.out);
       ok(fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'aidev.yaml at the root');
       ok(!fs.existsSync(path.join(fx.root, 'src', 'aidev.yaml')), 'nothing written into src/');
@@ -960,7 +959,7 @@ function run() {
   test('a registered clone is listed as present while it exists', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes'], fx.root).code, 0);
+      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
       const env = { AIDEV_HOME: HOME };
       const listed = home.listPackages(env);
       ok(listed.present.some((p) => path.resolve(p.path).toLowerCase() === path.resolve(fx.root).toLowerCase()), 'present');

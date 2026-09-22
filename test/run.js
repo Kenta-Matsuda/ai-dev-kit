@@ -18,6 +18,7 @@ const suites = [
   './uninstall.test.js',
   './completion.test.js',
   './knowledge-agent.test.js',
+  './wiki-hooks.test.js',
   './agent.test.js',
   './evolve.test.js',
   // Last: this one checks the kit's own shipped files rather than a fixture,

@@ -9,7 +9,9 @@
       "Edit(.github/copilot-instructions.md)",
       "Edit(.github/agents/**)",
       "Edit(.github/skills/**)",
+      "Edit(.github/hooks/**)",
       "Edit(AGENTS.md)",
+      "Edit(.codex/**)",
       "Edit(.kiro/steering/**)",
       "Edit(.kiro/agents/**)",
       "Edit(.aidev/policy.yaml)",
@@ -52,6 +54,12 @@
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           { "type": "command", "command": "aidev hook quality-gate" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "aidev hook after-bash" }
         ]
       }
     ],

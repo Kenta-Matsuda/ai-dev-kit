@@ -218,6 +218,93 @@ const REGISTRY = Object.freeze({
 
 const TOOL_IDS = Object.freeze(Object.keys(REGISTRY));
 
+/**
+ * Hook adapters: how each tool wires hooks and reads their answers.
+ *
+ * `hook.js` never looks at the tool id. It asks the adapter to shape a
+ * context injection, a permission decision or a stop refusal, and to phrase
+ * "start the knowledge-builder as a subagent" the way that tool understands.
+ * Where a tool cannot do one of these (Kiro discards PostToolUse stdout), the
+ * adapter returns null and the hook prints nothing.
+ *
+ *   configFiles   the repo files the kit materialises to wire its hooks
+ *   events        the tool's names for the four events the kit uses
+ *   inSubagents   whether the tool fires hooks inside subagents (guard-write
+ *                 coverage; false means the agent definition must restrict
+ *                 writes on its own)
+ *   context()     shape { additionalContext } for an event; { raw } prints text
+ *   decision()    shape the PreToolUse allow/deny answer
+ *   denyExitCode  exit status that also signals a denial (0 = JSON only)
+ *   block()       shape the "do not stop yet" answer
+ *   stopActive()  true/false when the tool says whether this stop was already
+ *                 refused once; null when it has no such flag (the kit counts)
+ *   subagentHint  how the main agent starts a named subagent
+ */
+const claudeShaped = Object.freeze({
+  context: (eventName) => (text) => ({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } }),
+  decision: (allow, reason) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: allow ? 'allow' : 'deny', permissionDecisionReason: reason } }),
+  block: (reason) => ({ decision: 'block', reason }),
+  stopActive: (input) => (input && typeof input.stop_hook_active === 'boolean' ? input.stop_hook_active : false),
+});
+
+const HOOK_ADAPTERS = Object.freeze({
+  claude: Object.freeze({
+    id: 'claude',
+    configFiles: Object.freeze(['.claude/settings.json']),
+    events: Object.freeze({ sessionStart: 'SessionStart', preToolUse: 'PreToolUse', postToolUse: 'PostToolUse', stop: 'Stop' }),
+    inSubagents: true,
+    context(event, text) { return claudeShaped.context(this.events[event] || event)(text); },
+    decision: claudeShaped.decision,
+    denyExitCode: 0,
+    block: claudeShaped.block,
+    stopActive: claudeShaped.stopActive,
+    subagentHint: (agent) => `start the "${agent}" subagent with the Agent tool`,
+  }),
+  copilot: Object.freeze({
+    id: 'copilot',
+    configFiles: Object.freeze(['.github/hooks/aidev.json']),
+    events: Object.freeze({ sessionStart: 'sessionStart', preToolUse: 'preToolUse', postToolUse: 'postToolUse', stop: 'agentStop' }),
+    inSubagents: false,
+    context: (event, text) => ({ additionalContext: text }),
+    decision: (allow, reason) => ({ permissionDecision: allow ? 'allow' : 'deny', permissionDecisionReason: reason }),
+    denyExitCode: 0,
+    block: claudeShaped.block,
+    stopActive: claudeShaped.stopActive,
+    subagentHint: (agent) => `delegate to the custom agent "${agent}" (its profile is in .github/agents/)`,
+  }),
+  codex: Object.freeze({
+    id: 'codex',
+    configFiles: Object.freeze(['.codex/hooks.json']),
+    events: Object.freeze({ sessionStart: 'SessionStart', preToolUse: 'PreToolUse', postToolUse: 'PostToolUse', stop: 'Stop' }),
+    inSubagents: true,
+    context(event, text) { return claudeShaped.context(this.events[event] || event)(text); },
+    decision: claudeShaped.decision,
+    denyExitCode: 0,
+    block: claudeShaped.block,
+    stopActive: claudeShaped.stopActive,
+    subagentHint: (agent) => `spawn the "${agent}" custom agent (defined in .codex/agents/) and delegate the batch to it`,
+  }),
+  kiro: Object.freeze({
+    id: 'kiro',
+    configFiles: Object.freeze(['.kiro/agents/aidev.json']),
+    events: Object.freeze({ sessionStart: 'agentSpawn', preToolUse: 'preToolUse', postToolUse: 'postToolUse', stop: 'stop' }),
+    inSubagents: false,
+    // agentSpawn stdout becomes context as plain text; postToolUse stdout is discarded.
+    context: (event, text) => (event === 'sessionStart' ? { raw: text } : null),
+    decision: claudeShaped.decision,
+    denyExitCode: 2,
+    block: claudeShaped.block,
+    stopActive: () => null,
+    subagentHint: (agent) => `start the "${agent}" agent with the subagent tool`,
+  }),
+});
+
+function hookAdapter(id) {
+  const a = HOOK_ADAPTERS[String(id)];
+  if (!a) throw new Error(`unsupported tool: ${JSON.stringify(String(id))} (supported: ${TOOL_IDS.join(', ')})`);
+  return a;
+}
+
 function getTool(id) {
   const t = REGISTRY[id];
   if (!t) throw new Error(`unsupported tool: ${JSON.stringify(String(id))} (supported: ${TOOL_IDS.join(', ')})`);
@@ -338,7 +425,7 @@ function checkVersion(resolved, env = process.env) {
 }
 
 module.exports = {
-  REGISTRY, TOOL_IDS, AGENT_NAME_RE, ALL_CONFIG_GLOBS, TEMPLATES_DIR,
+  REGISTRY, TOOL_IDS, HOOK_ADAPTERS, hookAdapter, AGENT_NAME_RE, ALL_CONFIG_GLOBS, TEMPLATES_DIR,
   TEMPLATE_AGENTS_DIR, TEMPLATE_SKILLS_DIR, TEMPLATE_INSTRUCTIONS,
   getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents,
   filePointerPrompt, resolveBinary, checkVersion, versionAtLeast, stripControl,

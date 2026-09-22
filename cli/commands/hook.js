@@ -1,9 +1,10 @@
 'use strict';
 /**
- * `aidev hook <name>` — the runtime half of the permission design.
+ * `aidev hook <name> [--tool <id>]` — the runtime half of the permission and
+ * Wiki design.
  *
- * Claude Code passes hook input as JSON on stdin and reads a JSON decision on
- * stdout. Three constraints shape everything here:
+ * The AI coding tool passes hook input as JSON on stdin and reads a JSON
+ * answer on stdout. Three constraints shape everything here:
  *
  *   - The default hook timeout is 30s (5s is the practical target), so nothing
  *     in this file may touch the network. `guard-write` computes a local-only
@@ -11,22 +12,45 @@
  *   - The same file runs on Windows and POSIX, so no shell syntax appears.
  *   - Failure must not silently open the gate. An unreadable policy or an
  *     unexpected exception denies the write and says why.
+ *
+ * Tools differ in event names, in the shape of the JSON they read back and in
+ * how a subagent is started. Those differences live in `tools.js`
+ * (`hookAdapter`); this file asks the adapter to shape its output and never
+ * looks at the tool id itself.
+ *
+ * Wiki follow-up (`after-bash`, `session-stop`): after a commit the CLI does
+ * the structural half of `aidev knowledge update` on its own and, when prose
+ * is owed, hands the interactive tool a plan for its knowledge-builder
+ * subagents. The session cannot stop while the Wiki is behind a clean HEAD;
+ * the tool's own loop guard (or the kit's, for tools without one) lets the
+ * second stop through with a warning.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { EXIT, AidevError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
+const layout = require('../lib/layout');
+const gitMod = require('../lib/git');
 const policyMod = require('../lib/policy');
 const stateMod = require('../lib/state');
+const inventory = require('../lib/inventory');
 const leases = require('../lib/leases');
 const home = require('../lib/home');
+const toolsMod = require('../lib/tools');
 const ui = require('../lib/ui');
 
-const FLAGS = { input: 'string' };
+const FLAGS = { input: 'string', tool: 'string' };
+const FLAG_HELP = {
+  input: 'read the hook payload from this file instead of stdin',
+  tool: `shape the answer for this AI tool (${toolsMod.TOOL_IDS.join(', ')}); default: claude`,
+};
 
 /** Tools whose payload names a file to be written. */
 const PATH_FIELDS = ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath'];
+
+const LAST_HEAD_REL = '.aidev/cache/last-head.json';
+const STOP_GUARD_REL = '.aidev/cache/wiki-stop.json';
 
 function readStdin(inputFlag) {
   if (inputFlag) {
@@ -46,10 +70,17 @@ function parseInput(raw) {
   try { return JSON.parse(text); } catch { return { _unparsed: text }; }
 }
 
+/** The tool name and its arguments, whichever field names the tool uses. */
+function toolCall(input) {
+  return {
+    tool: input.tool_name || input.toolName || '',
+    args: input.tool_input || input.toolInput || input.toolArgs || input.tool_args || {},
+  };
+}
+
 /** Collect every filesystem path a tool call would write. */
 function targetsFrom(input) {
-  const tool = input.tool_name || input.toolName || '';
-  const ti = input.tool_input || input.toolInput || {};
+  const { tool, args: ti } = toolCall(input);
   const targets = [];
 
   for (const f of PATH_FIELDS) {
@@ -66,42 +97,48 @@ function targetsFrom(input) {
       }
     }
   }
-  if (/^bash$/i.test(tool) && typeof ti.command === 'string') {
+  if (/^(bash|shell|execute_bash|powershell)$/i.test(tool) && typeof ti.command === 'string') {
     targets.push(...policyMod.extractBashTargets(ti.command));
   }
   return [...new Set(targets)];
 }
 
-/** Emit the PreToolUse decision Claude Code expects. */
-function emitDecision(allow, reason) {
-  ui.json({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: allow ? 'allow' : 'deny',
-      permissionDecisionReason: reason,
-    },
-  });
+// ------------------------------------------------------------------ output
+
+/** Print what the adapter shaped: a JSON document, raw text, or nothing. */
+function emit(obj) {
+  if (obj == null) return;
+  if (typeof obj.raw === 'string') { ui.out(obj.raw); return; }
+  ui.json(obj);
+}
+
+/** Emit the PreToolUse decision the tool expects. */
+function emitDecision(adapter, allow, reason) {
+  emit(adapter.decision(allow, reason));
+  return allow ? EXIT.OK : adapter.denyExitCode;
+}
+
+function emitContext(adapter, event, text) {
+  emit(adapter.context(event, text));
 }
 
 // ---------------------------------------------------------------- guard-write
 
-function guardWrite(ctx, input) {
+function guardWrite(ctx, input, adapter) {
   const { repoRoot } = ctx;
 
   // Unparsable input means the guard cannot know what is being written. That is
   // exactly the case the fail-closed rule exists for — distinct from empty
   // input, which legitimately carries no tool call at all.
   if (input && input._unparsed !== undefined) {
-    emitDecision(false, 'ai-dev-kit: hook payload was not valid JSON, so the write could not be evaluated; blocked.');
-    return EXIT.OK;
+    return emitDecision(adapter, false, 'ai-dev-kit: hook payload was not valid JSON, so the write could not be evaluated; blocked.');
   }
 
   const targets = targetsFrom(input);
   if (targets.length === 0) {
     // Nothing identifiable to govern. For Bash this is the documented limit of
     // static extraction, not a guarantee of safety.
-    emitDecision(true, 'no filesystem target identified');
-    return EXIT.OK;
+    return emitDecision(adapter, true, 'no filesystem target identified');
   }
 
   let config = null;
@@ -111,30 +148,26 @@ function guardWrite(ctx, input) {
     policy = cfgMod.loadPolicy(repoRoot);
   } catch (e) {
     // Fail closed: an unreadable policy must never mean "no policy".
-    emitDecision(false, `ai-dev-kit: policy could not be evaluated (${e.message}); write blocked.`);
-    return EXIT.OK;
+    return emitDecision(adapter, false, `ai-dev-kit: policy could not be evaluated (${e.message}); write blocked.`);
   }
 
   const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
   const verdict = policyMod.decideMany(repoRoot, targets, { config, policy, state: st });
 
   if (verdict.decision === policyMod.DECISION.DENY) {
-    emitDecision(false, `ai-dev-kit: ${verdict.reason}`);
-  } else {
-    emitDecision(true, 'ai-dev-kit: no policy violation');
+    return emitDecision(adapter, false, `ai-dev-kit: ${verdict.reason}`);
   }
-  return EXIT.OK;
+  return emitDecision(adapter, true, 'ai-dev-kit: no policy violation');
 }
 
 // --------------------------------------------------------------- session-start
 
-function sessionStart(ctx) {
+function sessionStart(ctx, input, adapter) {
   const { repoRoot } = ctx;
   let config = null;
   try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
   if (!config) {
-    ui.json({ hookSpecificOutput: { hookEventName: 'SessionStart',
-      additionalContext: '[ai-dev-kit] aidev.yaml not found; run "aidev init".' } });
+    emitContext(adapter, 'sessionStart', '[ai-dev-kit] aidev.yaml not found; run "aidev init".');
     return EXIT.OK;
   }
 
@@ -142,18 +175,25 @@ function sessionStart(ctx) {
   const st = stateMod.computeState(repoRoot, config, { checkRemote: true });
   const lines = [stateMod.formatSummary(st)];
 
-  const sync = leases.readSyncLease(repoRoot);
-  if (sync) {
-    const ev = leases.evaluateLease(sync);
+  const lease = leases.readSyncLease(repoRoot);
+  if (lease) {
+    const ev = leases.evaluateLease(lease);
     lines.push(ev.valid
-      ? `⏳ a sync is in progress (target ${stateMod.short(sync.targetSha)}); only .aidev/knowledge/** is writable.`
-      : `⚠️ a stale sync lease is present (${ev.reason}). Run "aidev sync --resume" or "aidev sync --abort".`);
+      ? `⏳ a Wiki publish is in progress (target ${stateMod.short(lease.targetSha)}); only .aidev/knowledge/** is writable.`
+      : `⚠️ a stale publish lease is present (${ev.reason}). Run "aidev knowledge update" to continue it or "aidev knowledge update --abort" to discard it.`);
   }
   if (st.severity === stateMod.SEVERITY.ERROR) {
     lines.push('❌ writes are blocked until the LLM Wiki exists and is readable.');
+  } else if (needsFollowUp(st)) {
+    lines.push(st.wikiBehind
+      ? 'ℹ️ the Wiki will be brought to HEAD after your next commit (the hook writes a plan for the knowledge-builder subagent).'
+      : `ℹ️ ${st.pendingPages} Wiki page(s) still await prose; the Stop hook will ask for the knowledge-builder subagent before the session ends.`);
   }
 
-  ui.json({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } });
+  // Remember HEAD so after-bash reacts to the first commit of the session.
+  rememberHead(repoRoot, gitMod.headSha(repoRoot));
+
+  emitContext(adapter, 'sessionStart', lines.join('\n'));
   return EXIT.OK;
 }
 
@@ -167,7 +207,7 @@ function sessionStart(ctx) {
  * on the developer's own machine — it is not a trust boundary, and nothing
  * from a Work Item or the network reaches it.
  */
-function qualityGate(ctx, input) {
+function qualityGate(ctx, input, adapter) {
   const { repoRoot } = ctx;
   let config = null;
   try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
@@ -182,7 +222,6 @@ function qualityGate(ctx, input) {
   // PKG code, and running the PKG's lint and typecheck after each of dozens of
   // Wiki writes is what made agent-driven Wiki generation crawl.
   const pathsMod = require('../lib/paths');
-  const layout = require('../lib/layout');
   const touchesPkg = edited.some((t) => {
     const rel = pathsMod.toRepoRelative(repoRoot, t);
     return rel != null && rel !== '.' && !layout.isKitManaged(rel);
@@ -203,15 +242,146 @@ function qualityGate(ctx, input) {
   }
   const failed = results.filter((r) => !r.ok);
   if (failed.length > 0) {
-    ui.json({
-      hookSpecificOutput: { hookEventName: 'PostToolUse',
-        additionalContext: `[ai-dev-kit] quality gate failed: ${failed.map((f) => f.gate).join(', ')}\n` +
-          failed.map((f) => `--- ${f.gate} ---\n${f.output}`).join('\n') },
-    });
+    emitContext(adapter, 'postToolUse',
+      `[ai-dev-kit] quality gate failed: ${failed.map((f) => f.gate).join(', ')}\n` +
+      failed.map((f) => `--- ${f.gate} ---\n${f.output}`).join('\n'));
   } else {
     ui.json({ ok: true, ran: results.map((r) => r.gate), edited: edited.length });
   }
   return EXIT.OK;
+}
+
+// ------------------------------------------------------------ Wiki follow-up
+
+/** The Wiki needs work: it is behind HEAD, or its structure is at HEAD but prose is owed. */
+function needsFollowUp(st) {
+  return st.hasWiki && st.severity !== stateMod.SEVERITY.ERROR && (st.wikiBehind || st.pendingPages > 0);
+}
+
+function rememberHead(repoRoot, sha) {
+  try { cfgMod.writeJsonAtomic(layout.abs(repoRoot, LAST_HEAD_REL), { sha: sha || null, at: new Date().toISOString() }); } catch { /* best effort */ }
+}
+
+function lastHead(repoRoot) {
+  const doc = cfgMod.readJsonIfExists(layout.abs(repoRoot, LAST_HEAD_REL));
+  return doc && typeof doc.sha === 'string' ? doc.sha : null;
+}
+
+/**
+ * What the interactive tool must do now: start the knowledge-builder as a
+ * subagent per batch, then let the CLI fold the reports and commit.
+ */
+function planInstructions(adapter, st, planned) {
+  const b = st.behind || {};
+  const agent = 'knowledge-builder';
+  const why = st.wikiBehind
+    ? `the Wiki describes ${stateMod.short(st.knowledgeSha)} but HEAD is ${stateMod.short(st.headSha)} (+${b.added || 0} ~${b.modified || 0} -${b.removed || 0} →${b.renamed || 0})`
+    : `the Wiki structure is at HEAD (${stateMod.short(st.headSha)}) but its prose is not finished`;
+  return [
+    `[ai-dev-kit] ${why}. The structural update is done; ${planned.targets} generation target(s) need prose in ${planned.batches} batch(es).`,
+    'Do this now, before any other work:',
+    `  1. For each batch in ${planned.rel} (\`batches[i]\`), ${adapter.subagentHint(agent)} with this task: ` +
+      `"Read ${planned.rel}. You handle batch <i>: write the Wiki pages for its generation targets following the ${agent} contract ` +
+      'and write one completion report per target under `reportDir` with the plan\'s `targetSha`." Run the batches one after another.',
+    `  2. When every batch has reported, run \`${planned.finish}\`: the CLI records the reports and commits ${layout.KNOWLEDGE_REL}/ as its own commit.`,
+    '  3. If the command says targets are still queued, start the subagent again for the batches it names.',
+    'Do not edit the Wiki pages by hand and do not touch manifest.json or inventory/**.',
+  ].join('\n');
+}
+
+/**
+ * Bring the structural half of the Wiki to HEAD and say what is left.
+ * Returns { kind, text } where kind is one of: 'skip', 'dirty', 'committed',
+ * 'plan', 'error'.
+ */
+function followUp(ctx, config, st) {
+  const { repoRoot } = ctx;
+  const dirty = inventory.dirtyTargets(repoRoot, config);
+  if (dirty.length > 0) {
+    return {
+      kind: 'dirty',
+      text: `[ai-dev-kit] the Wiki is behind HEAD (${stateMod.short(st.headSha)}), but ${dirty.length} generation target(s) are not committed yet: ` +
+        `${dirty.slice(0, 8).join(', ')}${dirty.length > 8 ? ', …' : ''}. Commit them; the Wiki is updated after the commit.`,
+    };
+  }
+  const knowledge = require('./knowledge');
+  const flags = { 'no-agent': true, json: true };
+  return knowledge.updateInPlace({ ...ctx, flags }, config, repoRoot, { silent: true, commit: true, human: false })
+    .then((r) => {
+      if (r.remaining === 0) {
+        return {
+          kind: 'committed',
+          text: r.committed
+            ? `[ai-dev-kit] the Wiki structure was brought to HEAD without prose changes and committed as ${stateMod.short(r.commitSha)}.`
+            : '[ai-dev-kit] the Wiki already describes HEAD.',
+        };
+      }
+      const planned = knowledge.readPlanFile(repoRoot) || {};
+      return {
+        kind: 'plan',
+        // Describe the situation the hook found, not the structure it just wrote.
+        text: planInstructions(ctx.adapter, st, {
+          rel: knowledge.PLAN_REL, targets: r.remaining,
+          batches: Array.isArray(planned.batches) ? planned.batches.length : 1,
+          finish: planned.finish || `${knowledge.COMMAND} --no-agent`,
+        }),
+      };
+    })
+    .catch((e) => ({ kind: 'error', text: `[ai-dev-kit] the Wiki is behind HEAD but could not be updated: ${e.message}` }));
+}
+
+/**
+ * PostToolUse for shell commands: notice a new HEAD, and when the Wiki fell
+ * behind a clean tree, do the structural update and hand over the plan.
+ */
+async function afterBash(ctx, input, adapter) {
+  const { repoRoot } = ctx;
+  let config = null;
+  try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
+  if (!config) { ui.json({ ok: true, skipped: 'not a package' }); return EXIT.OK; }
+
+  const head = gitMod.headSha(repoRoot);
+  const previous = lastHead(repoRoot);
+  rememberHead(repoRoot, head);
+  if (!head || head === previous) { ui.json({ ok: true, head: head ? stateMod.short(head) : null, changed: false }); return EXIT.OK; }
+
+  const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
+  if (!needsFollowUp(st)) {
+    ui.json({ ok: true, head: stateMod.short(head), changed: true, wikiBehind: !!st.wikiBehind, pending: st.pendingPages });
+    return EXIT.OK;
+  }
+  const r = await followUp({ ...ctx, adapter }, config, st);
+  const shaped = adapter.context('postToolUse', r.text);
+  if (shaped == null) ui.json({ ok: true, head: stateMod.short(head), changed: true, wikiBehind: true, followUp: r.kind });
+  else emit({ ...shaped, ok: true, followUp: r.kind });
+  return EXIT.OK;
+}
+
+/** The kit's own loop guard for tools whose Stop hook has none. */
+function stopGuard(repoRoot, head) {
+  const full = layout.abs(repoRoot, STOP_GUARD_REL);
+  const doc = cfgMod.readJsonIfExists(full);
+  if (doc && doc.sha === head) { try { fs.unlinkSync(full); } catch { /* ignore */ } return true; }
+  try { cfgMod.writeJsonAtomic(full, { sha: head, at: new Date().toISOString() }); } catch { /* best effort */ }
+  return false;
+}
+
+/**
+ * Refuse to stop while the Wiki is behind a clean HEAD. Returns the block
+ * document, or null when the session may stop (with an optional warning).
+ */
+async function wikiStopCheck(ctx, input, adapter, config) {
+  const { repoRoot } = ctx;
+  const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
+  if (!needsFollowUp(st)) return { block: null };
+  const head = st.headSha;
+  const active = adapter.stopActive(input);
+  const secondTime = active === null ? stopGuard(repoRoot, head) : active === true;
+  const r = await followUp({ ...ctx, adapter }, config, st);
+  if (r.kind === 'committed') return { block: null, note: r.text };
+  if (r.kind === 'dirty') return { block: null, note: r.text };
+  if (secondTime) return { block: null, note: `${r.text}\n(the session was already asked once; letting it stop)` };
+  return { block: adapter.block(r.text), note: null };
 }
 
 // ---------------------------------------------------------------- session-stop
@@ -303,15 +473,25 @@ function reflectionInstructions(m, rel, sessionId, config) {
   ].join('\n');
 }
 
-function sessionStop(ctx, input) {
+async function sessionStop(ctx, input, adapter) {
   const { repoRoot } = ctx;
   try {
-    const dev = home.readDeveloper();
-    if (!dev.enabled) { ui.json({ ok: true, skipped: 'not a kit developer machine' }); return EXIT.OK; }
-    const sessionId = input && input.session_id;
-    if (!sessionId || (input && input.stop_hook_active)) { ui.json({ ok: true }); return EXIT.OK; }
     let config = null;
     try { config = cfgMod.loadConfig(repoRoot, { required: false }); } catch { config = null; }
+
+    // ---- the Wiki must be at HEAD before the session ends -------------------
+    let wikiNote = null;
+    if (config) {
+      const w = await wikiStopCheck(ctx, input, adapter, config);
+      if (w.block) { emit({ ...w.block, wiki: 'behind' }); return EXIT.OK; }
+      wikiNote = w.note;
+    }
+
+    // ---- kit developer reflection ---------------------------------------------
+    const dev = home.readDeveloper();
+    if (!dev.enabled) { ui.json({ ok: true, skipped: 'not a kit developer machine', wiki: wikiNote }); return EXIT.OK; }
+    const sessionId = input && input.session_id;
+    if (!sessionId || adapter.stopActive(input) === true) { ui.json({ ok: true, wiki: wikiNote }); return EXIT.OK; }
     if (!config) { ui.json({ ok: true, skipped: 'not a package' }); return EXIT.OK; }
 
     const file = reflectionPath(repoRoot, sessionId);
@@ -331,19 +511,19 @@ function sessionStop(ctx, input) {
           launched = true;
         } catch { launched = false; }
       }
-      ui.json({ ok: true, reflected: true, file: rel, evolveLaunched: launched });
+      ui.json({ ok: true, reflected: true, file: rel, evolveLaunched: launched, wiki: wikiNote });
       return EXIT.OK;
     }
 
     const m = summarizeTranscript(input.transcript_path || '');
-    if (!m.ok) { ui.json({ ok: true, skipped: 'transcript unavailable' }); return EXIT.OK; }
+    if (!m.ok) { ui.json({ ok: true, skipped: 'transcript unavailable', wiki: wikiNote }); return EXIT.OK; }
     const metrics = { toolCalls: m.toolCalls, outputTokens: m.outputTokens, inputTokens: m.inputTokens, toolErrors: m.toolErrors, denials: m.denials, elapsedMs: m.elapsedMs };
     if (m.toolCalls < REFLECT_MIN_TOOL_CALLS && m.outputTokens < REFLECT_MIN_OUTPUT_TOKENS) {
-      ui.json({ ok: true, belowThreshold: true, metrics });
+      ui.json({ ok: true, belowThreshold: true, metrics, wiki: wikiNote });
       return EXIT.OK;
     }
     try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch { /* the session writes it */ }
-    ui.json({ decision: 'block', reason: reflectionInstructions(m, rel, sessionId, config), metrics });
+    emit({ ...adapter.block(reflectionInstructions(m, rel, sessionId, config)), metrics });
     return EXIT.OK;
   } catch (e) {
     // A Stop hook must never fail the session.
@@ -356,29 +536,31 @@ const HOOKS = {
   'session-start': sessionStart,
   'guard-write': guardWrite,
   'quality-gate': qualityGate,
+  'after-bash': afterBash,
   'session-stop': sessionStop,
 };
 
-function run(ctx) {
+async function run(ctx) {
   const name = ctx.positionals[0];
   if (!name) throw new AidevError(`hook name required (one of: ${Object.keys(HOOKS).join(', ')})`);
   const fn = HOOKS[name];
   if (!fn) throw new AidevError(`unknown hook: ${name} (expected one of: ${Object.keys(HOOKS).join(', ')})`);
+  let adapter;
+  try { adapter = toolsMod.hookAdapter(ctx.flags.tool || 'claude'); } catch (e) { throw new AidevError(`--tool: ${e.message}`); }
   const input = parseInput(readStdin(ctx.flags.input));
   try {
-    return fn(ctx, input);
+    return await fn(ctx, input, adapter);
   } catch (e) {
     // An unexpected fault in the guard must deny, not crash open.
     if (name === 'guard-write') {
-      emitDecision(false, `ai-dev-kit: guard failed (${e.message}); write blocked.`);
-      return EXIT.OK;
+      return emitDecision(adapter, false, `ai-dev-kit: guard failed (${e.message}); write blocked.`);
     }
     throw e;
   }
 }
 
 module.exports = {
-  run, FLAGS, HOOKS, targetsFrom, parseInput, summarizeTranscript, reflectionPath,
-  REFLECTION_DIR_REL, REFLECT_MIN_TOOL_CALLS, REFLECT_MIN_OUTPUT_TOKENS,
+  run, FLAGS, FLAG_HELP, HOOKS, targetsFrom, parseInput, summarizeTranscript, reflectionPath, planInstructions,
+  REFLECTION_DIR_REL, REFLECT_MIN_TOOL_CALLS, REFLECT_MIN_OUTPUT_TOKENS, LAST_HEAD_REL, STOP_GUARD_REL,
   summary: 'hooksからのみ呼ばれる内部サブコマンド',
 };

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Three-SHA state model (tracking / base / knowledge): the warning/error
+ * Wiki state model (inventory vs HEAD, tracking branch): the warning/error
  * boundary, kit-managed noise filtering and offline degradation.
  */
 
@@ -16,7 +16,7 @@ function local(fx) {
 }
 
 function run() {
-  suite('state: three-SHA verdicts');
+  suite('state: verdicts');
 
   test('a freshly set-up clone is OK', () => {
     const fx = makeRepo();
@@ -44,14 +44,16 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('pulling a PKG change the Wiki has not seen is a WARNING that names sync', () => {
+  test('pulling a PKG change the Wiki has not seen is a WARNING that names the update', () => {
     const fx = makeRepo();
     try {
       const newSha = advancePkg(fx);
       eq(pullPkg(fx), newSha);
       const st = local(fx);
       eq(st.severity, 'warn', st.message);
-      ok(/aidev sync/.test(st.message), st.message);
+      ok(/knowledge update/.test(st.message), st.message);
+      eq(st.wikiBehind, true);
+      eq(st.behind.added, 1, 'the new file is what differs');
       eq(st.baseSha, newSha);
       eq(st.knowledgeSha, fx.pkgSha, 'the Wiki still describes the old commit');
     } finally { fx.cleanup(); }
@@ -85,7 +87,7 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('a feature branch is judged on its base, not on its own commits', () => {
+  test('a feature branch commit that adds a PKG file puts the Wiki behind HEAD', () => {
     const fx = makeRepo();
     try {
       git(['checkout', '-q', '-b', 'feature/x'], fx.root);
@@ -96,26 +98,27 @@ function run() {
       const st = local(fx);
       eq(st.headSha, head);
       eq(st.baseSha, fx.setupSha, 'merge-base with origin/main');
-      eq(st.severity, 'ok', st.message);
+      eq(st.severity, 'warn', st.message);
+      eq(st.wikiBehind, true, 'the Wiki describes the branch HEAD, not the base');
       const rb = state.resolveBase(fx.root, 'main');
       eq(rb, { headSha: head, baseSha: fx.setupSha, localTrackingSha: fx.setupSha });
     } finally { fx.cleanup(); }
   });
 
-  test('a Wiki describing a commit this clone lacks is a WARNING', () => {
+  test('a knowledgeSha this clone lacks does not matter while the inventory matches HEAD', () => {
     const fx = makeRepo();
     try {
       const m = JSON.parse(fs.readFileSync(state.manifestPath(fx.root), 'utf8'));
       m.knowledgeSha = 'a'.repeat(40);
       fs.writeFileSync(state.manifestPath(fx.root), JSON.stringify(m));
       const st = local(fx);
-      eq(st.severity, 'warn', st.message);
-      ok(/does not have/.test(st.message), st.message);
-      eq(st.knowledgeSha, 'a'.repeat(40));
+      eq(st.severity, 'ok', st.message);
+      eq(st.wikiBehind, false);
+      eq(st.knowledgeSha, 'a'.repeat(40), 'informational only');
     } finally { fx.cleanup(); }
   });
 
-  test('pending prose is a WARNING that names the build', () => {
+  test('pending prose is a WARNING that names the update', () => {
     const fx = makeRepo();
     try {
       const m = JSON.parse(fs.readFileSync(state.manifestPath(fx.root), 'utf8'));
@@ -123,7 +126,7 @@ function run() {
       fs.writeFileSync(state.manifestPath(fx.root), JSON.stringify(m));
       const st = local(fx);
       eq(st.severity, 'warn', st.message);
-      ok(/knowledge build/.test(st.message), st.message);
+      ok(/knowledge update/.test(st.message), st.message);
       eq(st.pendingPages, 2);
     } finally { fx.cleanup(); }
   });
@@ -162,7 +165,7 @@ function run() {
       eq(st.severity, 'error');
       eq(st.hasWiki, false);
       eq(st.knowledgeSha, null);
-      ok(/knowledge build/.test(st.message), st.message);
+      ok(/aidev init/.test(st.message), st.message);
       ok(/\.aidev\/knowledge\/manifest\.json/.test(st.message), st.message);
     } finally { fx.cleanup(); }
   });
@@ -269,14 +272,15 @@ function run() {
 
   suite('state: summary');
 
-  test('the summary line reports base, knowledge and tracking', () => {
+  test('the summary line reports head, knowledge and tracking', () => {
     const fx = makeRepo();
     try {
       const st = local(fx);
       const s = state.formatSummary(st);
       ok(/\[ai-dev-kit\]/.test(s), s);
-      ok(/base=/.test(s) && /knowledge=/.test(s) && /tracking=/.test(s), s);
-      ok(s.includes(`base=${fx.setupSha.slice(0, 7)}`), s);
+      ok(/head=/.test(s) && /knowledge=/.test(s) && /tracking=/.test(s), s);
+      ok(s.includes(`head=${fx.setupSha.slice(0, 7)}`), s);
+      ok(!/base=/.test(s), 'base is no longer the reference point');
       ok(s.includes(`knowledge=${fx.pkgSha.slice(0, 7)}`), s);
       ok(!/src=|remote=/.test(s), 'no wrapper-era labels');
     } finally { fx.cleanup(); }

@@ -85,7 +85,7 @@ function decide(repoRoot, targetPath, {
       return deny(
         `Wiki consistency error (${st.message}) and no valid sync lease is held` +
         (lease ? ` (existing lease is ${ev.reason})` : '') +
-        '. All writes are blocked; run "aidev knowledge build" (or "aidev sync --resume" / "--abort").',
+        '. All writes are blocked; run "aidev knowledge update" (or "aidev knowledge update --abort" to discard an interrupted publish).',
         { rule: 'consistency-no-lease', path: rel, state: st.severity });
     }
     const syncWritable = pol.writable_during_sync && pol.writable_during_sync.length > 0

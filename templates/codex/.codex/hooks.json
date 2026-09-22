@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "aidev hook session-start --tool codex", "timeout": 30 } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "aidev hook guard-write --tool codex", "timeout": 30 } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "aidev hook quality-gate --tool codex", "timeout": 150 } ] },
+      { "hooks": [ { "type": "command", "command": "aidev hook after-bash --tool codex", "timeout": 30 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "aidev hook session-stop --tool codex", "timeout": 30 } ] }
+    ]
+  }
+}

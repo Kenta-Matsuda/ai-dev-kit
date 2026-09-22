@@ -103,7 +103,9 @@ function run() {
     ok(copilot.includes('.github/copilot-instructions.md'));
     for (const a of agents) ok(copilot.includes(`.github/agents/${a}.agent.md`), a);
     ok(copilot.some((d) => /^\.github\/skills\/[^/]+\/SKILL\.md$/.test(d)), 'copilot skills are shipped');
-    eq(dests('codex'), ['AGENTS.md']);
+    eq(dests('codex'), ['.codex/hooks.json', 'AGENTS.md']);
+    ok(copilot.includes('.github/hooks/aidev.json'), 'copilot hooks are shipped');
+    ok(dests('kiro').includes('.kiro/agents/aidev.json'), 'the kiro main agent (with the hooks) is shipped');
     const kiro = dests('kiro');
     ok(kiro.includes('.kiro/steering/ai-dev-kit.md'));
     const kb = path.join(KIT_ROOT, 'templates', 'kiro', '.kiro', 'agents', 'knowledge-builder.json');

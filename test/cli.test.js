@@ -66,10 +66,11 @@ function run() {
   test('--help lists every command', () => {
     const r = aidev(['--help']);
     eq(r.code, EXIT.OK, 'exit');
-    for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'workflow', 'apply',
+    for (const c of ['init', 'status', 'check', 'knowledge', 'agent', 'permission', 'workflow', 'apply',
       'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
       ok(new RegExp(`^\\s+${c}\\b`, 'm').test(r.stdout), `help mentions ${c}`);
     }
+    ok(!/^\s+sync\b/m.test(r.stdout), 'sync is gone (folded into knowledge update)');
   });
 
   test('--help no longer lists the removed plan and kit commands', () => {
@@ -102,7 +103,7 @@ function run() {
 
   test('a typo in --dry-run cannot silently become a real run', () => {
     // The whole reason unknown flags are fatal.
-    const r = aidev(['sync', '--dryrun']);
+    const r = aidev(['status', '--dryrun']);
     eq(r.code, EXIT.GENERAL, 'exit');
     ok(/unknown option/.test(r.stderr), 'message');
   });
@@ -127,9 +128,9 @@ function run() {
     eq(r.code, EXIT.OK, 'exit');
     ok(r.stdout.includes('--scope'), 'lists --scope');
     ok(r.stdout.includes('--full'), 'lists --full');
-    ok(r.stdout.includes('--no-remote'), 'lists --no-remote');
-    // Accepted for compatibility but hidden: nobody should be steered to it.
-    ok(!r.stdout.includes('--refresh'), 'does not advertise the no-op --refresh');
+    ok(r.stdout.includes('--no-commit'), 'lists --no-commit');
+    ok(r.stdout.includes('--branch'), 'lists --branch');
+    ok(!r.stdout.includes('--refresh'), 'does not advertise the retired --refresh');
   });
 
   test('update --help documents the self-update flags only; applying is a separate command', () => {
@@ -145,7 +146,7 @@ function run() {
   test('every command answers --help without needing a repository', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-bare-'));
     try {
-      for (const c of ['init', 'status', 'check', 'sync', 'knowledge', 'agent', 'permission', 'workflow',
+      for (const c of ['init', 'status', 'check', 'knowledge', 'agent', 'permission', 'workflow',
         'apply', 'update', 'doctor', 'eject', 'uninstall', 'hook', 'mcp']) {
         const r = aidev([c, '--help'], { cwd: dir });
         eq(r.code, EXIT.OK, `${c} --help exit: ${r.stderr}`);
@@ -157,7 +158,7 @@ function run() {
   test('--no-remote is accepted by every command that reads remote state', () => {
     const fx = makeRepo();
     try {
-      for (const args of [['check'], ['status'], ['knowledge', 'status']]) {
+      for (const args of [['check'], ['status']]) {
         const r = aidev([...args, '--no-remote'], { cwd: fx.root });
         ok(!/unknown option/.test(r.stderr), `${args.join(' ')} accepts --no-remote`);
       }
@@ -181,7 +182,7 @@ function run() {
       const r = aidev(['status', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
       ok(/my-pkg/.test(r.stdout), `names the package: ${r.stdout}`);
-      ok(/\[ai-dev-kit\] base=/.test(r.stdout), 'prints the three-SHA summary');
+      ok(/\[ai-dev-kit\] head=/.test(r.stdout), 'prints the head/knowledge/tracking summary');
     } finally { fx.cleanup(); }
   });
 
@@ -259,8 +260,8 @@ function run() {
       writeManifest(fx.root, m);
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.KNOWLEDGE, 'exit 4');
-      const s = aidev(['knowledge', 'status', '--no-remote'], { cwd: fx.root });
-      eq(s.code, EXIT.KNOWLEDGE, 'knowledge status agrees');
+      const s = aidev(['status', '--no-remote', '--json'], { cwd: fx.root });
+      eq(JSON.parse(s.stdout).state.severity, 'error', 'status agrees');
     } finally { fx.cleanup(); }
   });
 
@@ -271,16 +272,16 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('a Wiki describing a commit this clone lacks is a warning, not an error', () => {
-    // Someone else's sync may have landed; the developer needs to fetch, not
-    // stop working. --strict is how CI turns that warning into a failure.
+  test('a knowledgeSha this clone lacks is not a problem while the inventory matches HEAD', () => {
+    // The verdict compares the inventory with the tree at HEAD; the recorded
+    // commit is informational, so a squash or force-push cannot fail the check.
     const fx = makeRepo();
     try {
       const m = readManifest(fx.root);
       m.knowledgeSha = 'a'.repeat(40);
       writeManifest(fx.root, m);
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'exit 0');
-      eq(aidev(['check', '--no-remote', '--strict'], { cwd: fx.root }).code, EXIT.DRIFT, '--strict fails it');
+      eq(aidev(['check', '--no-remote', '--strict'], { cwd: fx.root }).code, EXIT.OK, 'still 0 under --strict');
     } finally { fx.cleanup(); }
   });
 
@@ -291,7 +292,7 @@ function run() {
       pullPkg(fx);
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `exit 0: ${r.stderr}`);
-      ok(/aidev sync/.test(r.stdout), `suggests a sync: ${r.stdout}`);
+      ok(/knowledge update/.test(r.stdout), `suggests the update: ${r.stdout}`);
       eq(aidev(['check', '--no-remote', '--strict'], { cwd: fx.root }).code, EXIT.DRIFT, '--strict');
     } finally { fx.cleanup(); }
   });
@@ -316,7 +317,7 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('a stale sync lease is exit 4 and names the recovery', () => {
+  test('a stale publish lease is exit 4 and names the recovery', () => {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'sync.lock'), JSON.stringify({
@@ -325,7 +326,7 @@ function run() {
       }));
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.KNOWLEDGE, 'exit 4');
-      ok(/--resume|--abort/.test(r.stderr), `names the recovery: ${r.stderr}`);
+      ok(/--abort/.test(r.stderr), `names the recovery: ${r.stderr}`);
     } finally { fx.cleanup(); }
   });
 
@@ -355,52 +356,46 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  test('knowledge status --json is parseable', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['knowledge', 'status', '--no-remote', '--json'], { cwd: fx.root });
-      ok(JSON.parse(r.stdout).state, 'has state');
-    } finally { fx.cleanup(); }
-  });
-
-  test('knowledge build --json prints no human output before the JSON', () => {
+  test('knowledge update --json prints no human output before the JSON', () => {
     // The regression this guards: ui.heading/ui.table ran before ui.json.
-    const fx = makeRepo();
+    const fx = makeRepo({ withWiki: false });
     try {
-      const r = aidev(['knowledge', 'build', '--json'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update', '--dry-run', '--json'], { cwd: fx.root });
       const parsed = JSON.parse(r.stdout);
       eq(parsed.ok, true, 'ok');
       ok(Array.isArray(parsed.pending), 'pending is a list');
     } finally { fx.cleanup(); }
   });
 
-  test('sync --check-only --json is parseable', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['sync', '--check-only', '--json'], { cwd: fx.root });
-      ok(JSON.parse(r.stdout).severity, 'has a severity');
-    } finally { fx.cleanup(); }
-  });
+  suite('cli: knowledge update');
 
-  suite('cli: knowledge build');
+  // `--no-commit` keeps the update in place; the fixtures sit on the tracking
+  // branch, where a committing update would publish on aidev/wiki-<sha>.
+  const upd = (args, cwd) => aidev(['knowledge', 'update', '--no-commit', '--no-agent', ...args], { cwd });
 
-  test('build writes a manifest recording the base SHA', () => {
+  test('update writes a manifest describing HEAD and leaves prose owed', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      const r = aidev(['knowledge', 'build'], { cwd: fx.root });
-      eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
+      const r = upd(['--json'], fx.root);
+      // Prose is owed (--no-agent), so the exit code says "not done"; the
+      // structure is nonetheless written and describes HEAD.
+      eq(r.code, EXIT.GENERAL, `exit: ${r.stderr}`);
+      const j = JSON.parse(r.stdout);
+      eq(j.structuredOk, true, 'structure written');
+      ok(j.remaining > 0, 'targets stay queued without an agent');
+      eq(j.committed, false, '--no-commit');
       const m = readManifest(fx.root);
-      // HEAD == origin/main, so the base this work stands on is HEAD itself.
-      eq(m.knowledgeSha, fx.setupSha, 'knowledgeSha');
+      eq(m.knowledgeSha, fx.setupSha, 'knowledgeSha is HEAD');
       eq(m.schemaVersion, 3, 'schemaVersion');
       ok(m.inventoryShards.length > 0, 'wrote shards');
+      ok(fs.existsSync(path.join(fx.root, ...layout.KNOWLEDGE_REL.split('/'), '.cache', 'plan.json')), 'a plan for subagents is written');
     } finally { fx.cleanup(); }
   });
 
-  test('build excludes secrets_paths and kit-managed files from the inventory', () => {
+  test('update excludes secrets_paths and kit-managed files from the inventory', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(['knowledge', 'build'], { cwd: fx.root });
+      upd([], fx.root);
       const m = readManifest(fx.root);
       const rows = m.inventoryShards.flatMap((s) =>
         JSON.parse(fs.readFileSync(path.join(fx.root, ...layout.KNOWLEDGE_REL.split('/'), ...s.split('/')), 'utf8')));
@@ -414,15 +409,15 @@ function run() {
   test('--dry-run writes nothing', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      eq(aidev(['knowledge', 'build', '--dry-run'], { cwd: fx.root }).code, EXIT.OK, 'exit');
+      eq(aidev(['knowledge', 'update', '--dry-run'], { cwd: fx.root }).code, EXIT.OK, 'exit');
       ok(!fs.existsSync(manifestPath(fx.root)), 'no manifest written');
     } finally { fx.cleanup(); }
   });
 
-  test('build creates .aidev/knowledge/index.md when absent', () => {
+  test('update creates .aidev/knowledge/index.md when absent', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(['knowledge', 'build'], { cwd: fx.root });
+      upd([], fx.root);
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge', 'index.md')), 'index.md exists');
     } finally { fx.cleanup(); }
   });
@@ -430,7 +425,7 @@ function run() {
   test('--scope narrows what is queued', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      const r = aidev(['knowledge', 'build', '--scope', 'docs', '--json'], { cwd: fx.root });
+      const r = upd(['--scope', 'docs', '--json'], fx.root);
       const parsed = JSON.parse(r.stdout);
       ok(parsed.pending.length > 0, 'something in scope was queued');
       ok(parsed.pending.every((p) => p.startsWith('docs')), `only docs queued: ${parsed.pending}`);
@@ -441,16 +436,16 @@ function run() {
   test('--scope matching nothing is an error, not a silent no-op', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      const r = aidev(['knowledge', 'build', '--scope', 'src/nowhere'], { cwd: fx.root });
+      const r = upd(['--scope', 'src/nowhere'], fx.root);
       eq(r.code, EXIT.GENERAL, 'exit');
       ok(/matched no files/.test(r.stderr), 'message');
     } finally { fx.cleanup(); }
   });
 
-  test('a hand-edited page halts the build until --force', () => {
+  test('a hand-edited page halts the update until --force', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(['knowledge', 'build'], { cwd: fx.root });
+      upd([], fx.root);
       // Record a page hash, then edit that page behind the generator's back.
       const pageRel = `${layout.KNOWLEDGE_REL}/api/auth.md`;
       write(path.join(fx.root, ...pageRel.split('/')), '# auth\n');
@@ -462,35 +457,71 @@ function run() {
       fs.writeFileSync(shardPath, JSON.stringify(rows, null, 2));
       write(path.join(fx.root, ...pageRel.split('/')), '# auth, edited by a human\n');
 
-      const blocked = aidev(['knowledge', 'build'], { cwd: fx.root });
+      const blocked = upd([], fx.root);
       eq(blocked.code, EXIT.GENERAL, 'blocked');
       ok(/edited by hand/.test(blocked.stderr), 'explains why');
-      const forced = aidev(['knowledge', 'build', '--force'], { cwd: fx.root });
-      eq(forced.code, EXIT.OK, '--force proceeds');
+      const forced = upd(['--force', '--json'], fx.root);
+      eq(JSON.parse(forced.stdout).structuredOk, true, '--force proceeds');
     } finally { fx.cleanup(); }
   });
 
-  test('a rename costs no regeneration', () => {
-    const fx = makeRepo({ withWiki: false });
+  test('uncommitted generation targets block the update and are listed', () => {
+    const fx = makeRepo();
     try {
-      aidev(['knowledge', 'build'], { cwd: fx.root });
+      write(path.join(fx.root, 'src', 'api', 'auth.ts'), 'export function auth() { return 2; }\n');
+      const r = aidev(['knowledge', 'update'], { cwd: fx.root });
+      eq(r.code, EXIT.GENERAL, 'refused');
+      ok(/uncommitted/.test(r.stderr), `explains why: ${r.stderr}`);
+      ok(/src\/api\/auth\.ts/.test(r.stderr), `lists the file: ${r.stderr}`);
+      // A dirty Wiki or kit file is not a reason to refuse.
+      git(['checkout', '--', 'src/api/auth.ts'], fx.root);
+      write(path.join(fx.root, 'aidev.yaml'), `${fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8')}# note\n`);
+      const ok2 = aidev(['knowledge', 'update', '--json'], { cwd: fx.root });
+      eq(ok2.code, EXIT.OK, `kit files may be dirty: ${ok2.stderr}`);
+    } finally { fx.cleanup(); }
+  });
+
+  test('a rename costs no regeneration and is committed on the feature branch without an agent', () => {
+    const fx = makeRepo();
+    try {
+      git(['checkout', '-q', '-b', 'feature/rename'], fx.root);
       git(['mv', 'src/api/auth.ts', 'src/api/authentication.ts'], fx.root);
       git(['commit', '-q', '-m', 'rename'], fx.root);
-      git(['push', '-q', 'origin', 'main'], fx.root);
-      const r = aidev(['knowledge', 'build', '--json'], { cwd: fx.root });
-      const parsed = JSON.parse(r.stdout);
-      ok(!parsed.pending.some((p) => p.includes('authentication')), `rename not queued: ${parsed.pending}`);
+      const head = git(['rev-parse', 'HEAD'], fx.root);
+      const r = aidev(['knowledge', 'update', '--json'], { cwd: fx.root });
+      eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
+      const j = JSON.parse(r.stdout);
+      eq(j.pending, [], `rename not queued: ${j.pending}`);
+      eq(j.diff.renamed, 1, 'seen as a rename');
+      eq(j.committed, true, 'the structural update is committed');
+      eq(j.branch, 'feature/rename', 'on the developer branch');
+      // The Wiki commit is separate from the source commit and touches only the Wiki.
+      eq(git(['rev-parse', 'HEAD~1'], fx.root), head, 'one commit on top of the source commit');
+      const files = git(['show', '--name-only', '--format=', 'HEAD'], fx.root).split('\n').filter(Boolean);
+      ok(files.every((f) => f.startsWith('.aidev/')), `only kit files committed: ${files.join(', ')}`);
+      ok(/aidev: update Wiki for/.test(git(['log', '-1', '--format=%s'], fx.root)), 'fixed commit message');
+      eq(readManifest(fx.root).knowledgeSha, head, 'describes the source commit');
+      eq(git(['status', '--porcelain'], fx.root), '', 'working tree clean');
+      // Nothing to do on a second run.
+      const again = JSON.parse(aidev(['knowledge', 'update', '--json'], { cwd: fx.root }).stdout);
+      eq(again.noop, true, 'no-op when the Wiki describes HEAD');
     } finally { fx.cleanup(); }
   });
 
-  test('the retired --refresh, --resume and --agent flags are rejected', () => {
+  test('the retired build/status subcommands and sync flags are rejected', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      for (const f of ['--refresh', '--resume', '--agent']) {
-        const r = aidev(['knowledge', 'build', f, '--dry-run'], { cwd: fx.root });
+      for (const sub of ['build', 'status']) {
+        const r = aidev(['knowledge', sub], { cwd: fx.root });
+        eq(r.code, EXIT.GENERAL, `${sub}: ${r.stderr}`);
+        ok(/unknown subcommand/.test(r.stderr), `${sub}: ${r.stderr}`);
+      }
+      for (const f of ['--refresh', '--resume', '--to', '--check-only', '--no-pr']) {
+        const r = aidev(['knowledge', 'update', f, '--dry-run'], { cwd: fx.root });
         eq(r.code, EXIT.GENERAL, `${f}: ${r.stderr}`);
         ok(new RegExp(`unknown option: ${f}`).test(r.stderr), `${f}: ${r.stderr}`);
       }
+      ok(aidev(['sync'], { cwd: fx.root }).code !== EXIT.OK, 'sync is gone');
     } finally { fx.cleanup(); }
   });
 
@@ -631,7 +662,7 @@ function run() {
       const r = hook('session-start', {}, fx.root);
       eq(r.code, EXIT.OK, 'exit 0');
       ok(/ai-dev-kit/.test(r.stdout), `summary present: ${r.stdout.slice(0, 200)}`);
-      ok(/base=/.test(r.stdout), 'three-SHA line');
+      ok(/head=/.test(r.stdout), 'the head/knowledge/tracking line');
     } finally { fx.cleanup(); }
   });
 
@@ -663,87 +694,58 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
-  suite('cli: sync');
+  suite('cli: knowledge update on the tracking branch (publish)');
 
-  const syncLockPath = (root) => path.join(root, '.aidev', 'sync.lock');
-  const worktreePath = (root) => path.join(root, '.aidev', 'cache', 'sync-worktree');
-
-  test('--check-only writes nothing and judges the state', () => {
-    const fx = makeRepo();
-    try {
-      const before = fs.readFileSync(manifestPath(fx.root), 'utf8');
-      const r = aidev(['sync', '--check-only', '--json'], { cwd: fx.root });
-      ok([EXIT.OK, EXIT.KNOWLEDGE].includes(r.code), `judged: exit ${r.code}`);
-      eq(fs.readFileSync(manifestPath(fx.root), 'utf8'), before, 'unchanged');
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'no lease taken');
-    } finally { fx.cleanup(); }
-  });
+  const leasePath = (root) => path.join(root, '.aidev', 'sync.lock');
+  const worktreePath = (root) => path.join(root, '.aidev', 'cache', 'wiki-worktree');
 
   test('--abort with no lease is a no-op, not an error', () => {
     const fx = makeRepo();
     try {
-      eq(aidev(['sync', '--abort'], { cwd: fx.root }).code, EXIT.OK, 'exit 0');
+      eq(aidev(['knowledge', 'update', '--abort'], { cwd: fx.root }).code, EXIT.OK, 'exit 0');
     } finally { fx.cleanup(); }
   });
 
-  test('an existing lease blocks a fresh sync and names the recovery', () => {
+  test('a lease for another target blocks a publish and names --abort', () => {
     const fx = makeRepo();
     try {
-      write(syncLockPath(fx.root), JSON.stringify({
+      advancePkg(fx);
+      pullPkg(fx);
+      write(leasePath(fx.root), JSON.stringify({
         schemaVersion: 1, kind: 'sync', targetSha: 'c'.repeat(40), originalSha: fx.pkgSha,
         acquiredAt: new Date().toISOString(), ttlMinutes: 120,
       }));
-      const r = aidev(['sync'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
-      ok(/--resume|--abort/.test(r.stderr), 'names the recovery');
-      ok(fs.existsSync(syncLockPath(fx.root)), 'the lease is left for the operator');
+      ok(/--abort/.test(r.stderr), `names the recovery: ${r.stderr}`);
+      ok(fs.existsSync(leasePath(fx.root)), 'the lease is left for the operator');
     } finally { fx.cleanup(); }
   });
 
   test('--abort removes the lease and the worktree without touching the checkout', () => {
     const fx = makeRepo();
     try {
-      write(syncLockPath(fx.root), JSON.stringify({
+      write(leasePath(fx.root), JSON.stringify({
         schemaVersion: 1, kind: 'sync', targetSha: fx.setupSha, originalSha: fx.pkgSha,
         acquiredAt: new Date().toISOString(), ttlMinutes: 120,
       }));
       const before = fs.readFileSync(manifestPath(fx.root), 'utf8');
-      const r = aidev(['sync', '--abort', '--json'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update', '--abort', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, r.stderr);
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'lease released');
+      ok(!fs.existsSync(leasePath(fx.root)), 'lease released');
       ok(!fs.existsSync(worktreePath(fx.root)), 'no worktree left');
       eq(fs.readFileSync(manifestPath(fx.root), 'utf8'), before, 'manifest untouched');
     } finally { fx.cleanup(); }
   });
 
-  test('--to rejects a SHA unreachable from the tracking branch', () => {
+  test('a no-op when the Wiki already describes HEAD takes no lease', () => {
     const fx = makeRepo();
     try {
-      // A commit on a side branch is never a legitimate sync target.
-      git(['checkout', '-q', '-b', 'side'], fx.pkgOrigin);
-      write(path.join(fx.pkgOrigin, 'side.txt'), 'side\n');
-      git(['add', '-A'], fx.pkgOrigin);
-      git(['commit', '-q', '-m', 'side commit'], fx.pkgOrigin);
-      const sideSha = git(['rev-parse', 'HEAD'], fx.pkgOrigin);
-      git(['push', '-q', 'origin', 'side'], fx.pkgOrigin);
-      git(['checkout', '-q', 'main'], fx.pkgOrigin);
-      git(['fetch', '-q', 'origin', '+refs/heads/*:refs/remotes/origin/*'], fx.root);
-      ok(git(['cat-file', '-t', sideSha], fx.root) === 'commit', 'the side commit is present locally');
-
-      const r = aidev(['sync', '--to', sideSha], { cwd: fx.root });
-      eq(r.code, EXIT.GENERAL, `refused: exit ${r.code}`);
-      ok(/not reachable/.test(r.stderr), `explains why: ${r.stderr}`);
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'no lease taken');
-    } finally { fx.cleanup(); }
-  });
-
-  test('sync is a no-op when the Wiki already describes the tracking branch', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['sync', '--json'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, r.stderr);
       eq(JSON.parse(r.stdout).noop, true, `noop: ${r.stdout}`);
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'no lease taken');
+      ok(!fs.existsSync(leasePath(fx.root)), 'no lease taken');
+      ok(!fs.existsSync(worktreePath(fx.root)), 'no worktree');
     } finally { fx.cleanup(); }
   });
 
@@ -751,93 +753,70 @@ function run() {
     const fx = makeRepo();
     try {
       const newSha = advancePkg(fx);
+      pullPkg(fx);
       const before = fs.readFileSync(manifestPath(fx.root), 'utf8');
-      const r = aidev(['sync', '--dry-run', '--json'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update', '--dry-run', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, r.stderr);
       const d = JSON.parse(r.stdout);
       eq(d.dryRun, true, 'dry run');
-      eq(d.targetSha, newSha, 'targets the new tip');
-      // The fixture's inventory is empty, so every generation target is new.
+      eq(d.targetSha, newSha, 'targets HEAD');
       ok(d.diff.added >= 1, `sees the added file: ${JSON.stringify(d.diff)}`);
       eq(fs.readFileSync(manifestPath(fx.root), 'utf8'), before, 'manifest untouched');
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'no lease');
+      ok(!fs.existsSync(leasePath(fx.root)), 'no lease');
       ok(!git(['branch', '--list', `aidev/wiki-${newSha.slice(0, 12)}`], fx.root), 'no branch created');
     } finally { fx.cleanup(); }
   });
 
-  test('sync --no-pr commits the Wiki on aidev/wiki-<sha> without touching the checkout', () => {
+  test('a rename on the tracking branch is published on aidev/wiki-<sha> without touching the checkout', () => {
     const fx = makeRepo();
     try {
-      const newSha = advancePkg(fx);
+      git(['mv', 'src/api/auth.ts', 'src/api/authentication.ts'], fx.root);
+      git(['commit', '-q', '-m', 'rename'], fx.root);
+      git(['push', '-q', 'origin', 'main'], fx.root);
+      const head = git(['rev-parse', 'HEAD'], fx.root);
       const before = fs.readFileSync(manifestPath(fx.root), 'utf8');
-      const r = aidev(['sync', '--no-pr', '--json'], { cwd: fx.root });
+      const r = aidev(['knowledge', 'update', '--no-push', '--branch', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
       const d = JSON.parse(r.stdout);
-      eq(d.ok, true, 'ok');
-      eq(d.targetSha, newSha, 'target is the new tip');
-      const branch = `aidev/wiki-${newSha.slice(0, 12)}`;
+      const branch = `aidev/wiki-${head.slice(0, 12)}`;
       eq(d.branch, branch, 'branch name');
       eq(d.committed, true, 'committed');
-      eq(d.pushed, false, '--no-pr does not push');
-      ok(d.pendingPages > 0, 'the new file awaits prose');
-
-      // The commit lives on the local sync branch...
+      eq(d.pushed, false, '--no-push does not push');
       const shown = git(['show', `${branch}:${MANIFEST_REL}`], fx.root);
-      eq(JSON.parse(shown).knowledgeSha, newSha, 'the committed manifest describes the target');
-      ok(git(['rev-parse', '--verify', `${branch}^{commit}`], fx.root), 'branch exists');
+      eq(JSON.parse(shown).knowledgeSha, head, 'the committed manifest describes HEAD');
       ok(!git(['ls-remote', '--heads', 'origin', branch], fx.root), 'nothing was pushed');
-
-      // ...and the developer's checkout is exactly as it was.
       eq(fs.readFileSync(manifestPath(fx.root), 'utf8'), before, 'local manifest untouched');
-      eq(git(['rev-parse', 'HEAD'], fx.root), fx.setupSha, 'HEAD did not move');
+      eq(git(['rev-parse', 'HEAD'], fx.root), head, 'HEAD did not move');
       eq(git(['status', '--porcelain'], fx.root), '', 'working tree clean');
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'lease released');
+      ok(!fs.existsSync(leasePath(fx.root)), 'lease released');
       ok(!fs.existsSync(worktreePath(fx.root)), 'worktree removed');
     } finally { fx.cleanup(); }
   });
 
-  test('sync pushes the branch and leaves the PR to a human on generic hosting', () => {
-    const fx = makeRepo({ hosting: 'generic' });
-    try {
-      const newSha = advancePkg(fx);
-      const r = aidev(['sync', '--json'], { cwd: fx.root });
-      eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
-      const d = JSON.parse(r.stdout);
-      eq(d.pushed, true, 'pushed');
-      eq(d.pr.ok, false, `no PR API on generic hosting: ${JSON.stringify(d.pr)}`);
-      ok(/by hand/.test(d.pr.reason), `tells the human to open it: ${d.pr.reason}`);
-      const branch = `aidev/wiki-${newSha.slice(0, 12)}`;
-      ok(git(['ls-remote', '--heads', 'origin', branch], fx.root).includes(branch), 'branch is on origin');
-      ok(!fs.existsSync(syncLockPath(fx.root)), 'lease released');
-      ok(!fs.existsSync(worktreePath(fx.root)), 'worktree removed');
-    } finally { fx.cleanup(); }
-  });
-
-  test('a hand-edited page in the committed Wiki stops sync unless --force', () => {
+  test('without an agent nothing is published; the worktree waits for a re-run or --abort', () => {
     const fx = makeRepo();
     try {
-      // Commit a Wiki page whose recorded hash no longer matches its content.
-      const pageRel = `${layout.KNOWLEDGE_REL}/api/auth.md`;
-      const shardPath = path.join(fx.root, '.aidev', 'knowledge', 'inventory', '00.json');
-      const crypto = require('crypto');
-      fs.writeFileSync(shardPath, JSON.stringify([{
-        path: 'src/api/auth.ts', blob: '0'.repeat(40), masked: false, pages: [pageRel],
-        selfHashes: { [pageRel]: `sha256:${crypto.createHash('sha256').update('# auth\n').digest('hex')}` },
-      }], null, 2));
-      write(path.join(fx.root, ...pageRel.split('/')), '# auth, edited by a human\n');
-      git(['add', '-A'], fx.root);
-      git(['commit', '-q', '-m', 'hand edit'], fx.root);
-      git(['push', '-q', 'origin', 'main'], fx.root);
       advancePkg(fx);
+      pullPkg(fx);
+      const r = aidev(['knowledge', 'update', '--no-agent', '--json'], { cwd: fx.root });
+      eq(r.code, EXIT.GENERAL, `prose is owed: ${r.stderr}`);
+      const d = JSON.parse(r.stdout);
+      eq(d.published, false, 'not published');
+      ok(d.remaining > 0, 'targets remain');
+      ok(fs.existsSync(leasePath(fx.root)), 'the lease is kept so the state is not hidden');
+      ok(fs.existsSync(worktreePath(fx.root)), 'the worktree is kept for the next run');
+      eq(aidev(['knowledge', 'update', '--abort'], { cwd: fx.root }).code, EXIT.OK, 'abort');
+      ok(!fs.existsSync(worktreePath(fx.root)), 'worktree removed');
+    } finally { fx.cleanup(); }
+  });
 
-      const blocked = aidev(['sync', '--no-pr'], { cwd: fx.root });
-      eq(blocked.code, EXIT.GENERAL, `blocked: ${blocked.stdout}`);
-      ok(/hand/.test(blocked.stderr), `explains why: ${blocked.stderr}`);
-      ok(fs.existsSync(syncLockPath(fx.root)), 'the lease is kept so the state is not hidden');
-      eq(aidev(['sync', '--abort'], { cwd: fx.root }).code, EXIT.OK, 'abort');
-      const forced = aidev(['sync', '--no-pr', '--force', '--json'], { cwd: fx.root });
-      eq(forced.code, EXIT.OK, `--force proceeds: ${forced.stderr}`);
-      eq(JSON.parse(forced.stdout).committed, true, 'committed');
+  test('--no-push without --branch is rejected', () => {
+    const fx = makeRepo();
+    try {
+      git(['checkout', '-q', '-b', 'feature/x'], fx.root);
+      const r = aidev(['knowledge', 'update', '--no-push'], { cwd: fx.root });
+      eq(r.code, EXIT.GENERAL, 'refused');
+      ok(/--branch/.test(r.stderr), r.stderr);
     } finally { fx.cleanup(); }
   });
 

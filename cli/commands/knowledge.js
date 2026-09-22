@@ -1,33 +1,52 @@
 'use strict';
 /**
- * `aidev knowledge build|status`
+ * `aidev knowledge update` — bring the LLM Wiki to HEAD.
  *
- * The CLI owns the structured half of the Wiki — the file inventory, the
- * manifest and the resumable checkpoint. Prose generation belongs to the
- * knowledge-builder agent, which reads the plan this command produces and is
- * started right after the structured write (`--no-agent` skips it). Keeping
- * the split here is what lets `build` be re-run safely: scanning, sharding and
- * diffing are deterministic and free, so a resumed run never re-pays for work
- * already done.
+ * The Wiki describes one commit: the HEAD of the branch it is committed on.
+ * This command makes that true again after the code moved, in three parts
+ * that are deliberately separate so each can be run, resumed or skipped on
+ * its own:
+ *
+ *   structure  (CLI, deterministic, free)   scan the tree at HEAD, diff it
+ *              against the recorded inventory, drop orphaned pages, write the
+ *              inventory shards, the manifest and the checkpoint
+ *   prose      (knowledge-builder agent)    write the pages for what changed,
+ *              one batch per process, reporting each finished target
+ *   commit     (CLI)                        commit `.aidev/knowledge/` on its
+ *              own, so the source commit and the Wiki commit stay apart and
+ *              travel in the same pull request
+ *
+ * The working tree must be clean for the generation targets: a Wiki that
+ * describes half-committed files describes nothing. On the tracking branch
+ * itself (or with `--branch`) the update happens in a temporary worktree and
+ * is published as `aidev/wiki-<sha12>` with a pull request, because a
+ * protected branch cannot take the commit directly.
+ *
+ * The hooks call the structural part on their own (`plan`) and leave the
+ * prose to a subagent started by the interactive tool; the final
+ * `aidev knowledge update --no-agent` then folds the reports and commits.
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { EXIT, AidevError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
+const layout = require('../lib/layout');
 const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
 const inventory = require('../lib/inventory');
 const knowledgeScope = require('../lib/knowledge-scope');
 const leases = require('../lib/leases');
 const pathsMod = require('../lib/paths');
+const ado = require('../lib/ado');
 const agentMod = require('../lib/agent');
 const ui = require('../lib/ui');
 
 const FLAGS = {
   scope: 'string', full: 'boolean',
   'dry-run': 'boolean', json: 'boolean', force: 'boolean',
-  'no-remote': 'boolean',
+  'no-commit': 'boolean', branch: 'boolean', 'no-push': 'boolean', abort: 'boolean',
   ...agentMod.AGENT_FLAGS,
 };
 
@@ -36,92 +55,150 @@ const FLAG_HELP = {
   full: 'regenerate every target from scratch instead of only what changed or was left queued',
   'dry-run': 'show what would be queued and written; write nothing',
   json: 'machine-readable output',
-  force: 'overwrite Wiki pages that were edited by hand',
-  'no-remote': 'status: skip the remote check',
+  force: 'overwrite Wiki pages that were edited by hand; take over a stale publish lease',
+  'no-commit': 'leave the updated Wiki in the working tree instead of committing it',
+  branch: `publish from a temporary worktree as ${'aidev/wiki-<sha12>'} with a pull request (automatic on the tracking branch)`,
+  'no-push': 'with --branch: commit on the local aidev/wiki-<sha12> branch but do not push or open a PR',
+  abort: 'discard an interrupted --branch publish: remove its worktree and release the lease',
   ...agentMod.AGENT_FLAG_HELP,
 };
 
-function status(ctx, config) {
-  const { repoRoot, flags } = ctx;
-  const st = stateMod.computeState(repoRoot, config, { checkRemote: !flags['no-remote'] });
-  const manifest = inventory.readManifest(repoRoot);
-  const records = inventory.readInventory(repoRoot, manifest);
-  const handEdits = inventory.detectHandEdits(repoRoot, records);
-  const problems = inventory.validateInventoryConsistency(records);
+const WORKTREE_REL = '.aidev/cache/wiki-worktree';
+const PLAN_REL = `${inventory.CACHE_DIR_REL}/plan.json`;
+const COMMAND = 'aidev knowledge update';
 
-  if (flags.json) {
-    ui.json({ state: st, manifest, files: records.length, handEdits, problems });
-    return st.severity === stateMod.SEVERITY.ERROR ? EXIT.KNOWLEDGE : EXIT.OK;
-  }
-
-  ui.heading('aidev knowledge status');
-  ui.table([
-    ['tracking', stateMod.short(st.trackingSha)],
-    ['base', stateMod.short(st.baseSha)],
-    ['knowledge', stateMod.short(st.knowledgeSha)],
-    ['generatedAt', manifest?.generatedAt || '-'],
-    ['generation targets', records.length],
-    ['evidence files', manifest?.evidence?.trackedFiles ?? '-'],
-    ['shards', manifest?.inventoryShards?.length ?? 0],
-    ['masked files', manifest?.stats?.maskedFiles ?? 0],
-    ['pending targets', manifest?.checkpoint?.pendingPaths?.length ?? 0],
-  ]);
-  ui.out('');
-  ui.out(stateMod.formatSummary(st));
-  if (handEdits.length > 0) {
-    ui.warn(`${handEdits.length} page(s) edited by hand since generation:`);
-    for (const h of handEdits.slice(0, 20)) ui.dim(`    ${h.page} (${h.reason})`);
-  }
-  if (problems.length > 0) {
-    ui.warn(`${problems.length} inventory inconsistency/ies (a page recorded with differing hashes):`);
-    for (const p of problems.slice(0, 10)) ui.dim(`    ${p.page} ← ${p.sources.join(', ')}`);
-  }
-  return st.severity === stateMod.SEVERITY.ERROR ? EXIT.KNOWLEDGE : EXIT.OK;
+/** The branch a published Wiki update lands on. */
+function wikiBranchName(targetSha) {
+  return `aidev/wiki-${String(targetSha).slice(0, 12)}`;
 }
 
-async function build(ctx, config, { silent = false } = {}) {
-  const { repoRoot, flags } = ctx;
-  const human = !flags.json; // --json must emit exactly one JSON document
-  // With `silent` the JSON document is handed back to the caller (init embeds
-  // it in its own report) instead of being printed here.
+/** The fixed message of a Wiki commit; the sha12 is the commit it describes. */
+function commitMessage(targetSha) {
+  return [
+    `aidev: update Wiki for ${String(targetSha).slice(0, 12)}`,
+    '',
+    `Regenerates ${layout.KNOWLEDGE_REL}/ so it describes ${targetSha}.`,
+    'Generated by ai-dev-kit; review it like any other change in this pull request.',
+  ].join('\n');
+}
+
+// ------------------------------------------------------------------ helpers
+
+function counts(diff) {
+  return { added: diff.added.length, modified: diff.modified.length, removed: diff.removed.length, renamed: diff.renamed.length };
+}
+
+/**
+ * Commit `.aidev/knowledge/` (and the ignore file that keeps its cache out of
+ * git) on the current branch of `root`. Nothing else is staged: the source
+ * commit is the developer's, the Wiki commit is the kit's.
+ */
+function commitWiki(root, targetSha) {
+  gitMod.run(['add', '-A', '--', layout.KNOWLEDGE_REL, layout.AIDEV_GITIGNORE_REL], { cwd: root });
+  const staged = gitMod.run(['diff', '--cached', '--quiet'], { cwd: root });
+  if (staged.ok) return { committed: false, reason: 'the committed Wiki already matches; nothing to commit' };
+  const commit = gitMod.run(['commit', '-m', commitMessage(targetSha)], { cwd: root });
+  if (!commit.ok) return { committed: false, reason: `commit failed: ${commit.stderr || commit.stdout}` };
+  return { committed: true, sha: gitMod.headSha(root) };
+}
+
+/**
+ * Write the plan the interactive tool's subagents work from: the queued
+ * targets in batches, the evidence they may read, and the SHA every report
+ * must carry. Gitignored; rewritten on every structural update.
+ */
+function writePlanFile(repoRoot, config, plan) {
+  const batchSize = config?.knowledge?.agent_batch_size ?? agentMod.DEFAULT_BATCH_SIZE;
+  const doc = {
+    schemaVersion: 2,
+    targetSha: plan.targetSha,
+    mode: 'generate',
+    hasOverview: plan.hasOverview,
+    generationScope: plan.scope || null,
+    generationTargets: plan.pending,
+    batches: agentMod.chunk(plan.pending, batchSize),
+    evidence: {
+      include: plan.evidence.include,
+      exclude: plan.evidence.exclude,
+      paths: plan.evidence.paths,
+      excludedSecretPatterns: plan.evidence.secretsPaths,
+    },
+    maxFilesPerDir: config?.knowledge?.max_files_per_dir ?? 20,
+    reportDir: inventory.DONE_DIR_REL,
+    finish: `${COMMAND} --no-agent`,
+  };
+  const full = layout.abs(repoRoot, PLAN_REL);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  cfgMod.writeJsonAtomic(full, doc);
+  return { rel: PLAN_REL, batches: doc.batches.length, targets: plan.pending.length };
+}
+
+function readPlanFile(repoRoot) {
+  return cfgMod.readJsonIfExists(layout.abs(repoRoot, PLAN_REL));
+}
+
+function removePlanFile(repoRoot) {
+  try { fs.unlinkSync(layout.abs(repoRoot, PLAN_REL)); } catch { /* absent is fine */ }
+}
+
+// ---------------------------------------------------------- in-place update
+
+/**
+ * The update proper, in `root` (the clone, or a worktree). Returns
+ * { code, json, plan, remaining, committed, commitSha }.
+ *
+ * `commit` false leaves the result in the working tree (init, hooks, the
+ * publish path which commits on its own branch). `leaseHeld` true means the
+ * caller owns the sync lease already.
+ */
+async function updateInPlace(ctx, config, root, {
+  silent = false, commit = true, leaseHeld = false, human = true,
+} = {}) {
+  const { flags } = ctx;
   let json = null;
-  const emitJson = (obj) => { json = obj; if (!silent) ui.json(obj); };
-  if (!gitMod.isRepo(repoRoot)) throw new AidevError(`${repoRoot} is not a git repository`);
-  // The Wiki describes the tracking-branch commit this work is based on. On a
-  // feature branch that is the merge-base; without a fetched tracking branch it
-  // is HEAD itself.
-  const base = stateMod.resolveBase(repoRoot, config.sync.tracking_branch);
-  const targetSha = base.baseSha;
+  const emitJson = (obj) => { json = obj; if (!silent && !human) ui.json(obj); };
+  const say = human && !silent ? ui : null;
+
+  const targetSha = gitMod.headSha(root);
   if (!targetSha) throw new AidevError('could not resolve HEAD — commit something first');
 
-  let existing = inventory.readManifest(repoRoot);
+  // ---- 0-b. the tree must be clean where the Wiki looks --------------------
+  const dirty = inventory.dirtyTargets(root, config);
+  if (dirty.length > 0) {
+    const list = dirty.slice(0, 20).map((p) => `      ${p}`).join('\n');
+    throw new AidevError(
+      `${dirty.length} generation target(s) have uncommitted changes; the Wiki describes commits only:\n${list}` +
+      `${dirty.length > 20 ? `\n      … and ${dirty.length - 20} more` : ''}\n` +
+      `    Commit (or stash) them, then run "${COMMAND}" again.`);
+  }
 
-  // A previous run may have been stopped (timeout, Ctrl-C) after the agent
-  // reported targets the CLI never got to record. Fold those in first, so they
-  // count as done rather than being generated a second time.
+  let existing = inventory.readManifest(root);
+
+  // A previous run may have been stopped after the agent reported targets the
+  // CLI never got to record. Fold those in first, so they count as done.
   if (existing && !flags['dry-run']) {
-    const leftover = inventory.applyCompletions(repoRoot, {
+    const leftover = inventory.applyCompletions(root, {
       targetSha: existing.knowledgeSha, shardSize: config.knowledge.inventory_shard_size,
     });
     if (leftover.applied.length > 0) {
-      existing = inventory.readManifest(repoRoot);
-      if (human) ui.info(`${leftover.applied.length} target(s) finished by an earlier run were recorded.`);
+      existing = inventory.readManifest(root);
+      if (say) say.info(`${leftover.applied.length} target(s) finished by an earlier run were recorded.`);
+    }
+    if (say && leftover.rejected.length > 0) {
+      say.warn(`${leftover.rejected.length} completion report(s) were rejected; those targets stay queued:`);
+      for (const r of leftover.rejected.slice(0, 10)) say.dim(`    ${r.target || r.file}: ${r.reason}`);
     }
   }
 
-  // Incremental by default: only what changed since the recorded inventory is
-  // regenerated, and whatever an earlier run left queued is picked up again.
-  // `--full` throws the inventory away and regenerates every target.
+  // ---- 0-c. plan ------------------------------------------------------------
   const resuming = !flags.full;
-  const existingRecords = inventory.readInventory(repoRoot, existing);
+  const existingRecords = inventory.readInventory(root, existing);
   const oldRecords = resuming ? existingRecords : [];
-  const newRecords = inventory.scanPackage(repoRoot, config) || [];
-  const evidenceRecords = knowledgeScope.scanEvidence(repoRoot, config) || [];
+  const newRecords = inventory.scanPackage(root, config, { ref: targetSha }) || [];
+  const evidenceRecords = knowledgeScope.scanEvidence(root, config, { ref: targetSha }) || [];
   const evidenceState = knowledgeScope.buildEvidenceSnapshot(evidenceRecords, newRecords, config);
   const supportingEvidenceChanged = knowledgeScope.evidenceChanged(existing?.evidence, evidenceState);
 
-  // --scope narrows generation only. Repository evidence deliberately remains
-  // broad so even a docs-only scoped run can verify claims against source code.
   let scope = null;
   if (flags.scope) {
     scope = pathsMod.normalizeRel(flags.scope);
@@ -135,52 +212,45 @@ async function build(ctx, config, { silent = false } = {}) {
 
   const diff = inventory.diffInventory(oldRecords, newRecords);
   const currentTargets = new Set(newRecords.map((record) => record.path));
-  const generationSet = new Set(
-    [...diff.added, ...diff.modified].map((record) => record.path));
-
-  // Whatever an earlier run left queued is still owed. Merge it back instead
-  // of losing it merely because its target blob is now recorded as unchanged.
+  const generationSet = new Set([...diff.added, ...diff.modified].map((record) => record.path));
   if (resuming) {
     for (const pendingPath of existing?.checkpoint?.pendingPaths || []) {
       if (currentTargets.has(pendingPath)) generationSet.add(pendingPath);
     }
   }
-
-  // We do not yet store page-level evidence dependencies. If supporting code,
-  // tests, config or CI changes, refreshing every generation target is the only
-  // safe alternative to silently retaining prose based on stale evidence.
-  if (supportingEvidenceChanged) {
-    for (const record of newRecords) generationSet.add(record.path);
-  }
+  // No page-level evidence graph yet: supporting code, tests, config or CI
+  // changing means every target is refreshed rather than silently kept.
+  if (supportingEvidenceChanged) for (const record of newRecords) generationSet.add(record.path);
 
   const generationPaths = [...generationSet].sort();
   const pending = generationPaths.filter(inScope);
   const deferred = generationPaths.filter((p) => !inScope(p));
+  const structuralOnly = diff.changed > 0 || (existing?.checkpoint?.staleIndexes || []).length > 0;
+  // The inventory already matches HEAD and nothing is queued: the Wiki
+  // describes this tree, whatever commit its manifest happens to name.
+  const nothingToDo = !!existing && pending.length === 0 && deferred.length === 0 && !structuralOnly
+    && !supportingEvidenceChanged;
 
-  if (human) {
-    ui.heading(`aidev knowledge build${flags['dry-run'] ? ' (dry run)' : ''}`);
-    ui.table([
-      ['target', stateMod.short(targetSha)],
+  if (say) {
+    say.heading(`${COMMAND}${flags['dry-run'] ? ' (dry run)' : ''}`);
+    say.table([
+      ['target', `${stateMod.short(targetSha)} (HEAD of ${gitMod.currentBranch(root) || 'detached HEAD'})`],
+      ['wiki describes', stateMod.short(existing?.knowledgeSha)],
       ['generation targets', `${scoped.length}${scope === null ? '' : ` of ${newRecords.length}`}`],
       ['repository evidence', `${evidenceState.trackedFiles} tracked files`],
-      ['supporting evidence', `${evidenceState.supportingFiles} outside generation targets`],
       ['evidence changed', supportingEvidenceChanged ? 'yes — refresh targets' : 'no'],
       ['added', diff.added.length],
       ['modified', diff.modified.length],
       ['removed', diff.removed.length],
       ['renamed (free)', diff.renamed.length],
       ['unchanged', diff.unchanged.length],
-      ['masked targets', newRecords.filter((r) => r.masked).length],
       ['queued now', pending.length],
       ...(deferred.length > 0 ? [['deferred (out of scope)', deferred.length]] : []),
     ]);
   }
 
-  // Hand edits are human work. Overwriting them must be an explicit decision,
-  // so this halts rather than warning-and-proceeding — with --full as well,
-  // which is why the check reads the recorded inventory, not oldRecords.
-  const handEdits = inventory.detectHandEdits(repoRoot, existingRecords)
-    .filter((h) => h.reason !== 'missing');
+  // Hand edits are human work. Overwriting them must be an explicit decision.
+  const handEdits = inventory.detectHandEdits(root, existingRecords).filter((h) => h.reason !== 'missing');
   if (handEdits.length > 0 && !flags.force && !flags['dry-run']) {
     const list = handEdits.slice(0, 10).map((h) => `      ${h.page} (${h.reason})`).join('\n');
     throw new AidevError(
@@ -189,60 +259,68 @@ async function build(ctx, config, { silent = false } = {}) {
       '    Re-run with --force to discard those edits, or move them into the generator.');
   }
 
+  const evidence = {
+    paths: evidenceRecords.map((r) => r.path),
+    include: evidenceState.include,
+    exclude: evidenceState.exclude,
+    secretsPaths: config.secrets_paths,
+  };
+  const plan = {
+    targetSha, pending, deferred, scope, evidence,
+    hasOverview: fs.existsSync(path.join(root, ...inventory.OVERVIEW_PAGE.split('/'))),
+  };
+
   if (flags['dry-run']) {
-    if (flags.json) {
-      emitJson({
-        ok: true,
-        dryRun: true,
-        targetSha,
-        pending,
-        deferred,
-        evidence: evidenceState,
-        evidenceChanged: supportingEvidenceChanged,
-        handEdits,
-      });
-    } else {
+    const opts = agentMod.resolveOptions(flags, config);
+    if (!human) {
+      emitJson({ ok: true, dryRun: true, targetSha, pending, deferred, evidence: evidenceState,
+        evidenceChanged: supportingEvidenceChanged, handEdits, diff: counts(diff) });
+    } else if (say) {
       if (handEdits.length > 0) {
-        ui.warn(`${handEdits.length} hand-edited page(s) would block this build; --force would discard them:`);
-        for (const h of handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
+        say.warn(`${handEdits.length} hand-edited page(s) would block this update; --force would discard them:`);
+        for (const h of handEdits.slice(0, 10)) say.dim(`    ${h.page} (${h.reason})`);
       }
-      ui.ok('dry run complete; nothing was written.');
-      const opts = agentMod.resolveOptions(flags, config);
+      say.ok('dry run complete; nothing was written.');
       if (opts.enabled && pending.length > 0) {
         const batches = Math.ceil(pending.length / opts.batchSize);
-        ui.dim(`    would then run the ${opts.agent} agent with ${agentMod.toolLabel(opts.tool)} for ${pending.length} generation target(s) in ${batches} batch(es).`);
+        say.dim(`    would then run the ${opts.agent} agent with ${agentMod.toolLabel(opts.tool)} for ${pending.length} generation target(s) in ${batches} batch(es).`);
       } else if (!opts.enabled && pending.length > 0) {
-        ui.dim(`    --no-agent: ${pending.length} generation target(s) would stay queued without prose.`);
+        say.dim(`    --no-agent: ${pending.length} generation target(s) would stay queued without prose.`);
       }
     }
-    return { code: EXIT.OK, json };
+    return { code: EXIT.OK, json, plan, remaining: pending.length, committed: false, nothingToDo };
   }
 
-  // Writing knowledge/** while the Wiki is inconsistent is precisely what the
-  // sync lease authorises — and regenerating is what *resolves* that state. So
-  // refusing here would make `aidev sync` the only way out even when the code is
-  // already at the commit the operator wants described (a rename committed
-  // a fresh clone with a Wiki committed later, say). Take the lease for the duration of the
-  // write instead: the invariant "knowledge/** is only rewritten under a lease"
-  // holds, concurrent syncs are still excluded, and the deadlock is gone.
-  const st = stateMod.computeState(repoRoot, config, { checkRemote: false });
+  if (nothingToDo) {
+    // Reports folded a moment ago may have left the Wiki complete but
+    // uncommitted; committing here is what finishes the subagent flow.
+    let c = { committed: false, sha: null };
+    if (commit && !flags['no-commit']) c = commitWiki(root, targetSha);
+    if (say) {
+      if (c.committed) say.ok(`the Wiki describes ${stateMod.short(targetSha)}; committed it as ${stateMod.short(c.sha)}.`);
+      else say.ok(`the Wiki already describes ${stateMod.short(targetSha)}; nothing to do.`);
+    }
+    if (!human) emitJson({ ok: true, noop: !c.committed, targetSha, remaining: 0, committed: !!c.committed, commitSha: c.sha || null });
+    removePlanFile(root);
+    return { code: EXIT.OK, json, plan, remaining: 0, committed: !!c.committed, commitSha: c.sha || null, nothingToDo: !c.committed };
+  }
+
+  // Writing knowledge/** while the Wiki is missing is exactly what the sync
+  // lease authorises, and regenerating is what resolves that state. Take the
+  // lease for the duration of the structured write.
+  const st = stateMod.computeState(root, config, { checkRemote: false });
   let ownedLease = false;
-  if (st.severity === stateMod.SEVERITY.ERROR && st.hasWiki) {
-    const ev = leases.evaluateLease(leases.readSyncLease(repoRoot));
+  if (!leaseHeld && st.severity === stateMod.SEVERITY.ERROR && st.hasWiki) {
+    const ev = leases.evaluateLease(leases.readSyncLease(root));
     if (!ev.valid) {
-      // A stale lease is NOT adopted silently — acquireSyncLease throws and
-      // names --resume/--abort, which is the right outcome here too.
-      leases.acquireSyncLease(repoRoot, {
-        targetSha,
-        originalSha: st.knowledgeSha,
-        ttlMinutes: config.sync.lease_ttl_minutes,
-        force: !!flags.force,
+      leases.acquireSyncLease(root, {
+        targetSha, originalSha: st.knowledgeSha, ttlMinutes: config.sync.lease_ttl_minutes, force: !!flags.force,
       });
       ownedLease = true;
     }
   }
 
-  // Carry forward prose that is still valid; only added/modified need an LLM.
+  // ---- structure ------------------------------------------------------------
   const carried = new Map();
   for (const r of [...diff.unchanged, ...diff.renamed]) {
     carried.set(r.path, { pages: r.pages || [], selfHashes: r.selfHashes || {} });
@@ -251,29 +329,23 @@ async function build(ctx, config, { silent = false } = {}) {
   const records = [];
   for (const r of newRecords) {
     if (inScope(r.path)) {
-      records.push({
-        ...r,
-        pages: carried.get(r.path)?.pages || [],
-        selfHashes: carried.get(r.path)?.selfHashes || {},
-      });
+      records.push({ ...r, pages: carried.get(r.path)?.pages || [], selfHashes: carried.get(r.path)?.selfHashes || {} });
     } else if (oldByPath.has(r.path)) {
-      // Untouched by this run: keep the previous blob so a later full build
-      // still recognises it as changed.
       records.push(oldByPath.get(r.path));
     }
-    // An out-of-scope file with no previous record is deliberately omitted:
-    // absent from the inventory, the next build sees it as added.
   }
 
   let shards;
   let structuredManifest = null;
+  let orphans = { deleted: [], skipped: [], staleIndexes: [] };
   try {
-    shards = inventory.writeInventory(repoRoot, records, config.knowledge.inventory_shard_size);
+    shards = inventory.writeInventory(root, records, config.knowledge.inventory_shard_size);
+    if (diff.removed.length > 0) {
+      orphans = inventory.removeOrphanedPages(root, inventory.orphanedPages(diff.removed, records));
+      if (say && orphans.deleted.length > 0) say.ok(`removed ${orphans.deleted.length} orphaned Wiki page(s)`);
+    }
     const manifest = existing || inventory.emptyManifest();
     manifest.schemaVersion = inventory.SCHEMA_VERSION;
-    // Safe to advance: the inventory now describes targetSha exactly. Pages whose
-    // prose is still queued are reported by computeState as a WARN, not by
-    // holding this SHA back — sync must be able to finish and release its lease.
     manifest.knowledgeSha = targetSha;
     manifest.kitCommit = gitMod.headSha(ctx.installRoot);
     manifest.generatedAt = new Date().toISOString();
@@ -285,13 +357,13 @@ async function build(ctx, config, { silent = false } = {}) {
       evidenceFiles: evidenceState.trackedFiles,
     };
     manifest.evidence = evidenceState;
-    manifest.checkpoint = { completedShards: shards.length, pendingPaths: [...pending, ...deferred] };
+    const staleIndexes = [...new Set([...(existing?.checkpoint?.staleIndexes || []), ...orphans.staleIndexes])];
+    manifest.checkpoint = { completedShards: shards.length, pendingPaths: [...pending, ...deferred], staleIndexes };
     structuredManifest = JSON.parse(JSON.stringify(manifest));
-    inventory.writeManifest(repoRoot, manifest);
+    inventory.writeManifest(root, manifest);
+    layout.ensureAidevGitignore(root);
 
-    // The index is the entry point the design requires; create a stub if absent
-    // so the directory is never a bare pile of generated pages.
-    const indexPath = path.join(repoRoot, ...inventory.INDEX_PAGE.split('/'));
+    const indexPath = path.join(root, ...inventory.INDEX_PAGE.split('/'));
     if (!fs.existsSync(indexPath)) {
       cfgMod.writeFileAtomic(indexPath, [
         `# ${config.package.name} — LLM Wiki`,
@@ -304,131 +376,373 @@ async function build(ctx, config, { silent = false } = {}) {
       ].join('\n'));
     }
   } finally {
-    // Only ever release what this command minted. A lease taken by `aidev sync`
-    // belongs to that operation and must survive this build, or sync would lose
-    // its protection mid-flight.
-    if (ownedLease) leases.releaseSyncLease(repoRoot);
+    if (ownedLease) leases.releaseSyncLease(root);
   }
 
-  if (human) {
-    ui.ok(`manifest and ${shards.length} shard(s) written for ${stateMod.short(targetSha)}`);
+  if (say) {
+    say.ok(`manifest and ${shards.length} shard(s) written for ${stateMod.short(targetSha)}`);
     if (pending.length > 0) {
-      ui.info(`${pending.length} generation target(s) queued for the knowledge-builder agent:`);
-      for (const p of pending.slice(0, 20)) ui.dim(`    ${p}`);
-      if (pending.length > 20) ui.dim(`    … and ${pending.length - 20} more`);
-      ui.dim(`    The agent can research ${evidenceState.trackedFiles} tracked, non-secret file(s) across the PKG repository.`);
-    } else ui.ok('no generation targets in scope need regeneration.');
-    if (deferred.length > 0) {
-      ui.warn(`${deferred.length} generation target(s) outside --scope were left for a later build.`);
-    }
+      say.info(`${pending.length} generation target(s) queued for the knowledge-builder agent:`);
+      for (const p of pending.slice(0, 20)) say.dim(`    ${p}`);
+      if (pending.length > 20) say.dim(`    … and ${pending.length - 20} more`);
+    } else say.ok('no generation targets in scope need regeneration.');
+    if (deferred.length > 0) say.warn(`${deferred.length} generation target(s) outside --scope were left for a later update.`);
   }
 
-  // The agent runs *after* the lease is released and the manifest has advanced
-  // to targetSha. At that point the three SHAs agree and the state is WARN (or
-  // OK), so writes to knowledge/** are permitted by ordinary policy — which is
-  // exactly why state.js grades pending prose as a warning rather than an
-  // error. Running it inside the lease would instead require holding the lease
-  // across a multi-minute subprocess and would block every concurrent sync.
+  // ---- prose ------------------------------------------------------------------
   let agentResult = { ran: false };
   if (pending.length > 0) {
     agentResult = await agentMod.runWikiAgent({
-      repoRoot, config, flags, targetSha,
-      // Only in-scope generation targets are writable. Evidence intentionally
-      // remains repository-wide so scoped docs can still be code-verified.
-      paths: pending,
-      scope,
-      evidence: {
-        paths: evidenceRecords.map((record) => record.path),
-        include: evidenceState.include,
-        exclude: evidenceState.exclude,
-        secretsPaths: config.secrets_paths,
-      },
-      human,
-      // Everything is being (re)generated: the repository map is worth
-      // redoing before the batches start.
+      repoRoot: root, installRoot: ctx.installRoot, config, flags, targetSha,
+      paths: pending, scope, evidence, human: !!say,
       fullRebuild: scope === null && pending.length === scoped.length,
     });
   } else {
-    // Still validate the agent flags even with nothing to do. Otherwise a typo
-    // in --agent-name, --agent-timeout or --agent-model is silently accepted whenever the
-    // queue happens to be empty and rejected when it is not — the same command
-    // passing or failing based on unrelated state.
     const opts = agentMod.resolveOptions(flags, config);
-    if (opts.enabled) {
-      agentResult = { ran: false, reason: 'nothing to generate' };
-      if (human) ui.info('nothing to generate, so the agent was not started.');
-    }
+    if (opts.enabled) agentResult = { ran: false, reason: 'nothing to generate' };
   }
 
-  // Re-read rather than trusting the list we queued: the checkpoint was
-  // advanced from the agent's completion reports after every batch, and a
-  // partial run must leave the remainder visible so the next build resumes.
   let after = null;
   let afterReadError = null;
-  try { after = inventory.readManifest(repoRoot); }
-  catch (e) { afterReadError = e; }
-  const observedPending = after?.checkpoint?.pendingPaths;
-  const actualSourceSha = stateMod.resolveBase(repoRoot, config.sync.tracking_branch).baseSha;
-  agentResult = agentMod.assessWikiProgress(agentResult, pending, observedPending, {
+  try { after = inventory.readManifest(root); } catch (e) { afterReadError = e; }
+  agentResult = agentMod.assessWikiProgress(agentResult, pending, after?.checkpoint?.pendingPaths, {
     expectedTargetSha: targetSha,
     actualTargetSha: afterReadError ? targetSha : after?.knowledgeSha,
-    actualSourceSha,
+    actualSourceSha: gitMod.headSha(root),
   });
-  if (afterReadError) {
-    agentResult = { ...agentResult, reason: `Wiki manifest could not be read after Claude exited: ${afterReadError.message}` };
-  }
+  if (afterReadError) agentResult = { ...agentResult, reason: `Wiki manifest could not be read after the agent exited: ${afterReadError.message}` };
 
   let structuredOk = true;
   if (agentResult.checkpointInvalid) {
-    // If Claude only damaged/deleted the checkpoint while the source and
-    // manifest target stayed put, restore the exact pre-agent queue. Never
-    // overwrite state belonging to a concurrent sync that moved the target.
-    const canRestore = structuredManifest && actualSourceSha === targetSha
-      && (!after || after.knowledgeSha === targetSha);
+    const canRestore = structuredManifest && gitMod.headSha(root) === targetSha && (!after || after.knowledgeSha === targetSha);
     if (canRestore) {
-      inventory.writeManifest(repoRoot, structuredManifest);
+      inventory.writeManifest(root, structuredManifest);
       after = structuredManifest;
       agentResult = { ...agentResult, checkpointRestored: true };
-    } else {
-      structuredOk = false;
-    }
+    } else structuredOk = false;
   }
 
   const afterPending = after?.checkpoint?.pendingPaths;
   const remaining = Array.isArray(afterPending) ? afterPending.length : pending.length;
-  agentMod.renderWikiProgress(agentResult, { human });
-  if (human && pending.length > 0 && agentResult.reason?.startsWith('not requested')) {
-    ui.info(`--no-agent: ${remaining} generation target(s) stay queued without prose.`);
-    ui.dim('    Run "aidev knowledge build" to write them; the manifest and checkpoint are saved.');
+  agentMod.renderWikiProgress(agentResult, { human: !!say, resumeCommand: COMMAND });
+  if (say && pending.length > 0 && agentResult.reason?.startsWith('not requested')) {
+    say.info(`--no-agent: ${remaining} generation target(s) stay queued without prose.`);
+    say.dim(`    Run "${COMMAND}" to write them; the manifest and checkpoint are saved.`);
   }
 
-  const commandOk = structuredOk && !(agentResult.ran && !agentResult.ok);
+  // The plan for an interactive tool's subagents mirrors what is still queued.
+  if (remaining > 0) writePlanFile(root, config, { ...plan, pending: Array.isArray(afterPending) ? afterPending : pending });
+  else removePlanFile(root);
+
+  // ---- commit -------------------------------------------------------------------
+  let committed = false;
+  let commitSha = null;
+  let commitReason = null;
+  const complete = structuredOk && remaining === 0 && !(agentResult.ran && !agentResult.ok);
+  if (commit && !flags['no-commit']) {
+    if (complete) {
+      const c = commitWiki(root, targetSha);
+      committed = c.committed;
+      commitSha = c.sha || null;
+      commitReason = c.reason || null;
+      if (say) {
+        if (committed) say.ok(`committed the Wiki as ${stateMod.short(commitSha)} (${commitMessage(targetSha).split('\n')[0]})`);
+        else say.info(commitReason);
+      }
+    } else if (say) {
+      say.warn(`${remaining} generation target(s) still need prose; the Wiki was not committed.`);
+      say.dim(`    Run "${COMMAND}" again to continue; finished targets are saved in the checkpoint.`);
+    }
+  } else if (say && complete) {
+    say.info(`--no-commit: the updated Wiki is in the working tree; commit ${layout.KNOWLEDGE_REL}/ when ready.`);
+  }
+
+  const commandOk = complete;
   if (!human) {
     emitJson({
-      ok: commandOk,
-      structuredOk,
-      targetSha,
-      files: records.length,
-      generationTargets: records.length,
-      evidenceFiles: evidenceState.trackedFiles,
-      shards: shards.length,
-      pending,
-      deferred,
-      remaining,
-      agent: agentResult,
+      ok: commandOk, structuredOk, targetSha,
+      branch: gitMod.currentBranch(root),
+      files: records.length, generationTargets: records.length, evidenceFiles: evidenceState.trackedFiles,
+      shards: shards.length, diff: counts(diff), orphans: orphans.deleted, pending, deferred, remaining,
+      agent: agentResult, committed, commitSha, commitReason,
+      plan: remaining > 0 ? PLAN_REL : null,
     });
   }
-  // A failed or incomplete agent is reported but does not discard the
-  // structured write; the non-zero exit tells CI that prose is still owed.
-  return { code: commandOk ? EXIT.OK : EXIT.GENERAL, json };
+  return { code: commandOk ? EXIT.OK : EXIT.GENERAL, json, plan, remaining, committed, commitSha, structuredOk, agentResult };
+}
+
+// --------------------------------------------------------------- publishing
+
+function worktreePath(repoRoot) { return layout.abs(repoRoot, WORKTREE_REL); }
+
+/** Ensure a worktree at `targetSha`, reusing one left by an interrupted publish. */
+function ensureWorktree(repoRoot, targetSha) {
+  const dir = worktreePath(repoRoot);
+  if (fs.existsSync(dir)) {
+    if (gitMod.headSha(dir) === targetSha) return { dir, reused: true };
+    gitMod.worktreeRemove(repoRoot, dir);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const added = gitMod.worktreeAdd(repoRoot, dir, targetSha);
+  if (!added.ok) throw new AidevError(`could not create a worktree for ${stateMod.short(targetSha)}: ${added.stderr}`);
+  return { dir, reused: false };
+}
+
+function removeWorktree(repoRoot) {
+  const dir = worktreePath(repoRoot);
+  if (!fs.existsSync(dir)) return;
+  gitMod.worktreeRemove(repoRoot, dir);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
+function operationKey(config, targetSha) {
+  const h = config.hosting;
+  return crypto.createHash('sha256')
+    .update([h.type, h.organization || '', h.project || '', h.repository || '', targetSha].join('\0'))
+    .digest('hex').slice(0, 32);
+}
+
+function streamId(config) {
+  const h = config.hosting;
+  return crypto.createHash('sha256')
+    .update([h.type, h.organization || '', h.project || '', h.repository || '', config.sync.tracking_branch].join('\0'))
+    .digest('hex').slice(0, 32);
+}
+
+const STREAM_MARKER = '<!-- aidev:wiki-stream ';
+function streamMarker(id) { return `${STREAM_MARKER}${id} -->`; }
+
+function prDescription({ id, opKey, targetSha, branch, diff }) {
+  return [
+    streamMarker(id),
+    '',
+    `Updates the LLM Wiki (\`${layout.KNOWLEDGE_REL}/\`) for \`${branch}\` at \`${targetSha}\`.`,
+    '',
+    '| | |',
+    '| --- | --- |',
+    `| target SHA | \`${targetSha}\` |`,
+    `| operation key | \`${opKey}\` |`,
+    `| wiki stream | \`${id}\` |`,
+    '',
+    '### Change set',
+    '',
+    `- added: ${diff.added}`,
+    `- modified: ${diff.modified}`,
+    `- removed: ${diff.removed}`,
+    `- renamed: ${diff.renamed}`,
+    '',
+    '> The Wiki is regenerated and describes the target commit. Review it like any other change.',
+    '',
+    '**Merging is a human decision — this PR is never auto-completed.**',
+  ].join('\n');
+}
+
+/** Commit the Wiki in the worktree onto the publish branch; optionally push. */
+function commitAndPush(worktree, prBranch, targetSha, { push }) {
+  const co = gitMod.run(['checkout', '-B', prBranch], { cwd: worktree });
+  if (!co.ok) return { committed: false, pushed: false, reason: `could not create branch ${prBranch}: ${co.stderr}` };
+  const c = commitWiki(worktree, targetSha);
+  if (!c.committed) return { committed: false, pushed: false, reason: c.reason };
+  if (!push) return { committed: true, pushed: false, branch: prBranch, sha: c.sha };
+  const pushed = gitMod.run(['push', '--force-with-lease', '--set-upstream', 'origin', prBranch], { cwd: worktree });
+  if (!pushed.ok) return { committed: true, pushed: false, branch: prBranch, sha: c.sha, reason: `push failed: ${pushed.stderr}` };
+  return { committed: true, pushed: true, branch: prBranch, sha: c.sha };
+}
+
+async function openPr(config, { prBranch, id, opKey, targetSha, diff }) {
+  if (config.hosting.type !== 'azure-devops') {
+    return { ok: false, reason: `hosting.type is ${config.hosting.type}; open the pull request for ${prBranch} by hand` };
+  }
+  const repo = config.hosting.repository;
+  const targetBranch = config.sync.pr.target_branch;
+  const description = prDescription({ id, opKey, targetSha, branch: config.sync.tracking_branch, diff });
+  const open = await ado.listPullRequests(config, repo, { status: 'active', targetBranch });
+  const mine = open.find((pr) => String(pr.description || '').includes(streamMarker(id)));
+  if (mine && String(mine.sourceRefName || '').endsWith(`/${prBranch}`)) {
+    await ado.updatePullRequestDescription(config, repo, mine.pullRequestId, description);
+    return { ok: true, updated: true, pullRequestId: mine.pullRequestId, url: mine.url };
+  }
+  const created = await ado.createPullRequest(config, repo, {
+    sourceBranch: prBranch, targetBranch,
+    title: commitMessage(targetSha).split('\n')[0],
+    description, reviewers: config.sync.pr.reviewers,
+  });
+  const result = { ok: true, created: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null };
+  if (mine) {
+    try {
+      await ado.updatePullRequestDescription(config, repo, mine.pullRequestId,
+        `${String(mine.description || '')}\n\n> ⚠️ Superseded by \`${prBranch}\`${result.pullRequestId ? ` (PR !${result.pullRequestId})` : ''}. Close this one after review.`);
+      result.superseded = { pullRequestId: mine.pullRequestId, branch: mine.sourceRefName };
+    } catch (e) {
+      result.supersedeWarning = `the previous PR !${mine.pullRequestId} could not be annotated: ${e.message}`;
+    }
+  }
+  return result;
+}
+
+/**
+ * Publish path: update in a worktree at HEAD and commit on aidev/wiki-<sha12>.
+ * The developer's checkout is never touched. A failure keeps the lease and
+ * the worktree so finished prose is not thrown away; re-running continues
+ * from the checkpoint, `--abort` discards it.
+ */
+async function publish(ctx, config, { silent = false } = {}) {
+  const { repoRoot, flags } = ctx;
+  const human = !flags.json;
+  const say = human && !silent ? ui : null;
+  const targetSha = gitMod.headSha(repoRoot);
+  if (!targetSha) throw new AidevError('could not resolve HEAD — commit something first');
+  const prBranch = wikiBranchName(targetSha);
+  const opKey = operationKey(config, targetSha);
+  const id = streamId(config);
+
+  const existingLease = leases.readSyncLease(repoRoot);
+  let lease;
+  if (existingLease) {
+    const ev = leases.evaluateLease(existingLease);
+    if (existingLease.targetSha === targetSha || flags.force) {
+      lease = existingLease.targetSha === targetSha ? existingLease
+        : leases.acquireSyncLease(repoRoot, { targetSha, originalSha: stateMod.knowledgeSha(repoRoot), ttlMinutes: config.sync.lease_ttl_minutes, force: true });
+      if (say) say.ok(`continuing the interrupted publish (target ${stateMod.short(lease.targetSha)})`);
+    } else {
+      throw new AidevError(
+        `an interrupted publish is present (${ev.valid ? 'active' : ev.reason}; target ${stateMod.short(existingLease.targetSha)}). ` +
+        `Discard it with "${COMMAND} --abort", or take it over with --force.`);
+    }
+  } else {
+    lease = leases.acquireSyncLease(repoRoot, { targetSha, originalSha: stateMod.knowledgeSha(repoRoot), ttlMinutes: config.sync.lease_ttl_minutes });
+    if (say) say.ok(`acquired publish lease (ttl ${lease.ttlMinutes}m)`);
+  }
+
+  try {
+    const { dir: work, reused } = ensureWorktree(repoRoot, targetSha);
+    if (say) say.ok(`${reused ? 'reusing' : 'created'} worktree at ${WORKTREE_REL} (${stateMod.short(targetSha)})`);
+    if (say) say.table([['publish branch', prBranch], ['pull request target', config.sync.pr.target_branch]]);
+
+    const r = await updateInPlace({ ...ctx, repoRoot: work }, config, work, { silent: true, commit: false, leaseHeld: true, human: !!say });
+    if (r.nothingToDo) {
+      removeWorktree(repoRoot);
+      leases.releaseSyncLease(repoRoot);
+      if (!human) ui.json({ ok: true, noop: true, targetSha, branch: prBranch });
+      return EXIT.OK;
+    }
+    const diff = r.json?.diff || { added: 0, modified: 0, removed: 0, renamed: 0 };
+
+    let pr = { attempted: false };
+    let out = { committed: false, pushed: false };
+    if (r.code !== EXIT.OK) {
+      if (say) say.fail(`the Wiki is not complete (${r.remaining} target(s) still queued); nothing was published.`);
+      if (say) say.dim(`    Run "${COMMAND}" again to continue in the same worktree, or "${COMMAND} --abort" to discard it.`);
+      if (!human) ui.json({ ok: false, structuredOk: r.structuredOk !== false, targetSha, branch: prBranch, remaining: r.remaining, agent: r.agentResult, published: false, committed: false });
+      return EXIT.GENERAL;
+    }
+
+    out = commitAndPush(work, prBranch, targetSha, { push: !flags['no-push'] });
+    if (!out.committed) {
+      if (say) say.info(out.reason);
+    } else if (flags['no-push']) {
+      if (say) say.ok(`committed on local branch ${prBranch} (--no-push: not pushed). Push it and open a PR when ready.`);
+      pr = { attempted: false, reason: '--no-push', branch: prBranch };
+    } else if (!out.pushed) {
+      if (say) say.warn(`committed on ${prBranch} but not pushed: ${out.reason}`);
+      pr = { attempted: false, reason: out.reason, branch: prBranch };
+    } else {
+      if (say) say.ok(`pushed ${prBranch}`);
+      if (!config.sync.auto_pr) {
+        pr = { attempted: false, reason: 'sync.auto_pr is false', branch: prBranch };
+        if (say) say.info('sync.auto_pr is false; open the pull request by hand.');
+      } else if (config.hosting.type === 'azure-devops' && !process.env[config.hosting.auth_env]) {
+        pr = { attempted: false, reason: `${config.hosting.auth_env} is not set`, branch: prBranch };
+        if (say) say.warn(`${config.hosting.auth_env} is not set; open the pull request for ${prBranch} by hand.`);
+      } else {
+        try {
+          const res = await openPr(config, { prBranch, id, opKey, targetSha, diff });
+          pr = { attempted: true, ...res };
+          if (say) {
+            if (!res.ok) say.info(res.reason);
+            else if (res.created) say.ok(`opened pull request${res.pullRequestId ? ` !${res.pullRequestId}` : ''}${res.url ? ` ${res.url}` : ''}`);
+            else if (res.updated) say.ok(`updated the existing pull request !${res.pullRequestId}`);
+            if (res.superseded) say.warn(`the earlier PR !${res.superseded.pullRequestId} was annotated as superseded; closing it is a human decision.`);
+            if (res.supersedeWarning) say.warn(res.supersedeWarning);
+          }
+        } catch (e) {
+          pr = { attempted: true, ok: false, reason: e.message, branch: prBranch };
+          if (say) say.fail(`the pull request could not be created: ${e.message}. ${prBranch} is pushed; open it by hand.`);
+        }
+      }
+      if (say) say.dim('    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.');
+    }
+
+    removeWorktree(repoRoot);
+    leases.releaseSyncLease(repoRoot);
+    if (say) say.ok('publish lease released');
+    if (!human) {
+      ui.json({ ok: true, targetSha, branch: prBranch, committed: out.committed, commitSha: out.sha || null,
+        pushed: out.pushed, diff, pr, agent: r.agentResult });
+    }
+    return EXIT.OK;
+  } catch (e) {
+    if (say) {
+      say.fail(`publish failed: ${e.message}`);
+      say.dim('    The lease and worktree were kept so the half-finished state is not hidden.');
+      say.dim(`    Run "${COMMAND}" again to continue, or "${COMMAND} --abort" to discard it.`);
+    }
+    throw e;
+  }
+}
+
+function abort(repoRoot, flags) {
+  const lease = leases.readSyncLease(repoRoot);
+  removeWorktree(repoRoot);
+  if (!lease) { ui.warn('no interrupted publish to abort.'); if (flags.json) ui.json({ ok: true, aborted: false }); return EXIT.OK; }
+  leases.releaseSyncLease(repoRoot);
+  ui.ok('publish lease released and the worktree removed; your checkout was never touched.');
+  if (flags.json) ui.json({ ok: true, aborted: true });
+  return EXIT.OK;
+}
+
+// ---------------------------------------------------------------------- run
+
+/**
+ * `update` for callers inside the CLI (init, hooks). `commit: false` keeps the
+ * result in the working tree; `silent: true` prints nothing and hands the
+ * JSON back instead.
+ */
+async function update(ctx, config, { silent = false, commit = true } = {}) {
+  const { repoRoot, flags } = ctx;
+  if (!gitMod.isRepo(repoRoot)) throw new AidevError(`${repoRoot} is not a git repository`);
+  if (flags.abort) return { code: abort(repoRoot, flags), json: null };
+  const human = !flags.json;
+  // The tree must be clean where the Wiki looks, whichever path follows.
+  const dirty = inventory.dirtyTargets(repoRoot, config);
+  if (dirty.length > 0) {
+    const list = dirty.slice(0, 20).map((p) => `      ${p}`).join('\n');
+    throw new AidevError(
+      `${dirty.length} generation target(s) have uncommitted changes; the Wiki describes commits only:\n${list}` +
+      `${dirty.length > 20 ? `\n      … and ${dirty.length - 20} more` : ''}\n` +
+      `    Commit (or stash) them, then run "${COMMAND}" again.`);
+  }
+  const onTracking = gitMod.currentBranch(repoRoot) === config.sync.tracking_branch;
+  const wantPublish = flags.branch || (commit && !flags['no-commit'] && !flags['dry-run'] && onTracking);
+  if (wantPublish) {
+    if (flags['no-commit']) throw new AidevError('--branch publishes a commit; it cannot be combined with --no-commit');
+    if (human && !silent && !flags.branch) ui.info(`on ${config.sync.tracking_branch}: publishing as ${wikiBranchName(gitMod.headSha(repoRoot))} instead of committing here.`);
+    return { code: await publish(ctx, config, { silent }), json: null };
+  }
+  if (flags['no-push']) throw new AidevError('--no-push only applies with --branch');
+  return updateInPlace(ctx, config, repoRoot, { silent, commit, human });
 }
 
 async function run(ctx) {
   const sub = ctx.positionals[0];
+  if (sub !== 'update') throw new AidevError(`unknown subcommand: aidev knowledge ${sub || ''} (expected: update)`);
   const config = cfgMod.loadConfig(ctx.repoRoot);
-  if (sub === 'status') return status(ctx, config);
-  if (sub === 'build') return (await build(ctx, config)).code;
-  throw new AidevError(`unknown subcommand: aidev knowledge ${sub || ''} (expected: build, status)`);
+  return (await update(ctx, config)).code;
 }
 
-module.exports = { run, build, FLAGS, FLAG_HELP, summary: 'LLM Wikiの生成と状態確認' };
+module.exports = {
+  run, update, updateInPlace, writePlanFile, readPlanFile, removePlanFile, commitWiki, wikiBranchName, commitMessage,
+  operationKey, streamId, FLAGS, FLAG_HELP, WORKTREE_REL, PLAN_REL, COMMAND,
+  summary: 'LLM WikiをHEADに追従させ、別コミットとして積む',
+};

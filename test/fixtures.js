@@ -88,7 +88,10 @@ function writeStaticAssets(root, { hooks = false, realTemplates = false } = {}) 
     hooks: {
       SessionStart: [{ matcher: '*', hooks: [kitHook('session-start'), ...(hooks ? [{ type: 'command', command: 'echo team-owned-hook' }] : [])] }],
       PreToolUse: [{ matcher: 'Write|Edit|MultiEdit|Bash', hooks: [kitHook('guard-write')] }],
-      PostToolUse: [{ matcher: 'Write|Edit|MultiEdit', hooks: [kitHook('quality-gate')] }],
+      PostToolUse: [
+        { matcher: 'Write|Edit|MultiEdit', hooks: [kitHook('quality-gate')] },
+        { matcher: 'Bash', hooks: [kitHook('after-bash')] },
+      ],
       Stop: [{ hooks: [kitHook('session-stop')] }],
     },
   };
@@ -187,12 +190,26 @@ function makeRepo({
   // whether the code moved — exactly what happens after a real `aidev init`.
   const pkgSha = git(['rev-parse', 'HEAD'], root);
   if (withWiki) {
+    // The inventory records the PKG files the Wiki was generated from, as the
+    // CLI writes it; the verdict compares it with the tree at HEAD.
+    let records = [];
+    let evidence;
+    if (withConfig) {
+      const inv = require('../cli/lib/inventory');
+      const cfgMod = require('../cli/lib/config');
+      const scope = require('../cli/lib/knowledge-scope');
+      const config = cfgMod.loadConfig(root);
+      records = (inv.scanPackage(root, config, { ref: pkgSha }) || [])
+        .map((r) => ({ ...r, pages: [], selfHashes: {} }));
+      evidence = scope.buildEvidenceSnapshot(scope.scanEvidence(root, config, { ref: pkgSha }) || [], records, config);
+    }
     write(path.join(root, '.aidev', 'knowledge', 'index.md'), '# index\n');
-    write(path.join(root, '.aidev', 'knowledge', 'inventory', '00.json'), '[]\n');
+    write(path.join(root, '.aidev', 'knowledge', 'inventory', '00.json'), `${JSON.stringify(records)}\n`);
     write(path.join(root, '.aidev', 'knowledge', 'manifest.json'), `${JSON.stringify({
       schemaVersion: 3, knowledgeSha: pkgSha, kitCommit: null,
       generatedAt: new Date().toISOString(), inventoryShards: ['inventory/00.json'],
-      stats: { files: 0, pages: 0, maskedFiles: 0 }, checkpoint: { pendingPaths: [] },
+      stats: { files: records.length, pages: 0, maskedFiles: 0 }, checkpoint: { pendingPaths: [] },
+      ...(evidence ? { evidence } : {}),
     }, null, 2)}\n`);
   }
   if (withLock && withAssets) {

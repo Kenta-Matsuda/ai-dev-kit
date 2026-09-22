@@ -1,33 +1,33 @@
 'use strict';
 /**
- * The three-SHA consistency model, for a developer working in their own PKG
- * clone (typically on a feature branch).
+ * The Wiki consistency model, for a developer working in their own PKG clone.
  *
- *   trackingSha   tip of origin/<tracking_branch> — the code the Wiki is meant
- *                 to describe next
- *   baseSha       merge-base of HEAD and the tracking branch — the tracking
- *                 commit the current work is built on
- *   knowledgeSha  the commit the Wiki (.aidev/knowledge/manifest.json) describes
+ *   headSha       the commit the checkout is at — the code the Wiki must describe
+ *   knowledgeSha  the commit the Wiki (.aidev/knowledge/manifest.json) says it
+ *                 describes; informational, never the basis of the verdict
+ *   trackingSha   tip of origin/<tracking_branch>; only used to warn that the
+ *                 branch has moved on
  *
- * A feature branch is expected to differ from the tracking branch, so
- * consistency is not "HEAD == knowledgeSha". It is: does the Wiki describe the
- * base this work stands on?
+ * The verdict compares the *inventory* (the paths and blob ids the Wiki was
+ * generated from) with the tree at HEAD. That needs no old commit object, so
+ * it is the same after a fetch, a rebase, a squash or a force-push, and it is
+ * what `aidev knowledge update` uses to decide what to regenerate.
  *
- *   knowledgeSha == baseSha                   → OK (or WARN if prose is pending
- *                                               or the tracking branch moved on)
- *   knowledgeSha behind baseSha               → WARN. The base contains changes
- *                                               the Wiki has not seen; sync soon.
- *   knowledgeSha not in this branch's history → WARN. Wrong branch, or a Wiki
- *                                               from somewhere else.
+ *   inventory == tree at HEAD, nothing pending   → OK (or WARN when the
+ *                                                  tracking branch moved on)
+ *   inventory != tree at HEAD                    → WARN: the Wiki is behind
+ *                                                  HEAD; update it
+ *   prose still queued                           → WARN
  *   no Wiki, or a Wiki whose manifest is unreadable → ERROR. Nothing to reason
- *                                               from; ordinary writes stop
- *                                               until "aidev knowledge build".
+ *                                                  from; ordinary writes stop
+ *                                                  until the Wiki exists.
  */
 
 const path = require('path');
 const git = require('./git');
 const layout = require('./layout');
 const { readJsonIfExists, writeJsonAtomic } = require('./config');
+const inventory = require('./inventory');
 
 const SEVERITY = { OK: 'ok', UNKNOWN: 'unknown', WARN: 'warn', ERROR: 'error' };
 
@@ -106,7 +106,7 @@ function resolveBase(repoRoot, branch) {
  * PreToolUse guard uses — the error condition never depends on the network.
  */
 function computeState(repoRoot, config, { checkRemote = true, force = false } = {}) {
-  const branch = config?.sync?.tracking_branch || 'main';
+  const branch = config?.hosting?.tracking_branch || config?.sync?.tracking_branch || 'main';
   const { headSha, baseSha, localTrackingSha } = resolveBase(repoRoot, branch);
   const kSha = knowledgeSha(repoRoot);
 
@@ -119,40 +119,46 @@ function computeState(repoRoot, config, { checkRemote = true, force = false } = 
   const pendingPaths = Array.isArray(manifest?.checkpoint?.pendingPaths)
     ? manifest.checkpoint.pendingPaths : [];
 
+  // The structured verdict: what the Wiki was generated from versus HEAD.
+  let behind = null;
+  if (hasWiki && headSha) {
+    const records = inventory.readInventory(repoRoot, manifest);
+    behind = inventory.compareWithTree(repoRoot, config, records, { ref: 'HEAD' });
+  }
+
   let severity;
   let message;
   if (!hasWiki) {
     severity = SEVERITY.ERROR;
-    message = `LLM Wiki has not been generated yet (${layout.KNOWLEDGE_REL}/manifest.json is missing). Run "aidev knowledge build".`;
+    message = `LLM Wiki has not been generated yet (${layout.KNOWLEDGE_REL}/manifest.json is missing). Run "aidev init" (or "aidev knowledge update").`;
   } else if (!headSha) {
     severity = SEVERITY.ERROR;
     message = 'HEAD could not be resolved — is this a git repository with at least one commit?';
   } else if (!kSha) {
     severity = SEVERITY.ERROR;
     message = `${layout.KNOWLEDGE_REL}/manifest.json does not record a valid knowledgeSha.`;
-  } else if (!git.commitExists(repoRoot, kSha)) {
+  } else if (behind == null) {
+    severity = SEVERITY.ERROR;
+    message = 'the tree at HEAD could not be listed, so the Wiki cannot be compared with it.';
+  } else if (behind.behind) {
     severity = SEVERITY.WARN;
-    message = `the Wiki describes ${short(kSha)}, a commit this clone does not have. Fetch, check the branch, or run "aidev sync".`;
-  } else if (sourceChanged(repoRoot, kSha, baseSha)) {
-    // Only the package's own files count: the commit that adds the Wiki, or a
-    // kit update, changes nothing the Wiki describes.
-    severity = SEVERITY.WARN;
-    message = `the code this work is based on (${short(baseSha)}) has changed since the Wiki was generated (${short(kSha)}) — run "aidev sync" to catch up.`;
+    message = `the Wiki describes ${short(kSha)}, but ${behind.changed} file(s) differ at HEAD (${short(headSha)}): `
+      + `+${behind.added} ~${behind.modified} -${behind.removed} →${behind.renamed} — run "aidev knowledge update".`;
   } else if (pendingPaths.length > 0) {
     severity = SEVERITY.WARN;
-    message = `${pendingPaths.length} page(s) still await prose regeneration — run "aidev knowledge build".`;
+    message = `${pendingPaths.length} page(s) still await prose regeneration — run "aidev knowledge update".`;
   } else if (checkRemote && !remote.ok) {
     severity = SEVERITY.UNKNOWN;
     message = `remote unverified (${remote.reason || 'unreachable'}); local state is internally consistent.`;
   } else if (localTrackingSha && localTrackingSha !== baseSha && sourceChanged(repoRoot, baseSha, localTrackingSha)) {
     severity = SEVERITY.WARN;
-    message = `origin/${branch} has moved ahead (${short(localTrackingSha)}); work may continue. Run "aidev sync" to catch up.`;
+    message = `origin/${branch} has moved ahead (${short(localTrackingSha)}); work may continue. Merge or rebase, then "aidev knowledge update".`;
   } else if (remote.ok && remote.sha && remote.sha !== (localTrackingSha || baseSha)) {
     severity = SEVERITY.WARN;
-    message = `origin/${branch} has new commits (${short(remote.sha)}) that are not fetched yet; "git fetch" then "aidev status" to see whether the Wiki needs a sync.`;
+    message = `origin/${branch} has new commits (${short(remote.sha)}) that are not fetched yet; "git fetch" then "aidev status" to see whether the Wiki needs an update.`;
   } else {
     severity = SEVERITY.OK;
-    message = 'the Wiki describes the code this work is based on.';
+    message = `the Wiki describes HEAD (${short(headSha)}).`;
   }
 
   return {
@@ -169,6 +175,8 @@ function computeState(repoRoot, config, { checkRemote = true, force = false } = 
     remoteCheckedAt: remote.checkedAt,
     remoteReason: remote.reason,
     hasWiki,
+    behind,
+    wikiBehind: !!(behind && behind.behind),
     pendingPages: pendingPaths.length,
     trackingBranch: branch,
   };
@@ -181,7 +189,7 @@ function short(sha) {
 /** One-line summary for SessionStart. */
 function formatSummary(state) {
   const icon = { ok: '✅', unknown: 'ℹ️', warn: '⚠️', error: '❌' }[state.severity] || '•';
-  const head = `[ai-dev-kit] base=${short(state.baseSha)}  knowledge=${short(state.knowledgeSha)}  tracking=${short(state.trackingSha)}`;
+  const head = `[ai-dev-kit] head=${short(state.headSha)}  knowledge=${short(state.knowledgeSha)}  tracking=${short(state.trackingSha)}`;
   return `${head}\n${icon} ${state.message}`;
 }
 

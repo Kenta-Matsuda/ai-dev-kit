@@ -88,7 +88,7 @@ const DEFAULTS = Object.freeze({
   tools: {
     default: Object.freeze(['claude']),
     agent: 'claude',
-    // The model handed to an agent the CLI starts itself (knowledge build, sync). An
+    // The model handed to an agent the CLI starts itself (knowledge update). An
     // interactive session resolves its own model from the tool's settings.
     agent_model: 'sonnet',
   },

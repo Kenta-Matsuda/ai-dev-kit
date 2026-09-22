@@ -123,7 +123,7 @@ function run(ctx) {
     ui.warn(`${r.handEdits.length} Wiki page(s) edited by hand since generation:`);
     for (const h of r.handEdits.slice(0, 10)) ui.dim(`    ${h.page} (${h.reason})`);
   }
-  if (r.inconsistencies.length > 0) ui.warn(`${r.inconsistencies.length} inventory inconsistency/ies; run "aidev knowledge build --full" if they persist.`);
+  if (r.inconsistencies.length > 0) ui.warn(`${r.inconsistencies.length} inventory inconsistency/ies; run "aidev knowledge update --full" if they persist.`);
   if (!cfgState.noLock) {
     for (const m of cfgState.conflicts.slice(0, 10)) ui.dim(`    conflict:   ${m}`);
     for (const m of cfgState.hooksMissing.slice(0, 10)) ui.dim(`    missing hook: ${m}`);
@@ -132,8 +132,8 @@ function run(ctx) {
   }
   if (r.syncLease) {
     ui.warn(r.syncLease.evaluation.valid
-      ? `a sync is in progress (target ${stateMod.short(r.syncLease.targetSha)}).`
-      : `a stale sync lease is present (${r.syncLease.evaluation.reason}). Run "aidev sync --resume" or "aidev sync --abort".`);
+      ? `a Wiki publish is in progress (target ${stateMod.short(r.syncLease.targetSha)}).`
+      : `a stale publish lease is present (${r.syncLease.evaluation.reason}). Run "aidev knowledge update" to continue it or "aidev knowledge update --abort" to discard it.`);
   }
   ui.out('');
   return EXIT.OK;

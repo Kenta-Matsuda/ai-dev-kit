@@ -16,7 +16,7 @@
  * Three properties matter more than convenience here:
  *
  *   - It runs by default. A Wiki without prose is not useful to anyone, so
- *     the commands that own the Wiki (`knowledge build`, `sync`) start the
+ *     the command that owns the Wiki (`knowledge update`) starts the
  *     agent unless `--no-agent` is passed. That flag is for CI and scripts
  *     that maintain only the structured half; cost is shown up front and
  *     progress is saved per target.
@@ -588,7 +588,7 @@ function assessWikiProgress(agentResult, paths, checkpointPaths, {
 /** Show the domain result after a command has re-read the checkpoint. */
 function renderWikiProgress(result, {
   human = true,
-  resumeCommand = 'aidev knowledge build',
+  resumeCommand = 'aidev knowledge update',
 } = {}) {
   if (!human || !result.ran) return;
   if (result.ok) {
@@ -776,7 +776,7 @@ async function runWikiAgent({
     ui.dim(`    repository evidence: ${evidencePaths.length} tracked, non-secret file(s)`);
     ui.dim(`    requested model: ${opts.model || `${label}'s own default (no model flag passed)`}`);
     ui.dim(`    each run has a ${formatDuration(opts.timeoutMs)} budget. Progress is saved per target,`);
-    ui.dim('    so if this stops, "aidev knowledge build" continues where it left off.');
+    ui.dim('    so if this stops, "aidev knowledge update" continues where it left off.');
   }
 
   const summary = {
@@ -828,8 +828,8 @@ async function runWikiAgent({
       if (res.result) for (const l of String(res.result).split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       if (res.stderr) for (const l of res.stderr.split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       ui.dim(res.timedOut
-        ? '    Finished targets are saved. Resume with "aidev knowledge build"; raise --agent-timeout or lower --agent-batch-size if it keeps happening.'
-        : '    Finished targets are saved. Resume with "aidev knowledge build" after correcting the cause.');
+        ? '    Finished targets are saved. Resume with "aidev knowledge update"; raise --agent-timeout or lower --agent-batch-size if it keeps happening.'
+        : '    Finished targets are saved. Resume with "aidev knowledge update" after correcting the cause.');
     }
     return summary;
   };

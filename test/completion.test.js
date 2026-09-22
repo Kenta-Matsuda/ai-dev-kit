@@ -8,8 +8,8 @@
  *   - the permission weakening check that gates --approve
  *   - orphaned Wiki page removal (README scenario 7)
  *   - the session-start summary and the self-evolution journal at session-stop
- *   - how the knowledge-builder agent is launched, in `knowledge build` and
- *     inside the temporary worktree of `aidev sync`
+ *   - how the knowledge-builder agent is launched, in `knowledge update` and
+ *     inside the temporary worktree of a publish on the tracking branch
  *
  * Run: node test/completion.test.js
  */
@@ -526,14 +526,15 @@ function run() {
   });
 
   // --------------------------------------------- agent invocation (end-to-end)
-  suite('agent: knowledge build integration');
+  suite('agent: knowledge update integration');
 
   // Each case builds its own repo on purpose. The first successful build
   // records the inventory, after which nothing is pending and a later run
   // would not start an agent at all — a shared fixture would silently stop
   // testing the thing these cases exist to test.
   const withRepo = (fn) => {
-    const fx = makeRepo();
+    // No Wiki yet: the first update has every target to generate.
+    const fx = makeRepo({ withWiki: false });
     try {
       return fn({
         fx,
@@ -545,12 +546,15 @@ function run() {
     } finally { fx.cleanup(); }
   };
 
-  test('--no-agent spawns nothing at all', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--no-agent', '--json'],
+  test('--no-agent spawns nothing at all and reports the prose as owed', () => withRepo(({ root, stub, argvOut }) => {
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--no-agent', '--json'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
-    eq(r.code, 0, r.out);
+    eq(r.code, 1, r.out);
     ok(!fs.existsSync(argvOut), 'the agent ran although --no-agent was given');
-    eq(lastJson(r.out).agent.ran, false);
+    const j = lastJson(r.out);
+    eq(j.agent.ran, false);
+    eq(j.structuredOk, true);
+    ok(j.remaining > 0, 'targets stay queued');
   }));
 
   const bareRepo = (extra = {}) => require('./fixtures').makeRepo({
@@ -620,7 +624,7 @@ function run() {
   });
 
   test('the agent runs by default', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--json'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     eq(r.code, 0, r.out);
     ok(fs.existsSync(argvOut), `the agent did not run by default: ${r.out}`);
@@ -628,27 +632,27 @@ function run() {
   }));
 
   test('--no-agent with --agent-name is rejected', () => withRepo(({ root, stub }) => {
-    const r = aidev(root, ['knowledge', 'build', '--no-agent', '--agent-name', 'x', '--json'], { env: { AIDEV_CLAUDE_BIN: stub } });
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--no-agent', '--agent-name', 'x', '--json'], { env: { AIDEV_CLAUDE_BIN: stub } });
     eq(r.code, 1, r.out);
     ok(/--no-agent cannot be combined/.test(r.out), r.out);
   }));
 
-  test('the build targets the merge-base with the tracking branch', () => withRepo(({ fx, root }) => {
-    const r = aidev(root, ['knowledge', 'build', '--json']);
+  test('the update targets HEAD', () => withRepo(({ fx, root, stub, argvOut }) => {
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     eq(r.code, 0, r.out);
-    eq(lastJson(r.out).targetSha, fx.setupSha, 'target is not HEAD == origin/main');
-    eq(readManifest(root).knowledgeSha, fx.setupSha, 'the manifest does not describe the target');
+    eq(lastJson(r.out).targetSha, fx.setupSha, 'target is not HEAD');
+    eq(readManifest(root).knowledgeSha, fx.setupSha, 'the manifest does not describe HEAD');
   }));
 
   test('--dry-run reports the agent it would run but spawns nothing', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--dry-run'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--dry-run'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     eq(r.code, 0, r.out);
     ok(!fs.existsSync(argvOut), 'a dry run spawned the agent');
   }));
 
   test('the build spawns claude with the documented argv and prompt on stdin', () => withRepo(({ fx, root, stub, argvOut, promptOut }) => {
-    const r = aidev(root, ['knowledge', 'build'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut } });
     eq(r.code, 0, r.out);
     ok(fs.existsSync(argvOut), `the agent never ran: ${r.out}`);
@@ -683,7 +687,7 @@ function run() {
       return cmd;
     };
     withRepo(({ root, stub, argvOut, promptOut }) => {
-      const r = aidev(root, ['knowledge', 'build'], { env: {
+      const r = aidev(root, ['knowledge', 'update', '--no-commit'], { env: {
         AIDEV_CLAUDE_BIN: writeCmd(root, stub),
         STUB_ARGV_OUT: argvOut,
         STUB_PROMPT_OUT: promptOut,
@@ -696,7 +700,7 @@ function run() {
     });
     withRepo(({ root, stub, argvOut }) => {
       const started = Date.now();
-      const r = aidev(root, ['knowledge', 'build', '--agent-timeout', '10000', '--json'], { env: {
+      const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-timeout', '10000', '--json'], { env: {
         AIDEV_CLAUDE_BIN: writeCmd(root, stub),
         STUB_ARGV_OUT: argvOut,
         STUB_MODE: 'hang',
@@ -708,7 +712,7 @@ function run() {
   });
 
   test('--agent-name overrides which agent is started', () => withRepo(({ root, stub, argvOut }) => {
-    aidev(root, ['knowledge', 'build', '--agent-name', 'custom-builder'],
+    aidev(root, ['knowledge', 'update', '--no-commit', '--agent-name', 'custom-builder'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     ok(fs.existsSync(argvOut), 'the named agent never ran');
     const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
@@ -716,7 +720,7 @@ function run() {
   }));
 
   test('--agent-model reaches the spawned process as --model', () => withRepo(({ root, stub, argvOut }) => {
-    aidev(root, ['knowledge', 'build', '--agent-model', 'claude-opus-4-8'],
+    aidev(root, ['knowledge', 'update', '--no-commit', '--agent-model', 'claude-opus-4-8'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     ok(fs.existsSync(argvOut), 'the run never started an agent');
     const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
@@ -724,44 +728,45 @@ function run() {
   }));
 
   test('a rejected model never reaches a subprocess', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--agent-model', '--dangerously-skip-permissions'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-model', '--dangerously-skip-permissions'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     ok(r.code !== 0, `a flag-shaped model was accepted: ${r.out}`);
     ok(!fs.existsSync(argvOut), 'the bad model was still spawned');
   }));
 
   test('a rejected agent name never reaches a subprocess', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--agent-name', '../evil'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-name', '../evil'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     ok(r.code !== 0, `a path-traversing agent name was accepted: ${r.out}`);
     ok(!fs.existsSync(argvOut), 'the bad name was still spawned');
   }));
 
-  test('a missing claude is a warning, not a failure', () => withRepo(({ root }) => {
-    const r = aidev(root, ['knowledge', 'build'],
+  test('a missing claude keeps the structured write and reports the prose as owed', () => withRepo(({ root }) => {
+    const r = aidev(root, ['knowledge', 'update', '--no-commit'],
       { env: { AIDEV_CLAUDE_BIN: path.join(root, 'no-such-claude') } });
-    // The structured write already succeeded, so this must not fail the run.
-    eq(r.code, 0, `a missing binary failed the build: ${r.out}`);
+    // The structure is written; the exit code says the Wiki is not complete.
+    eq(r.code, 1, `a missing binary must leave prose owed: ${r.out}`);
+    ok(/did not run/.test(r.out), `explains the missing tool: ${r.out}`);
     ok(fs.existsSync(path.join(root, K, 'manifest.json')), 'the manifest was lost');
   }));
 
   test('agent failures preserve the queue and align human, JSON, and exit status', () => {
     withRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['knowledge', 'build'],
+      const r = aidev(root, ['knowledge', 'update', '--no-commit'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
       eq(r.code, 1, `expected exit 1: ${r.out}`);
       const m = readManifest(root);
       ok(m.checkpoint.pendingPaths.length > 0, 'a failed agent discarded the work queue');
     });
     withRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['knowledge', 'build'],
+      const r = aidev(root, ['knowledge', 'update', '--no-commit'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
       eq(r.code, 1, `zero progress was reported as success: ${r.out}`);
       ok(/made no Wiki progress/.test(r.out), `missing no-progress diagnosis: ${r.out}`);
       ok(/need more information/.test(r.out), `Claude's result was hidden: ${r.out}`);
     });
     withRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['knowledge', 'build', '--json'],
+      const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
       eq(r.code, 1, `zero-progress JSON run exited ${r.code}: ${r.out}`);
       const j = lastJson(r.out);
@@ -770,7 +775,7 @@ function run() {
       eq(j.agent.noProgress, true, 'agent no-progress state was lost');
     });
     withRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['knowledge', 'build', '--json'],
+      const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'partial' } });
       eq(r.code, 1, `partial JSON run exited ${r.code}: ${r.out}`);
       const j = lastJson(r.out);
@@ -780,7 +785,7 @@ function run() {
       ok(j.agent.remaining > 0, 'unfinished targets disappeared');
     });
     withRepo(({ root, stub, argvOut }) => {
-      const r = aidev(root, ['knowledge', 'build', '--json'],
+      const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'missing-checkpoint' } });
       eq(r.code, 1, `missing checkpoint run exited ${r.code}: ${r.out}`);
       const j = lastJson(r.out);
@@ -791,13 +796,13 @@ function run() {
       const restored = readManifest(root);
       ok(restored.checkpoint.pendingPaths.length > 0, 'restored checkpoint lost the unfinished queue');
       // The next (incremental) build picks the restored queue up again.
-      const retry = aidev(root, ['knowledge', 'build', '--dry-run', '--json']);
+      const retry = aidev(root, ['knowledge', 'update', '--no-commit', '--dry-run', '--json']);
       ok(lastJson(retry.out).pending.length > 0, 'the next build cannot recover the queue');
     });
   });
 
   test('--json stays exactly one document and carries the agent result', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--json'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
     const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
     eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}: ${r.out}`);
@@ -808,7 +813,7 @@ function run() {
   }));
 
   test('the CLI folds completion reports into the checkpoint and reports what was drained', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--json'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'drain' } });
     eq(r.code, 0, r.out);
     eq(lastJson(r.out).remaining, 0, 'the drained checkpoint was not re-read');
@@ -824,7 +829,7 @@ function run() {
   }));
 
   test('--scope narrows generation targets but preserves repository evidence', () => withRepo(({ root, stub, argvOut, promptOut }) => {
-    aidev(root, ['knowledge', 'build', '--scope', 'docs'],
+    aidev(root, ['knowledge', 'update', '--no-commit', '--scope', 'docs'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut } });
     ok(fs.existsSync(argvOut), 'the scoped run never started an agent');
     const prompt = fs.readFileSync(promptOut, 'utf8');
@@ -844,7 +849,7 @@ function run() {
   }));
 
   test('a hung agent is killed at the deadline rather than hanging the CLI', () => withRepo(({ root, stub, argvOut }) => {
-    const r = aidev(root, ['knowledge', 'build', '--agent-timeout', '10000', '--json'],
+    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-timeout', '10000', '--json'],
       { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'hang' } });
     // Exits on its own rather than blocking until the harness gives up.
     eq(r.code, 1, `a hung agent did not fail the run: ${r.out}`);
@@ -853,16 +858,20 @@ function run() {
     ok(fs.existsSync(path.join(root, K, 'manifest.json')), 'the manifest was lost');
   }));
 
-  // ------------------------------------------------- agent invocation in sync
-  suite('agent: sync integration');
+  // ------------------------------------------- agent invocation in a publish
+  suite('agent: publish integration (tracking branch)');
 
   {
-    const WORKTREE = path.join('.aidev', 'cache', 'sync-worktree');
+    const WORKTREE = path.join('.aidev', 'cache', 'wiki-worktree');
+    const { git, pullPkg } = require('./fixtures');
 
+    // The clone sits on the tracking branch at a commit the Wiki does not
+    // describe, so `knowledge update` publishes on aidev/wiki-<sha>.
     const withAdvancedRepo = (fn) => {
       const fx = makeRepo();
       try {
-        const targetSha = advancePkg(fx); // give sync a real commit to follow
+        advancePkg(fx);
+        const targetSha = pullPkg(fx);
         return fn({
           fx,
           root: fx.root,
@@ -875,100 +884,94 @@ function run() {
       } finally { fx.cleanup(); }
     };
 
-    /** The developer's checkout must come out of a sync exactly as it went in. */
-    const assertCheckoutUntouched = (fx) => {
-      eq(readManifest(fx.root).knowledgeSha, fx.pkgSha, 'sync rewrote the manifest in the developer checkout');
-      ok(!fs.existsSync(path.join(fx.root, '.aidev', 'sync.lock')), 'the sync lease outlived the run');
-      ok(!fs.existsSync(path.join(fx.root, WORKTREE)), 'the temporary worktree was left behind');
-      eq(require('./fixtures').git(['rev-parse', 'HEAD'], fx.root), fx.setupSha, 'sync moved HEAD of the checkout');
+    /** The developer's checkout must come out of a publish exactly as it went in. */
+    const assertCheckoutUntouched = (fx, targetSha, { leaseKept = false } = {}) => {
+      eq(readManifest(fx.root).knowledgeSha, fx.pkgSha, 'the publish rewrote the manifest in the developer checkout');
+      eq(fs.existsSync(path.join(fx.root, '.aidev', 'sync.lock')), leaseKept, leaseKept ? 'the lease must be kept' : 'the lease outlived the run');
+      eq(fs.existsSync(path.join(fx.root, WORKTREE)), leaseKept, leaseKept ? 'the worktree must be kept' : 'the temporary worktree was left behind');
+      eq(git(['rev-parse', 'HEAD'], fx.root), targetSha, 'the publish moved HEAD of the checkout');
+      ok(!git(['status', '--porcelain'], fx.root).split('\n').some((l) => /\.aidev\/knowledge/.test(l)), 'the publish touched the Wiki in the checkout');
     };
 
-    test('sync --no-agent leaves prose to a later run', () => withAdvancedRepo(({ fx, root, stub, argvOut }) => {
-      const r = aidev(root, ['sync', '--no-pr', '--no-agent', '--json'],
+    test('--no-agent publishes nothing and keeps the worktree for a re-run', () => withAdvancedRepo(({ fx, root, targetSha, stub, argvOut }) => {
+      const r = aidev(root, ['knowledge', 'update', '--no-push', '--no-agent', '--json'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut } });
-      eq(r.code, 0, r.out);
-      ok(!fs.existsSync(argvOut), 'sync spawned an agent although --no-agent was given');
+      eq(r.code, 1, r.out);
+      ok(!fs.existsSync(argvOut), 'an agent was spawned although --no-agent was given');
       const j = lastJson(r.out);
       eq(j.agent.ran, false);
-      eq(j.committed, true, 'the structured Wiki was not committed on the sync branch');
-      ok(j.pendingPages > 0, 'nothing is owed to the agent although the source moved');
-      assertCheckoutUntouched(fx);
+      eq(j.published, false, 'a Wiki with prose owed must not be published');
+      ok(j.remaining > 0, 'nothing is owed to the agent although the source moved');
+      assertCheckoutUntouched(fx, targetSha, { leaseKept: true });
+      eq(aidev(root, ['knowledge', 'update', '--abort']).code, 0);
     }));
 
-    test('sync runs the builder inside the worktree and commits the result', () => withAdvancedRepo(({ fx, root, targetSha, stub, argvOut, promptOut, callsOut }) => {
-      const r = aidev(root, ['sync', '--no-pr', '--json'],
+    test('the publish runs the builder inside the worktree and commits on aidev/wiki-<sha>', () => withAdvancedRepo(({ fx, root, targetSha, stub, argvOut, promptOut, callsOut }) => {
+      const r = aidev(root, ['knowledge', 'update', '--no-push', '--json'],
         { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut, STUB_CALLS_OUT: callsOut } });
       eq(r.code, 0, r.out);
-      ok(fs.existsSync(argvOut), `sync never started the agent: ${r.out}`);
+      ok(fs.existsSync(argvOut), `the publish never started the agent: ${r.out}`);
       const j = lastJson(r.out);
       eq(j.agent.ran, true);
       eq(j.agent.ok, true);
-      eq(j.targetSha, targetSha, 'sync did not follow origin/main to the new commit');
-      ok(String(j.branch).startsWith('aidev/wiki-'), `unexpected sync branch: ${j.branch}`);
+      eq(j.targetSha, targetSha, 'the publish did not describe HEAD');
+      eq(j.branch, `aidev/wiki-${targetSha.slice(0, 12)}`, `unexpected branch: ${j.branch}`);
       eq(j.committed, true, 'the regenerated Wiki was not committed');
-      eq(j.pushed, false, '--no-pr must not push');
-      eq(j.pendingPages, 0, 'targets remained queued after a drained run');
-      // The agent's cwd was the worktree, so its prose landed on the sync branch.
+      eq(j.pushed, false, '--no-push must not push');
       const calls = fs.readFileSync(callsOut, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
       ok(calls.every((c) => path.resolve(c.cwd) === path.resolve(root, WORKTREE)),
         `the agent did not run inside the worktree: ${JSON.stringify(calls.map((c) => c.cwd))}`);
       ok(fs.readFileSync(promptOut, 'utf8').includes(`Target PKG commit: ${targetSha}`), 'the agent was told the wrong commit');
-      const { git } = require('./fixtures');
       const committed = JSON.parse(git(['show', `${j.branch}:${K}/manifest.json`], root));
       eq(committed.knowledgeSha, targetSha, 'the committed manifest does not describe the target');
       eq(committed.checkpoint.pendingPaths, [], 'the committed checkpoint still owes prose');
       ok(git(['ls-tree', '--name-only', '-r', j.branch], root).includes(`${K}/pages/new.ts.md`),
-        'the page the agent wrote is not on the sync branch');
-      // Holding the lease across a multi-minute agent would block every other
-      // sync; it, and the worktree, must be gone by the time the command returns.
-      assertCheckoutUntouched(fx);
+        'the page the agent wrote is not on the publish branch');
+      ok(/aidev: update Wiki for/.test(git(['log', '-1', '--format=%s', j.branch], root)), 'fixed commit message');
+      assertCheckoutUntouched(fx, targetSha);
     }));
 
-    test('agent failure or no progress does not unwind sync and JSON reports failure', () => {
-      withAdvancedRepo(({ fx, root, stub, argvOut }) => {
-        const r = aidev(root, ['sync', '--no-pr'],
+    test('agent failure or no progress publishes nothing and JSON reports failure', () => {
+      withAdvancedRepo(({ fx, root, targetSha, stub, argvOut }) => {
+        const r = aidev(root, ['knowledge', 'update', '--no-push'],
           { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'fail' } });
         eq(r.code, 1, `expected exit 1: ${r.out}`);
-        // The structured Wiki is still committed: only prose is owed.
-        ok(/sync lease released/.test(r.out), `the lease was not released: ${r.out}`);
-        assertCheckoutUntouched(fx);
+        ok(/nothing was published/.test(r.out), `the failure was not explained: ${r.out}`);
+        assertCheckoutUntouched(fx, targetSha, { leaseKept: true });
       });
-      withAdvancedRepo(({ fx, root, stub, argvOut }) => {
-        const r = aidev(root, ['sync', '--no-pr', '--json'],
+      withAdvancedRepo(({ fx, root, targetSha, stub, argvOut }) => {
+        const r = aidev(root, ['knowledge', 'update', '--no-push', '--json'],
           { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'no-progress' } });
-        eq(r.code, 1, `zero-progress sync exited ${r.code}: ${r.out}`);
+        eq(r.code, 1, `zero-progress publish exited ${r.code}: ${r.out}`);
         const j = lastJson(r.out);
-        eq(j.ok, false, 'sync JSON contradicted its failing exit code');
-        eq(j.structuredOk, true, 'sync lost its successful structured result');
-        eq(j.agent.noProgress, true, 'sync did not report agent no progress');
-        eq(j.committed, true, 'the structured result was not committed although it is valid');
-        ok(j.pendingPages > 0, 'the unfinished queue disappeared');
-        assertCheckoutUntouched(fx);
+        eq(j.ok, false, 'JSON contradicted its failing exit code');
+        eq(j.structuredOk, true, 'the successful structured result was lost');
+        eq(j.agent.noProgress, true, 'agent no progress was not reported');
+        eq(j.published, false, 'a Wiki with prose owed was published');
+        ok(j.remaining > 0, 'the unfinished queue disappeared');
+        assertCheckoutUntouched(fx, targetSha, { leaseKept: true });
       });
-      withAdvancedRepo(({ fx, root, stub, argvOut }) => {
-        const r = aidev(root, ['sync', '--json'],
+      withAdvancedRepo(({ fx, root, targetSha, stub, argvOut }) => {
+        const r = aidev(root, ['knowledge', 'update', '--no-push', '--json'],
           { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'missing-checkpoint' } });
-        eq(r.code, 1, `missing-checkpoint sync exited ${r.code}: ${r.out}`);
+        eq(r.code, 1, `missing-checkpoint publish exited ${r.code}: ${r.out}`);
         const j = lastJson(r.out);
         eq(j.ok, false, 'checkpoint failure was reported as success');
         eq(j.structuredOk, true, 'a restorable checkpoint was graded as a structured failure');
-        eq(j.agent.checkpointRestored, true, 'sync did not restore its pending queue');
-        eq(j.pr.blocked, true, 'sync attempted publication after checkpoint failure');
-        eq(j.committed, false, 'a corrupted Wiki was committed');
-        ok(j.pendingPages > 0, 'sync lost its restored queue');
-        assertCheckoutUntouched(fx);
+        eq(j.agent.checkpointRestored, true, 'the pending queue was not restored');
+        eq(j.published, false, 'a corrupted Wiki was published');
+        assertCheckoutUntouched(fx, targetSha, { leaseKept: true });
       });
-      withAdvancedRepo(({ fx, root, stub, argvOut }) => {
-        const r = aidev(root, ['sync', '--json'],
+      withAdvancedRepo(({ fx, root, targetSha, stub, argvOut }) => {
+        const r = aidev(root, ['knowledge', 'update', '--no-push', '--json'],
           { env: { AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_MODE: 'target-mismatch' } });
-        eq(r.code, 1, `target-mismatch sync exited ${r.code}: ${r.out}`);
+        eq(r.code, 1, `target-mismatch publish exited ${r.code}: ${r.out}`);
         const j = lastJson(r.out);
         eq(j.ok, false, 'target mismatch was reported as success');
         eq(j.structuredOk, false, 'target mismatch kept structuredOk true');
         eq(j.agent.targetMismatch, true, 'target mismatch was not exposed');
-        eq(j.pr.blocked, true, 'sync attempted publication for the wrong target');
-        eq(j.committed, false, 'a Wiki describing the wrong commit was committed');
-        assertCheckoutUntouched(fx);
+        eq(j.published, false, 'a Wiki describing the wrong commit was published');
+        assertCheckoutUntouched(fx, targetSha, { leaseKept: true });
       });
     });
   }

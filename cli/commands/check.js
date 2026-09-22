@@ -24,7 +24,7 @@ const ui = require('../lib/ui');
 
 const FLAGS = { strict: 'boolean', json: 'boolean', 'no-remote': 'boolean' };
 const FLAG_HELP = {
-  strict: 'treat warnings (tracking branch ahead, pending prose) as failures (exit 2)',
+  strict: 'treat warnings (Wiki behind HEAD, pending prose, tracking branch ahead) as failures (exit 2)',
   json: 'machine-readable output',
   'no-remote': 'do not contact the remote',
 };
@@ -85,7 +85,7 @@ function run(ctx) {
   } else if (r.inconsistencies.length > 0) {
     problems.push({ code: EXIT.KNOWLEDGE, message: `${r.inconsistencies.length} inventory inconsistency/ies (a page recorded with differing hashes)` });
   } else if (r.syncLease && !r.syncLease.evaluation.valid) {
-    problems.push({ code: EXIT.KNOWLEDGE, message: `a stale sync lease is present (${r.syncLease.evaluation.reason}); run "aidev sync --resume" or "aidev sync --abort".` });
+    problems.push({ code: EXIT.KNOWLEDGE, message: `a stale publish lease is present (${r.syncLease.evaluation.reason}); run "aidev knowledge update" to continue it or "aidev knowledge update --abort" to discard it.` });
   } else if (st.severity === stateMod.SEVERITY.WARN && flags.strict) {
     problems.push({ code: EXIT.DRIFT, message: `${st.message} (--strict)` });
   }
@@ -96,15 +96,15 @@ function run(ctx) {
       exitCode: problems.length === 0 ? EXIT.OK : problems[0].code,
       problems,
       severity: st.severity,
-      trackingSha: st.trackingSha, baseSha: st.baseSha, knowledgeSha: st.knowledgeSha,
+      trackingSha: st.trackingSha, headSha: st.headSha, baseSha: st.baseSha, knowledgeSha: st.knowledgeSha, wikiBehind: st.wikiBehind,
       handEdits: r.handEdits,
     });
   } else {
     ui.heading('aidev check');
     ui.table([
-      ['tracking', stateMod.short(st.trackingSha)],
-      ['base', stateMod.short(st.baseSha)],
+      ['head', stateMod.short(st.headSha)],
       ['knowledge', stateMod.short(st.knowledgeSha)],
+      ['tracking', stateMod.short(st.trackingSha)],
       ['tool config', r.config.noLock ? 'not recorded'
         : (r.config.conflicts.length ? 'CONFLICTS' : (r.config.hooksMissing.length ? 'HOOKS MISSING'
           : `ok${r.config.customised.length ? ` (${r.config.customised.length} customised)` : ''}${r.config.outdated ? ', newer kit templates available (aidev apply)' : ''}`))],
