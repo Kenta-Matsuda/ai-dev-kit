@@ -81,6 +81,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 
 - auto-complete / `completionOptions` を設定しない
 - 自分でマージしない。レビュー依頼までが範囲です
+- aidev が生成した Wiki ページ・Wiki コミット・Wiki PR も、内容の確認はユーザーが行います
 - 既存のオープンPRがあるなら、**新規作成せず更新**します
 
 ## PR作成前の最終確認

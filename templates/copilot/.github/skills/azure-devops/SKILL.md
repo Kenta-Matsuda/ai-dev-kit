@@ -11,9 +11,9 @@ description: Work Item・ブランチ・PR・Pipeline の定型操作。MCP経�
 ## 呼び出し口
 
 - MCPサーバー `azure-devops`（`.mcp.json` → `aidev mcp azure-devops` が起動）
-- CLI（`aidev sync`）— Wiki の更新と Wiki PR の作成はこちら
+- CLI（`aidev knowledge update`）— Wiki の更新・Wiki コミット・Wiki PR の作成はこちら
 
-Work Item の状態や PR の作成・更新は MCP で行い、Wiki の同期は `aidev sync` に任せてください。
+Work Item の状態や PR の作成・更新は MCP で行い、Wiki の更新は `aidev knowledge update` に任せてください。
 
 ## 原則: 状態はAPIが正本
 
@@ -25,7 +25,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 | PRがマージされたか | **PR API の `status` / `mergeStatus`**。ブランチの有無で判断しない |
 | マージ結果のSHA | **PR API の `lastMergeCommit`**。作業ブランチ先端を使わない |
 | Work Item の状態 | Work Item API。本文の記述を信用しない |
-| 対象SHA | `aidev sync` が追跡ブランチを fetch して解決 |
+| Wiki が説明する SHA | `manifest.json` の `knowledgeSha`（`aidev knowledge update` が HEAD を書く） |
 
 > 🔴 **作業ブランチの先端SHAをマージ結果として使ってはいけません。**
 > squash マージは新しい単一コミットを作り、rebase マージは全SHAを付け替え、
@@ -48,7 +48,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 | --- | --- |
 | issue-to-pr | `aidev/issue-<id>` |
 | 通常の機能開発 | `feature/<name>` |
-| Wiki同期 | `aidev/wiki-<sha12>`（`aidev sync` が生成。同期ストリームIDで既存PRを再利用） |
+| Wiki 更新（tracking branch 上） | `aidev/wiki-<sha12>`（`aidev knowledge update` が一時 worktree で作り、PR を作成・更新する） |
 
 既定ブランチへ直接pushしません。force-push・履歴改変は**実行前に必ず確認**を取ります。
 
@@ -57,6 +57,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 作成は**品質ゲート通過後**です（[[test-and-verify]]）。本文の規約は [[commit-and-pr]]。
 
 - **自動マージ禁止**。PKG PR・Wiki PR（`aidev/wiki-<sha>`）とも人間がマージします
+- aidev が生成した Wiki ページ・Wiki コミット・PR の内容はユーザーがレビューします
 - `completionOptions` で auto-complete を設定しない
 - PR本文・コミットメッセージに秘密情報を含めない
 - 既存のオープンPRがあれば**新規作成せず更新**する（重複PRを作らない）
@@ -78,4 +79,4 @@ Work Item・リンクされたPR・同期PRメタデータです。
 
 原因が確定できないまま再試行を繰り返さないでください（[[failure-triage]]）。
 
-関連: [[secure-coding]] / [[commit-and-pr]] / [[knowledge-sync]] / [[failure-triage]]
+関連: [[secure-coding]] / [[commit-and-pr]] / [[knowledge-update]] / [[failure-triage]]

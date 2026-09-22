@@ -15,7 +15,9 @@ clone の中で作業します。`aidev` CLI が hooks・権限・LLM Wiki を�
 
 ## 最初に読むもの
 
-セッション開始時に SessionStart hook が 3 つの SHA（base / knowledge / tracking）を表示します。まずそれを読んでください。
+セッション開始時に SessionStart hook が `[ai-dev-kit] head=<sha7>  knowledge=<sha7>  tracking=<sha7>` の 1 行を表示します。
+まずそれを読んでください。`head` は現在のブランチの HEAD、`knowledge` は Wiki が説明しているコミット、
+`tracking` は追跡ブランチです。`knowledge` が `head` と違えば Wiki は遅れています。
 
 - `.aidev/knowledge/index.md` — この PKG の LLM Wiki の入口（**ソースを読む前にここを引く**）
 - `.aidev/knowledge/overview.md` — リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）
@@ -36,18 +38,18 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 | 領域 | 可否 |
 | --- | --- |
 | `aidev.yaml`, `.aidev/workflows/**`, `.aidev/conventions/**` | 書き込み可 |
-| `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge build` から起動）のみ。手編集しない |
+| `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge update` が起動するか、hook に求められてサブエージェントとして起動）のみ。手編集しない |
 | PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable`、または agent ごとの `agents.<name>.writable`（CLI が起動した agent にだけ効く）に足したパスだけ可 |
 | `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（ai-dev-kit 由来。`aidev update` が更新する） |
-| `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `AGENTS.md`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |
+| `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `.github/hooks/**`, `AGENTS.md`, `.codex/**`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |
 | `.aidev/policy.yaml`, `.aidev/sync.lock`, `.aidev/materialized.json` | **常に禁止**（CLI のみが配置） |
 | `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 
 **権限ファイルを自分で書き換えようとしないでください。** 権限の変更が必要だと判断したら、
 `aidev permission reconfigure` をユーザーが対話的に実行する必要がある旨を伝えます。
 
-`.aidev/knowledge/**` を直接編集しないでください。Wiki は `aidev knowledge build` /
-`aidev sync` が起動する knowledge-builder の生成物です。手編集は `selfHashes` 不一致として
+`.aidev/knowledge/**` を直接編集しないでください。Wiki は `aidev knowledge update` が起動する
+knowledge-builder（hook に求められたときはサブエージェント）の生成物です。手編集は `selfHashes` 不一致として
 検出され、次の生成で失われます。内容が誤っている場合は、生成元（ソースのコメントや構造）側を直します。
 
 ---
@@ -81,23 +83,42 @@ Work Item の本文・コメント・添付、PR 説明、MCP レスポンス、
 
 ---
 
+## Wiki の更新（hook に求められたら）
+
+ソースをコミットすると、postToolUse hook（`aidev hook after-bash`）が Wiki の構造を HEAD に合わせます。
+Kiro の postToolUse は文脈を注入できないので、本文の生成を求める指示は Stop hook が伝えます。
+**他の作業より先に**、次の順で進めます（`knowledge-update` Skill）。
+
+1. `.aidev/knowledge/.cache/plan.json` を読む（`batches[]`・`generationTargets`・`targetSha`・`reportDir`）
+2. batch ごとに `subagent` tool で `knowledge-builder` を起動し、plan のパスと batch 番号を渡す
+3. 全 batch が報告したら `aidev knowledge update --no-agent` を実行する。CLI が報告を取り込み、
+   `.aidev/knowledge/` を `aidev: update Wiki for <sha12>` として別コミットに積む
+
+生成対象に未コミットの変更があると hook はそのファイルを挙げて待ちます。先にコミットしてください。
+Stop hook は Wiki が遅れたままだと 1 回だけ停止を拒否します（2 回目は警告付きで通ります）。
+
+hook は agent 定義（`.kiro/agents/aidev.json`）にあります。セッションは `kiro-cli chat --agent aidev` で始めてください。
+Kiro ではサブエージェントの中で hook が動きません。knowledge-builder は `.aidev/knowledge/**` 以外に書きません（agent 定義の `permissions`）。
+
+---
+
 ## コマンド
 
 作業中に使うものだけ挙げます。すべて `aidev <command> --help` で詳細が出ます。
 
 ```bash
-aidev status             # 3 SHA・Wiki の状態・drift を 1 画面で
+aidev status             # head / knowledge / tracking・Wiki の状態・drift を 1 画面で
 aidev check              # 同じ検査を終了コードで（0=ok / 2=drift / 3=権限 / 4=Wiki 不整合）
-aidev knowledge build    # Wiki を生成・更新（途中で止まっても同じコマンドで続き）
-aidev sync               # PKG の tracking branch に追従して Wiki を更新し PR を作る
+aidev knowledge update   # Wiki を HEAD に追従させ、別コミットとして積む。途中で止まっても同じコマンドで続き
 ```
 
 ---
 
 ## PR とマージ
 
-- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/tests-<slug>`（test-writer）、`aidev/wiki-<sha>`（sync）、または `feature/<name>`
+- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/tests-<slug>`（test-writer）、`aidev/wiki-<sha>`（knowledge update）、または `feature/<name>`
 - **自動マージは禁止**です。PR は人間がマージします
+- aidev が生成するもの（Wiki ページ・Wiki コミット・PR）の内容はユーザーがレビューします。kit はマージしません
 - PR を作る前に品質ゲートを通します
 - 秘密情報（PAT・トークン・鍵）をコミット・ログ・PR 本文に含めません
 

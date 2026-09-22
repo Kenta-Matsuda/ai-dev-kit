@@ -105,4 +105,4 @@ description: 失敗時の調査手順と停止判断。何回試して駄目な�
 `aidev check` と `aidev status` の**出力を添えて**報告します。
 自分で復旧を試みる前に、まず現状を保全してください。
 
-関連: [[test-and-verify]] / [[secure-coding]] / [[knowledge-sync]] / [[code-review]]
+関連: [[test-and-verify]] / [[secure-coding]] / [[knowledge-update]] / [[code-review]]

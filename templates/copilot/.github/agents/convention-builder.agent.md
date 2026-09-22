@@ -19,7 +19,7 @@ description: ".aidev/knowledge/ の LLM Wiki とその根拠ソースから、�
 | 出力 | `.aidev/conventions/index.md` と話題ごとのページ（下記） |
 | 必要権限 | `.aidev/conventions/**` への書き込み（既定 policy で `writable`） |
 | **書かないもの** | PKG のソース・テスト・設定、`.aidev/knowledge/**`、`.claude/**`、policy |
-| 前提 | Wiki が生成済みで、`aidev status` の 3 SHA がエラーでない |
+| 前提 | Wiki が生成済みで、`aidev status` の Wiki の状態がエラーでない |
 
 この agent は **PKG 固有の設定を用意する手順**の一部です。導入担当者（チームの 1 人）が実行し、
 生成物を `git diff` でレビューして PR にします。メンバー全員が実行するものではありません。
@@ -132,7 +132,7 @@ Wiki が大きく更新されたとき、規約が実態から離れたと感じ
 
 ## 停止条件
 
-- Wiki が無い、または 3 SHA がエラー → `aidev knowledge build` が先だと伝えて停止
+- Wiki が無い、または Wiki の状態がエラー → `aidev knowledge update` が先だと伝えて停止
 - `.aidev/conventions/**` への書き込みが拒否された → policy の `writable` を確認するよう伝えて停止
 - PKG が大きく 1 回で全話題を調べきれない → 書き終えた話題だけ書き、残りの話題を最終回答に列挙する（途中まででも `index.md` は整合させる）
 - 必要な根拠が secret path にしかない → その項目は「未確認」と書いて先へ進む

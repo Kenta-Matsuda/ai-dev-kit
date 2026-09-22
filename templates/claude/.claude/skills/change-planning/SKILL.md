@@ -82,7 +82,7 @@ grep -rn "functionName" . --include='*.ts' -l --exclude-dir=node_modules --exclu
 | --- | --- |
 | PKGのソース（`**`） | 既定はread-only。チームが `.aidev/policy.yaml` の `writable` か `agents.<name>.writable` に足したパスだけ可 |
 | `aidev.yaml`・`.aidev/workflows/**` | 書き込み可 |
-| `.aidev/knowledge/**` | CLIから起動された knowledge-builder、または `aidev sync` のsyncリース保持中のみ。手編集しない |
+| `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge update` が起動、または hook に求められてサブエージェント起動）のみ。手編集しない |
 | `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
 | `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 

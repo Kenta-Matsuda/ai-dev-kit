@@ -26,15 +26,16 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
 | 実装を変更する直前 | 変更対象の現在の姿は、Wikiではなくソースが正 |
 | シグネチャ・型・引数の順序を使う | 細部は生成時点のもの |
 | 「推測:」と書かれている記述に依拠する | 確定情報ではない |
-| 3SHAが警告・エラー状態 | Wikiが別のコードを説明している可能性 |
+| Wiki の状態が警告・エラー | Wikiが別のコードを説明している可能性 |
 | Wikiに該当記述が無い | 「無い」ことの根拠にはならない |
 
-セッション開始時の3SHA表示を思い出してください。
+セッション開始時の `[ai-dev-kit] head=<sha7>  knowledge=<sha7>  tracking=<sha7>` の行を思い出してください。
 
-- `knowledgeSha == baseSha` → Wikiは手元のコードを説明している（内部整合）
-- `knowledgeSha` が `baseSha` より古い → **Wikiが古い**。警告。`aidev sync` で追従する
-- `trackingSha` が `baseSha` より先 → 追跡ブランチに追従遅れ。警告
-- Wikiが無い / manifest が読めない → **Wikiが信用できない**。エラー（exit 4）。書き込みも止まる
+- ✅ OK → Wikiは手元の HEAD を説明している
+- ⚠️ Wiki が HEAD より遅れ（+a ~m -r →rn） → **Wikiが古い**。コミット後は hook が更新を求めてくる。手動なら `aidev knowledge update`
+- ⚠️ prose 未完了（N 件） → 構造は更新済みで本文がまだ。[[knowledge-update]] の手順で埋める
+- ⚠️ tracking branch が先行 → 追跡ブランチに追従遅れ。merge / rebase してから更新する
+- ❌ Wikiが無い / manifest が読めない → **Wikiが信用できない**。エラー（exit 4）。書き込みも止まる
 
 現状は `aidev status` でいつでも確認できます。
 
@@ -48,11 +49,11 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
    `selfHashes` 不一致として警告される
 
 恒久的に直すなら、生成元（ソースのコメント・構造）を改善するか、
-`aidev knowledge build --scope <path>` で再生成します。
+`aidev knowledge update --scope <path>` で再生成します。
 
 ## やってはいけないこと
 
 - Wikiの記述を、ソースで確認せずに「事実」として報告する
 - Wikiに書いていないことを「存在しない」と結論する
 - `.aidev/knowledge/` を編集する
-- 3SHAがエラー状態のまま作業を続ける
+- Wiki の状態がエラー（exit 4）のまま作業を続ける

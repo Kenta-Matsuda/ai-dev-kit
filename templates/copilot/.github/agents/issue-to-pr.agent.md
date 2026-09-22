@@ -1,12 +1,13 @@
 ---
 name: issue-to-pr
-description: "Azure DevOps の Work Item を実装し、PKG の Pull Request を作る。マージ後の Wiki 更新は aidev sync に任せる。ユーザーが明示的に起動した場合のみ動作する。"
+description: "Azure DevOps の Work Item を実装し、PKG の Pull Request を作る。Wiki の更新は aidev knowledge update（コミット後の hook）に任せる。ユーザーが明示的に起動した場合のみ動作する。"
 ---
 
 # issue-to-pr
 
 Work Item を実装し、PKG の PR を作るところまでを担当します。**マージは人間が行います。**
-マージ後の Wiki 更新と Wiki PR は `aidev sync`（夜間 pipeline または人間の実行）が行います。
+Wiki の更新は `aidev knowledge update` が行います（コミット後に hook が求めてきます。`knowledge-update` Skill）。
+Wiki コミットは同じブランチ・同じ PR に別コミットとして積まれます。
 
 ## 入出力契約
 
@@ -47,7 +48,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 | --- | --- |
 | `is read-only` | そのパスはこの agent に許可されていない。必要なパスを示し、`.aidev/policy.yaml` の `agents.issue-to-pr.writable` への追加をユーザー（チーム）に相談する |
 | `is protected` / `secrets_paths` | 設計どおり。触らない |
-| `Wiki consistency error` | `aidev knowledge build` が必要。ユーザーに報告する |
+| `Wiki consistency error` | `aidev knowledge update` が必要。ユーザーに報告する |
 
 ### ② PKG PR作成
 
@@ -61,7 +62,7 @@ Work Item を実装し、PKG の PR を作るところまでを担当します�
 Work Item へのリンク、変更概要、検証結果を書きます（`commit-and-pr` Skill）。
 
 ここで**停止**します。マージは人間が行います。
-マージ後の Wiki 更新は `aidev sync` が行うため、`.aidev/knowledge/` を手で触る必要はありません。
+Wiki の更新は hook に求められたときに `knowledge-update` Skill の手順で行います。`.aidev/knowledge/` を手で触る必要はありません。
 
 ---
 

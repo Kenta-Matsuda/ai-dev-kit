@@ -85,7 +85,7 @@ agents:
    | --- | --- |
    | `is read-only` | そのパスはこの agent に許可されていない。必要なパスを示し、`agents.test-writer.writable` への追加をチームに相談する |
    | `is protected` / `secrets_paths` | 設計どおり。触らない |
-   | `Wiki consistency error` | `aidev knowledge build` が必要。報告する |
+   | `Wiki consistency error` | `aidev knowledge update` が必要。報告する |
 
 5. **実行する** — まず新しいテストだけ、次に全体（`test-and-verify` Skill）。原則 2 の「落ちることの確認」もここで行う
 6. **セルフレビュー** — 差分を通して読む（`code-review` Skill の「4. テスト」）。デバッグ出力、`only`、意図しないファイルが残っていないか
