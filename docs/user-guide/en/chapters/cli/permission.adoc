@@ -16,9 +16,9 @@ aidev permission show [--json]
 
 The policy (`.aidev/policy.yaml`) is a file the AI cannot write, so it is placed in two steps: the CLI generates a **candidate** `.aidev/policy.candidate.yaml` from `aidev.yaml`, and a human reads it and places it with `--approve`.
 
-When placing with `--approve`, a change that protects less than the current policy counts as a **weakening** and stops with exit code 3 unless `--force` is given.
+When placing with `--approve`, a change that protects less than the current policy (removing an entry from `protected` / `read_only` / `writable_during_sync`, promoting a path to `writable`, adding an `agents` grant, removing a `branch` condition) counts as a **weakening** and stops with exit code 3 unless `--force` is given.
 
-There is no interactive editing of the candidate. Adjust it through `secrets_paths` in `aidev.yaml`.
+There is no interactive editing of the candidate. The candidate contains only `secrets_paths` from `aidev.yaml` and the kit defaults; `agents` appears only as a commented example. `--approve` does not read the candidate file: it regenerates the candidate and places that, so hand edits to the candidate file have no effect. When the team adds `writable` or `agents.<name>` entries, edit the placed `.aidev/policy.yaml` directly, commit it and review it in a PR (running `reconfigure --approve` removes those additions).
 
 === Subcommands
 
@@ -33,7 +33,7 @@ There is no interactive editing of the candidate. Adjust it through `secrets_pat
 |Regenerate the candidate while a policy exists. `--approve` places it. A weakening also needs `--force`
 
 |`show`
-|Show the policy in force. If the file is missing, show the built-in minimal policy and exit 3
+|Show the policy in force and the `agents` grants. If the file is missing, show the built-in minimal policy and exit 3
 |===
 
 === Options
@@ -99,5 +99,5 @@ aidev permission show
 
 === See also
 
-* xref:permissions[Permissions and safety] — the four categories
+* xref:permissions[Permissions and safety] — the policy categories
 * xref:cli-hook[aidev hook] — the hook that makes the decision

@@ -4,7 +4,7 @@
 {project-name} は、AI が PKG の中で **書いてよい場所** を `.aidev/policy.yaml`（policy）に定め、Claude Code の hook で毎回の書き込みを検査します。ソースは通常 read-only です。token はファイルに書かず、環境変数だけで渡します。
 
 [[permissions-policy]]
-=== policy の 4 つの区分
+=== policy の区分
 
 [cols="1,2,3",options="header"]
 |===
@@ -16,7 +16,7 @@
 
 |`read_only`
 |`**`（PKG 全体）
-|agent は書けません。agent に編集させたいパスは `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
+|agent は書けません。編集させたいときは、agent ごとに `agents.<name>.writable` を足すか、全員向けに `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
@@ -24,10 +24,15 @@
 
 |`writable`
 |`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
-|通常時に書けます。
+|通常時に、どの agent も対話セッションも書けます。
+
+|`agents.<name>.writable` +
+`agents.<name>.branch`
+|無し
+|`aidev` が起動した agent `<name>` だけが追加で書けるパス。`branch` を書くと、そのブランチ（glob）に checkout しているときだけ有効です。
 |===
 
-判定は上から順です。リポジトリ外と `protected` は常に拒否、Wiki が無い間はすべて拒否、その後 `writable` → `read_only`（リースがあれば許可）の順に見ます。
+判定は上から順です。リポジトリ外、`secrets_paths`、`protected` は常に拒否。Wiki が無い間は（sync 中の `.aidev/knowledge/**` を除き）すべて拒否。その後 `writable` → `agents.<name>` → `read_only` の順に見て、最初に当たった区分で決まります。
 
 [[permissions-hooks]]
 === hook が何をするか
@@ -52,14 +57,14 @@
 
 |Stop
 |`aidev hook session-stop`
-|セッション終了時の状態を `.aidev/cache/` に記録します。
+|通常の環境では何もしません（ai-dev-kit 開発者の端末でだけ意味を持つ内部 hook です）。
 |===
 
 拒否されると、Claude には次のような理由が返ります。
 
 [source,text]
 ----
-ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents; …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents by default; this session was not started by the CLI as a named agent; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
 ----
@@ -69,7 +74,19 @@ hook を外す編集は `aidev check` が終了コード 2 で検出し、CI が
 [[permissions-source]]
 === ソースを agent に編集させるには
 
-既定では PKG のソースは `read_only` で、どの agent も書けません。`issue-to-pr` などに実装させたいときは、チームが `.aidev/policy.yaml` の `writable` に対象パス（例: `src/**`）を足し、コミットします。`protected` と `secrets_paths` はそれでも書けません。policy の変更は PR でレビューし、必要な期間だけ広げることを勧めます。
+既定では PKG のソースは `read_only` で、どの agent も書けません。`issue-to-pr` などに実装させたいときは、チームが `.aidev/policy.yaml` に **その agent 専用の許可** を書き、コミットします。
+
+[source,yaml]
+----
+agents:
+  issue-to-pr:
+    writable: ["src/**", "tests/**"]
+    branch: "aidev/issue-*"     # 任意。このブランチ上でだけ有効
+----
+
+この許可は、`aidev agent run issue-to-pr "..."` のように **`aidev` が起動した agent にだけ** 効きます（`aidev` が起動時に agent 名を hook に伝えるためで、agent が自分で名乗ることはできません）。人が `claude` で対話中にサブエージェントとして呼んだ場合は、agent 名を確実に知る手段が無いため read-only のままです。`branch` を書くと、そのブランチに checkout しているときだけ書けます。
+
+すべての agent と対話セッションに開きたい場合だけ `writable` に足します。`protected` と `secrets_paths` はどちらの方法でも書けません。policy の変更は PR でレビューし（`agents` を足す変更は `reconfigure --approve` でも `--force` を求められます）、必要な期間だけ広げることを勧めます。
 
 [[permissions-commands]]
 === policy を置く・変える・見る
@@ -84,7 +101,7 @@ policy は AI が作れません。人間が CLI で置きます。
 |候補 `.aidev/policy.candidate.yaml` を `.aidev/policy.yaml` として置きます。`aidev init` で `N` と答えた後に使います。
 
 |`aidev permission reconfigure` → `reconfigure --approve`
-|`secrets_paths` を変えたときなどに候補を作り直して置きます。保護を弱める変更には `--force` も必要です。
+|`secrets_paths` を変えたときなどに候補を作り直して置きます。保護を弱める変更には `--force` も必要です。候補は `aidev.yaml` から作り直されるので、チームが policy に手で足した `writable` や `agents` は消えます。置いた後にもう一度足してコミットしてください。
 
 |`aidev permission show`
 |有効な policy を表示します。
@@ -99,7 +116,8 @@ policy は AI が作れません。人間が CLI で置きます。
 
 === してはいけないこと
 
-* `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.aidev/policy.yaml` を手で編集しない（変えたいときは kit への PR）
+* `.claude/**`、`CLAUDE.md`、`.mcp.json` の kit 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、kit 全体の改善は kit への PR にする）
+* `.aidev/policy.yaml` は人間だけが編集し、変更は PR でレビューする（AI には編集させない）
 * AI が「拒否された」と報告したら、回避策を探さず理由を読む
 * token をコミット・ログ・PR 本文に含めない
 

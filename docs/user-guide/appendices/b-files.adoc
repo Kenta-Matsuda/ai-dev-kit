@@ -16,7 +16,7 @@
 
 |`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `.claude/settings.json`
 |配布される agent・skill・hooks
-|`aidev init` / `aidev update`。手編集は drift
+|`aidev init` / `aidev apply`。チームが編集でき、新しいテンプレートとはマージされる
 
 |`CLAUDE.md`
 |Claude への共通の指示
@@ -27,12 +27,12 @@
 |同上
 
 |`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `AGENTS.md`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`
-|`tools.default` に `copilot` / `codex` / `kiro` を書いたときだけ。同じテンプレートから生成した各ツール用の指示・agent・skill
-|同上。ツールを外すと次の `aidev update` で削除
+|`tools.default` に `copilot` / `codex` / `kiro` を書いたときだけ。各ツール用の指示・agent・skill
+|同上。ツールを外すと次の `aidev apply` で削除（編集済みなら残る）
 
 |`.aidev/policy.yaml`
 |承認済みの書き込み権限 policy
-|`aidev permission … --approve`、`aidev init`
+|`aidev permission … --approve`、`aidev init`。`writable` / `agents` の追加は人間が直接編集
 
 |`.aidev/materialized.json`
 |ツール設定の記録。適用した kit のコミットと、ファイルごとのテンプレートのハッシュと適用時のハッシュ、未解消の衝突。`aidev apply` がマージの基準に、`aidev check` が判定に使う
@@ -52,7 +52,7 @@
 
 |`.aidev/.gitignore`
 |下の「コミットしないもの」を除外する
-|`aidev init` / `aidev update`
+|`aidev init` / `aidev apply`
 |===
 
 `.claude/settings.local.json` は個人設定で、kit の管理外です。
@@ -66,7 +66,7 @@
 |パス |内容
 
 |`.aidev/cache/`
-|remote 確認のキャッシュ、sync の一時 worktree、セッションの記録
+|remote 確認のキャッシュ、sync の一時 worktree、agent に渡す仕事ファイル
 
 |`.aidev/sync.lock`
 |sync のロック
@@ -82,4 +82,4 @@
 
 === 端末側（AIDEV_HOME）
 
-`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（kit 更新の確認結果）を置きます。kit 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。`aidev uninstall` がどちらも消します。
+`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（kit 更新の確認結果）を置きます。kit 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。`aidev uninstall` がどちらも消します。{project-name} 本体の開発者の端末には `developer.json` も置かれます（利用者には関係ありません）。

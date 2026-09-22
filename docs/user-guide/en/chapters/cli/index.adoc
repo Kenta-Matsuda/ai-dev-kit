@@ -15,7 +15,7 @@ aidev <command> [subcommand] [options] [arguments]
 
 * Options are `--name` or `--name <value>`. `--name=value` also works.
 * An option the command does not accept is an error (`unknown option: --bogus`, exit code 1).
-* `knowledge`, `agent`, `permission`, `workflow`, `hook` and `mcp` require a subcommand.
+* `knowledge`, `agent`, `permission`, `workflow`, `evolve`, `hook` and `mcp` require a subcommand.
 * Commands for a PKG run inside the PKG clone (a subdirectory is fine; `init` needs the root).
 
 [[cli-common-options]]
@@ -38,7 +38,7 @@ aidev <command> [subcommand] [options] [arguments]
 |Print the kit version.
 |===
 
-Every command except `hook`, `mcp` and `update` checks once a day whether a newer kit exists and, if so, asks whether to update first. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
+Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day whether a newer kit exists and, if so, asks whether to update first. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
 
 [[cli-exit-codes]]
 === Exit codes
@@ -92,7 +92,6 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 |xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
 |Place or show the write-permission policy
 
-
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |Create and run approved scripts
 
@@ -117,6 +116,8 @@ Every command except `hook`, `mcp` and `update` checks once a day whether a newe
 |xref:cli-uninstall[`aidev uninstall`]
 |Remove `aidev` from this machine
 |===
+
+`aidev --help` also lists `aidev evolve`. It is for people developing {project-name} itself, on their own machine, and does not concern PKG users. Running it stops with `self-evolution is for ai-dev-kit developers only`.
 
 .Called by tools
 [%autowidth.stretch,options="header"]
@@ -143,7 +144,6 @@ include::sync.adoc[]
 include::agent.adoc[]
 
 include::permission.adoc[]
-
 
 include::workflow.adoc[]
 

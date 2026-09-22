@@ -16,7 +16,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`node not found` / `node vXX is too old`
 |Install Node.js {node-min-version} or newer and run the installer again.
 
-|`this checkout looks like a wrapper`
+|`this looks like a package that uses ai-dev-kit, not the kit itself`
 |You ran the installer inside a PKG. Run it in the kit clone.
 
 |`… checkout must be on branch main`
@@ -170,7 +170,13 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Symptom |What to do
 
 |Claude reports `… is read-only (**)`
-|Normal. By default agents cannot write PKG source. Add the paths you want edited to `writable` in `.aidev/policy.yaml` (xref:permissions-source[Letting an agent edit source]).
+|Normal. By default agents cannot write PKG source. Add the paths you want edited to `agents.<name>.writable` in `.aidev/policy.yaml` (only for an agent started by `aidev agent run`) or to `writable` (xref:permissions-source[Letting an agent edit source]).
+
+|`… is writable for agent issue-to-pr only on branch aidev/issue-*`
+|You are on a branch that does not match the `branch` condition in the policy. Check out that branch, or revise `branch`.
+
+|`… has no grant in .aidev/policy.yaml` although the agent was started by `aidev agent run`
+|The policy has no `agents.<name>` entry. Add one and commit.
 
 |`… is protected (.claude/**)`
 |Normal. Kit files are changed through a PR to the kit.

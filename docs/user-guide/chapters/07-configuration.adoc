@@ -90,7 +90,7 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 
 |`tools.default`
 |`["claude"]`
-|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`、`codex` は `AGENTS.md`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev update` で消えます。
+|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`、`codex` は `AGENTS.md`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev apply` で消えます（編集済みなら残ります）。
 
 |`tools.agent`
 |`default` の先頭
@@ -131,8 +131,6 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 |リポジトリ名
 |表示に使う PKG 名。
 
-
-
 |`sync.auto_pr`
 |`true`
 |`false` にすると `aidev sync` は push まで行い、PR を作りません。
@@ -149,7 +147,6 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 |`120`
 |sync の作業ロックの有効時間。
 
-
 |`knowledge.max_files_per_dir`
 |`20`
 |Wiki の 1 ディレクトリあたりのページ数の上限。
@@ -161,11 +158,9 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 |`knowledge.evidence.include` / `exclude`
 |`["**"]` / `package.exclude`
 |agent が調査に読んでよいファイル。
-
-|`self_evolution.enabled` / `cadence`
-|`true` / `weekly`
-|セッション終了時の観測記録（`.aidev/cache/`）の有無と周期。
 |===
+
+知らない項目は無視されます（エラーになりません）。項目名の打ち間違いは `aidev doctor` でも見つからないので、この表の名前を確かめてください。
 
 === 書いてはいけない項目
 

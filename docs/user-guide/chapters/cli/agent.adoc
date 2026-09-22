@@ -22,7 +22,9 @@ aidev agent run <name> [<task>...] [--tool <tool>] [--model <model>] [--timeout 
 . `aidev.yaml` の `tools.agents.<name>`
 . `aidev.yaml` の `tools.agent` / `tools.agent_model`
 
-使えるツールは `tools.default` にあるものだけです。他のツールを指定すると、`aidev.yaml` に足して `aidev update` を実行するよう案内して止まります。
+使えるツールは `tools.default` にあるものだけです。他のツールを指定すると、`aidev.yaml` に足してそのツールの設定ファイルを置く（`aidev apply`）よう案内して止まります。
+
+`aidev agent run` で起動した agent には、`.aidev/policy.yaml` の `agents.<name>` に書いた許可（PKG のソースを書けるパスと、任意のブランチ条件）が効きます。人が対話中にサブエージェントとして呼んだ場合は効きません（xref:permissions-source[ソースを agent に編集させるには]）。
 
 仕事の渡し方はツールごとに違います。Claude Code には標準入力で渡し、`--agent <name>` で agent を選びます。GitHub Copilot CLI と Kiro CLI には `.aidev/cache/agents/` に書いた仕事ファイルを指す 1 行をコマンドラインで渡し、同じく名前で agent を選びます。OpenAI Codex CLI は名前で agent を選べないため、仕事ファイルの先頭に agent の定義を含めます。
 
@@ -89,7 +91,7 @@ Claude Code 以外のアダプタは各ツールの非対話モードの公開�
 aidev agent list
 aidev agent show knowledge-builder --tool copilot
 aidev agent run issue-to-pr "Work Item 42 をトリアージして実装方針を提案して" --dry-run
-aidev agent run issue-to-pr "Work Item 42 をトリアージして実装方針を提案して"
+aidev agent run issue-to-pr "Work Item 42 を実装して PR を作って"   # policy の agents.issue-to-pr に書いたパスを編集できる
 aidev agent run knowledge-builder --prompt-file task.md --model opus
 ----
 

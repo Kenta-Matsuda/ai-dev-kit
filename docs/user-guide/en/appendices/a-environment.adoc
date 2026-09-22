@@ -24,6 +24,9 @@ Never write values into files. Set them in your shell profile, as user environme
 `AIDEV_KIRO_BIN`
 |Likewise for the GitHub Copilot CLI (`copilot`), OpenAI Codex CLI (`codex`) and Kiro CLI (`kiro-cli`) executables.
 
+|`AIDEV_AGENT`
+|The agent name that `aidev` sets, for the child process only, when it starts an agent. The hook uses it to apply `agents.<name>` from the policy. Do not set it yourself.
+
 |`AIDEV_DEBUG`
 |When set, internal errors show a stack trace.
 

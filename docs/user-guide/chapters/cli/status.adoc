@@ -12,7 +12,7 @@ aidev status [options]
 
 === 説明
 
-PKG 名・hosting・kit のバージョン、Wiki の状態（3 つのコミット SHA と 1 行の判定）、Wiki のページ数、配布ファイルの drift、policy の有無、手編集、進行中の sync を表示します。
+PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（3 つのコミット SHA と 1 行の判定）、Wiki のページ数、ツール設定の状態（適用した kit、編集済みファイル数、衝突、hooks の欠落）、policy の有無と agent ごとの許可、手編集、進行中の sync を表示します。
 
 表示専用です。同じ検査を終了コードで返すのが xref:cli-check[aidev check] です。
 
@@ -49,19 +49,19 @@ PKG 名・hosting・kit のバージョン、Wiki の状態（3 つのコミッ�
 aidev status
 ----
 
-[source,text]
+[source,text,subs="attributes+"]
 ----
 aidev status — demo-pkg
   hosting  azure-devops (demo-pkg), tracking origin/main
   tools    claude
-  kit      0.2.0 @ 9491efe
+  kit      {aidev-version} @ 9491efe
 
 [ai-dev-kit] base=1a2b3c4  knowledge=1a2b3c4  tracking=9f8e7d6
 ⚠️ origin/main has moved ahead (9f8e7d6); work may continue. Run "aidev sync" to catch up.
 
   Wiki         163 page(s) for 163 target(s)
-  tool config  matches the kit
-  policy       placed (14 protected paths)
+  tool config  applied from kit 9491efe, 1 file(s) customised
+  policy       placed (14 protected paths; agent grants: issue-to-pr → src/** on aidev/issue-*)
 ----
 
 `base` は今の作業が基づくコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。

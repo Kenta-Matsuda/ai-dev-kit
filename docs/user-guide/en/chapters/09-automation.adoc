@@ -29,7 +29,7 @@ The exit code of `aidev check` is the contract with CI.
 |Consistent. Warnings (`main` moved ahead, prose pending) still return 0; `--strict` turns them into 2.
 
 |2
-|`.claude/**`, `CLAUDE.md` or `.mcp.json` differ from the distributed version.
+|The tool configuration record (`.aidev/materialized.json`) is missing, `aidev apply` conflict markers remain, or the kit's hooks are gone from `.claude/settings.json`. Files the team merely edited still return 0.
 
 |3
 |`.aidev/policy.yaml` is missing or broken.
@@ -37,7 +37,6 @@ The exit code of `aidev check` is the contract with CI.
 |4
 |The Wiki is missing or broken, or a previous sync stopped halfway.
 |===
-
 
 [[automation-workflow]]
 === aidev workflow — running approved scripts

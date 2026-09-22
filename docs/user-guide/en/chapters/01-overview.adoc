@@ -7,7 +7,7 @@ After adopting it, you have three things:
 
 * **The same setup** — `.claude/` (agents, skills, hooks), `CLAUDE.md` and `.mcp.json` are shared by the whole team. They come from the kit's templates and the team may edit them. `aidev apply` takes in new templates, merging with edits; `aidev check` stops only unresolved conflicts and missing hooks.
 * **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. Claude reads them before it reads the source. When the code moves on, `aidev sync` catches the Wiki up and opens a PR.
-* **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only.
+* **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only, and the team can grant writes per agent.
 
 === Who does what
 
@@ -19,7 +19,7 @@ After adopting it, you have three things:
 |Install `aidev` on your machine. → xref:install[Install aidev on your machine]
 
 |Package owner (one person per package, once)
-|Create the setup with `aidev init`, generate the Wiki with `aidev knowledge build`, and share it with the team through a PR. → xref:setup-owner[Package owner steps]
+|Create the setup and generate the Wiki with `aidev init`, then share it with the team through a PR. → xref:setup-owner[Package owner steps]
 
 |Member
 |`git pull` → `aidev init` → `claude`. No questions asked. → xref:setup-member[Member steps]

@@ -16,7 +16,7 @@
 |`node not found` / `node vXX is too old`
 |Node.js {node-min-version} 以上を入れて installer を再実行します。
 
-|`this checkout looks like a wrapper`
+|`this looks like a package that uses ai-dev-kit, not the kit itself`
 |PKG の中で installer を実行しています。kit の clone で実行します。
 
 |`… checkout must be on branch main`
@@ -170,7 +170,13 @@
 |症状 |対処
 
 |Claude が `… is read-only (**)` と報告
-|正常です。既定では agent は PKG のソースを書けません。編集させたいパスは `.aidev/policy.yaml` の `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
+|正常です。既定では agent は PKG のソースを書けません。編集させたいパスは `.aidev/policy.yaml` の `agents.<name>.writable`（`aidev agent run` で起動した agent だけ）か `writable` に足します（xref:permissions-source[ソースを agent に編集させるには]）。
+
+|`… is writable for agent issue-to-pr only on branch aidev/issue-*`
+|policy の `branch` 条件に合わないブランチにいます。そのブランチに checkout するか、`branch` を見直します。
+
+|`aidev agent run` で起動したのに `… has no grant in .aidev/policy.yaml`
+|policy に `agents.<name>` がありません。足してコミットします。
 
 |`… is protected (.claude/**)`
 |正常です。kit のファイルは kit への PR で変えます。

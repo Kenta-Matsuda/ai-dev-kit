@@ -66,7 +66,7 @@ Wiki 更新を伴わないマージが入ると main が Wiki より進む。こ
 | メインの Claude | サブエージェントの起動と `aidev knowledge update` の実行 |
 | knowledge-builder | evidence を読み、対象のページと index を書き、完了報告を残す |
 
-claude 以外のツール（copilot / codex / kiro）ではサブエージェント起動の可否がツールごとに違うため、A の手順 3 が使えない場合は B の headless 起動に落とす。
+claude 以外のツール（copilot / codex / kiro）でも A を成立させる。hook の置き場・イベント名・出力の形・サブエージェントの呼び方はツールごとに違うので、`cli/lib/tools.js` の registry と `templates/<tool>/` の hook 設定で kit が吸収する（詳細は `2026-09-22-wiki-update-flows.md` §5）。B の headless 起動に落とすのは、そのツールで Stop 拒否かサブエージェント起動が使えない場合だけ。
 
 ## 必要な変更
 
@@ -74,7 +74,7 @@ claude 以外のツール（copilot / codex / kiro）ではサブエージェン
 2. **状態判定を HEAD 基準にする。** `state.js` の「knowledgeSha と base のソース差分」を「inventory に記録した対象（パスと blob）と HEAD の木の一致」に変える。コミット K を必要としないので「K が手元に無い」の WARN は消える。Wiki だけのコミットは generation target 外なので、自動コミット後も OK になる。tracking の先行は WARN として残す。詳細は `2026-09-22-wiki-update-flows.md` §0-a。
 3. **クリーン判定を追加する。** generation target 内の未コミット変更 / 未追跡ファイルで停止し、ファイルを列挙する。
 4. **`aidev knowledge update` を新設する。** `build` と `sync` を統合。フラグは `--full`、`--scope`、`--no-agent`、`--no-commit`、`--dry-run`、`--branch`（C 用）、`--force`（手編集ページの上書き）。
-5. **hook を追加する。** PostToolUse（Bash）での HEAD 変化検出と plan 呼び出し、Stop での再検査と停止拒否。既存の `pending-refresh.json` は廃止。
+5. **hook を追加する。** PostToolUse（Bash）での HEAD 変化検出と plan 呼び出し、Stop での再検査と停止拒否。既存の `pending-refresh.json` は廃止。`tools.js` の registry に hook adapter（設定の置き場、イベント名、stdin / 出力の形、サブエージェント起動の文面）を足し、`templates/copilot|codex|kiro/` に hook 設定を配布する。
 6. **自動コミット。** `.aidev/knowledge/` と `.aidev/.gitignore` だけを stage し、固定メッセージ（例: `aidev: update Wiki for <sha12>`）でコミットする。CLI が行うコミットであり、エージェントにコミット権限を与えるものではない。
 7. **ブランチ接頭辞** `aidev/wiki-` → `aidev/wiki-`。
 8. **知識 skill / CLAUDE.md テンプレート**に「hook が求めたら knowledge-builder をサブエージェントで起動する」手順を書く。

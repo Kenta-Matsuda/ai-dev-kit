@@ -15,7 +15,7 @@ aidev <command> [subcommand] [options] [arguments]
 
 * オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
 * 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
-* `knowledge`、`agent`、`permission`、`workflow`、`hook`、`mcp` はサブコマンドが必須です。
+* `knowledge`、`agent`、`permission`、`workflow`、`evolve`、`hook`、`mcp` はサブコマンドが必須です。
 * PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。
 
 [[cli-common-options]]
@@ -38,7 +38,7 @@ aidev <command> [subcommand] [options] [arguments]
 |kit のバージョンを表示します。
 |===
 
-`hook`、`mcp`、`update` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
+`hook`、`mcp`、`update`、`uninstall` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
 
 [[cli-exit-codes]]
 === 終了コード
@@ -92,7 +92,6 @@ aidev <command> [subcommand] [options] [arguments]
 |xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
 |書き込み権限 policy を置く・見る
 
-
 |xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
 |承認済みスクリプトを作る・実行する
 
@@ -117,6 +116,8 @@ aidev <command> [subcommand] [options] [arguments]
 |xref:cli-uninstall[`aidev uninstall`]
 |この端末から `aidev` を消す
 |===
+
+`aidev --help` にはこのほかに `aidev evolve` が載っています。{project-name} 本体を開発する人が自分の端末でだけ使う機能で、PKG の利用者には関係ありません。実行しても `self-evolution is for ai-dev-kit developers only` で止まります。
 
 .ツールから呼ばれる
 [%autowidth.stretch,options="header"]
@@ -143,7 +144,6 @@ include::sync.adoc[]
 include::agent.adoc[]
 
 include::permission.adoc[]
-
 
 include::workflow.adoc[]
 

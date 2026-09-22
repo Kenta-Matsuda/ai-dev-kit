@@ -13,13 +13,13 @@ aidev eject --yes [--keep-assets] [--force] [--json]
 
 === 説明
 
-順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ `.claude/**`、`CLAUDE.md`、`.mcp.json` を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
+順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md`、`.mcp.json`、他のツールの分）を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
 
 残すもの: PKG のファイル、`.aidev/knowledge/`（Wiki）、`aidev.yaml`、`.aidev/workflows/`。
 
 eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外してください。`aidev init` で再導入できます。
 
-対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。進行中の sync や作業リースがあると `--force` 無しでは拒否します。
+対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。進行中の sync（有効な sync lease）があると `--force` 無しでは拒否します。
 
 === オプション
 
@@ -37,10 +37,10 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |JSON で出力する
 
 |`--force`
-|eject 済みでも、進行中のリースがあっても実行する
+|eject 済みでも、進行中の sync があっても実行する
 
 |`--keep-assets`
-|`.claude/`、`CLAUDE.md`、`.mcp.json` を残す
+|kit が置いたツール設定ファイルを残す
 |===
 
 === 終了コード
@@ -53,7 +53,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |eject した。既に eject 済み。`--dry-run`
 
 |1
-|`--yes` が無い。管理の痕跡が無い。進行中のリースがある
+|`--yes` が無い。管理の痕跡が無い。進行中の sync がある
 |===
 
 === 例

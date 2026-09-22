@@ -16,9 +16,9 @@ aidev permission show [--json]
 
 policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CLI が `aidev.yaml` から **候補** `.aidev/policy.candidate.yaml` を作り、人間が読んで `--approve` で置く 2 段階です。
 
-`--approve` で置くとき、今の policy より保護が減る変更は **弱化** と判定され、`--force` が無いと終了コード 3 で止まります。
+`--approve` で置くとき、今の policy より保護が減る変更（`protected` / `read_only` / `writable_during_sync` からの削除、`writable` への昇格、`agents` の許可の追加、`branch` 条件の削除）は **弱化** と判定され、`--force` が無いと終了コード 3 で止まります。
 
-候補を対話で編集する機能はありません。調整は `aidev.yaml` の `secrets_paths` で行います。
+候補を対話で編集する機能はありません。候補に入るのは `aidev.yaml` の `secrets_paths` と kit の既定だけで、`agents` はコメントの記入例だけです。`--approve` は候補ファイルを読まずに作り直して置くので、候補ファイルを手で編集しても反映されません。チームが `writable` や `agents.<name>` を足すときは、置いた後の `.aidev/policy.yaml` を直接編集してコミットし、PR でレビューします（`reconfigure --approve` を実行すると、その追加は消えます）。
 
 === サブコマンド
 
@@ -33,7 +33,7 @@ policy（`.aidev/policy.yaml`）は AI が書けないファイルなので、CL
 |policy がある状態で候補を作り直す。`--approve` で置く。弱化があれば `--force` も必要
 
 |`show`
-|有効な policy を表示する。ファイルが無ければ組み込みの最小 policy を表示し、終了コード 3
+|有効な policy と `agents` の許可を表示する。ファイルが無ければ組み込みの最小 policy を表示し、終了コード 3
 |===
 
 === オプション
@@ -99,5 +99,5 @@ aidev permission show
 
 === 関連
 
-* xref:permissions[権限と安全性] — 4 つの区分
+* xref:permissions[権限と安全性] — policy の区分
 * xref:cli-hook[aidev hook] — 判定を行う hook

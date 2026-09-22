@@ -31,7 +31,7 @@ aidev hook session-stop
 |PKG のファイルを編集した後に `quality_gates` を実行し、失敗の出力を返す
 
 |`session-stop`
-|セッション終了時の状態を `.aidev/cache/` に記録する
+|通常の環境では何もしない（ai-dev-kit 開発者の端末でだけ動く内部 hook）
 |===
 
 === 終了コード

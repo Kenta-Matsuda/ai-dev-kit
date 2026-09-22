@@ -31,7 +31,7 @@ aidev init
 [source,text]
 ----
 ✓ aidev.yaml is present (set up by your team); nothing to ask.
-✓ tool configuration is current (18 file(s): .claude/, CLAUDE.md, .mcp.json)
+✓ tool configuration is current (18 file(s) for claude)
 ✓ AZURE_DEVOPS_PAT is set (value not read)
 ✓ .aidev/policy.yaml is present
 ✓ LLM Wiki is present (.aidev/knowledge/)
@@ -40,7 +40,7 @@ aidev init
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[環境変数を設定] して、ターミナルを開き直します。
-* `✗ N kit-owned file(s) differ from the kit copy` → あなたの clone の `.claude/` などが配布版と違います。`git status` で確認し、意図した変更でなければ `aidev init --force` で戻します。
+* `tool config` 行に `newer templates available` → チームがまだ新しい kit のテンプレートを取り込んでいません。導入担当者が `aidev apply` して PR にします（xref:daily-apply[aidev apply]）。
 * `the LLM Wiki is not in this clone yet …` と聞かれたら → Enter（`N`）で断ります。導入担当者の PR がマージされてから `git pull` します。
 
 . 状態を確認します。

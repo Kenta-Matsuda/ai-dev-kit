@@ -22,7 +22,9 @@ The tool and model are chosen in this order:
 . `tools.agents.<name>` in `aidev.yaml`
 . `tools.agent` / `tools.agent_model` in `aidev.yaml`
 
-Only tools listed in `tools.default` can be used. Naming another tool stops with a hint to add it to `aidev.yaml` and run `aidev update`.
+Only tools listed in `tools.default` can be used. Naming another tool stops with a hint to add it to `aidev.yaml` and place that tool's configuration files (`aidev apply`).
+
+An agent started by `aidev agent run` gets the grant written under `agents.<name>` in `.aidev/policy.yaml` (paths of PKG source it may write, and an optional branch condition). The grant does not apply when a person calls the agent as a sub-agent in an interactive session (xref:permissions-source[Letting an agent edit source]).
 
 How the task reaches the tool differs. Claude Code receives it on standard input and selects the agent with `--agent <name>`. GitHub Copilot CLI and Kiro CLI receive one command-line sentence pointing at a task file written under `.aidev/cache/agents/`, and also select the agent by name. OpenAI Codex CLI cannot select an agent by name, so the task file starts with the agent's definition.
 
@@ -89,7 +91,7 @@ The adapters other than Claude Code follow each tool's published non-interactive
 aidev agent list
 aidev agent show knowledge-builder --tool copilot
 aidev agent run issue-to-pr "Triage work item 42 and propose an implementation plan" --dry-run
-aidev agent run issue-to-pr "Triage work item 42 and propose an implementation plan"
+aidev agent run issue-to-pr "Implement work item 42 and open a PR"   # may edit the paths granted under agents.issue-to-pr in the policy
 aidev agent run knowledge-builder --prompt-file task.md --model opus
 ----
 

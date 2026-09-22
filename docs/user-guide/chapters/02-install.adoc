@@ -40,7 +40,7 @@ cd ~/ai-dev-kit
 installer はファイルをコピーせず、clone を指す起動スクリプトを置きます（Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`、POSIX: `~/.local/bin`）。最後に `next: aidev doctor` と出れば成功です。
 +
 * `node not found` / `too old` → Node.js {node-min-version} 以上を入れて再実行します。
-* `this checkout looks like a wrapper` → PKG の中で実行しています。kit の clone で実行します。
+* `this looks like a package that uses ai-dev-kit, not the kit itself` → PKG の中で実行しています。kit の clone で実行します。
 * `~/.local/bin is not on your PATH` → 表示された `export PATH=...` をシェルの profile に追加します。
 
 . **新しいターミナルを開き**、動作を確認します。

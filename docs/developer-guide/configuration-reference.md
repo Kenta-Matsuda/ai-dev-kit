@@ -64,11 +64,6 @@ sync:
   remote_check_ttl_minutes: 60
   lease_ttl_minutes: 120
 
-
-self_evolution:
-  enabled: true
-  cadence: weekly
-
 quality_gates:
   lint: npm run lint
   typecheck: npm run typecheck
@@ -162,16 +157,6 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 `auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`aidev/wiki-<sha12>` branchに残ります。
 
-
-### `self_evolution`
-
-| key | 型 | 既定 | 説明 |
-| --- | --- | --- | --- |
-| `enabled` | bool | `true` | Stop hookが`.aidev/cache/evolution-journal.json`へ観測を記録するか |
-| `cadence` | string | `weekly` | `daily` / `monthly` / それ以外は7日として`due`判定に使う |
-
-記録までが実装範囲で、集約やPR生成はありません。
-
 ### `quality_gates`
 
 任意のkeyからcommand文字列へのmapping。PostToolUse hookが、編集対象にPKG file（kit管理path以外）が含まれるときだけ、repo rootでplatform shell経由に実行します（1 commandあたり120秒timeout）。失敗時は`additionalContext`で出力を返します。
@@ -191,6 +176,8 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 | `read_only` | string[] | agentは書込不可（`writable`で個別に許可） |
 | `writable_during_sync` | string[] | 整合性ERRORかつ有効なsync leaseのときに書込可 |
 | `writable` | string[] | 通常時に書込可（`read_only`より先に評価） |
+| `agents.<name>.writable` | string[] | CLIが起動したagent `<name>`（子processの`AIDEV_AGENT`）にだけ追加で書込可。`protected` / secretsより下位 |
+| `agents.<name>.branch` | string | 任意。checkoutのbranchがこのglobに一致するときだけ上の許可が効く |
 
 `config.DEFAULT_POLICY_SCOPES`（候補生成と`loadPolicy`のfallbackの既定）:
 
@@ -208,7 +195,16 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 .aidev/sync.lock  .aidev/materialized.json  .aidev/.gitignore  .aidev/ejected.json
 ```
 
-候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使います。`aidev.yaml`から`read_only` / `writable`を変える設定項目は現在ありません。変えたい場合は候補を手で編集してから`--approve`します（弱体化には`--force`が必要）。
+候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使い、`agents`は空（commentの記入例つき）です。`aidev.yaml`から`read_only` / `writable` / `agents`を変える設定項目は現在ありません。teamが広げるときは`.aidev/policy.yaml`を直接編集してcommitします（`--approve`は候補fileを読まず生成し直すので、手編集は候補ではなくpolicy本体に行う）。`reconfigure --approve`は生成し直した既定に戻すため、手で足した`writable` / `agents`は消えます（`agents`の追加は弱体化として`--force`を要求しますが、削除は要求しません）。
+
+`agents`の例:
+
+```yaml
+agents:
+  issue-to-pr:
+    writable: ["src/**", "tests/**"]
+    branch: "aidev/issue-*"   # 任意
+```
 
 globの意味（`paths.js`）: `*`は1 segment内、`?`は1文字、`**`は0個以上のsegment、`a/**`は`a`自身も一致。`..`は照合前に字句的に解決し、Windowsの`\`は`/`へ畳みます。
 
@@ -235,6 +231,8 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
+| `AIDEV_AGENT` | `policy.js`（`decide`の既定値） | CLIが`agent.runAgent`で子processの環境に入れるagent名。hookがそれを継承し、policyの`agents.<name>`を適用する。人が設定するものではない |
+| `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
 | `AIDEV_DEBUG` | `aidev.js` | internal errorのstack traceを表示 |
 | `CLAUDE_PROJECT_DIR` | `aidev.js`（`hook`のみ） | repo root探索の起点 |
 | `HTTPS_PROXY` / `https_proxy` | `doctor` | 表示のみ |
@@ -251,10 +249,11 @@ CLI起動agent（knowledge build / sync / agent run / workflow ctx.agent。前2�
 | `.aidev/ejected.json` | `eject` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
 | `.aidev/sync.lock` | `sync`、`knowledge build`（一時） | sync lease（`architecture.md` §5） |
-
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
-| `.aidev/cache/pending-refresh.json` | `hook session-stop` | `{queuedAt, knowledgeSha, severity, action}` |
-| `.aidev/cache/evolution-journal.json` | `hook session-stop` | `{schemaVersion: 1, cadence, observations: [{at, signals[]}], due}` |
+| `.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md` | `agent.runAgent`（`prompt: 'file'`のtool） | agentへ渡すprompt file |
+| `.aidev/cache/evolution/<session>.md` | Claude session（Stop hookの指示で。kit開発者端末のみ） | 振り返り（事実 / 無駄と原因 / kit への提案 / 提案しないこと）。`aidev evolve run`が`done/`へ移す。`--auto`時は`<file>.evolve-launched` markerも置く |
+| `AIDEV_HOME/developer.json` | `aidev evolve enable` | `{schemaVersion: 1, enabled: true, autoEvolve, enabledAt}` |
+| `AIDEV_HOME/cache/evolve/<yyyymmdd>/`、`<yyyymmdd>-input/` | `aidev evolve run` | kit checkoutのworktree（branch `aidev/evolve-<yyyymmdd>`）と、そこへ渡す振り返りのcopy |
 | `.aidev/cache/sync-worktree/` | `sync` | 一時git worktree |
 | `.aidev/knowledge/.cache/agent-task-*.json` | `agent.prepareTask` | 大きいplan（`schemaVersion: 2`） |
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |

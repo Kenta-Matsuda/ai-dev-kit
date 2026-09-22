@@ -36,17 +36,27 @@ Each line is `✓` (ok), `⚠` (warning) or `✗` (failure).
 aidev doctor
 ----
 
-[source,text]
+[source,text,subs="attributes+"]
 ----
 aidev doctor
   ✓ node                   v22.17.1
+  ✓ platform               win32 x64
   ✓ git                    git version 2.44.0.windows.1
-  ✓ aidev                  0.2.0 @ C:\tools\ai-dev-kit
+  ✓ aidev                  {aidev-version} @ C:\tools\ai-dev-kit
+  ✓ kit checkout           9491efe
   ✓ kit update             up to date
+  ✓ AIDEV_HOME             C:\Users\you\AppData\Local\ai-dev-kit
+  ✓ registered packages    1
   ✓ claude                 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
   ✓ aidev.yaml             C:\work\demo-pkg
+  ✓ aidev.yaml schema      package.name=demo-pkg, hosting=azure-devops
+  ✓ git repository         C:\work\demo-pkg
+  ✓ remote origin          https://dev.azure.com/contoso/Platform/_git/demo-pkg
   ✓ policy                 14 protected patterns
+  ✓ agent tool             claude (aidev.yaml tools.agent; one run: --agent-tool)
+  ✓ agent model            sonnet
   ⚠ env AZURE_DEVOPS_PAT   not set — Azure DevOps calls will fail
+  ✓ proxy                  none configured
   ✓ remote reachability    origin/main = 9f8e7d6
   ✓ Wiki state             the Wiki describes the code this work is based on.
 

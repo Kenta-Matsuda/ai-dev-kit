@@ -13,13 +13,13 @@ aidev eject --yes [--keep-assets] [--force] [--json]
 
 === Description
 
-In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes `.claude/**`, `CLAUDE.md` and `.mcp.json`, ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
+In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, `.mcp.json`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
 
 Kept: your package files, `.aidev/knowledge/` (the Wiki), `aidev.yaml`, `.aidev/workflows/`.
 
 After ejecting, `aidev check` returns 0. Remove `aidev check` from CI. `aidev init` re-adopts the package.
 
-There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With a sync or work lease in progress it refuses unless `--force` is given.
+There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With a sync in progress (a valid sync lease) it refuses unless `--force` is given.
 
 === Options
 
@@ -37,10 +37,10 @@ There is no interactive confirmation. Without `--yes` it lists what would happen
 |Machine-readable output
 
 |`--force`
-|Run even if already ejected or a lease is in progress
+|Run even if already ejected or a sync is in progress
 
 |`--keep-assets`
-|Keep `.claude/`, `CLAUDE.md` and `.mcp.json`
+|Keep the tool configuration files the kit placed
 |===
 
 === Exit codes
@@ -53,7 +53,7 @@ There is no interactive confirmation. Without `--yes` it lists what would happen
 |Ejected. Already ejected. `--dry-run`
 
 |1
-|`--yes` missing. No trace of kit management. A lease is in progress
+|`--yes` missing. No trace of kit management. A sync is in progress
 |===
 
 === Examples

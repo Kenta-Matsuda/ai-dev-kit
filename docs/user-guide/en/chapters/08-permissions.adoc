@@ -4,7 +4,7 @@
 {project-name} defines **where the AI may write** inside the PKG in `.aidev/policy.yaml` (the policy), and a Claude Code hook checks every write against it. Source code is read-only by default. Tokens are never written to files; they are passed only through environment variables.
 
 [[permissions-policy]]
-=== The four policy categories
+=== The policy categories
 
 [cols="1,2,3",options="header"]
 |===
@@ -16,7 +16,7 @@
 
 |`read_only`
 |`**` (the whole PKG)
-|Agents cannot write here. Add the paths you want an agent to edit to `writable` (xref:permissions-source[Letting an agent edit source]).
+|Agents cannot write here. To allow edits, add `agents.<name>.writable` for one agent, or `writable` for everyone (xref:permissions-source[Letting an agent edit source]).
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
@@ -24,10 +24,15 @@
 
 |`writable`
 |`.aidev/knowledge/**`, `.aidev/workflows/**`, `aidev.yaml`
-|Writable at any time.
+|Writable at any time, by every agent and every interactive session.
+
+|`agents.<name>.writable` +
+`agents.<name>.branch`
+|None
+|Extra paths that only the agent `<name>` started by `aidev` may write. With `branch`, the grant applies only while that branch (a glob) is checked out.
 |===
 
-Rules are checked top to bottom. Paths outside the repository and `protected` paths are always denied, everything is denied while there is no Wiki, then `writable` and `read_only` (allowed with a lease) are checked in that order.
+Rules are checked top to bottom. Paths outside the repository, `secrets_paths` and `protected` paths are always denied. While there is no Wiki, everything is denied (except `.aidev/knowledge/**` during a sync). After that, `writable` → `agents.<name>` → `read_only` are checked in that order, and the first match decides.
 
 [[permissions-hooks]]
 === What the hooks do
@@ -52,14 +57,14 @@ The distributed `.claude/settings.json` registers four hooks.
 
 |Stop
 |`aidev hook session-stop`
-|Records the end-of-session state in `.aidev/cache/`.
+|Does nothing in an ordinary environment (an internal hook that only matters on an ai-dev-kit developer's machine).
 |===
 
 When a write is denied, Claude receives a reason like these.
 
 [source,text]
 ----
-ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents; …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). PKG source is not written by agents by default; this session was not started by the CLI as a named agent; …
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev knowledge build" …
 ----
@@ -69,7 +74,19 @@ An edit that removes a hook is caught by `aidev check` with exit code 2, and CI 
 [[permissions-source]]
 === Letting an agent edit source
 
-By default the PKG source is `read_only` and no agent can write it. To let `issue-to-pr` or another agent implement changes, the team adds the paths (for example `src/**`) to `writable` in `.aidev/policy.yaml` and commits it. `protected` paths and `secrets_paths` stay unwritable regardless. Review policy changes in a PR and widen them only for as long as needed.
+By default the PKG source is `read_only` and no agent can write it. To let `issue-to-pr` or another agent implement changes, the team writes a **grant for that agent** in `.aidev/policy.yaml` and commits it.
+
+[source,yaml]
+----
+agents:
+  issue-to-pr:
+    writable: ["src/**", "tests/**"]
+    branch: "aidev/issue-*"     # optional: only on this branch
+----
+
+A grant applies only to an agent that **`aidev` started**, such as `aidev agent run issue-to-pr "..."` (`aidev` tells the hook which agent it started; an agent cannot claim a name for itself). A sub-agent called from an interactive `claude` session stays read-only, because there is no reliable way to know its name there. With `branch`, writes are allowed only while that branch is checked out.
+
+Add paths to `writable` only when every agent and interactive session should be able to write them. `protected` paths and `secrets_paths` stay unwritable either way. Review policy changes in a PR (adding `agents` requires `--force` at `reconfigure --approve`) and widen them only for as long as needed.
 
 [[permissions-commands]]
 === Placing, changing and viewing the policy
@@ -84,7 +101,7 @@ The AI cannot create the policy. A human places it with the CLI.
 |Places the candidate `.aidev/policy.candidate.yaml` as `.aidev/policy.yaml`. Use it after answering `N` in `aidev init`.
 
 |`aidev permission reconfigure` → `reconfigure --approve`
-|Rebuilds and places the candidate, for example after changing `secrets_paths`. A change that weakens protection also needs `--force`.
+|Rebuilds and places the candidate, for example after changing `secrets_paths`. A change that weakens protection also needs `--force`. The candidate is rebuilt from `aidev.yaml`, so any `writable` or `agents` entries the team added to the policy by hand are lost. Add them again after placing it, and commit.
 
 |`aidev permission show`
 |Shows the policy in force.
@@ -99,7 +116,8 @@ The AI cannot create the policy. A human places it with the CLI.
 
 === What not to do
 
-* Do not hand-edit `.claude/**`, `CLAUDE.md`, `.mcp.json` or `.aidev/policy.yaml` (change them through a PR to the kit).
+* Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole kit as a PR to the kit).
+* Only humans edit `.aidev/policy.yaml`, and every change is reviewed in a PR (never let the AI edit it).
 * When the AI reports a denied write, read the reason instead of looking for a workaround.
 * Do not put tokens in commits, logs or PR descriptions.
 

@@ -1,6 +1,6 @@
 # Architecture and internal behavior
 
-この文書はai-dev-kit 0.2.0（PKG clone方式）の技術設計を、本体を保守する人向けに説明します。利用者向けの手順は`docs/user-guide/`を参照してください。
+この文書はai-dev-kit（PKG clone方式）の技術設計を、本体を保守する人向けに説明します。利用者向けの手順は`docs/user-guide/`を参照してください。
 
 ## 1. PKG clone方式
 
@@ -15,6 +15,7 @@
 │  ├─ settings.json               hooks / deny / ask
 │  ├─ agents/  skills/
 │  └─ settings.local.json         個人設定。kit所有ではなくdrift検出から除外
+├─ .github/  AGENTS.md  .kiro/    tools.default に copilot / codex / kiro があるときだけ（§2）
 └─ .aidev/
    ├─ .gitignore                  CLIが書く。runtime stateをgitから外す
    ├─ policy.yaml                 承認済みpolicy（CLIだけが配置）
@@ -25,13 +26,13 @@
    │  └─ .cache/                  agent plan、完了報告 done/（ignored）
    ├─ workflows/<name>/           workflow.yaml, steps.js, approval.json（runs/ はignored）
    ├─ sync.lock                   sync lease（ignored）
-   └─ cache/                      remote-check.json, sync-worktree/, pending-refresh.json,
-                                  evolution-journal.json（ignored）
+   └─ cache/                      remote-check.json, sync-worktree/, agents/（prompt file）,
+                                  evolution/<session>.md（kit開発者端末の振り返り）（ignored）
 ```
 
-`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`update`、`sync`（worktree内）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
+`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`apply`、`sync`（worktree内）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
 
-path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
+path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、全toolの`TOOL_CONFIG_GLOBS`: `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.github/copilot-instructions.md`、`.github/agents/**`、`.github/skills/**`、`AGENTS.md`、`.kiro/steering/**`、`.kiro/agents/**`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
 
 ### 端末側: kit checkoutと`AIDEV_HOME`
 
@@ -39,9 +40,9 @@ path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml
 | --- | --- |
 | kit checkout（`installRoot`） | ai-dev-kit自身のclone。launcherが`cli/bin/aidev.js`を指す。`aidev update`が`origin/main`へfast-forwardする。templateの読み出し元 |
 | launcher | `scripts/install.ps1`が`%LOCALAPPDATA%\ai-dev-kit\bin\aidev.cmd` / `.ps1`、`scripts/install.sh`が`~/.local/bin/aidev`を作る（`AIDEV_BIN_DIR`で変更可） |
-| `AIDEV_HOME` | 既定はWindows `%LOCALAPPDATA%\ai-dev-kit`、POSIX `$XDG_DATA_HOME/ai-dev-kit`（未設定なら`~/.local/share/ai-dev-kit`）。`registry.json`と`cache/update-check.json`を置く |
+| `AIDEV_HOME` | 既定はWindows `%LOCALAPPDATA%\ai-dev-kit`、POSIX `$XDG_DATA_HOME/ai-dev-kit`（未設定なら`~/.local/share/ai-dev-kit`）。`registry.json`、`cache/update-check.json`、kit開発者端末では`developer.json`と`cache/evolve/`（§13）を置く |
 
-`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`update`が登録し、`eject`が削除します。`uninstall`は`registry.json`と`cache/`ごと消します（PKG側には触れず、kit所有fileを消す`git rm`を表示するだけ）。`update`はここに載っているcloneのうちlockの`kitCommit`が現在のkitと違うものを「`aidev apply`が必要」として一覧します（適用はしません）。
+`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`apply`が登録し、`eject`が削除します。`uninstall`は`registry.json`と`cache/`ごと消します（PKG側には触れず、kit所有fileを消す`git rm`を表示するだけ）。`update`はここに載っているcloneのうちlockの`kitCommit`が現在のkitと違うものを「`aidev apply`が必要」として一覧します（適用はしません）。
 
 ## 2. tool configのtemplate、apply、記録
 
@@ -108,7 +109,7 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
 | 層 | 実体 | 位置付け |
 | --- | --- | --- |
 | 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev permission *`・`aidev eject`・`aidev uninstall`をask |
-| 実行時guard | `aidev hook guard-write` | path、policy、整合性、leaseを評価して`permissionDecision`を返す |
+| 実行時guard | `aidev hook guard-write` | path、policy（`AIDEV_AGENT`によるagent単位の許可を含む）、整合性、leaseを評価して`permissionDecision`を返す |
 | 制御面の検査 | `aidev check`（exit 2）+ branch policy | hooksを消した編集と未解消のconflict markerをmerge前に止める（teamの他の編集は止めない） |
 | 行動指示 | `CLAUDE.md`、Agents / Skills | 補助。強制境界ではない |
 | 認証scope | tokenの権限 | server側で最も強い強制力 |
@@ -125,8 +126,9 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
    - あり、かつ`writable_during_sync`一致 → allow `sync-lease`
    - あり、かつ不一致 → deny `sync-lease-scope`
 5. `writable`一致 → allow `writable`（Wiki・workflows・`aidev.yaml`は`read_only: ["**"]`の内側にあるため、read_onlyより先に評価する）
-6. `read_only`一致 → deny `read-only`（agentはPKG sourceを書かない。teamが`writable`に足したpathだけが5で許可される）
-7. どれにも当たらない → allow `default`（既定policyは`read_only: ["**"]`なので、通常この分岐に到達するpathはない）
+6. agent単位の許可: `AIDEV_AGENT`（CLIが`agent.runAgent`で子processの環境に入れる。hookはそれを継承する）がpolicyの`agents.<name>`にあり、pathが`agents.<name>.writable`に一致 → `branch`があればcheckoutのbranchがそのglobに一致するときだけ allow `agent-writable`（不一致は deny `agent-branch`、detached HEADも不一致）
+7. `read_only`一致 → deny `read-only`（理由にagent名と許可の有無を含める）
+8. どれにも当たらない → allow `default`（既定policyは`read_only: ["**"]`なので、通常この分岐に到達するpathはない）
 
 `decideMany`は複数targetのうち最初のdenyで確定します。
 
@@ -151,9 +153,10 @@ writable:
   - ".aidev/knowledge/**"
   - ".aidev/workflows/**"
   - "aidev.yaml"
+agents: {}            # 候補は空。teamが policy.yaml に直接書く（例: issue-to-pr: { writable: ["src/**"], branch: "aidev/issue-*" }）
 ```
 
-候補は`permission.buildCandidate(config)`が`aidev.yaml`から機械生成します。agentは使いません。policy fileが無い場合、`loadPolicy`は上記と同じ内容の`_fallback: true`を返します（未初期化repoが無防備にならない）。
+候補は`permission.buildCandidate(config)`が`aidev.yaml`から機械生成します。agentは使いません。`--approve`は候補fileを読まず生成し直すので、teamの追加（`writable` / `agents`）は`.aidev/policy.yaml`を直接編集してPRでreviewします。policy fileが無い場合、`loadPolicy`は上記と同じ内容の`_fallback: true`を返します（未初期化repoが無防備にならない）。
 
 ### Bash targetの抽出
 
@@ -169,7 +172,7 @@ writable:
 | `baseSha` | `merge-base(HEAD, origin/<tracking_branch>)`。remote-tracking refが無ければHEAD | 今の作業が立脚するtracking commit |
 | `knowledgeSha` | `.aidev/knowledge/manifest.json`の`knowledgeSha` | Wikiが説明するcommit |
 
-feature branch上ではHEADとtracking branchが違うのが正常なので、整合性は`HEAD == knowledgeSha`ではなく「Wikiは今の作業の土台を説明しているか」で判定します。比較は**source treeの差分**です。`state.sourceChanged(repoRoot, a, b)`は`git diff --quiet a b -- . :(exclude)<kit-managed>`で、kit管理path（`aidev.yaml`、`.aidev`、`.claude`、`CLAUDE.md`、`.mcp.json`）を除いた変更の有無を返します。Wikiを追加しただけのcommitやkit更新commitは「codeが動いた」と数えません。commitが手元に無い場合は「変更あり」に倒します。
+feature branch上ではHEADとtracking branchが違うのが正常なので、整合性は`HEAD == knowledgeSha`ではなく「Wikiは今の作業の土台を説明しているか」で判定します。比較は**source treeの差分**です。`state.sourceChanged(repoRoot, a, b)`は`git diff --quiet a b -- . :(exclude)<kit-managed>`で、kit管理path（`KIT_MANAGED_GLOBS`: `aidev.yaml`、`.aidev`、全toolの設定file）を除いた変更の有無を返します。Wikiを追加しただけのcommitやkit更新commitは「codeが動いた」と数えません。commitが手元に無い場合は「変更あり」に倒します。
 
 ### severity（判定順）
 
@@ -196,7 +199,7 @@ remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.
 
 ## 5. lease
 
-種類は2つで、混同しないことが設計の要点です。どちらのfileも`ALWAYS_PROTECTED`なので、agentが自分でleaseを作る・延長することはできません。`evaluateLease`は`acquiredAt + ttlMinutes`で期限を判定し、壊れた記録は無効扱いです。
+leaseはsync leaseの1種類だけです（work leaseは0.5.0で撤去）。fileは`ALWAYS_PROTECTED`なので、agentが自分でleaseを作る・延長することはできません。`evaluateLease`は`acquiredAt + ttlMinutes`で期限を判定し、壊れた記録は無効扱いです。
 
 ### sync lease（`.aidev/sync.lock`）
 
@@ -212,7 +215,7 @@ remote確認は`git ls-remote --heads`（local refを変更しない）を`sync.
 
 sync leaseがguardで効くのは、状態がERRORのときだけです（§3の第4段）。
 
-leaseはこの1種類だけです。PKG sourceへのagentの書き込みは、teamが`.aidev/policy.yaml`の`writable`にpathを足すことで許可します（一時的な「work lease」の仕組みは0.5.0で撤去）。
+PKG sourceへのagentの書き込みは、teamが`.aidev/policy.yaml`に`agents.<name>.writable`（CLIが起動したそのagentだけ。任意で`branch`）か`writable`（全員）を書くことで許可します。一時的な許可（TTL付きのwork lease）は再導入しません。
 
 ## 6. Wiki: manifest、inventory、evidence、agent
 
@@ -249,7 +252,7 @@ LLM Wikiは正本ではなくPKG sourceから再生成できる派生情報で�
 }
 ```
 
-`kitCommit`は`knowledge build`ではPKGのHEAD、`sync`ではkit checkoutのHEADが入ります（不統一。`implementation-status.md`参照）。`state.knowledgeSha`は`knowledgeSha`が無ければ`targetSha`も読みますが、書き手は常に`knowledgeSha`です。
+`kitCommit`は`knowledge build`も`sync`もkit checkoutのHEAD（Wikiを生成したkitの版）です。`state.knowledgeSha`は`knowledgeSha`が無ければ`targetSha`も読みますが、書き手は常に`knowledgeSha`です。
 
 ### inventory record（`.aidev/knowledge/inventory/NN.json`）
 
@@ -294,7 +297,8 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 - tool固有の事項は`cli/lib/tools.js`の`REGISTRY`（`claude` / `copilot` / `codex` / `kiro`）に集約する。各recordは`bin`、`envBin`、`minVersion`、`verified`、`prompt`（`stdin` | `file`）、`namedAgents`、`argv()`、`parse()`、`configGlobs`、`configDirs`を持つ。`agent.js`はtool idを見ずadapterに委譲する
 - `tools.resolveBinary(tool)`: `AIDEV_<TOOL>_BIN`（`.js`ならnodeで実行しversion検査を省く。testはこれでstubを差す）→ Windowsは`where.exe <bin>`で絶対pathへ解決（`.cmd`/`.bat`は`cmd.exe /d /s /c`経由）→ それ以外はPATHの`<bin>`
 - `tools.checkVersion`: `<bin> --version`。`minVersion`があるtool（claude: 2.1.259）はそれ未満で起動しない。無いtoolは起動できれば通す
-- claudeのargvは`-p --input-format text --agent <name> [--model <m>] --output-format json --permission-mode acceptEdits --permission-prompts none`。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる
+- claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format json --permission-mode acceptEdits --permission-prompts none`。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
+- `runAgent`は子processの環境に`AIDEV_AGENT=<name>`を入れる。toolが起動するhookはそれを継承し、guard-writeがpolicyの`agents.<name>`を適用する
 - `prompt: 'file'`のtool（copilot / codex / kiro）はpromptを`.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md`へ書き、argvには`filePointerPrompt(rel)`の1文だけを載せる。`namedAgents: false`のtool（codex）はそのfileの先頭に同梱agent定義の本文を置く。argv: copilot `-p <pointer> --allow-all-tools [--agent <name>] [--model <m>]`、codex `exec --sandbox workspace-write [--model <m>] <pointer>`、kiro `chat --no-interactive --trust-all-tools [--agent <name>] [--model <m>] <pointer>`。claude以外は実機未検証（`verified: false`）で、`aidev agent run --dry-run`がcommand lineを表示する
 - 結果はadapterの`parse()`が`{ok, result, costUsd, sessionId, permissionDenials, reason}`へ正規化する。claudeはJSON契約、他はexit codeとstdout本文
 - timeoutではWindowsで`taskkill /T /F`によりprocess tree全体を止め、それ以外はSIGTERM→5秒後SIGKILL
@@ -359,11 +363,11 @@ agentの作業branch先端をそのままsync対象にしません。squash、re
 | SessionStart | — | `formatSummary`とsync leaseの状態を`additionalContext`で返す |
 | PreToolUse | `Write|Edit|MultiEdit|NotebookEdit|Bash` | `targetsFrom`でpathを集め`policy.decideMany`。deny理由を`permissionDecisionReason`へ |
 | PostToolUse | `Write|Edit|MultiEdit` | `quality_gates`のcommandをrepo rootで実行。編集対象がkit管理pathだけなら`skipped` |
-| Stop | — | `.aidev/cache/pending-refresh.json`と`evolution-journal.json`へ観測を記録 |
+| Stop | — | kit開発者端末（`home.readDeveloper`）でだけ動く。transcriptを集計し、閾値（tool call 30回 / 出力20k tokens）を超えた未振り返りのsessionに`decision: block`で振り返り（`.aidev/cache/evolution/<session>.md`）を書かせる。それ以外は何もしない（§13 self-evolution） |
 
 guard-writeはfail-closedです。payloadがJSONでない、policyが読めない、例外が出た、いずれもdenyを返します（exit 0のまま）。hookはnetworkに触れず、`session-start`だけTTL cacheと3秒timeoutのremote確認を行います。
 
-Stop hookはWiki更新を起動しません。pending refresh queueを消費するrunnerは存在せず、journalも記録のみです。
+Stop hookはWiki更新を起動しません。利用者の端末では`{ok: true, skipped}`を返すだけで、fileも書きません。
 
 ## 9. workflow runner
 
@@ -381,7 +385,7 @@ Stop hookはWiki更新を起動しません。pending refresh queueを消費す�
 
 `aidev update`はkit checkoutだけを進めます（`selfUpdate`: 未commit変更なし・`main` branch上を確認し、`origin/main`をfetchして`merge --ff-only`。divergeは拒否）。PKGには触れず、registryのcloneのうちlockの`kitCommit`が古いものを一覧して`aidev apply`を案内します。PKGへの適用（`aidev apply`）を分けているのは、teamの編集とのmergeやconflict解消に時間をかけられるようにするためです。
 
-更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `mcp` / `update`以外のcommandで`home.checkForUpdate`を呼び（`--json`と`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`と比べて新しければ警告を出し、TTYなら「今updateするか」を尋ねて`update`を実行します。結果は`AIDEV_HOME/cache/update-check.json`に24時間cacheされ、確認失敗はcacheしません。
+更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `mcp` / `update` / `uninstall`以外のcommandで`home.checkForUpdate`を呼び（`--json`と`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`と比べて新しければ警告を出し、TTYなら「今updateするか」を尋ねて`update`を実行します。結果は`AIDEV_HOME/cache/update-check.json`に24時間cacheされ、確認失敗はcacheしません。
 
 ## 12. model解決
 
@@ -401,10 +405,19 @@ CLI起動agent（aidev knowledge build, aidev sync, aidev agent run, workflow ct
 
 同梱agentのfrontmatterは`model: inherit`で、具体modelを固定しません。
 
-## 13. source references
+## 13. self-evolution（kit開発者向け）
+
+利用者には存在しない機能です。判定の鍵は`AIDEV_HOME/developer.json`（`aidev evolve enable`）または`AIDEV_KIT_DEVELOPER=1`で、PKGに配布されるfileには何も無く、PKG側の設定にもありません。
+
+1. **Stop hook**（`hook.js sessionStop`）: 開発者端末でのみ、`transcript_path`のJSONLを`summarizeTranscript`で集計（tool call数、tool error、`ai-dev-kit:`のdeny、入出力token、cache、経過時間）。`stop_hook_active`でなく、`.aidev/cache/evolution/<session_id>.md`が無く、閾値（`REFLECT_MIN_TOOL_CALLS` 30 / `REFLECT_MIN_OUTPUT_TOKENS` 20000）を超えていれば`{decision: "block", reason}`を返す。reasonは集計値と書式（事実 / 無駄と原因 / kit への提案 / 提案しないこと）と「promptや応答やdiffや秘密を書かない」規則を含む。同じsessionが自分の文脈で振り返りを書き、次のStopでfileを見て素通しする。1 session 1回。`--auto`で有効化した端末では、振り返りが揃った時点で`aidev evolve run`を1回だけdetachedで起動する（marker `<file>.evolve-launched`）。
+2. **`aidev evolve run`**（`evolve.js`）: 開発者端末のみ。registryのPKGと現在のPKGから`.aidev/cache/evolution/*.md`を集め、kit checkoutの`git worktree add -b aidev/evolve-<yyyymmdd> <AIDEV_HOME>/cache/evolve/<date> main`で作業treeを作り、`cli/agents/evolution.md`の定義を**promptに前置**（`runAgent({ definition })`。kitには`.claude/agents/`が無いので`--agent`は使わない）して`evolution` agentを起動する。claudeには`--allowedTools`でRead/Glob/Grep/Edit/Write/Bash(git|npm|node|gh)を渡す。agentがtemplateを直し、`npm run check` / `docs:check`を通し、commitし、手元のtool（GitHub MCP / `gh` / Azure DevOps MCP）でPRを作る。CLIはPR作成先を判定しない（agentが`origin`に合うtoolを使う）。成功した振り返りは`done/`へ移す。worktreeは残し、削除commandを表示する。
+3. `evolution` agent定義は`cli/agents/`に置き、`templates/`には含めない（PKGに配布しない）。
+
+## 14. source references
 
 - 配置: `cli/lib/layout.js`（`TOOL_CONFIG_GLOBS`を含む）、`cli/lib/home.js`
 - tool adapter: `cli/lib/tools.js`、`cli/commands/agent.js`
+- self-evolution: `cli/commands/evolve.js`、`cli/agents/evolution.md`、`cli/commands/hook.js`（`sessionStop`）、`cli/lib/home.js`（developer marker）
 - tool config: `cli/lib/assets.js`（`templates/<tool>/`のtreeを`applyTemplates`で適用。3-way merge、conflict marker、lock schema 4、`inspectConfig`）、`cli/commands/apply.js`
 - config / policy: `cli/lib/config.js`、`cli/lib/policy.js`、`cli/lib/paths.js`
 - state: `cli/lib/state.js`、`cli/lib/git.js`

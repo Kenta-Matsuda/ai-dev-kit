@@ -29,7 +29,7 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |整合しています。警告（`main` が進んでいる、本文が未生成）は 0 のままです。`--strict` で 2 になります。
 
 |2
-|`.claude/**`・`CLAUDE.md`・`.mcp.json` が配布版と違います。
+|ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev apply` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えています。チームがファイルを編集しただけなら 0 です。
 
 |3
 |`.aidev/policy.yaml` が無い、または壊れています。
@@ -37,7 +37,6 @@ kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`
 |4
 |Wiki が無い・壊れている、または前回の sync が途中で止まっています。
 |===
-
 
 [[automation-workflow]]
 === aidev workflow — 承認済みスクリプトの実行

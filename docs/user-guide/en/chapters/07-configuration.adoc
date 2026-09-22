@@ -39,8 +39,11 @@ hosting:
   tracking_branch: "main"
 
 tools:
-  default: ["claude"]
-  agent_model: "sonnet"         # model for the agent that writes the Wiki; "" leaves it to Claude Code
+  default: ["claude"]           # AI tools whose configuration is placed; several allowed: ["claude", "copilot"]
+  agent: claude                 # tool aidev starts agents with (one of default)
+  agent_model: "sonnet"         # model for those agents; "" leaves it to the tool
+  agents:                       # per-agent overrides (optional)
+    knowledge-builder: { model: opus }
 
 knowledge:
   agent_timeout_ms: 1800000     # time budget per agent run (30 minutes)
@@ -87,7 +90,7 @@ quality_gates:                  # commands run after the AI edits a file
 
 |`tools.default`
 |`["claude"]`
-|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/` and `.github/skills/`; `codex` gets `AGENTS.md`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev update`.
+|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/` and `.github/skills/`; `codex` gets `AGENTS.md`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev apply` (kept if they were edited).
 
 |`tools.agent`
 |First entry of `default`
@@ -128,8 +131,6 @@ quality_gates:                  # commands run after the AI edits a file
 |repository name
 |PKG name used in output.
 
-
-
 |`sync.auto_pr`
 |`true`
 |`false` makes `aidev sync` push but not open a PR.
@@ -146,7 +147,6 @@ quality_gates:                  # commands run after the AI edits a file
 |`120`
 |How long the sync lock stays valid.
 
-
 |`knowledge.max_files_per_dir`
 |`20`
 |Maximum pages per Wiki directory.
@@ -158,11 +158,9 @@ quality_gates:                  # commands run after the AI edits a file
 |`knowledge.evidence.include` / `exclude`
 |`["**"]` / `package.exclude`
 |Files the agent may read while researching.
-
-|`self_evolution.enabled` / `cadence`
-|`true` / `weekly`
-|Whether and how often session observations are recorded in `.aidev/cache/`.
 |===
+
+Unknown keys are ignored (they are not an error). A misspelled key name is not caught by `aidev doctor` either, so check the names against these tables.
 
 === Keys you must not write
 

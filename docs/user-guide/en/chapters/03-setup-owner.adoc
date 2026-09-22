@@ -46,7 +46,7 @@ aidev init
 +
 After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step. It then asks `Build the LLM Wiki now? (Y/n)`. Enter starts the build (step 4).
 +
-* `✗ N kit-owned file(s) differ from the kit copy` → there is already a hand-edited `.claude/` or similar. Save its contents somewhere, then run `aidev init --force`.
+* `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` or similar already contains files that differ from the kit templates. Save their contents somewhere, then run `aidev init --force`.
 * `run "aidev init" at the repository root` → move to the root and run it there.
 
 . Approve the policy (only if you answered `N` in step 2). Read the candidate and place it once you agree with it.
@@ -88,7 +88,7 @@ git commit -m "chore: adopt ai-dev-kit"
 git push -u origin feature/ai-dev-kit
 ----
 +
-Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want.
+Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want. If you also chose `copilot` / `codex` / `kiro`, `git add` that tool's configuration files too (`.github/`, `AGENTS.md`, `.kiro/`; see xref:files-and-state[Files in the package]).
 
 . Have the PR reviewed and merge it into `main`. After the merge, members can join with xref:setup-member[Member steps].
 

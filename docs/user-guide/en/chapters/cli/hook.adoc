@@ -31,7 +31,7 @@ Claude Code starts it from the distributed `.claude/settings.json`. It reads the
 |Runs `quality_gates` after a package file was edited and returns the output of failures
 
 |`session-stop`
-|Records the state at the end of the session under `.aidev/cache/`
+|Does nothing in an ordinary environment (an internal hook that runs only on an ai-dev-kit developer's machine)
 |===
 
 === Exit codes

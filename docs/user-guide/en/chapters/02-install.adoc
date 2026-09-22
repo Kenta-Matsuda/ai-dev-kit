@@ -40,7 +40,7 @@ cd ~/ai-dev-kit
 The installer copies nothing. It places a launcher that points at the clone (Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`, POSIX: `~/.local/bin`). It succeeded if the last line is `next: aidev doctor`.
 +
 * `node not found` / `too old` → install Node.js {node-min-version} or later and run it again.
-* `this checkout looks like a wrapper` → you ran it inside a package. Run it in the kit clone.
+* `this looks like a package that uses ai-dev-kit, not the kit itself` → you ran it inside a package. Run it in the kit clone.
 * `~/.local/bin is not on your PATH` → add the `export PATH=...` line shown to your shell profile.
 
 . **Open a new terminal** and check that it works.

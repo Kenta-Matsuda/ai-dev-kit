@@ -31,7 +31,7 @@ aidev init
 [source,text]
 ----
 ✓ aidev.yaml is present (set up by your team); nothing to ask.
-✓ tool configuration is current (18 file(s): .claude/, CLAUDE.md, .mcp.json)
+✓ tool configuration is current (18 file(s) for claude)
 ✓ AZURE_DEVOPS_PAT is set (value not read)
 ✓ .aidev/policy.yaml is present
 ✓ LLM Wiki is present (.aidev/knowledge/)
@@ -40,7 +40,7 @@ aidev init
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[set the environment variable] and open a new terminal.
-* `✗ N kit-owned file(s) differ from the kit copy` → the `.claude/` or similar in your clone differs from the distributed version. Check with `git status`; if the change was not intended, restore it with `aidev init --force`.
+* `newer templates available` on the `tool config` line → the team has not taken in the newer kit templates yet. The package owner runs `aidev apply` and opens a PR (xref:daily-apply[aidev apply]).
 * If it asks `the LLM Wiki is not in this clone yet …` → press Enter (`N`). Run `git pull` after the package owner's pull request merges.
 
 . Check the state.

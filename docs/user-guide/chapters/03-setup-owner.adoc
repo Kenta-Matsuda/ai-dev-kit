@@ -46,7 +46,7 @@ aidev init
 +
 質問のあと、設定ファイルが書かれ、policy の要約と `Place this policy now? (y/N)` が表示されます。`y` で policy が置かれます。`N` なら候補ファイルが書かれ、次の手順で承認します。続けて `Build the LLM Wiki now? (Y/n)` と聞かれます。Enter で Wiki の生成が始まります（手順 4）。
 +
-* `✗ N kit-owned file(s) differ from the kit copy` → 既に手編集された `.claude/` などがあります。内容を退避してから `aidev init --force` を実行します。
+* `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` などに kit のテンプレートと違う既存ファイルがあります。内容を退避してから `aidev init --force` を実行します。
 * `run "aidev init" at the repository root` → ルートに移動して実行します。
 
 . policy を承認します（手順 2 で `N` にした場合だけ）。候補を読み、納得したら置きます。
@@ -88,7 +88,7 @@ git commit -m "chore: adopt ai-dev-kit"
 git push -u origin feature/ai-dev-kit
 ----
 +
-`aidev check` が `✓ environment is consistent.` であることを確認してから push します。`.aidev/.gitignore` が一時ファイルを除外するので、`git add .aidev` で余計なものは入りません。
+`aidev check` が `✓ environment is consistent.` であることを確認してから push します。`.aidev/.gitignore` が一時ファイルを除外するので、`git add .aidev` で余計なものは入りません。`copilot` / `codex` / `kiro` も選んだ場合は、そのツールの設定ファイル（`.github/`、`AGENTS.md`、`.kiro/`）も `git add` します（xref:files-and-state[PKG 内のファイル]）。
 
 . PR をレビューしてもらい、`main` にマージします。マージ後、メンバーは xref:setup-member[メンバーの手順] で参加できます。
 

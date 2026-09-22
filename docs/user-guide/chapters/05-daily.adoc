@@ -41,7 +41,7 @@ aidev status
 
 その他の表示は xref:troubleshooting-status[トラブルシューティング] を見てください。
 
-続く行では、`tool config` と `policy` を確認します。`tool config` は `applied from kit <sha>` で始まり、チームが編集したファイル数（`customised`）や、新しいテンプレートがあること（`newer templates available: "aidev apply"`）を添えます。`CONFLICTS` なら `aidev apply` の衝突が未解消、`kit hooks missing` なら `.claude/settings.json` から hooks が消えています（xref:daily-apply[aidev apply]）。`policy missing` は `aidev permission configure --approve` で解決します。
+続く行では、`tool config` と `policy` を確認します。`tool config` は `applied from kit <sha>` で始まり、チームが編集したファイル数（`customised`）や、新しいテンプレートがあること（`newer templates available: "aidev apply"`）を添えます。`CONFLICTS` なら `aidev apply` の衝突が未解消、`kit hooks missing` なら `.claude/settings.json` から hooks が消えています（xref:daily-apply[aidev apply]）。`policy` は `placed (N protected paths)` に、チームが agent ごとに足した許可（`agent grants: …`）を添えます。`missing` なら `aidev permission configure --approve` で解決します。
 
 === Wiki の使われ方
 

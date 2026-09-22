@@ -67,7 +67,7 @@ aidev check
   tracking     9f8e7d6
   base         1a2b3c4
   knowledge    1a2b3c4
-  tool config  matches the kit
+  tool config  ok (1 customised)
   policy       valid
 ✓ environment is consistent.
 ----
@@ -77,7 +77,7 @@ aidev check
 [source,text]
 ----
 ✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev apply" to record the result.
-    modified: .claude/settings.json
+    conflict: .claude/settings.json
 ----
 
 === 関連

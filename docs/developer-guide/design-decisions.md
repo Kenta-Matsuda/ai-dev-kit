@@ -1,6 +1,6 @@
 # Design decisions
 
-0.2.0（PKG clone方式）で採用した設計判断、検討した代替案、未決の論点を記録します。前身のwrapper repository方式（PKGをsubmoduleとして持つ別repository）からの変更点を中心に書きます。各判断は`architecture.md`の該当節と`implementation-status.md`の到達範囲を前提にしています。
+PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案、未決の論点を記録します。前身のwrapper repository方式（PKGをsubmoduleとして持つ別repository）からの変更点と、その後の版で足した判断を書きます。各判断は`architecture.md`の該当節と`implementation-status.md`の到達範囲を前提にしています。
 
 ## 採用した判断
 
@@ -16,7 +16,7 @@
 - tool起動時に設定directoryを外部へ向ける。toolごとの起動wrapperが必要になる
 - user-level設定（`~/.claude/`）へ置く。PKGごとの差分を表現できない
 
-**トレードオフ**: PKG repositoryにkit所有fileが入ります。local編集は`update`でconflictになり、`--force`かkitへのPRが必要です。
+**トレードオフ**: PKG repositoryにkit所有fileが入ります。kitとteamが同じ箇所を変えると`apply`でconflictになり、teamが解消するか`--force`でkit版にします。
 
 ### D2: LLM WikiはPKG repositoryの`.aidev/knowledge/`にcommitする
 
@@ -46,7 +46,7 @@
 
 **理由**: 新規PKGの導入が中央のPR mergeを待たずに始められます。policy fileはcommitされるので、その変更はPKG PRでreviewされます。
 
-**論点**: 候補生成が`DEFAULT_POLICY_SCOPES`固定で、`aidev.yaml`から`read_only` / `writable`を変える項目がありません。必要なら候補を手編集して承認します。
+**論点**: 候補生成が`DEFAULT_POLICY_SCOPES`固定で、`aidev.yaml`から`read_only` / `writable` / `agents`を変える項目がありません。teamは`.aidev/policy.yaml`を直接編集してPRでreviewします（`--approve`は候補fileを読まず生成し直すため、候補の手編集は反映されません）。
 
 ### D5: 3SHAはmerge-base基準とし、source treeの差分で整合を判定する
 
@@ -58,21 +58,23 @@
 
 **論点**: 「baseがknowledgeより進んでいる」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
 
-### D6: PKG fileは既定でread-onlyとし、teamが`writable`で広げる
+### D6: PKG fileは既定でread-onlyとし、teamがpolicyの`agents.<name>.writable`または`writable`で広げる
 
-**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・`aidev.yaml`のみ。PKG fileへの書込を許すのは、teamが`.aidev/policy.yaml`の`writable`にpathを足してcommitした場合だけです。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
+**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・`aidev.yaml`のみ。PKG fileへの書込を許すのは、teamが`.aidev/policy.yaml`に書いてcommitした場合だけです。agent単位なら`agents.<name>.writable`（任意で`branch` glob）、全員向けなら`writable`です。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
 
-**理由**: agentが自分の権限を広げられない構造にするためです。`writable`はsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。
+**理由**: agentが自分の権限を広げられない構造にするためです。`writable`も`agents`もsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。agent単位の許可は、対話sessionを含む全員に開かずにissue-to-prだけへsourceの編集を許すためにあります。
 
-**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。
+**却下した代替案**: 対話sessionのsub-agentもhookの入力から判別して許可する。Claude Codeのhook入力にagent識別子が含まれることを確認できていないため、当面はCLI起動（`aidev agent run` / `knowledge build` / `sync` / workflow `ctx.agent`）に限ります。
 
-### D7: 対応AI toolはClaude Codeのみとし、`tools.default`で宣言する
+**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可（policy `agents.<name>.writable` + 任意の`branch`）を足しました。誰が書いているかはCLIが子processの環境に入れる`AIDEV_AGENT`で決まり、agentは名乗れません。全員に開く`writable`と違い、CLIが起動したその agent にだけ効きます。
 
-**判断**: `config.TOOLS = ['claude']`。`tools.default`にそれ以外を書くと拒否します。adapter抽象は作っていません。
+### D7: AI toolはadapter registryで扱い、実機検証済みはClaude Codeだけとする
 
-**理由**: PreToolUse相当の強制機構を持つtoolがClaude Codeだけであり、同じ保証を約束できないtoolを「対応」と言わないためです。`tools.default`をschemaに置いたのは、将来adapterを足したときに設定fileの形を変えないためです。
+**判断**: `cli/lib/tools.js`の`REGISTRY`に`claude` / `copilot` / `codex` / `kiro`を持ち、`tools.default`で宣言したtoolのtemplate（`templates/<tool>/`）を実体化し、CLIから起動できます（0.3.0）。実機で検証しているのは`claude`だけで、他は`verified: false`として公開仕様に沿ったargvを持ち、`aidev agent run --dry-run`でcommand lineを確認できます。hookによる書込policyの実行時強制はClaude Codeだけです。
 
-**論点**: 強制水準が低いtoolを追加する場合、PKG sourceの編集をそのtoolで許可するか（0.3.0でadapterは追加済み。hookによる強制はclaudeのみ）。
+**理由**: 設定fileの形をtoolごとに変えずに済ませ、tool固有の差をregistry 1か所に閉じるためです。「対応」と「検証済み」を分けるのは、PreToolUse相当の強制機構を持たないtoolに同じ保証を約束しないためです。
+
+**論点**: claude以外のtoolでhook相当の強制をどう実現するか（`proposals/2026-09-22-wiki-update-flows.md` §5に調査あり）。Antigravity CLIは未対応。
 
 ### D8: hostingは`azure-devops`と`generic`の2種とする
 
@@ -90,13 +92,13 @@
 
 **論点**: PKGがPythonでも、`ctx.run`でPKGのtest runnerを呼ぶだけならNode.jsで足ります。Pythonでloopを書きたい要望が強ければ`runtime`拡張を検討します。
 
-### D10: `aidev update`はkit checkoutを更新し、現在のPKGへ再適用する（`--all`で全登録PKG）
+### D10: `aidev update`はkit checkoutだけを更新し、PKGへの適用は`aidev apply`に分ける
 
-**判断**: 既定は現在いるPKGだけ。`--all`で`AIDEV_HOME/registry.json`に登録された全cloneへ再適用します。適用結果はcommitせず、利用者がreviewしてcommitします。起動時に更新の有無を通知します（`AIDEV_NO_UPDATE_CHECK=1`で抑止）。
+**判断**: `update`は`origin/main`へのfast-forwardだけを行い、`AIDEV_HOME/registry.json`のcloneのうち古いtemplateのままのものを一覧します。PKGへの適用はteamが都合のよいときに`aidev apply`で行い、結果はcommitせず利用者がreviewしてcommitします。起動時に更新の有無を通知します（`AIDEV_NO_UPDATE_CHECK=1`で抑止）。
 
-**理由**: 更新のdiffがPKG PRとしてreviewされることで、kit側の変更が各PKGに「いつ・何が」入ったかが履歴に残ります。全登録PKGへの自動適用を既定にしなかったのは、無関係なcloneの作業treeを予告なく書き換えないためです。
+**理由**: 更新のdiffがPKG PRとしてreviewされることで、kit側の変更が各PKGに「いつ・何が」入ったかが履歴に残ります。適用を分けたのは、teamの編集とのmergeやconflictの解消に時間をかけられるようにするためで、無関係なcloneの作業treeを予告なく書き換えないためでもあります（0.4.0。それ以前は`update`が現在のPKGへ再適用していました）。
 
-**論点**: 多数のPKGを登録している端末での`--all`の所要時間。移動・削除されたcloneは`listPackages`が`missing`として除外します。
+**論点**: 移動・削除されたcloneは`listPackages`が`missing`として除外します。
 
 ### D11: `sync`は一時worktreeで行い、利用者のcheckoutに触れない
 
@@ -114,17 +116,29 @@
 
 **トレードオフ**: batchごとにagentがrepositoryへ再orientするcostがかかります。survey runで`overview.md` / `index.md`を先に作り、後続batchはそれを読むことで軽減しています。
 
+### D13: self-evolutionはkit開発者の端末だけで動かし、振り返りは同じsessionが書く
+
+**判断**: 発動条件は`AIDEV_HOME/developer.json`（`aidev evolve enable`）または`AIDEV_KIT_DEVELOPER=1`で、PKGに配布されるfileや`aidev.yaml`には置きません。Stop hookはtranscriptを集計し、閾値（tool call 30回 / 出力20k tokens）を超えた未振り返りのsessionに1回だけ`decision: block`で振り返りを書かせます。`aidev evolve run`が振り返りを集め、kit checkoutのworktree（`aidev/evolve-<date>`）で`evolution` agentを起動し、agentがtemplateを直してPRを作ります。mergeは人間です。
+
+**理由**: 後から別のagentにtranscriptを読ませるより、文脈を持つ本人が「どこで時間とtokenを無駄にしたか」を正確に言えます。PKG利用者の端末で動かさないのは、利用者にcostと挙動の差を生まないためです。変更先をkitのtemplateに限るのは、PKG内の`.claude/**`を直接変えるとdriftになるためです。
+
+**却下した代替案**: `aidev.yaml`の`self_evolution`でPKGごとにon/offする（0.5.0まで。journal記録だけで読む側が無く、PKG側の設定で決める性質でもないため撤去）。SessionEndで集計する（Claudeに指示を出せない）。
+
+**論点**: 閾値の初期値。`--auto`（Stop hookから`evolve run`を起動）を既定にするか。GitHub側のPR作成をagentの`gh` / MCP任せにしたままでよいか。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |
 | --- | --- | --- |
-
-| policyのcustomize | `aidev.yaml`から`read_only` / `writable`を生成できるようにするか | D4 |
+| policyのcustomize | `aidev.yaml`から`read_only` / `writable` / `agents`を生成できるようにするか。`reconfigure`が手編集を消す点をどう扱うか | D4、D6 |
+| 対話sessionのagent判別 | Claude Codeのhook入力からsub-agent名を取れれば`AIDEV_AGENT`と同じ扱いに広げる | D6 |
+| `agents.<name>.writable`の範囲 | `package.include`の内側に限定するか（撤去したwork leaseはそうしていた） | D6 |
 | `base ahead of knowledge`の扱い | WARNのままか、`--strict`以外でもexit 2にするか | D5 |
-
+| 開発中のWiki追従 | branch上のHEADを対象にhookとsub-agentでWikiを追従させる案（`proposals/2026-09-21-wiki-auto-update.md`、`2026-09-22-wiki-update-flows.md`）。未実装 | D5、D11、D12 |
 | 段階的配布 | `origin/main`のmergeが即時に全員へ通知される点を、tag pinやcanaryで緩和するか | D10 |
 | page単位のevidence依存 | supporting evidence変更時の全件再queueを減らす | D12 |
 | 追加tool / provider | 次に対応するtoolとhosting、強制水準の差の扱い | D7、D8 |
+| self-evolutionの運用 | 閾値、`--auto`の既定、PR作成の経路 | D13 |
 
 ## wrapper方式から維持した判断
 
@@ -138,4 +152,4 @@
 - hooksはsandboxではなく、認証scope、CI、branch policyを併用する
 - 認証情報は環境変数のみ。config、argv、logに載せない
 - `--dry-run`はnetwork副作用ゼロを意味しない
-- self-evolutionの提案は中央kitへのPRとし、policyを弱めない
+- self-evolutionの提案は中央kitへのPRとし、policyを弱めない（D13で実装）

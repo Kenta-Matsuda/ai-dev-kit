@@ -15,12 +15,12 @@ aidev init [options]
 Run it at the root of the PKG clone. If there is no `aidev.yaml`, it asks four questions (tools, Wiki generation targets, secret paths, hosting) and writes `aidev.yaml`. If the file already exists, it asks nothing. In both cases it then:
 
 * writes `.aidev/.gitignore`
-* places `.claude/**`, `CLAUDE.md` and `.mcp.json` from the kit templates and records their hashes in `.aidev/materialized.json`
+* places the configuration files of the chosen tools from the kit templates (for `claude`: `.claude/**`, `CLAUDE.md`, `.mcp.json`) and records their hashes in `.aidev/materialized.json`. In a clone that already has the record it places nothing and only reports the state
 * registers this clone on this machine
 * if `.aidev/policy.yaml` is missing, shows the candidate and asks `Place this policy now? (y/N)`
 * if there is no Wiki, asks `Build the LLM Wiki now? (Y/n)` and builds it; an unfinished Wiki is resumed
 
-On a first-time setup the build is the default. In a clone that already has the configuration but no Wiki (the team's pull request is not merged yet) the default is not to build. `--wiki` / `--no-wiki` skip the question. It does not merge an existing `.claude/` with the distributed version: if they differ it stops with exit code 2, and `--force` replaces them.
+On a first-time setup the build is the default. In a clone that already has the configuration but no Wiki (the team's pull request is not merged yet) the default is not to build. `--wiki` / `--no-wiki` skip the question. If, on the first run, an existing `.claude/` or similar differs from the templates, it does not merge: it leaves those files alone and stops with exit code 2. `--force` replaces them with the kit version.
 
 Questions are asked only when stdin is a terminal and neither `--yes` nor `--json` is given.
 
@@ -91,10 +91,10 @@ Questions are asked only when stdin is a terminal and neither `--yes` nor `--jso
 |Success
 
 |1
-|Not a git repository, no commits, run in a subdirectory, or the Azure DevOps organization and so on could not be determined
+|Not a git repository, no commits, run in a subdirectory, or the Azure DevOps organization and so on could not be determined. The Wiki build stopped part way (run `aidev init` again to continue)
 
 |2
-|Existing `.claude/**`, `CLAUDE.md` or `.mcp.json` differ from the distributed version (`--force` replaces them)
+|On the first run, existing `.claude/**`, `CLAUDE.md`, `.mcp.json` or similar differ from the kit templates (`--force` replaces them)
 |===
 
 === Examples

@@ -24,6 +24,9 @@
 `AIDEV_KIRO_BIN`
 |同じく GitHub Copilot CLI（`copilot`）、OpenAI Codex CLI（`codex`）、Kiro CLI（`kiro-cli`）の実行ファイルを直接指定します。
 
+|`AIDEV_AGENT`
+|`aidev` が agent を起動するときに、その子プロセスにだけ設定する agent 名。hook はこれで policy の `agents.<name>` を適用します。自分で設定しないでください。
+
 |`AIDEV_DEBUG`
 |設定すると内部エラーの stack trace を表示します。
 

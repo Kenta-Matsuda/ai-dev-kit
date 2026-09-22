@@ -16,7 +16,7 @@ The files {project-name} places in a package clone, and whether they are committ
 
 |`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `.claude/settings.json`
 |Distributed agents, skills and hooks
-|`aidev init` / `aidev update`. Hand edits are drift
+|`aidev init` / `aidev apply`. The team may edit them; they are merged with new templates
 
 |`CLAUDE.md`
 |Shared instructions for Claude
@@ -27,12 +27,12 @@ The files {project-name} places in a package clone, and whether they are committ
 |Same
 
 |`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `AGENTS.md`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`
-|Only when `tools.default` lists `copilot` / `codex` / `kiro`: the instructions, agents and skills for each tool, generated from the same templates
-|Same. Removing the tool deletes them at the next `aidev update`
+|Only when `tools.default` lists `copilot` / `codex` / `kiro`: the instructions, agents and skills for each tool
+|Same. Removing the tool deletes them at the next `aidev apply` (kept if edited)
 
 |`.aidev/policy.yaml`
 |The approved write-permission policy
-|`aidev permission … --approve`, `aidev init`
+|`aidev permission … --approve`, `aidev init`. `writable` / `agents` additions are edited in directly by humans
 
 |`.aidev/materialized.json`
 |The tool-configuration record: the kit commit applied, per file the template hash and the hash at apply time, and unresolved conflicts. `aidev apply` merges against it and `aidev check` judges by it
@@ -52,7 +52,7 @@ The files {project-name} places in a package clone, and whether they are committ
 
 |`.aidev/.gitignore`
 |Excludes the files listed under "Not committed"
-|`aidev init` / `aidev update`
+|`aidev init` / `aidev apply`
 |===
 
 `.claude/settings.local.json` is personal and outside the kit's management.
@@ -66,7 +66,7 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |Path |Contents
 
 |`.aidev/cache/`
-|Remote-check cache, the temporary sync worktree, session records
+|Remote-check cache, the temporary sync worktree, task files handed to agents
 
 |`.aidev/sync.lock`
 |The sync lock
@@ -82,4 +82,4 @@ Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aide
 
 === On this machine (AIDEV_HOME)
 
-Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both.
+Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `developer.json` (irrelevant to users).
