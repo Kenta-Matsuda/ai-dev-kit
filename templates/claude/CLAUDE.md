@@ -18,7 +18,7 @@ clone の中で作業します。`aidev` CLI が hooks・権限・LLM Wiki を�
 - `.aidev/knowledge/index.md` — この PKG の LLM Wiki の入口（**ソースを読む前にここを引く**）
 - `.aidev/knowledge/overview.md` — リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）
 - `aidev.yaml` — PKG 固有設定（生成対象・秘密領域・hosting）
-- `.aidev/conventions/index.md` — この PKG の開発規約（あれば。convention-builder が根拠付きで生成し、チームがレビューしたもの）
+- `.aidev/conventions/index.md` — この PKG の開発規約（あれば。PKG の workflow が根拠付きで生成し、チームがレビューしたもの）
 
 Wiki は**正本ではなく派生情報**です。記述には根拠ファイルへのリンクがあります。
 実装判断に使う前に、リンク先の実ソースで裏を取ってください。Wiki とソースが食い違う場合、
@@ -33,18 +33,19 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 
 | 領域 | 可否 |
 | --- | --- |
-| `aidev.yaml`, `.aidev/workflows/**`, `.aidev/conventions/**` | 書き込み可 |
-| `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge update` が起動するか、hook に求められてサブエージェントとして起動）のみ。手編集しない |
-| PKG のソース・テスト・設定 | **既定は read-only**。チームが `.aidev/policy.yaml` の `writable`、または agent ごとの `agents.<name>.writable`（CLI が起動した agent にだけ効く）に足したパスだけ可 |
-| `.claude/**`, `CLAUDE.md`, `.mcp.json` | **常に禁止**（ai-dev-kit 由来。`aidev update` が更新する） |
+| `aidev.yaml`, `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/conventions/**` | 書き込み可 |
+| `.aidev/knowledge/**` | knowledge-builder（`aidev sync wiki` が起動するか、hook に求められてサブエージェントとして起動）のみ。手編集しない |
+| PKG のソース・テスト・設定 | **既定は read-only**。`aidev run workflow` が起動した承認済み workflow の `scope.writable`、またはチームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
+| `.claude/**`, `CLAUDE.md` | **常に禁止**（ai-dev-kit 由来。`aidev sync tools` が更新する） |
+| `.mcp.json` | PKG の所有（kit は配布しない）。MCP server の追加は人が行う |
 | `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `.github/hooks/**`, `AGENTS.md`, `.codex/**`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |
 | `.aidev/policy.yaml`, `.aidev/sync.lock`, `.aidev/materialized.json` | **常に禁止**（CLI のみが配置） |
 | `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 
 **権限ファイルを自分で書き換えようとしないでください。** 権限の変更が必要だと判断したら、
-`aidev permission reconfigure` をユーザーが対話的に実行する必要がある旨を伝えます。
+`aidev create policy` をユーザーが対話的に実行する必要がある旨を伝えます。
 
-`.aidev/knowledge/**` を直接編集しないでください。Wiki は `aidev knowledge update` が起動する
+`.aidev/knowledge/**` を直接編集しないでください。Wiki は `aidev sync wiki` が起動する
 knowledge-builder（hook に求められたときはサブエージェント）の生成物です。手編集は `selfHashes` 不一致として
 検出され、次の生成で失われます。内容が誤っている場合は、生成元（ソースのコメントや構造）側を直します。
 
@@ -87,7 +88,7 @@ Wiki の構造を HEAD に合わせ、本文の生成を求めてきます。
 
 1. `.aidev/knowledge/.cache/plan.json` を読む（`batches[]`・`generationTargets`・`targetSha`・`reportDir`）
 2. batch ごとに Agent tool で `knowledge-builder` サブエージェントを起動し、plan のパスと batch 番号を渡す
-3. 全 batch が報告したら `aidev knowledge update --no-agent` を実行する。CLI が報告を取り込み、
+3. 全 batch が報告したら `aidev sync wiki --no-agent` を実行する。CLI が報告を取り込み、
    `.aidev/knowledge/` を `aidev: update Wiki for <sha12>` として別コミットに積む
 
 生成対象に未コミットの変更があると hook はそのファイルを挙げて待ちます。先にコミットしてください。
@@ -100,16 +101,15 @@ Stop hook は Wiki が遅れたままだと 1 回だけ停止を拒否します�
 作業中に使うものだけ挙げます。すべて `aidev <command> --help` で詳細が出ます。
 
 ```bash
-aidev status             # head / knowledge / tracking・Wiki の状態・drift を 1 画面で
-aidev check              # 同じ検査を終了コードで（0=ok / 2=drift / 3=権限 / 4=Wiki 不整合）
-aidev knowledge update   # Wiki を HEAD に追従させ、別コミットとして積む。途中で止まっても同じコマンドで続き
+aidev check             # 状態を 1 画面で表示し、終了コードでも返す（0=ok / 1=設定・workflow / 2=drift / 3=権限 / 4=Wiki 不整合）
+aidev sync wiki   # Wiki を HEAD に追従させ、別コミットとして積む。途中で止まっても同じコマンドで続き
 ```
 
 ---
 
 ## PR とマージ
 
-- ブランチは `aidev/issue-<id>`（issue-to-pr）、`aidev/tests-<slug>`（test-writer）、`aidev/wiki-<sha>`（knowledge update）、または `feature/<name>`
+- ブランチは `aidev/<workflow>-<yyyymmddHHMM>`（aidev run workflow）、`aidev/workflow-<name>`（aidev submit workflow）、`aidev/wiki-<sha>`（aidev sync wiki）、または `feature/<name>`
 - **自動マージは禁止**です。PR は人間がマージします
 - aidev が生成するもの（Wiki ページ・Wiki コミット・PR）の内容はユーザーがレビューします。kit はマージしません
 - PR を作る前に品質ゲートを通します
@@ -121,5 +121,5 @@ aidev knowledge update   # Wiki を HEAD に追従させ、別コミットとし
 
 - 権限で拒否された → 理由を読み、ユーザーに報告する（回避しない）
 - Wiki とソースが食い違う → ソースを信じ、乖離を報告する
-- 状態が壊れて見える → `aidev status` の出力を添えて報告する
+- 状態が壊れて見える → `aidev check` の出力を添えて報告する
 - 破壊的操作（force-push・履歴改変・大量削除）→ **実行前に必ず確認を取る**

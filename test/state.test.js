@@ -51,7 +51,7 @@ function run() {
       eq(pullPkg(fx), newSha);
       const st = local(fx);
       eq(st.severity, 'warn', st.message);
-      ok(/knowledge update/.test(st.message), st.message);
+      ok(/sync wiki/.test(st.message), st.message);
       eq(st.wikiBehind, true);
       eq(st.behind.added, 1, 'the new file is what differs');
       eq(st.baseSha, newSha);
@@ -126,7 +126,7 @@ function run() {
       fs.writeFileSync(state.manifestPath(fx.root), JSON.stringify(m));
       const st = local(fx);
       eq(st.severity, 'warn', st.message);
-      ok(/knowledge update/.test(st.message), st.message);
+      ok(/sync wiki/.test(st.message), st.message);
       eq(st.pendingPages, 2);
     } finally { fx.cleanup(); }
   });
@@ -196,7 +196,7 @@ function run() {
     try {
       write(path.join(fx.root, 'CLAUDE.md'), '# updated instructions\n');
       write(path.join(fx.root, '.claude', 'agents', 'new-agent.md'), '---\nname: new\n---\n');
-      write(path.join(fx.root, '.mcp.json'), '{"mcpServers":{}}\n');
+
       write(path.join(fx.root, 'aidev.yaml'), `${fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8')}# trailing\n`);
       write(path.join(fx.root, '.aidev', 'knowledge', 'overview.md'), '# overview\n');
       write(path.join(fx.root, '.aidev', 'workflows', 'flow', 'loop.py'), 'print(1)\n');

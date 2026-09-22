@@ -45,7 +45,7 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 --dry-run --yes --force --json
 --name <v> --include <globs> --exclude <globs> --secrets <globs>
 --hosting <azure-devops|generic> --org <v> --project <v> --repository <v>
---tracking-branch <v> --tools <list> --agent-model <v> --approve --wiki --no-wiki
+--tracking-branch <v> --tools <list> --agent-model <v> --approve
 ```
 
 処理順: 前提確認（git repo、commitあり、repo root）→ eject marker削除 → `aidev.yaml`作成/維持 → `.aidev/.gitignore` → template適用（lockが無いとき、または`--force`。lockがあれば`inspectConfig`で報告のみ） → `.aidev/materialized.json` → registry登録 → auth envの有無表示 → policy（既存なら維持、無ければ候補を表示し`--approve`または対話でyesなら配置、否なら`.aidev/policy.candidate.yaml`）→ Wiki（完成済みなら維持。無い/未完了なら`knowledge.update(ctx, config, { commit: false })`を同一processで実行し、結果は作業treeに残す。初回は既定yes、設定ありWiki無し=チームのPR未マージは既定no、未完了は再開。TTYでは質問、`--wiki`/`--no-wiki`で省略）→ 次の手順の案内。exit codeはWiki updateの結果に従う（agent toolが無い、agent失敗・途中終了はprose未完了としてexit 1、`aidev init`再実行で続行）。
@@ -56,19 +56,41 @@ PKG cloneのrootでkitを導入します。`aidev.yaml`が無ければ質問（T
 - `--tools`は`tools.js`のregistry（`claude` / `copilot` / `codex` / `kiro`）から選ぶ。`tools.default`に応じてclaude templateのcopyとderived config（`assets.listTemplateFiles(installRoot, { tools })`）を実体化し、lockに`tools`を記録する
 - 生成した`aidev.yaml`は書き込む前に`validateConfig`を通す
 - kit所有fileがlocal編集されていればconflictとして表示しexit 2（`--force`でkit版に置換）
-- exit: 0 / 1 / 2
-
-### `aidev status`
-
-一画面の状態表示。`--json --no-remote`。`aidev.yaml`が無ければexit 1（ejected repositoryはその旨を表示）。それ以外はexit 0。表示: package / hosting / tools / kit、tool config（適用commit、customised数、conflict、hooks欠落、`apply`の案内）、`formatSummary`（`[ai-dev-kit] head=… knowledge=… tracking=…`と判定）、tracking先端のWikiが`aidev/wiki-<sha12>` branch（localまたはorigin）に既にあるかの注記、Wiki統計（page数、target数、pending数）、policy（protected数と`agents`の許可一覧）、手編集page、inventory不整合、publish lease。旧`knowledge status`の内容はここに統合されています。
-
-`status.inspect(repoRoot, config, {checkRemote})`が`check`と共有する検査本体です。
+- exit: 0 / 1 / 2（Wikiの状態はexitに影響しない）
 
 ### `aidev check`
 
-CI gate。`--strict --json --no-remote`。`.aidev/ejected.json`がある、または`aidev.yaml`が無ければ「対象外」としてexit 0。判定順は tool config（`materialized.json`欠落、未解消conflict marker、kit hooks欠落 → 2。teamの編集は通る）→ policy（欠落・不正 → 3）→ Wiki（ERROR severity、inventory不整合、期限切れpublish lease → 4）→ `--strict`かつWARN（Wiki behind HEAD、pending prose、tracking branch先行） → 2。最初の問題のcodeを返します。JSONには`problems[]`、`severity`、`headSha` / `knowledgeSha` / `trackingSha` / `baseSha`、`wikiBehind`、`handEdits`を含みます。人間向け表示は`head` / `knowledge` / `tracking`の3行です。
+一画面の状態表示とCI gateを兼ねます。`--strict --json --no-remote`。`.aidev/ejected.json`がある、または`aidev.yaml`が無ければ「対象外」としてexit 0（無い場合は`aidev init`を案内）。`aidev.yaml`が解析できなければexit 1。
 
-### `aidev knowledge update`
+表示: package / hosting / tools / kit、`formatSummary`（`[ai-dev-kit] head=… knowledge=… tracking=…`と判定）、tracking先端のWikiが`aidev/wiki-<sha12>`にあるときの案内、head / knowledge / tracking、Wiki（page数、target数、pending）、tool config（適用commit、customised数、conflict、hooks欠落、`apply`の案内）、policy、workflows（数、approved数、INVALID数）、手編集page、publish lease。
+
+判定順は tool config（`materialized.json`欠落、未解消conflict marker、kit hooks欠落 → 2。teamの編集は通る）→ policy（欠落・不正 → 3）→ Wiki（ERROR severity、inventory不整合、期限切れpublish lease → 4。WARNは`--strict`のときだけ2）→ workflow（`workflow.inspect`がinvalid: 定義が不正、参照するagent / skillが無い → 1）。最初の問題のcodeがexit。JSONは`{ok, exitCode, problems[], package, hosting, tools, kit, severity, trackingSha, headSha, baseSha, knowledgeSha, wikiBehind, state, wiki, toolConfig, policy, syncLease, workflows[], handEdits}`。
+
+`check.inspect(repoRoot, config, {checkRemote, installRoot})`が検査本体で、hook（session-start）と`uninstall`も使います。
+
+### `aidev update`
+
+kit本体だけを更新します。objectは取りません（`aidev update wiki`は「takes no object」でexit 1。Wikiは`aidev sync wiki`、tool設定は`aidev sync tools`）。
+
+```text
+--dry-run --json
+```
+
+kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。PKGには触れません。更新後、registryのcloneのうちlockの`kitCommit`が現在と違うものを一覧し、`aidev sync tools <package>`を案内します。JSONは`{ok, dryRun, kit: {updated, from, to, versionFrom, versionTo}, packagesBehind: [{path, name, applied}]}`。
+
+### `aidev sync tools|wiki [<package>]`
+
+`<package>`はregistryの名前かpath（`home.resolvePackage`）。省略時はcwdのPKG。`aidev update`のあと、端末上の複数PKGを1か所から追従させるためにあります。flagは両objectの和集合（`--force`は両方で意味がある: toolsは編集を捨ててkit版、wikiは手編集pageの上書き / staleなleaseの引き継ぎ）。
+
+#### `aidev sync tools`
+
+```text
+--dry-run --json --force
+```
+
+`aidev.yaml`必須。`tools.default`の各toolの`templates/<tool>/`を`assets.applyTemplates`でPKGに適用します（architecture.md §2の判定表）。結果を`created / updated / merged / kept / resolved / pruned / retired / unchanged / conflicts`で表示し、lockと`.aidev/.gitignore`を書き、registryを更新します。conflictが1つでもあればexit 2（新規のmarker、または前回のmarkerが未解消）。`--force`は全fileをkit版にし、conflictも消します。`--dry-run`は何も書きません（lockも）。JSONは各分類のpath配列と`conflicts: [{path, reason}]`。
+
+#### `aidev sync wiki`
 
 ```text
 --scope <path> --full --dry-run --json --force --no-commit --branch --no-push --abort
@@ -113,64 +135,59 @@ publish（`publish`。tracking branch上または`--branch`）:
 
 `init`はin-placeを`commit: false`で、hookは`updateInPlace`を`{ 'no-agent': true, json: true }`で呼びます（内部command参照）。
 
-### `aidev agent list|show|run`
+### `aidev create|submit|run|list|remove … workflow`（開発のcommand）
+
+動詞ごとに1 module（`create.js` / `submit.js` / `run.js` / `list.js` / `remove.js`）で、workflowの実装は`cli/commands/workflow.js`（`newWorkflow` / `submit` / `runWorkflow` / `list`）と`cli/lib/workflow.js`です。objectは`bin/aidev.js`の`SUBCOMMANDS`で検査され、無い・違うobjectはmoduleに入る前にexit 1。
 
 ```text
---json --dry-run --tool <tool> --model <model> --timeout <ms> --prompt-file <path>
+create:  --json --force --dry-run --describe <text> --approve
+submit:  --json --dry-run --no-push
+run:     --json --dry-run --task <text> --task-file <path> --max-minutes <n>
+list:    --json
+remove:  --json --dry-run
 ```
 
-- `list`: `tools.listBundledAgents(installRoot)`（`templates/claude/.claude/agents/*.md`のfrontmatter）と、`config.agentSettings`で決まる各agentのtool / model。`aidev.yaml`が無ければkit既定（claude）で表示
-- `show <name>`: 説明、定義file、tool、model、実際のcommand line（`previewCommand`: `tools.resolveBinary` + `agent.buildArgv`。`prompt: 'file'`のtoolはpointer文の位置をplaceholderで示す）。`verified: false`のtoolは警告
-- `run <name> [task...]`: `aidev.yaml`必須。task は引数の結合 > `--prompt-file` > 非TTYのstdin。tool / modelは`--tool` / `--model` > `tools.agents.<name>` > `tools.agent` / `tools.agent_model`。`tools.default`に無いtool、registryに無いtool、同梱に無いagentはspawn前にexit 1。`--dry-run`はcommand lineを表示して起動しない。`agent.runAgent`の結果を人間向け / JSON（`{ok, agent, tool, model, timeoutMs, result, reason, skipped, timedOut, exitCode, durationMs, costUsd, permissionDenials, promptFile}`）で返し、失敗・skip・timeoutはexit 1
+- `create workflow <name>`: 名前は`^[a-z0-9][a-z0-9-]{0,63}$`。既存なら`--force`。既定はtemplate YAML。`--describe "<text>"`は`aidev.yaml`必須で、`workflow-creator` agentを`tools.agent`（`tools.agents.workflow-creator`で上書き）で起動し、終了後に`loadDefinition` + `resolveDependencies`で検証。検証失敗はexit 1（fileは残す）。`--dry-run`は書かない・起動しない
+- `submit workflow <name>`: `aidev.yaml`必須。定義と依存を検証し、`approvalStatus`が既に`approved`なら何もせずexit 0。`aidev/workflow-<name>`へ`checkout -B`、`reviewedFiles`（`workflow.yaml` + PKG内の参照agent / skill）だけをcommit（`aidev: workflow <name>`）、`push --set-upstream origin`、`hosting.type: azure-devops`ならPR作成（同じsource branchのactive PRがあれば本文更新。失敗は警告で手動）、`generic`は手動案内。`--no-push`はcommitまで。JSON: `{ok, name, branch, target, sha, committed, pushed, pr, files}`
+- `run workflow <name>`: `aidev.yaml`必須。`loadDefinition` → `resolveDependencies` → `approvalStatus`。未承認はexit 1（理由と手順）。tool / modelはagentごとに`workflow.yaml`の`tool` / `model` > `tools.agents.<name>` > `tools.agent` / `tools.agent_model`（`assertToolEnabled`）。`--task` / `--task-file`（排他）は全agent stepに「Task for this run」として渡す。`--max-minutes`は下げる方向にだけ効く。`pull-request` stepがあればclean tree必須、`aidev/<name>-<yyyymmddHHMM>`を作って作業。stepを順に実行し、全stepが完了でexit 0、停止（agent失敗、`until`の再試行切れ、同一失敗、`command`のexit 0以外、時間、費用、commit / push失敗）はexit 1。記録は`runs/<id>/run.json`（`{runId, name, hash, approvedRef, approvedSha, startedAt, finishedAt, startedBy, branch, baseSha, task, steps[], done, stopReason, agentRuns, costUsd, pr}`）と`log.txt`。`--dry-run`は承認状態・file別状態・scope・agents（tool、出所）・skills・steps・limits・taskを表示し、承認済みならexit 0、未承認はexit 1
+- `list workflows`: 各workflowの`{name, description, status, steps, scope}`（statusは`approved` / `not on <ref>` / `changed since <ref>` / `invalid: <理由>`）と`bundled[]`、`ref`。`aidev.yaml`が無くても動く（refは`origin/main`）
 - exit: 0 / 1
 
-### `aidev permission configure|reconfigure|show`
-
-```text
---approve --force --dry-run --json
-```
-
-- `configure`: `.aidev/policy.yaml`が既にあれば`reconfigure`か`--force`を要求。候補を`aidev.yaml`から生成し（`agents`は常に空で、記入例をcommentで添える）`validatePolicy`で検証。`--approve`なしなら`.aidev/policy.candidate.yaml`を書く。`--approve`で`.aidev/policy.yaml`へ配置し候補を削除
-- `--approve`は候補fileを読まず、その場で`aidev.yaml`から生成した内容を配置する。手で編集した候補や、現行policyに手で足した`writable` / `agents`は引き継がれない（teamの追加は`.aidev/policy.yaml`を直接編集してPRでreviewする）
-- 現行policyより保護が減る（protected / read_only / writable_during_syncからの削除、sync時のみ書込可のpathがwritableへ昇格、`agents.<name>.writable`の追加、`agents.<name>.branch`の削除）場合、`--approve`だけでは配置せずexit 3。`--approve --force`で配置
+- `create agent <name>`: `.aidev/agents/<name>.md`のtemplate（frontmatter + 入出力契約 / 手順 / 停止条件）。`--describe`は`agents-creator`を`tools.agent`で起動し、書いたあとfrontmatterの`name`を検証。`create skill <name>`: `.aidev/skills/<name>/SKILL.md`のtemplate（`--describe`は無い）。既存は`--force`
+- `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧。同名はPKGが優先
+- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。参照しているworkflowが残るagent / skillは拒否。commitは人が行う
+- `create policy [--approve] [--force] [--dry-run]`: 権限policyの候補生成と配置（`permission.configure`。旧`permission configure|reconfigure`）。名前は取らない
+- 動作: 候補を`aidev.yaml`から生成し`validatePolicy`で検証。`--approve`なしなら`.aidev/policy.candidate.yaml`を書く。`--approve`で`.aidev/policy.yaml`へ配置し候補を削除。policyが既にあっても同じ（旧`reconfigure`は無い）
+- `--approve`は候補fileを読まず、その場で`aidev.yaml`から生成した内容を配置する。手で編集した候補や、現行policyに手で足した`writable`は引き継がれない（teamの追加は`.aidev/policy.yaml`を直接編集してPRでreviewする）
+- 現行policyより保護が減る（protected / read_only / writable_during_syncからの削除、sync時のみ書込可のpathがwritableへ昇格）場合、`--approve`だけでは配置せずexit 3。`--approve --force`で配置
 - `--dry-run`は候補を表示するだけ（`--approve`と併用しても書かない）
-- `show`: 有効なpolicy（無ければ内蔵floor）と`agents`の許可を表示。policy fileが無ければexit 3
+- 有効なpolicyの表示は`aidev check`（policy行）と`aidev doctor <package>`（policy行）。`agents`キーを持つpolicyは`validatePolicy`がexit 3で拒否する
+- 実装は`cli/commands/permission.js`（`configure` / `show`）。`configure.js` / `show.js`は動詞の入口
+- `create workflow --describe`はworkflow-creatorに、参照できるagent / skillの一覧とschemaのtemplateを添える。kitは開発用agent・workflowを同梱しないので、足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書き、MCPは`.mcp.json`（PKG所有）への追加案としてfinal messageに出す
 
+### `aidev doctor [<package>]`
 
-### `aidev workflow new|approve|run|list`
+`--json`。この端末を見ます: node（20以上）、platform、git、aidevのversionと`installRoot`、kit checkoutのcommit、kit更新の有無、`AIDEV_HOME`、登録PKG（数と一覧）、registryの全AI tool（`tools.js`）の有無とversion、proxy。`<package>`（registry名かpath）を渡すと、そのPKGの`aidev.yaml`（schema）、git repo / branch、origin、policy、agent tool / model、auth env、remote到達性、Wiki状態、workflows（数、approved、invalid）も✓ / ⚠ / ✗で並べます。✗があればexit 1。CIのexit契約は`aidev check`だけが持ちます。
 
-```text
---json --force --dry-run --yes --max-iterations <n> --max-minutes <n> --resume
-```
-
-- `new <name>`: 名前は`^[a-z0-9][a-z0-9-]{0,63}$`。既存なら`--force`
-- `approve <name>`: 定義を検証（`cost.max_tokens`か`max_usd`必須、`commands`非空、上限超過は拒否）し、content hashを`approval.json`へ記録
-- `run <name>`: 承認hash一致を要求。`--max-iterations` / `--max-minutes`は下げる方向にだけ効く。`--resume`は同一hashの未完了runからiterationを引き継ぐ。完了でexit 0、上限到達等でexit 1
-- `list`: approved / CHANGED since approval / not approved
-- `workflow.yaml`の`agent:`（`name`必須、`tool` / `model` / `timeout_ms`任意）を`validateDefinition`が検証し、`approval.json`にも記録する。`steps.js`は`ctx.agent(prompt, { name?, tool?, model?, timeoutMs? })`で同梱agentを起動できる（`aidev.yaml`必須、toolは`tools.default`内、残り時間で打ち切り、報告costの合計が`cost.max_usd`に達したら次の起動を拒否してloop停止）。`checkpoint.json`に`agentRuns` / `costUsd`
-- `--dry-run`は`agent`行（使うagentとtool）も表示する
-
-### `aidev update`
+### `aidev uninstall [<package>] [--all]`
 
 ```text
---dry-run --json
+--yes --dry-run --json --all --force --keep-assets
 ```
 
-kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。PKGには触れません。更新後、registryのcloneのうちlockの`kitCommit`が現在と違うものを一覧し、`aidev apply`を案内します。JSONは`{ok, dryRun, kit: {updated, from, to, versionFrom, versionTo}, packagesBehind: [{path, name, applied}]}`。
+- 引数なし: この端末からCLIを消す（下記）。`<package>`: そのPKGからkitを外す（旧`eject`。`cli/lib/eject.js`）。`--all`: 登録PKG全部を外してからCLIを消す。`<package>`と`--all`は排他。どれも`--yes`必須、`--dry-run`で予告
 
-### `aidev apply`
+#### 端末（引数なし、または`--all`の最後）
 
 ```text
---dry-run --json --force
+--yes --dry-run --json
 ```
 
-`aidev.yaml`必須。`tools.default`の各toolの`templates/<tool>/`を`assets.applyTemplates`でPKGに適用します（architecture.md §2の判定表）。結果を`created / updated / merged / kept / resolved / pruned / retired / unchanged / conflicts`で表示し、lockと`.aidev/.gitignore`を書き、registryを更新します。conflictが1つでもあればexit 2（新規のmarker、または前回のmarkerが未解消）。`--force`は全fileをkit版にし、conflictも消します。`--dry-run`は何も書きません（lockも）。JSONは各分類のpath配列と`conflicts: [{path, reason}]`。
+installerが置いたものをこの端末から消します。順序: bin directory（`AIDEV_BIN_DIR`、既定はWindows `%LOCALAPPDATA%ai-dev-kitin`、POSIX `~/.local/bin`）の`aidev.cmd` / `aidev.ps1` / `aidev`のうち"Generated by ai-dev-kit"を含むものを削除 → Windowsではuser PATHからbin directoryを除去（PowerShell経由、best-effort、entryがあるときだけ書く） → `AIDEV_HOME`の`registry.json`と`cache/`を削除 → 空になったbin directoryと`AIDEV_HOME`を削除。`--yes`なしでは一覧を表示してexit 1。消すものが無くてもexit 0。
 
-### `aidev doctor`
+削除しないもの: kit checkout（`installRoot`。実行中のprocessの居場所で、Windowsでは内側からの削除が不安定）と登録済みPKG内のkit所有file（commit済みでteam共有）。どちらも消すcommandを表示します。PKG向けには`aidev uninstall <package> --yes`と、`assets.listStaticFiles`を`collapsePaths`で「kit所有fileしか無いdirectory」まで畳んだ`git rm -r -q -- …`（`.aidev`と`aidev.yaml`を含む。ejectと違いWikiも消える）を出します。
 
-`--json`。node（20以上）、platform、git、aidevのversionと`installRoot`、kit checkoutのcommit、kit更新の有無、`AIDEV_HOME`、登録PKG数、`claude`のversion（2.1.259以上か）を確認します。PKG内なら`aidev.yaml` schema、git repo、origin、policy、agent model、`hosting.auth_env`の有無（値は読まない）、`HTTPS_PROXY`、remote到達性（cache無視）、Wiki状態も確認します。`fail`が1つでもあればexit 1、warnのみは0。
-
-### `aidev eject`
+#### `<package>`（旧eject）
 
 ```text
 --yes --dry-run --json --force --keep-assets
@@ -180,24 +197,9 @@ kit管理を解除します。既にejected（marker あり）なら`--force`な
 
 順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`cache/`を削除 → `--keep-assets`でなければkit所有file（lockに記録されたfileと現在のtemplateが置くfile。teamが追加したfileは含まない）を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
 
-### `aidev uninstall`
+### self-evolution（`npm run evolve -- enable|disable|status|run`。CLI commandではない）
 
-```text
---yes --dry-run --json
-```
-
-installerが置いたものをこの端末から消します。順序: bin directory（`AIDEV_BIN_DIR`、既定はWindows `%LOCALAPPDATA%ai-dev-kitin`、POSIX `~/.local/bin`）の`aidev.cmd` / `aidev.ps1` / `aidev`のうち"Generated by ai-dev-kit"を含むものを削除 → Windowsではuser PATHからbin directoryを除去（PowerShell経由、best-effort、entryがあるときだけ書く） → `AIDEV_HOME`の`registry.json`と`cache/`を削除 → 空になったbin directoryと`AIDEV_HOME`を削除。`--yes`なしでは一覧を表示してexit 1。消すものが無くてもexit 0。
-
-削除しないもの: kit checkout（`installRoot`。実行中のprocessの居場所で、Windowsでは内側からの削除が不安定）と登録済みPKG内のkit所有file（commit済みでteam共有）。どちらも消すcommandを表示します。PKG向けには`aidev eject --yes`と、`assets.listStaticFiles`を`collapsePaths`で「kit所有fileしか無いdirectory」まで畳んだ`git rm -r -q -- …`（`.aidev`と`aidev.yaml`を含む。ejectと違いWikiも消える）を出します。
-
-### `aidev evolve enable|disable|status|run`（kit開発者向け）
-
-```text
---json --dry-run --auto --tool <tool> --model <model> --timeout <ms>
-```
-
-- `enable [--auto]`: `AIDEV_HOME/developer.json`を書く（`--auto`は`autoEvolve: true`）。`disable`は消す。`status`は有効可否とこの端末の振り返り一覧
-- `run`: 開発者端末以外はexit 1。振り返りが無ければexit 0。あればkit checkoutのworktree（`aidev/evolve-<yyyymmdd>`）で`evolution` agentを起動し、結果を表示。`--dry-run`は振り返り一覧とcommand lineだけ。agent失敗はexit 1（worktreeは残す）。JSONは`{ok, branch, worktree, reflections, tool, model, result, reason, durationMs, costUsd}`
+`scripts/evolve.js`。kit checkoutで`npm run evolve -- <sub>`として実行します（`aidev evolve`は無い）。flagと動作は従来どおり（`--json --dry-run --auto --tool --model --timeout`。`enable`は`AIDEV_HOME/developer.json`、`run`はkit developer端末のみでworktree + evolution agent）。Stop hookの`--auto`起動は`scripts/evolve.js run --json`をdetachedで呼びます。
 
 ## 内部command
 
@@ -206,9 +208,8 @@ installerが置いたものをこの端末から消します。順序: bin direc
 | `aidev hook session-start` | SessionStart | `formatSummary`（`head` / `knowledge` / `tracking`と判定）とpublish leaseの状態、Wikiが遅れていれば追従の予告を`additionalContext`で返す。HEADを`.aidev/cache/last-head.json`に記録する |
 | `aidev hook guard-write` | PreToolUse | tool inputからpathを抽出し`policy.decideMany`。deny時は`permissionDecision: deny` |
 | `aidev hook quality-gate` | PostToolUse（Write / Edit） | 編集対象にPKG fileが含まれるときだけ`quality_gates`をrepo rootで実行 |
-| `aidev hook after-bash` | PostToolUse（Bash / shell） | HEADが`last-head.json`と違い、Wikiが遅れている（または prose pending）なら`followUp`: generation targetが汚れていればpathを挙げるだけ。cleanなら`knowledge.updateInPlace`を`--no-agent --json`で実行し、残り0なら（rename-onlyなど）その場でcommit、残りがあれば`plan.json`のbatch数とともに「batchごとにknowledge-builderをsubagent起動 → `aidev knowledge update --no-agent`」の指示を`additionalContext`で返す |
+| `aidev hook after-bash` | PostToolUse（Bash / shell） | HEADが`last-head.json`と違い、Wikiが遅れている（または prose pending）なら`followUp`: generation targetが汚れていればpathを挙げるだけ。cleanなら`knowledge.updateInPlace`を`--no-agent --json`で実行し、残り0なら（rename-onlyなど）その場でcommit、残りがあれば`plan.json`のbatch数とともに「batchごとにknowledge-builderをsubagent起動 → `aidev sync wiki --no-agent`」の指示を`additionalContext`で返す |
 | `aidev hook session-stop` | Stop | Wikiが遅れている（または prose pending）かつcleanなら1回だけ`decision: block`で`after-bash`と同じ指示を返す（2回目は`stop_hook_active`、無いtoolは`.aidev/cache/wiki-stop.json`で判定し、警告付きで通す。dirtyなら止めない）。続けてkit開発者端末でのみ、transcriptを集計して閾値超えのsessionに`decision: block`で振り返りを書かせる |
-| `aidev mcp azure-devops` | `.mcp.json` | 設定と環境変数を解決し、固定版MCP serverをstdioで起動 |
 
 `hook`のoption: `--input <file>`（stdinの代わりにfileからpayloadを読む。testとデバッグ用）と`--tool <claude|copilot|codex|kiro>`（`tools.hookAdapter`で出力の形をtoolに合わせる。既定`claude`）です。出力はadapterが決めるJSON（kiroの`session-start`だけはraw text、kiroの`postToolUse`は何も出さない）です。payloadは`{tool_name, tool_input: {file_path | edits[] | command …}}`（`session-stop`は`{session_id, transcript_path, stop_hook_active}`）。`guard-write`は常にexit 0で、失敗はdenyとして表現します（kiroのadapterはdeny時exit 2）。hooksはnetworkにもLLMにも触れません。
 
@@ -218,5 +219,5 @@ installerが置いたものをこの端末から消します。順序: bin direc
 
 ## 削除されたcommand
 
-`aidev plan`、`aidev kit apply`、`aidev config` / `pkg` / `profile`（wrapper時代）、`aidev task`（0.5.0で状態機械とwork leaseごと撤去）、`aidev sync`、`aidev knowledge build`、`aidev knowledge status`（2026-09-22に`aidev knowledge update`と`aidev status`へ統合。`--resume` / `--to` / `--check-only` / `--no-pr`も無い）は存在せず、「unknown command」です。wrapper repositoryへkit管理対象を取り込む操作は`aidev apply`に置き換わりました。
+`aidev plan`、`aidev kit apply`、`aidev config` / `pkg` / `profile`（wrapper時代）、`aidev task`（0.5.0）、`aidev sync`（旧publish。2026-09-22）、`aidev knowledge *`、`aidev status`、`aidev agent *`、`aidev permission *`、`aidev workflow *`、`aidev apply`、`aidev configure`、`aidev show`、`aidev eject`、`aidev mcp`、`aidev evolve`、`aidev update kit|wiki`、`aidev init --wiki` / `--no-wiki`（2026-09-23の動詞先行化・framework化）は存在せず、「unknown command」「takes no object」「needs an object」のいずれかです。現在の入口は`init` / `check` / `doctor` / `run` / `create` / `submit` / `list` / `remove` / `sync` / `update` / `uninstall`と内部の`hook`だけです。
 

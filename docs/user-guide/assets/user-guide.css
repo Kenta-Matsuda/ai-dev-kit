@@ -785,3 +785,35 @@ h1.sect0 {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+
+/* Mermaid diagrams ([mermaid] blocks). The renderer is inlined at build time. */
+.mermaid-figure {
+  margin: 1.25rem 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-x: auto;
+}
+.mermaid-figure > .title {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+.mermaid-figure > pre.mermaid {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: center;
+}
+.mermaid-figure > pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+@media print {
+  .mermaid-figure { break-inside: avoid; }
+}

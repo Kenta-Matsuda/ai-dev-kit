@@ -1,18 +1,24 @@
 [[setup-owner]]
 == Package owner steps
 
-Adopt {project-name} in a package for the first time, and share the setup, the policy and the Wiki with the team through a PR. One person does this once per package.
+Adopt {project-name} in a PKG for the first time, and share the setup, the policy and the Wiki with the team through a PR. One person does this once per PKG. **This person decides what the AI is allowed to do and what it is asked to do in this PKG.** Members do not decide.
+
+After adoption, the package owner also turns the following into PRs.
+
+* Generating the development conventions and defining the work handed to the AI (workflows) → xref:setup-owner-after[After adoption]
+* Taking in new kit templates (`aidev sync tools`) → xref:daily-apply[aidev sync tools]
+* Changing `aidev.yaml` and the policy → xref:configuration[aidev.yaml reference], xref:permissions[Permissions and safety]
 
 === What you need
 
 * xref:install[Install aidev on your machine] is done, and `aidev doctor` shows `✓` for `claude`
-* A clone of the package with at least one commit and `origin` set
+* A clone of the PKG with at least one commit and `origin` set
 * For Azure DevOps, `AZURE_DEVOPS_PAT` is set
 * Generating the Wiki takes time. Expect a few minutes to fifteen minutes per 20 generation targets
 
 === Steps
 
-. Create a working branch at the package root.
+. Create a working branch at the PKG root.
 +
 [source,bash]
 ----
@@ -32,19 +38,19 @@ aidev init
 |Question |How to answer
 
 |1/4 tools
-|Press Enter for `claude`. For several tools, write them comma-separated, such as `claude, copilot` (`claude`, `copilot`, `codex`, `kiro`).
+|Press Enter for `claude`. For several tools, write them comma-separated, such as `claude, copilot` (`claude`, `copilot`, `codex`, `kiro`). The team decides who uses which tool; the answer is kept in `aidev.yaml`.
 
 |2/4 Wiki generation targets
-|The paths you want explanation pages for (globs, comma-separated). `src/**`, `docs/**` and similar are suggested. The Wiki's research covers the whole package anyway, so list only the places you want pages for.
+|The paths you want explanation pages for (globs, comma-separated). `src/**`, `docs/**` and similar are suggested. The Wiki's research covers the whole PKG anyway, so list only the places you want pages for.
 
 |3/4 secret paths
 |Paths the AI must never read. Add the places where certificates or configuration live to the five defaults.
 
 |4/4 hosting
-|Inferred from the `origin` URL. For Azure DevOps, confirm organization / project / repository, then answer the branch the Wiki should follow (default `main`).
+|Inferred from the `origin` URL. For Azure DevOps, confirm organization / project / repository, then answer the branch the Wiki should follow (default `main`). This branch is also the reference for workflow approval.
 |===
 +
-After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step. It then asks `Build the LLM Wiki now? (Y/n)`. Enter starts the build (step 4).
+After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step. At the end, `next steps` lists the remaining steps (approving the policy, building the Wiki, committing, the PR). `aidev init` does not build the Wiki.
 +
 * `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` or similar already contains files that differ from the kit templates. Save their contents somewhere, then run `aidev init --force`.
 * `run "aidev init" at the repository root` → move to the root and run it there.
@@ -54,12 +60,17 @@ After the questions, the configuration files are written and a summary of the po
 [source,bash]
 ----
 cat .aidev/policy.candidate.yaml
-aidev permission configure --approve
+aidev create policy --approve
 ----
 +
-See xref:permissions[Permissions and safety] for what the policy contains.
+See xref:permissions[Permissions and safety] for what the policy contains. The range of source the AI may write is not in the policy; it goes in `scope.writable` of the workflows you create later.
 
-. Wait for the Wiki build. It starts when you press Enter at the last question of `aidev init`. It takes time. If it stops part way, running `aidev init` again resumes where it left off.
+. Build the Wiki. `--no-commit` leaves the result in the working tree so it is committed together with the setup in the next step. It takes time. If it stops part way, running the same command again resumes where it left off.
++
+[source,bash]
+----
+aidev sync wiki --no-commit
+----
 +
 [source,text]
 ----
@@ -71,29 +82,53 @@ See xref:permissions[Permissions and safety] for what the policy contains.
 ✓ knowledge-builder completed 163/163 queued generation target(s) ($4.9012)
 ----
 +
-It is done when the last line is `✓ knowledge-builder completed N/N`. If it stops with anything else, check the following and run `aidev init` again.
+It is done when the last line is `✓ knowledge-builder completed N/N`. If it stops with anything else, check the following and run the same command again.
 +
 * `⚠ the knowledge-builder agent did not run` → Claude Code was not found. Fix the `claude` line of `aidev doctor`.
 * `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → the finished part is saved. Run it again.
 +
-The Wiki is complete when the second line of `aidev status` is `✅`.
+The Wiki is complete when the second line of `aidev check` is `✅`.
 
 . Commit and open a PR.
 +
 [source,bash]
 ----
 aidev check
-git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json
+git add aidev.yaml .aidev .claude CLAUDE.md
 git commit -m "chore: adopt ai-dev-kit"
 git push -u origin feature/ai-dev-kit
 ----
 +
-Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want. If you also chose `copilot` / `codex` / `kiro`, `git add` that tool's configuration files too (`.github/`, `AGENTS.md`, `.kiro/`; see xref:files-and-state[Files in the package]).
+Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want. If you also chose `copilot` / `codex` / `kiro`, `git add` that tool's configuration files too (`.github/`, `AGENTS.md`, `.kiro/`; see xref:files-and-state[Files in the PKG]).
 
-. Have the PR reviewed and merge it into `main`. After the merge, members can join with xref:setup-member[Member steps].
+. Have the PR reviewed and merge it into `main`. The reviewer looks at the setup (`aidev.yaml`, the policy) and the contents of the Wiki. After the merge, members can join with xref:setup-member[Member steps].
+
+[[setup-owner-after]]
+=== After adoption
+
+The package owner does all of these and turns them into PRs. Any order.
+
+[%autowidth.stretch,options="header"]
+|===
+|What to do |How
+
+|Set the branch policy
+|Make `aidev check` on every PR a required build validation for `main`, and add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**` and `.aidev/policy.yaml`. Workflow approval means "merged into `main`", so this setting is what approval really is. → xref:automation-ci[Automation: CI]
+
+|Write out the development conventions of this PKG
+|Create a workflow with `aidev create workflow conventions --describe "Write this PKG's development conventions, with evidence, from the Wiki and the source into .aidev/conventions/ and open a PR"`, submit it, and run it after the merge. → xref:workflows-bundled[What the kit ships, and what it does not]
+
+|Define the work handed to the AI
+|Create the workflow (and the agents and skills it needs) with `aidev create workflow <name> --describe "<what you want>"`, check `scope.writable`, then `aidev submit workflow`. Once merged, members can run it. → xref:workflows[Putting the AI to work]
+
+|Bring the Wiki along at night
+|Put `pipelines/azure-pipelines-wiki.yml` in the PKG. → xref:automation-ci[Automation: CI]
+
+|Run lint / test after the AI edits files
+|Write them in `quality_gates` of `aidev.yaml`. → xref:configuration[aidev.yaml reference]
+|===
 
 === Next steps
 
-* Add `aidev check` to CI, keep the Wiki up to date every night → xref:automation-ci[Automation: CI]
-* Run lint / test after the AI edits files → `quality_gates` in xref:configuration[aidev.yaml reference]
-* Write down the development conventions of this package, with evidence → `aidev agent run convention-builder` (xref:cli-agent[aidev agent]). It writes under `.aidev/conventions/`; review with `git diff` and open a PR. Like building the Wiki, one person does this for the team
+* Guide the members → xref:setup-member[Member steps]
+* Put the AI to work → xref:workflows[Putting the AI to work]

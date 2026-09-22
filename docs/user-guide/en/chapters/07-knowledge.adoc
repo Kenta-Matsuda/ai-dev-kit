@@ -1,0 +1,251 @@
+[[knowledge]]
+== The LLM Wiki
+
+The LLM Wiki is a set of Markdown pages that explain the structure of the PKG's code and the role of each file, written for the AI. It lives in `.aidev/knowledge/`, is committed, and is shared by the team.
+
+* The Wiki describes **the HEAD of the branch you are on**. When you commit code, the Wiki is committed on the same branch as **a separate commit**. The source commit and the Wiki commit travel in the same PR, and the reviewer reviews both.
+* The package owner builds it the first time with `aidev sync wiki --no-commit`. After that, a hook starts an update after every commit; by hand, run `aidev sync wiki`. In both cases the knowledge-builder agent writes the prose.
+* The Wiki is not the source of truth. Every statement links to the file it came from, and the AI checks that file.
+* While there is no Wiki, every write by the AI is blocked.
+* Reviewing what `aidev` generates is your responsibility. The kit never merges a PR.
+
+[[knowledge-state]]
+=== Reading the state
+
+At the start of a session, and on the second line of `aidev check`, the state is shown like this.
+
+[source,text]
+----
+[ai-dev-kit] head=9f8e7d6  knowledge=9f8e7d6  tracking=9f8e7d6
+✅ the Wiki describes HEAD (9f8e7d6).
+----
+
+`head` is the commit your checkout is at, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`. The verdict does not compare SHAs. It compares the list of files and their fingerprints recorded when the Wiki was generated (the inventory) with the tree at HEAD, so it stays correct after a rebase, a squash or a force-push.
+
+[%autowidth.stretch,options="header"]
+|===
+|Shown |Meaning |What to do
+
+|`✅ the Wiki describes HEAD`
+|The Wiki matches HEAD.
+|Nothing.
+
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD (+a ~m -r →n) — run "aidev sync wiki"`
+|The code moved on. `+` added, `~` modified, `-` removed, `→` renamed.
+|The hook starts the update after your next commit. To do it now, run `aidev sync wiki`.
+
+|`⚠️ N page(s) still await prose regeneration`
+|The structure matches HEAD, but some pages have no text yet.
+|Run `aidev sync wiki` (or follow the hook's instructions if they were shown).
+
+|`⚠️ origin/main has moved ahead …`
+|`main` is ahead of your branch.
+|Merge or rebase at a good moment, then `aidev sync wiki`.
+
+|`⚠️ origin/main has new commits … not fetched yet`
+|The remote has commits you have not fetched.
+|Run `git fetch`, then `aidev check`.
+
+|`ℹ️ remote unverified …`
+|The remote could not be reached (offline, proxy). Your local state is consistent.
+|Keep working.
+
+|`❌ LLM Wiki has not been generated yet …` +
+`❌ … manifest.json does not record a valid knowledgeSha`
+|There is no Wiki, or it cannot be read. **Every write by the AI is blocked.** `aidev check` exits with 4.
+|If `git pull` should bring it, pull. If not, ask the package owner or run `aidev sync wiki --no-commit`.
+|===
+
+`aidev check` lets `⚠️` pass with 0. With `--strict` it becomes 2.
+
+[[knowledge-hook-flow]]
+=== What happens after a commit
+
+When you run `git commit` inside an AI tool session, the hook (`aidev hook after-bash`) notices that HEAD changed and does the following. It touches neither the network nor an LLM, so it finishes in seconds.
+
+.The Wiki following a commit. The hook does the structure; the session's subagent writes the prose
+[mermaid]
+----
+flowchart TD
+  c["git commit (inside the AI tool session)"] --> h["hook: aidev hook after-bash"]
+  h --> dirty{"uncommitted changes<br/>in generation targets?"}
+  dirty -- "yes" --> stop["list the files and do nothing<br/>(commit them first)"]
+  dirty -- "no" --> st["update the structure<br/>inventory, manifest, pages of removed files"]
+  st --> need{"prose needs rewriting?"}
+  need -- "renames only" --> c1["the hook commits .aidev/knowledge/"]
+  need -- "yes" --> plan["write plan.json and instruct the session"]
+  plan --> sub["start knowledge-builder as a subagent<br/>once per batch"]
+  sub --> fin["aidev sync wiki --no-agent"]
+  fin --> c2["commit as aidev: update Wiki for #60;sha12#62;"]
+----
+
+. If generation targets (`package.include` in `aidev.yaml`) have uncommitted changes, it lists those files and does nothing else. Commit them.
+. It compares the tree at HEAD with the inventory to find added, modified, removed and renamed files. Pages of removed files are deleted, and the inventory and manifest are rewritten.
+. If only renames happened, no prose is needed. The hook commits `.aidev/knowledge/` itself and is done.
+. If prose is needed, it writes the generation targets, in batches, to `.aidev/knowledge/.cache/plan.json` and tells the session what to do.
++
+[source,text]
+----
+[ai-dev-kit] the Wiki describes 1a2b3c4 but HEAD is 9f8e7d6 (+2 ~5 -0 →1). The structural update is done; 7 generation target(s) need prose in 1 batch(es).
+Do this now, before any other work:
+  1. For each batch in .aidev/knowledge/.cache/plan.json (`batches[i]`), start the "knowledge-builder" subagent with the Agent tool with this task: …
+  2. When every batch has reported, run `aidev sync wiki --no-agent`: the CLI records the reports and commits .aidev/knowledge/ as its own commit.
+  3. If the command says targets are still queued, start the subagent again for the batches it names.
+----
+
+The session starts the knowledge-builder as a subagent once per batch, then runs `aidev sync wiki --no-agent`. The CLI records the completion reports and commits `.aidev/knowledge/` as `aidev: update Wiki for <sha12>`.
+
+If you try to end the session while the Wiki is behind HEAD (or its prose is unfinished), the Stop hook refuses once and repeats the instructions. The second stop passes with a warning. A tree with uncommitted changes never blocks the stop.
+
+Whether the hooks are available depends on the tool (xref:cli-hook[aidev hook]). Claude Code is the tool verified against the real binary.
+
+[[knowledge-manual]]
+=== Updating by hand
+
+Without the hooks, in CI, or when you want the update right now, run:
+
+[source,bash]
+----
+aidev sync wiki
+----
+
+If generation targets have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the kit's configuration files are dirty.
+
+The command proceeds in this order.
+
+. Records completion reports left by a previous run.
+. Scans the tree at HEAD and compares it with the inventory (added, modified, removed, renamed; a pure rename needs no prose). If a file in the research scope changed, every page is queued.
+. Deletes the pages of removed files, then writes the inventory and manifest. The structure now matches HEAD.
+. Splits the queue into batches of 20 and starts the agent once per batch (30 minutes each). Progress is saved after every batch.
+. When everything is done, commits `.aidev/knowledge/` as `aidev: update Wiki for <sha12>`.
+
+[source,text]
+----
+aidev sync wiki
+  target               9f8e7d6 (HEAD of feature/login)
+  wiki describes       1a2b3c4
+  generation targets   163
+  added                2
+  modified             5
+  removed              0
+  renamed (free)       1
+  unchanged            155
+  queued now           7
+✓ manifest and 1 shard(s) written for 9f8e7d6
+ℹ 7 generation target(s) queued for the knowledge-builder agent:
+    src/api/auth.ts
+    …
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ batch 1/1 complete: 7/7 in 4m 2s ($0.5533)
+✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
+----
+
+`$` is the cost Claude Code reported.
+
+While prose is still pending, the exit code is 1 and nothing is committed. Run the **same command** again to continue from the checkpoint.
+
+[%autowidth.stretch,options="header"]
+|===
+|Message |What to do
+
+|`✗ … ran out of time`
+|Run the same command again. If it keeps happening, add `--agent-batch-size 10` or raise `knowledge.agent_timeout_ms` in `aidev.yaml`.
+
+|`⚠ … partial Wiki progress: 120/163 completed …`
+|Run the same command again.
+
+|`✗ … made no Wiki progress: 0/20`
+|Nothing finished. Read the `Claude result:` lines that follow, fix the cause, then run again.
+
+|`⚠ the knowledge-builder agent did not run`
+|The AI tool was not found. Fix the tool's line in `aidev doctor`.
+
+|`ℹ --no-agent: N generation target(s) stay queued without prose.`
+|Only the structure was written. Run `aidev sync wiki` to write the prose.
+
+|Ctrl-C
+|Run the same command again.
+|===
+
+[[knowledge-publish]]
+=== Updating on the tracking branch
+
+You cannot commit directly to `main` (the tracking branch). When you run `aidev sync wiki` with `main` checked out (or add `--branch`), the CLI updates in a temporary worktree at `.aidev/cache/wiki-worktree/`, commits on the branch `aidev/wiki-<sha12>`, pushes it and opens a PR. **Your checkout is never touched.**
+
+[source,text]
+----
+ℹ on main: publishing as aidev/wiki-9f8e7d6c5b4a instead of committing here.
+✓ acquired publish lease (ttl 120m)
+✓ created worktree at .aidev/cache/wiki-worktree (9f8e7d6)
+  publish branch       aidev/wiki-9f8e7d6c5b4a
+  pull request target  main
+…
+✓ pushed aidev/wiki-9f8e7d6c5b4a
+✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
+    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
+✓ publish lease released
+----
+
+* The PR is opened when `sync.auto_pr` in `aidev.yaml` is `true`, the hosting is Azure DevOps and the PAT environment variable is set. With `generic` hosting or without the PAT it pushes and you open the PR by hand. With `--no-push` it does not push either.
+* It publishes only when the prose is complete. If it stops part way, the lease (`.aidev/sync.lock`) and the worktree stay. The same command continues; `aidev sync wiki --abort` discards them.
+* To run this every night, use the pipeline in xref:automation-ci[Automation: CI].
+
+[[knowledge-files]]
+=== What is generated
+
+[%autowidth.stretch,options="header"]
+|===
+|Path |Contents
+
+|`.aidev/knowledge/index.md`
+|The entry point. The AI reads it first.
+
+|`.aidev/knowledge/overview.md`
+|A map of the repository: purpose, layout, how to build and test, main modules.
+
+|`.aidev/knowledge/**/*.md`
+|One page per generation target.
+
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|The commit the Wiki describes (`knowledgeSha`), a fingerprint per file, and the targets still pending. **Managed by the CLI. Do not touch.**
+
+|`.aidev/knowledge/.cache/`
+|`plan.json` (the batches the hook hands to the session) and the agent's completion reports. Already gitignored.
+|===
+
+[[knowledge-scope-vs-evidence]]
+=== Generation targets and research scope
+
+* **Generation targets** — the paths that get pages. This is `package.include` in `aidev.yaml`.
+* **Research scope** — the files the agent may read to back up what it writes. By default this is the whole PKG minus `secrets_paths`.
+
+Even if the targets are only `docs/**`, the agent still reads the code and tests to verify. When a file in the research scope changes, the next update regenerates every page.
+
+[[knowledge-handedit]]
+=== Why not to edit pages by hand
+
+A hash is recorded per page, and `aidev check` / `aidev check` detect hand edits.
+
+[source,text]
+----
+⚠ 2 Wiki page(s) edited by hand since generation:
+    .aidev/knowledge/src/api/auth.md (modified)
+----
+
+With hand edits present, `aidev sync wiki` stops and leaves the decision to overwrite to a human (`--force` overwrites). Hand edits are lost on the next generation. If the content is wrong, fix the source (comments or structure) instead.
+
+[[knowledge-scope-flag]]
+=== Updating only part of the Wiki
+
+[source,bash]
+----
+aidev sync wiki --scope src/api
+----
+
+Only pages under `src/api` are queued. Changes outside that path are carried over to the next run, and `aidev check` warns about pending prose until then.
+
+=== Related
+
+* xref:cli-sync-wiki[aidev sync wiki] — options and exit codes
+* xref:cli-hook[aidev hook] — the hooks per tool
+* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `sync.*`

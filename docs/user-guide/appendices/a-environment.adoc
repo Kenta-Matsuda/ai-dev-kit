@@ -9,7 +9,7 @@
 |変数 |説明
 
 |`AZURE_DEVOPS_PAT`
-|Azure DevOps の PAT。tracking branch 上の `aidev knowledge update`（PR 作成）と MCP サーバーが使います。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
+|Azure DevOps の PAT。tracking branch 上の `aidev sync wiki`（PR 作成）と `aidev submit workflow` が使います。PKG が `.mcp.json` に用意する MCP server も同じ変数を使えます。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
 
 |`AIDEV_HOME`
 |端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と kit 更新確認のキャッシュを置きます。
@@ -24,8 +24,8 @@
 `AIDEV_KIRO_BIN`
 |同じく GitHub Copilot CLI（`copilot`）、OpenAI Codex CLI（`codex`）、Kiro CLI（`kiro-cli`）の実行ファイルを直接指定します。
 
-|`AIDEV_AGENT`
-|`aidev` が agent を起動するときに、その子プロセスにだけ設定する agent 名。hook はこれで policy の `agents.<name>` を適用します。自分で設定しないでください。
+|`AIDEV_WORKFLOW`
+|`aidev run workflow` が agent を起動するときに、その子プロセスにだけ設定する workflow 名。hook はこれで、その workflow が承認済みかを確かめ、`scope.writable` を許可します。自分で設定しないでください。
 
 |`AIDEV_DEBUG`
 |設定すると内部エラーの stack trace を表示します。

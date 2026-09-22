@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "azure-devops": {
-      "command": "aidev",
-      "args": ["mcp", "azure-devops"]
-    }
-  }
-}

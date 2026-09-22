@@ -8,7 +8,7 @@
  *     page hashes, inventory records and checkpoint progress
  *   - a build runs one survey plus one agent process per batch, and a run cut
  *     short by its time budget keeps every batch that finished
- *   - re-running `aidev knowledge update` continues rather than starting over
+ *   - re-running `aidev sync wiki` continues rather than starting over
  *   - the PostToolUse quality gate stays out of the way of Wiki writes
  *
  * Run: node test/knowledge-agent.test.js
@@ -81,7 +81,7 @@ function run() {
   test('a report records page hashes and clears the target from the checkpoint', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(fx.root, ['knowledge', 'update', '--no-commit']); // queue everything, no agent
+      aidev(fx.root, ['sync', 'wiki', '--no-commit']); // queue everything, no agent
       const before = readManifest(fx.root);
       const target = before.checkpoint.pendingPaths[0];
       ok(target, 'nothing was queued');
@@ -110,7 +110,7 @@ function run() {
   test('a shared page gets one hash everywhere, so status reports no inconsistency', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(fx.root, ['knowledge', 'update', '--no-commit']);
+      aidev(fx.root, ['sync', 'wiki', '--no-commit']);
       const m = readManifest(fx.root);
       const [t1, t2] = m.checkpoint.pendingPaths;
       ok(t1 && t2, 'need two targets');
@@ -134,7 +134,7 @@ function run() {
   test('a report naming a missing page, a structured file, a page outside the Wiki, or a foreign SHA is rejected and the target stays queued', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(fx.root, ['knowledge', 'update', '--no-commit']);
+      aidev(fx.root, ['sync', 'wiki', '--no-commit']);
       const m = readManifest(fx.root);
       const [t1, t2, t3] = m.checkpoint.pendingPaths;
       ok(t1 && t2 && t3, 'need three targets');
@@ -165,7 +165,7 @@ function run() {
   test('reports are left alone when the manifest describes another SHA', () => {
     const fx = makeRepo({ withWiki: false });
     try {
-      aidev(fx.root, ['knowledge', 'update', '--no-commit']);
+      aidev(fx.root, ['sync', 'wiki', '--no-commit']);
       const m = readManifest(fx.root);
       const t = m.checkpoint.pendingPaths[0];
       write(path.join(fx.root, K, 'p.md'), '# p\n');
@@ -189,7 +189,7 @@ function run() {
   });
 
   test('a full update runs one survey then one process per batch, in queue order', () => withRepo(({ root, env, callsFile }) => {
-    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-batch-size', '2', '--json'], { env: env() });
+    const r = aidev(root, ['sync', 'wiki', '--no-commit', '--agent-batch-size', '2', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     const seen = calls(callsFile);
     eq(seen[0].runMode, 'survey', 'the first run was not a survey');
@@ -208,20 +208,20 @@ function run() {
   }, { pkgFiles: manyFiles(5) }));
 
   test('--no-survey skips the survey and an existing overview makes it automatic', () => withRepo(({ root, env, callsFile }) => {
-    let r = aidev(root, ['knowledge', 'update', '--no-commit', '--no-survey', '--json'], { env: env() });
+    let r = aidev(root, ['sync', 'wiki', '--no-commit', '--no-survey', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     ok(calls(callsFile).every((c) => c.runMode === 'generate'), 'a survey ran despite --no-survey');
     // An incremental build with an overview present does not re-survey.
     fs.writeFileSync(path.join(root, K, 'overview.md'), '# overview\n');
     fs.unlinkSync(callsFile);
-    r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: env() });
+    r = aidev(root, ['sync', 'wiki', '--no-commit', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     eq(calls(callsFile).length, 0, 'nothing changed, yet an agent ran');
   }, { pkgFiles: manyFiles(3) }));
 
   test('a timeout mid-update keeps finished batches; the next update resumes from the rest', () => withRepo(({ root, env, callsFile }) => {
     // survey = call 1, batch 1 = call 2, batch 2 = call 3 (hangs)
-    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-batch-size', '2', '--agent-timeout', '10000', '--json'],
+    const r = aidev(root, ['sync', 'wiki', '--no-commit', '--agent-batch-size', '2', '--agent-timeout', '10000', '--json'],
       { env: env({ STUB_HANG_AT: '3' }) });
     eq(r.code, 1, `a timed-out build did not fail: ${r.out}`);
     const j = lastJson(r.out);
@@ -231,7 +231,7 @@ function run() {
     ok(/Finished targets are saved/.test(r.out) || j.agent.batches.length === 2, 'no resume guidance');
 
     fs.unlinkSync(callsFile);
-    const again = aidev(root, ['knowledge', 'update', '--no-commit', '--agent-batch-size', '2', '--json'], { env: env() });
+    const again = aidev(root, ['sync', 'wiki', '--no-commit', '--agent-batch-size', '2', '--json'], { env: env() });
     eq(again.code, 0, again.out);
     const seen = calls(callsFile);
     ok(seen.every((c) => c.runMode === 'generate'), 'the resumed build surveyed again');
@@ -240,18 +240,18 @@ function run() {
   }, { pkgFiles: manyFiles(5) }));
 
   test('reports written by a run that was killed are recorded by the next build before it queues work', () => withRepo(({ root }) => {
-    aidev(root, ['knowledge', 'update', '--no-commit']);
+    aidev(root, ['sync', 'wiki', '--no-commit']);
     const m = readManifest(root);
     const t = m.checkpoint.pendingPaths[0];
     write(path.join(root, K, 'late.md'), '# late\n');
     write(path.join(doneDir(root), inventory.doneFileName(t)),
       JSON.stringify({ target: t, targetSha: m.knowledgeSha, pages: [`${K}/late.md`] }));
-    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--dry-run', '--json']);
+    const r = aidev(root, ['sync', 'wiki', '--no-commit', '--dry-run', '--json']);
     // dry-run must not consume the report...
     ok(lastJson(r.out).pending.includes(t), 'dry run should still show the target pending');
     ok(fs.existsSync(path.join(doneDir(root), inventory.doneFileName(t))), 'dry run consumed a report');
     // ...but a real build records it and does not queue the target again.
-    const real = aidev(root, ['knowledge', 'update', '--no-commit', '--json']);
+    const real = aidev(root, ['sync', 'wiki', '--no-commit', '--json']);
     eq(lastJson(real.out).structuredOk, true, real.out);
     ok(!lastJson(real.out).pending.includes(t), 'the recorded target was queued again');
     ok(!fs.existsSync(path.join(doneDir(root), inventory.doneFileName(t))), 'the real build left the report behind');
@@ -260,13 +260,13 @@ function run() {
   }, { pkgFiles: manyFiles(3) }));
 
   test('update is incremental by default and --full regenerates everything', () => withRepo(({ root, env, callsFile }) => {
-    let r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: env() });
+    let r = aidev(root, ['sync', 'wiki', '--no-commit', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     fs.unlinkSync(callsFile);
-    r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: env() });
+    r = aidev(root, ['sync', 'wiki', '--no-commit', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     eq(calls(callsFile).length, 0, 'an unchanged PKG was regenerated');
-    r = aidev(root, ['knowledge', 'update', '--no-commit', '--full', '--json'], { env: env() });
+    r = aidev(root, ['sync', 'wiki', '--no-commit', '--full', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     const seen = calls(callsFile);
     eq(seen[0].runMode, 'survey', '--full did not re-survey');
@@ -274,13 +274,13 @@ function run() {
   }, { pkgFiles: manyFiles(3) }));
 
   test('a changed PKG file is the only target of the next incremental update', () => withRepo(({ root, fx, env, callsFile }) => {
-    let r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: env() });
+    let r = aidev(root, ['sync', 'wiki', '--no-commit', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     fs.unlinkSync(callsFile);
     const { advancePkg, pullPkg } = require('./fixtures');
     advancePkg(fx, 'mod/file-01.ts', 'export const v1 = 100;\n');
     pullPkg(fx);
-    r = aidev(root, ['knowledge', 'update', '--no-commit', '--json'], { env: env() });
+    r = aidev(root, ['sync', 'wiki', '--no-commit', '--json'], { env: env() });
     eq(r.code, 0, r.out);
     const seen = calls(callsFile);
     ok(seen.every((c) => c.runMode === 'generate'), 'an overview exists, yet it re-surveyed');
@@ -301,14 +301,14 @@ function run() {
       ['--agent-batch-size', '0'], ['--agent-batch-size', 'x'], ['--agent-batch-size', '2.5'],
       ['--survey', '--no-survey'],
     ]) {
-      const r = aidev(root, ['knowledge', 'update', '--no-commit', ...args], { env: env() });
+      const r = aidev(root, ['sync', 'wiki', '--no-commit', ...args], { env: env() });
       eq(r.code, 1, `${args.join(' ')} was accepted: ${r.out}`);
     }
     ok(!fs.existsSync(callsFile), 'an agent ran on bad flags');
   }, { pkgFiles: manyFiles(2) }));
 
   test('the dry run announces the batch count', () => withRepo(({ root, env }) => {
-    const r = aidev(root, ['knowledge', 'update', '--no-commit', '--dry-run', '--agent-batch-size', '2'], { env: env() });
+    const r = aidev(root, ['sync', 'wiki', '--no-commit', '--dry-run', '--agent-batch-size', '2'], { env: env() });
     eq(r.code, 0, r.out);
     ok(/3 batch\(es\)/.test(r.out), `batch count missing: ${r.out}`);
   }, { pkgFiles: manyFiles(5) }));

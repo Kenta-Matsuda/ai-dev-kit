@@ -1,0 +1,331 @@
+[[workflows]]
+== AI に仕事をさせる（workflow）
+
+AI に開発作業を任せる入口は workflow だけです（`aidev create workflow` → `aidev submit workflow` → `aidev run workflow`）。「何をさせるか」を YAML で書き、PR でレビューして `main` に入れ、`main` にあるものと同じ定義だけを実行します。
+
+3 つの役割に分かれます。
+
+[%autowidth.stretch,options="header"]
+|===
+|役割 |すること |コマンド
+
+|導入担当者
+|workflow を定義し、PR にする
+|`aidev create workflow`、`aidev submit workflow`
+
+|レビュアー
+|定義の PR をレビューしてマージする。**マージが承認です。**
+|（hosting の PR）
+
+|メンバー
+|承認済みの workflow を実行し、できた PR をレビュアーに渡す
+|`aidev run workflow`、`aidev list workflows`
+|===
+
+実行するメンバーは成果物に責任を負いません。責任は、定義をレビューした人と、成果物の PR をレビューする人にあります。ループ・再試行・コマンド実行・コミット・PR 作成といった実行の仕組みは kit が持ち、YAML には書けません。YAML で表せないことは kit への要望です。
+
+[[workflows-flow]]
+=== 流れ
+
+.workflow の流れ。マージが承認になり、実行できるのは main にある定義だけ
+[mermaid]
+----
+flowchart LR
+  subgraph O["導入担当者"]
+    direction TB
+    n["aidev create workflow #60;name#62;<br/>雛形 / 同梱を写す / 自然言語から生成"]
+    d["git diff でレビュー"]
+    s["aidev submit workflow #60;name#62;"]
+    n --> d --> s
+  end
+  subgraph R["レビュアー"]
+    direction TB
+    p1["定義の PR を読む"]
+    m1["マージ = 承認"]
+    p2["成果物の PR を読む"]
+    m2["マージ"]
+    p1 --> m1
+    p2 --> m2
+  end
+  subgraph M["メンバー"]
+    direction TB
+    f["git fetch origin"]
+    r["aidev run workflow #60;name#62;"]
+    pr["成果物の PR"]
+    f --> r --> pr
+  end
+  s -- "PR" --> p1
+  m1 -- "origin/main" --> f
+  pr --> p2
+----
+
+[[workflows-define]]
+=== 定義する（導入担当者）
+
+雛形を作る方法は 2 つです。どれも `.aidev/workflows/<name>/workflow.yaml` を書くだけで、実行はしません。
+
+[source,bash]
+----
+aidev create workflow e2e-tests                            # 空の雛形
+aidev create workflow e2e-tests --describe "tests/e2e/ に主要画面の Playwright テストを書いて PR にする"
+----
+
+`--describe` は workflow-creator agent を `aidev.yaml` の `tools.agent` で起動して YAML を書かせます。足りない agent・skill があれば、workflow-creator が agents-creator をサブエージェントとして起動し、`.aidev/agents/`・`.aidev/skills/` に書かせます。外部システム（Work Item、チケット、DB）が要るときは、PKG の `.mcp.json` に足す MCP server の定義案を報告に書きます（追加は人が行います）。書いたあと CLI が検証し、結果と次の手順を表示します。
+
+雛形を PKG に合わせて編集します。多くの場合、変えるのは `scope.writable`（この PKG でその仕事が書いてよい場所）と `until`（この PKG のテストコマンド）です。
+
+[source,yaml]
+----
+name: write-tests                  # ディレクトリ名と一致。小文字・数字・ハイフン
+description: 指定した対象のテストを既存の書き方で書き、通してから PR を作る
+
+objective: |                       # すべての agent step に渡す目的（必須）
+  Add tests for the target named in --task. Follow the way existing tests are
+  written and run. Do not change the code under test.
+
+scope:
+  writable: [tests/**]             # この workflow の agent が書けるパス（必須。[] なら何も書けない）
+
+agents: [test-writer]              # 名前で参照。.aidev/agents/<name>.md（この PKG の agent）→ kit 同梱の順に探す
+skills: [test-and-verify, repository-discovery]   # 全 agent step の指示に本文を差し込む
+
+# tool: claude                     # 任意。aidev.yaml の tools.default にあるもの。既定は tools.agent
+# model: sonnet                    # 任意。"" でツールの既定に任せる
+
+steps:
+  - id: survey
+    agent: test-writer
+    prompt: テストの書き方と実行方法を調べ、未カバーの振る舞いを列挙する。ファイルは書かない。
+  - id: write
+    agent: test-writer
+    prompt: 列挙したテストを既存の書き方で書き、実行する。
+    until: npm test                # exit 0 になるまで agent を繰り返す（shell を通さない）
+    max_retries: 4                 # until の再試行回数（上限 10）
+  - id: pr
+    kind: pull-request             # scope.writable の変更を commit → push → PR
+
+limits:
+  max_minutes: 45                  # 上限 60。下げることはできるが上げられない
+
+cost:
+  max_usd: 8                       # 必須。報告された費用がこれに達したら次の agent を起動しない
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|項目 |意味
+
+|`objective`
+|すべての agent step の指示の先頭に入る目的。必須です。
+
+|`scope.writable`
+|この workflow が動いている間、agent が書けるパス（glob）。**PKG のソースを AI が書けるのは、承認済み workflow のこの範囲だけです。** `protected`（`.claude/**`、`.aidev/policy.yaml` など）と `secrets_paths` は書けません。`[]` なら何も書けません（調査だけの workflow）。
+
+|`agents` / `skills`
+|名前で参照します。PKG の `.aidev/agents/<name>.md`・`.aidev/skills/<name>/SKILL.md` を先に探し、無ければ kit 同梱のものを使います。agent の定義と skill の本文は指示に差し込まれるので、名前で agent を選べないツールでも同じ契約で動きます。
+
+|`tool` / `model`
+|省略すると `aidev.yaml` の `tools.agent` / `tools.agent_model`（agent ごとの `tools.agents.<name>` があればそれ）に従います。`tool` は `tools.default` にあるものだけです。
+
+|`steps`
+|順に実行します。1 つの step は次の 3 種類のどれか 1 つです。
+`agent`（`prompt` 必須。`until` を書くと exit 0 になるまで `max_retries` 回まで agent を繰り返す。`timeout_ms` 任意）、
+`command`（`command` を空白で分割して shell 無しで実行。exit 0 以外で workflow 失敗）、
+`kind: pull-request`（`scope.writable` の変更を commit・push して PR を作る。`title` 任意。1 つまで）。
+
+|`limits.max_minutes`
+|workflow 全体の時間の上限。60 を超えられません。
+
+|`cost.max_usd`
+|必須。ツールが報告した費用（Claude Code のみ）の合計がこれに達すると、次の agent を起動せず止まります。
+|===
+
+`until` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。
+
+安全弁は省略できず、上げられません。時間の上限（60 分）、step ごとの再試行回数（10 回）、費用の上限（必須）、同じ失敗の検知（`until` の出力が 2 回続けて同じなら停止）、agent 1 回の起動は `timeout_ms` と残り時間の短い方で打ち切りです。
+
+[[workflows-submit]]
+=== 提出する（導入担当者）
+
+`git diff` で定義をレビューしたら提出します。
+
+[source,bash]
+----
+git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+aidev submit workflow write-tests
+----
+
+[source,text]
+----
+aidev submit workflow write-tests
+✓ on branch aidev/workflow-write-tests
+✓ committed 3f2a9c1b7d0e (1 file(s))
+✓ pushed aidev/workflow-write-tests
+✓ pull request !124 created (aidev/workflow-write-tests → main)
+    Once it is merged, anyone with the branch fetched can run: aidev run workflow write-tests
+----
+
+* 定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent・skill を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps）。`generic` hosting では push まで行い、PR は手で作ります。`--no-push` なら push もしません。
+* PR 本文には目的・書いてよい範囲・agent と skill・手順・上限と、「マージがこの workflow を承認する」旨が書かれます。
+* 既に `main` と同じなら `already matches origin/main; nothing to submit.` と表示して終わります。
+
+`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**` には branch policy で必須レビュアーを付けてください。誰が承認したかは PR のレビュアーと git の author が記録します。
+
+[[workflows-approval]]
+=== 承認とは
+
+「承認済み」とは、`workflow.yaml` と、それが参照する PKG 内の agent・skill の内容が、**`origin/<tracking branch>`（通常 `origin/main`）にあるものと 1 byte も違わない** ことです。承認を記録するコマンドやファイルはありません。
+
+* 判定は最後に fetch した `origin/main` で行います。マージ後は `git fetch origin` してから実行します。offline でも判定できます。
+* 承認後に手元で編集すると、その時点で未承認になります。実行中の agent が `workflow.yaml` や自分の定義を書き換えて範囲を広げても、書き込みのたびに判定するので拒否されます。
+* 状態は `aidev list workflows` で見ます。
+
+[source,text]
+----
+aidev list workflows
+  write-tests           approved                          指定した対象のテストを既存の書き方で書き、通してから PR を作る
+  e2e-tests             not on origin/main                主要画面の IT テストを Playwright で書く
+  write-conventions     changed since origin/main         Wiki と根拠ソースから開発規約を書き、PR を作る
+
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|状態 |意味 |すること
+
+|`approved`
+|`origin/main` と同じ
+|実行できます。
+
+|`not on origin/main`
+|まだ `main` に無い（未提出か、PR が未マージ）
+|提出する。マージ済みなら `git fetch origin`。
+
+|`changed since origin/main`
+|`main` の内容から変えた
+|差分をレビューして提出し直すか、`git checkout origin/main -- .aidev/workflows/<name>/` で戻す。
+
+|`invalid: …`
+|YAML が検証を通らない
+|表示された項目を直す。
+|===
+
+[[workflows-run]]
+=== 実行する（メンバー）
+
+[source,bash]
+----
+git fetch origin
+aidev run workflow write-tests --dry-run --task "src/services/order.ts"
+aidev run workflow write-tests --task "src/services/order.ts"
+----
+
+`--dry-run` は承認の状態、書いてよい範囲、使う agent とツール、手順、上限を表示して何も始めません。まずこれで確認します。
+
+`--task` は今回の指示です（Work Item の番号、対象のパスなど）。すべての agent step に「データ」として渡され、`objective` や `scope` を変えることはできません。長い指示は `--task-file <path>` で渡します。
+
+[source,text]
+----
+aidev run workflow write-tests
+    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests-202609230112 at 9f8e7d6… (approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
+    [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
+    [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:25:02.417Z] step write: agent finished in 8m 21s ($0.9811)
+    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1
+    [2026-09-23T01:25:19.010Z] step write: agent test-writer via claude (sonnet) attempt 2 (budget 19m 44s)
+    [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
+    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
+    [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
+    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests-202609230112
+    [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
+    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+実行中に起きることは次のとおりです。
+
+* `pull-request` step がある workflow は、作業ツリーがきれいであることを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。無い workflow は今のブランチで動き、変更は作業ツリーに残ります。
+* agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは `scope.writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
+* `until` が exit 0 以外なら、その出力を添えて同じ agent をもう一度起動します。同じ出力が 2 回続いたら止まります。
+* `pull-request` step は `scope.writable` の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用が書かれます。範囲内に変更が無ければ commit も PR も作りません。
+* 記録は `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に残ります。gitignore 済みで、コミットされません。
+
+止まったときの表示と対処です。終了コードは 1 です。再開の仕組みはなく、直してもう一度実行します。
+
+[%autowidth.stretch,options="header"]
+|===
+|表示 |すること
+
+|`workflow <name> is not approved: … is not on origin/main yet`
+|PR が未マージです。マージ済みなら `git fetch origin`。
+
+|`workflow <name> is not approved: … differs from origin/main`
+|手元で定義を変えています。戻すか、導入担当者に提出し直してもらいます。
+
+|`the working tree has uncommitted changes; commit or stash them first`
+|`pull-request` step のある workflow は、きれいな作業ツリーで実行します。
+
+|`workflow stopped — step <id>: <until> still fails after N retries` +
+`… the same failure repeated`
+|agent がテストを通せませんでした。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身を見て、`--task` を具体的にするか、導入担当者に `max_retries` や `prompt` の見直しを相談します。
+
+|`workflow stopped — step <id>: cost limit of $N reached` +
+`… time limit of N minutes exceeded`
+|上限に達しました。`--task` を小さくするか、導入担当者に上限の見直しを相談します（60 分・上限額は定義の変更 = PR です）。
+
+|`workflow stopped — step <id>: <command> exited N`
+|`command` step が失敗しました。出力を見て原因を直します。
+
+|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|正常です。push 済みのブランチから手で PR を作ります。
+|===
+
+[[workflows-review]]
+=== workflow の PR を見る（レビュアー）
+
+2 種類の PR が届きます。
+
+*定義の PR*（`aidev: workflow <name>`）。マージが承認なので、実行結果と同じ重さで見ます。
+
+* `objective` は、チームがその AI にさせてよい仕事か。
+* `scope.writable` は必要最小か。ソース全体（`**`）や設定・CI のパスが入っていないか。
+* `until` と `command` は、この PKG で安全に実行できるコマンドか（shell は通りませんが、コマンド自体は実行されます）。
+* `cost.max_usd` と `limits.max_minutes` は妥当か。
+* 参照する `.aidev/agents/`・`.aidev/skills/` のファイルが同じ PR に入っているか。その指示に、範囲外の作業や秘密情報の扱いが書かれていないか。
+
+*成果物の PR*（`aidev/<name>-<yyyymmddHHMM>` ブランチ）。PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。
+
+* 差分が `scope.writable` の中に収まっているか（hook が守りますが、確認します）。
+* テストが通っているか。CI の `aidev check` が通っているか。
+* `objective` と `--task` の内容どおりか。余計な変更が無いか。
+
+[[workflows-bundled]]
+=== kit が同梱するもの、しないもの
+
+kit は **仕組み** だけを配ります。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）です。
+
+開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。kit は同梱しません。導入担当者が `aidev create workflow <name> --describe "<やりたいこと>"` で作り、workflow-creator が必要な agent・skill を agents-creator に書かせます。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。kit はそれを配布も起動もしません。
+
+[[workflows-agents-skills]]
+=== agent と skill
+
+agent は AI ツールに渡す役割の定義（Markdown）、skill は手順書です。workflow から名前で参照します。
+
+kit に同梱されている agent は `knowledge-builder`（Wiki を書く。`aidev sync wiki` と hook が使う）、`workflow-creator`（`aidev create workflow --describe` が使う）、`agents-creator`（新しい agent を書く。`aidev create agent --describe` と workflow-creator が使う）、`permission-setting`（policy の候補作り）の 4 つです。開発作業をする agent は PKG が作ります。skill は `.claude/skills/` に置かれたものと同じです。
+
+PKG 固有の agent・skill は `.aidev/agents/<name>.md`、`.aidev/skills/<name>/SKILL.md` に置きます。同名の kit 同梱のものより優先されます。作り方は 3 つです。
+
+* `aidev create agent <name>` / `aidev create skill <name>` で雛形を書き、編集する。`agent` は `--describe "<text>"` で agents-creator に書かせることもできる
+* `aidev create workflow --describe` で、workflow-creator が必要な agent・skill を agents-creator に書かせる
+* 対話中の Claude に書かせる（`.aidev/agents/**` と `.aidev/skills/**` は policy の既定で書けます）
+
+一覧は `aidev list agents` / `aidev list skills`、削除は `aidev remove agent|skill <name>`（workflow から参照されているものは拒否）です。どれも `aidev submit workflow` で workflow と一緒に PR に入り、レビューされ、`main` にあるものだけが workflow から使われます。
+
+=== 関連
+
+* xref:cli-run[aidev run workflow] — オプション、終了コード
+* xref:permissions[権限と安全性] — `scope.writable` と policy の関係
+* xref:configuration[aidev.yaml リファレンス] — `tools.agent`、`tools.agents`、`references`

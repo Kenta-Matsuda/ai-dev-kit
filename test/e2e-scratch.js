@@ -20,7 +20,7 @@ function aidev(args) {
 
 for (const args of [
   ['check', '--no-remote'],
-  ['knowledge', 'update', '--dry-run'],
+  ['sync', 'wiki', '--dry-run'],
   ['plan', '--no-remote'],
   ['knowledge', 'build', '--dry-run'],
 ]) {

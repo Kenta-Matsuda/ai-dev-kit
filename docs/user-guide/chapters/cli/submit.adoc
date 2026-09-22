@@ -1,0 +1,69 @@
+[[cli-submit]]
+== aidev submit
+
+workflow をブランチと PR にして提出します。PR のマージが承認です。
+
+=== 書式
+
+[source,text]
+----
+aidev submit workflow <name> [--no-push] [--dry-run] [--json]
+----
+
+=== 説明
+
+定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的・書いてよい範囲・agent と skill・手順・上限と、「マージがこの workflow を承認する」旨が書かれます。
+
+既に `origin/main` と同じなら `already matches origin/main; nothing to submit.` と表示して何もしません。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--no-push`
+|ローカルのブランチにコミットするだけで、push と PR はしない
+
+|`--dry-run`
+|ブランチ・宛先・対象ファイルを表示し、ブランチもコミットも push も PR も作らない
+
+|`--json`
+|JSON で出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|PR を作った（または既に承認済み）。`--dry-run`
+
+|1
+|`workflow` 以外の object、名前が無い。定義が不正、agent か skill が PKG にも kit にも無い。参照するファイルが手元に無い。ブランチ作成・コミット・push の失敗
+|===
+
+=== 例
+
+[source,bash]
+----
+git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+aidev submit workflow write-tests
+----
+
+[source,text]
+----
+aidev submit workflow write-tests
+✓ on branch aidev/workflow-write-tests
+✓ committed 3f2a9c1b7d0e (1 file(s))
+✓ pushed aidev/workflow-write-tests
+✓ pull request !124 created (aidev/workflow-write-tests → main)
+    Once it is merged, anyone with the branch fetched can run: aidev run workflow write-tests
+----
+
+=== 関連
+
+* xref:workflows-submit[AI に仕事をさせる: 提出する]、xref:workflows-review[workflow の PR を見る]
+* xref:cli-create[aidev create]、xref:cli-run[aidev run]

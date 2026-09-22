@@ -18,7 +18,7 @@
  *
  * Packages are NOT touched either. What the kit placed in a PKG clone is
  * committed and shared by the whole team; deleting it is a team decision that
- * goes through a PR. `aidev eject` is the supported way while the CLI still
+ * goes through a PR. `aidev uninstall <package>` is the supported way while the CLI still
  * exists; for afterwards, this command prints the `git rm` that does the same
  * (and more: it also drops the Wiki and aidev.yaml, which eject keeps).
  *
@@ -33,14 +33,19 @@ const { execFileSync } = require('child_process');
 const { EXIT, AidevError } = require('../lib/errors');
 const assets = require('../lib/assets');
 const home = require('../lib/home');
+const gitMod = require('../lib/git');
+const eject = require('../lib/eject');
 const pathsMod = require('../lib/paths');
 const ui = require('../lib/ui');
 
-const FLAGS = { yes: 'boolean', 'dry-run': 'boolean', json: 'boolean' };
+const FLAGS = { yes: 'boolean', 'dry-run': 'boolean', json: 'boolean', all: 'boolean', force: 'boolean', 'keep-assets': 'boolean' };
 const FLAG_HELP = {
-  yes: 'remove the launcher and AIDEV_HOME; you have read the list',
+  yes: 'you have read the list; remove',
   'dry-run': 'show what would be removed and the commands for the rest; write nothing',
   json: 'machine-readable output',
+  all: 'take the kit out of every registered package, then remove the CLI from this machine',
+  force: '<package>: run the removal again on an already-ejected or unrecognised directory',
+  'keep-assets': '<package>: keep the AI tool configuration files the kit placed (the team adopts them)',
 };
 
 /** Written by both installers into every launcher they create. */
@@ -192,8 +197,29 @@ function planUninstall({ installRoot, env = process.env }) {
   return { binDir, launchers, homeDir, homeEntries, packages, missing, checkout: checkoutRemovalCommand(installRoot) };
 }
 
+/**
+ * `aidev uninstall <package>` takes the kit out of one package (the former
+ * `eject`): hooks first, then policy, lock and the kit's files, leaving the
+ * Wiki, aidev.yaml and the team's workflows. `--all` does that for every
+ * registered package and then removes the CLI from the machine. With neither,
+ * only the machine is cleaned and the packages are listed with the commands
+ * that would clean them.
+ */
 function run(ctx) {
-  const { flags, installRoot } = ctx;
+  const { flags, installRoot, positionals } = ctx;
+  if (positionals[0] && flags.all) throw new AidevError('pass a package or --all, not both');
+  if (positionals[0]) {
+    const dir = home.resolvePackage(positionals[0]);
+    const root = gitMod.findRepoRoot(dir) || dir;
+    return eject.run({ ...ctx, repoRoot: root, positionals: [] });
+  }
+  if (flags.all) {
+    for (const p of home.listPackages().present) {
+      const code = eject.run({ ...ctx, repoRoot: p.path, positionals: [] });
+      if (code !== EXIT.OK) return code;
+      if (!flags.json) ui.out('');
+    }
+  }
   const dryRun = !!flags['dry-run'];
   const plan = planUninstall({ installRoot });
   const nothing = plan.launchers.length + plan.homeEntries.length === 0;
@@ -212,7 +238,7 @@ function run(ctx) {
       ui.dim('    the files the kit placed in these packages (committed; removing them is a team change):');
       for (const p of plan.packages) {
         ui.dim(`      ${p.path}`);
-        ui.dim('        before uninstalling (keeps the Wiki and aidev.yaml):   aidev eject --yes');
+        ui.dim(`        before uninstalling (keeps the Wiki and aidev.yaml):   aidev uninstall ${p.path} --yes`);
         ui.dim('        or by hand, in that clone (removes the Wiki too):');
         for (const c of p.commands) ui.dim(`          ${c}`);
       }

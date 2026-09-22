@@ -80,10 +80,10 @@ grep -rn "functionName" . --include='*.ts' -l --exclude-dir=node_modules --exclu
 
 | 領域 | 可否 |
 | --- | --- |
-| PKGのソース（`**`） | 既定はread-only。チームが `.aidev/policy.yaml` の `writable` か `agents.<name>.writable` に足したパスだけ可 |
-| `aidev.yaml`・`.aidev/workflows/**` | 書き込み可 |
-| `.aidev/knowledge/**` | knowledge-builder（`aidev knowledge update` が起動、または hook に求められてサブエージェント起動）のみ。手編集しない |
-| `.claude/**`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
+| PKGのソース（`**`） | 既定はread-only。`aidev run workflow` が起動した承認済み workflow の `scope.writable` か、チームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
+| `aidev.yaml`・`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`・`.aidev/conventions/**` | 書き込み可 |
+| `.aidev/knowledge/**` | knowledge-builder（`aidev sync wiki` が起動、または hook に求められてサブエージェント起動）のみ。手編集しない |
+| `.claude/**`・`CLAUDE.md`・`.aidev/policy.yaml`・`.aidev/materialized.json` | **常に禁止**（kit由来・CLI管理） |
 | `secrets_paths` 該当 | **常に禁止**（writable に含まれていても） |
 
 計画が禁止領域を含むなら、**実装を始める前に**ユーザーへ報告します。

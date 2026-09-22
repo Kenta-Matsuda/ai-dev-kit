@@ -1,6 +1,6 @@
 ---
 name: knowledge-builder
-description: PKGリポジトリ全体のコード・テスト・設定・文書を横断調査し、.aidev/knowledge/ に根拠付きLLM Wikiを生成する。aidev knowledge update から起動されるか、hook の指示で subagent として起動される。
+description: PKGリポジトリ全体のコード・テスト・設定・文書を横断調査し、.aidev/knowledge/ に根拠付きLLM Wikiを生成する。aidev sync wiki から起動されるか、hook の指示で subagent として起動される。
 tools: Read, Glob, Grep, Write, Bash, Agent
 model: inherit
 ---

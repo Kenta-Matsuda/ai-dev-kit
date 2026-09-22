@@ -1,0 +1,158 @@
+[[permissions]]
+== 権限と安全性
+
+{project-name} は、AI が PKG の中で **書いてよい場所** を 2 段で決めます。
+
+* **policy**（`.aidev/policy.yaml`）— どの agent も対話セッションも常に書ける場所と、常に書けない場所。人間が CLI で置き、PR でレビューします。
+* **workflow の `scope.writable`** — 承認済みの workflow を `aidev run workflow` で実行している間だけ、その agent が追加で書ける場所。PKG のソースを AI が書けるのはこれだけです。
+
+AI ツールの hook が毎回の書き込みを検査します。token はファイルに書かず、環境変数だけで渡します。
+
+[[permissions-policy]]
+=== policy の区分
+
+[cols="1,2,3",options="header"]
+|===
+|区分 |既定 |意味
+
+|`protected`
+|`.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json` など kit のファイル + `secrets_paths`
+|常に書き込み禁止。policy から消しても CLI が付け直します。workflow の `scope.writable` にも書けません。
+
+|`read_only`
+|`**`（PKG 全体）
+|agent も対話セッションも書けません。書けるのは、承認済み workflow の `scope.writable` の中だけです（xref:permissions-source[ソースを AI に書かせるには]）。
+
+|`writable_during_sync`
+|`.aidev/knowledge/**`
+|Wiki が無い・読めないときに、`aidev sync wiki` が構造を書き直す間だけ書けます。
+
+|`writable`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/conventions/**`, `aidev.yaml`
+|通常時に、どの agent も対話セッションも書けます。Wiki、workflow の定義、PKG 固有の agent と skill、開発規約、設定です。いずれも PR でレビューされ、`main` にあるものだけが効きます。
+|===
+
+判定は上から順です。
+
+. リポジトリ外、`secrets_paths`、`protected` は常に拒否。
+. Wiki が無い・読めない間は、`aidev sync wiki` が書く `.aidev/knowledge/**` を除き、すべて拒否。
+. `writable` に当たれば許可。
+. `aidev run workflow` が起動したセッションで、その workflow が承認済み（`origin/main` と同じ）で、パスが `scope.writable` に当たれば許可。判定は書き込みのたびに行うので、実行中に定義を変えると拒否に変わります。
+. `read_only` に当たれば拒否。
+. どれにも当たらなければ許可。
+
+.書き込み 1 件ごとの判定順
+[mermaid]
+----
+flowchart TD
+  w["書き込み先のパス"] --> q1{"リポジトリ外 /<br/>secrets_paths / protected?"}
+  q1 -- "はい" --> deny1["拒否"]
+  q1 -- "いいえ" --> q2{"Wiki が無い・読めない?"}
+  q2 -- "はい（.aidev/knowledge/** 以外）" --> deny2["拒否"]
+  q2 -- "いいえ" --> q3{"writable に当たる?"}
+  q3 -- "はい" --> allow1["許可"]
+  q3 -- "いいえ" --> q4{"aidev run workflow のセッションで<br/>承認済み workflow の scope.writable に当たる?"}
+  q4 -- "はい" --> allow2["許可"]
+  q4 -- "いいえ" --> q5{"read_only に当たる?"}
+  q5 -- "はい" --> deny3["拒否"]
+  q5 -- "いいえ" --> allow3["許可"]
+----
+
+[[permissions-hooks]]
+=== hook が何をするか
+
+配布される hook 設定（Claude Code は `.claude/settings.json`、GitHub Copilot CLI は `.github/hooks/aidev.json`、OpenAI Codex CLI は `.codex/hooks.json`、Kiro CLI は `.kiro/agents/aidev.json`）は 5 つの hook を登録します。実機で検証済みなのは Claude Code です。
+
+[cols="1,1,3",options="header"]
+|===
+|イベント |コマンド |動作
+
+|SessionStart
+|`aidev hook session-start`
+|Wiki の状態と進行中の publish をセッションのコンテキストに入れます。
+
+|PreToolUse（Write / Edit / Bash など）
+|`aidev hook guard-write`
+|書き込み先を policy と workflow の scope で判定し、拒否なら理由を返します。policy が読めないときも拒否します。
+
+|PostToolUse（Write / Edit）
+|`aidev hook quality-gate`
+|PKG のファイルを編集した後、`quality_gates` のコマンドを実行し、失敗の出力を AI に返します。
+
+|PostToolUse（Bash）
+|`aidev hook after-bash`
+|コミットで HEAD が変わり Wiki が遅れたら、構造を更新し、本文が必要なら knowledge-builder をサブエージェントで起動するようセッションに指示します（xref:knowledge-hook-flow[コミット後に何が起きるか]）。
+
+|Stop
+|`aidev hook session-stop`
+|Wiki が HEAD より遅れたままなら 1 回だけ終了を拒否して同じ指示を出します。
+|===
+
+拒否されると、AI には次のような理由が返ります。
+
+[source,text]
+----
+ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the scope.writable of an approved workflow. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but its scope.writable (tests/**) does not cover this path. …
+ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync wiki" …
+----
+
+hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます（検査するのは `.claude/settings.json` です）。
+
+[[permissions-source]]
+=== ソースを AI に書かせるには
+
+既定では PKG のソースは `read_only` で、対話中の Claude も、それが呼ぶサブエージェントも書けません。AI にソースを書かせたいときは、**その仕事を workflow として定義し、`scope.writable` に書いてよい範囲を書き、PR でレビューして `main` に入れます**（xref:workflows[AI に仕事をさせる]）。
+
+[source,yaml]
+----
+scope:
+  writable: [src/**, tests/**]
+----
+
+この範囲は `aidev run workflow <name>` が起動した agent にだけ効きます。`aidev` が起動時に workflow 名を子プロセスの環境変数 `AIDEV_WORKFLOW` に入れ、hook がそれを見て「その workflow が今も `origin/main` と同じか」「パスが範囲内か」を判定します。人が `claude` で対話中に同じ agent を呼んでも、この範囲は効きません。
+
+すべての agent と対話セッションにいつでも開きたい場合だけ、policy の `writable` に足します。`protected` と `secrets_paths` はどちらの方法でも書けません。policy の変更は PR でレビューし、必要な期間だけ広げることを勧めます。
+
+[[permissions-commands]]
+=== policy を置く・変える・見る
+
+policy は AI が作れません。導入担当者が CLI で置きます。
+
+[%autowidth.stretch,options="header"]
+|===
+|コマンド |動作
+
+|`aidev create policy --approve`
+|候補 `.aidev/policy.candidate.yaml` を `.aidev/policy.yaml` として置きます。`aidev init` で `N` と答えた後に使います。
+
+|`aidev create policy` → `aidev create policy --approve`
+|`secrets_paths` を変えたときなどに候補を作り直して置きます。保護を弱める変更には `--force` も必要です。候補は `aidev.yaml` から作り直されるので、チームが policy に手で足した `writable` は消えます。置いた後にもう一度足してコミットしてください。
+
+|`aidev check` / `aidev doctor <package>`
+|有効な policy の要約（protected の数、置かれているか）を表示します。全文は `.aidev/policy.yaml` を読みます。
+|===
+
+[[permissions-secrets]]
+=== 秘密情報
+
+* `secrets_paths` のファイルは、AI が読まず、書かず、Wiki からも隠されます。
+* PAT は `hosting.auth_env`（既定 `AZURE_DEVOPS_PAT`）の環境変数だけで渡します。`aidev.yaml` に書くと起動を拒否します。
+* `aidev doctor` と `aidev init` は token の有無だけを報告し、値は読みません。
+* workflow の実行記録（`.aidev/workflows/*/runs/`）にはコマンドの出力が入るため、gitignore 済みでコミットされません。
+
+=== してはいけないこと
+
+* `.claude/**`、`CLAUDE.md` の kit 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、kit 全体の改善は kit への PR にする）
+* `.aidev/policy.yaml` は人間だけが編集し、変更は PR でレビューする（AI には編集させない）
+* workflow の `scope.writable` に `**` や設定・CI のパスを書かない。仕事に必要な範囲だけにする
+* AI が「拒否された」と報告したら、回避策を探さず理由を読む
+* token をコミット・ログ・PR 本文に含めない
+
+=== 関連
+
+* xref:workflows[AI に仕事をさせる] — `scope.writable` と承認
+* xref:cli-create[aidev create policy]
+* xref:cli-hook[aidev hook]
+* xref:configuration[aidev.yaml リファレンス] — `secrets_paths`、`hosting.auth_env`

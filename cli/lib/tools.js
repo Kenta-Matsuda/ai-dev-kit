@@ -14,7 +14,8 @@
  *
  * Only Claude Code is exercised against the real binary by the maintainers.
  * The other adapters follow each tool's documented non-interactive mode and
- * are marked `verified: false`; `aidev agent run --dry-run` prints the exact
+ * are marked `verified: false`; `aidev run workflow --dry-run` names the tool
+ * and agent a run would use, and `agent.previewCommand` prints the exact
  * command line so a team can confirm it against the version they install
  * before relying on it.
  */
@@ -364,21 +365,34 @@ function resolveBinary(tool = 'claude', env = process.env) {
     return { ok: true, tool: t.id, bin: override, argvPrefix: [], shell: false, killTree: process.platform === 'win32', source: t.envBin };
   }
 
-  if (process.platform === 'win32') {
-    try {
-      const found = spawnSync('where.exe', [t.bin], {
-        encoding: 'utf8', env: { ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const candidate = found.status === 0
-        ? String(found.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean)
-        : null;
-      if (candidate) {
-        if (/\.(cmd|bat)$/i.test(candidate)) return { ...windowsScriptSpec(candidate, `PATH (${candidate})`, env), tool: t.id };
-        return { ok: true, tool: t.id, bin: candidate, argvPrefix: [], shell: false, killTree: true, source: `PATH (${candidate})` };
-      }
-    } catch { /* the spawn below produces the ordinary missing-binary diagnostic */ }
-  }
+  const located = process.platform === 'win32' ? locateOnWindows(t.bin, env) : null;
+  if (located) return { ...located, tool: t.id };
   return { ok: true, tool: t.id, bin: t.bin, argvPrefix: [], shell: false, killTree: false, source: 'PATH' };
+}
+
+/** `where.exe` lookup: the native executable, or a cmd.exe argv for a .cmd/.bat shim. Null when not found. */
+function locateOnWindows(bin, env) {
+  try {
+    const found = spawnSync('where.exe', [bin], {
+      encoding: 'utf8', env: { ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const candidate = found.status === 0
+      ? String(found.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean)
+      : null;
+    if (!candidate) return null;
+    if (/\.(cmd|bat)$/i.test(candidate)) return windowsScriptSpec(candidate, `PATH (${candidate})`, env);
+    return { ok: true, bin: candidate, argvPrefix: [], shell: false, killTree: true, source: `PATH (${candidate})` };
+  } catch { return null; }
+}
+
+/**
+ * Resolve any command name the way a tool binary is resolved (so `npm test`
+ * in a workflow works on Windows, where npm is a .cmd shim), without a shell.
+ */
+function resolveCommand(bin, env = process.env) {
+  const located = process.platform === 'win32' ? locateOnWindows(bin, env) : null;
+  if (located) return located;
+  return { ok: true, bin, argvPrefix: [], shell: false, killTree: process.platform === 'win32', source: 'PATH' };
 }
 
 /** Compare a parsed semantic version with a floor. */
@@ -427,6 +441,6 @@ function checkVersion(resolved, env = process.env) {
 module.exports = {
   REGISTRY, TOOL_IDS, HOOK_ADAPTERS, hookAdapter, AGENT_NAME_RE, ALL_CONFIG_GLOBS, TEMPLATES_DIR,
   TEMPLATE_AGENTS_DIR, TEMPLATE_SKILLS_DIR, TEMPLATE_INSTRUCTIONS,
-  getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents,
+  getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents, resolveCommand,
   filePointerPrompt, resolveBinary, checkVersion, versionAtLeast, stripControl,
 };

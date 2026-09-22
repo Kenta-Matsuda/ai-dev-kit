@@ -36,7 +36,7 @@ The AI tool starts it from the hook configuration the kit places. It reads the h
 
 |`after-bash`
 |After a shell command
-|When HEAD changed, the Wiki is behind and the tree is clean, does the structural update (inventory, manifest, removed pages). A rename-only change is committed right away. When prose is needed, writes `.aidev/knowledge/.cache/plan.json` and tells the session to start the knowledge-builder subagent per batch and then run `aidev knowledge update --no-agent`. When generation targets have uncommitted changes, it only names them and does nothing else
+|When HEAD changed, the Wiki is behind and the tree is clean, does the structural update (inventory, manifest, removed pages). A rename-only change is committed right away. When prose is needed, writes `.aidev/knowledge/.cache/plan.json` and tells the session to start the knowledge-builder subagent per batch and then run `aidev sync wiki --no-agent`. When generation targets have uncommitted changes, it only names them and does nothing else
 
 |`session-stop`
 |Session end
@@ -90,7 +90,7 @@ aidev hook guard-write --input /tmp/hook.json
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). PKG source is not written by agents; …"
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the scope.writable of an approved workflow. …"
   }
 }
 ----

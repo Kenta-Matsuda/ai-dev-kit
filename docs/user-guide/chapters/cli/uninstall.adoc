@@ -1,7 +1,7 @@
 [[cli-uninstall]]
 == aidev uninstall
 
-この端末から `aidev` コマンドを消します。
+この端末から `aidev` を消します。`<package>` を渡すと、その PKG から kit の管理を外します（旧 eject）。`--all` は登録済みの全 PKG から外してから端末の `aidev` を消します。
 
 === 書式
 
@@ -9,20 +9,40 @@
 ----
 aidev uninstall --dry-run
 aidev uninstall --yes [--json]
+aidev uninstall <package> --yes [--keep-assets] [--force] [--json]
+aidev uninstall --all --yes [--json]
 ----
 
 === 説明
+
+==== 引数なし — 端末から消す
 
 installer が置いたものを消します。①起動スクリプト（Windows: `aidev.cmd` と `aidev.ps1`、POSIX: `aidev`。installer が生成したものだけ）、②Windows ではユーザー PATH に足した起動スクリプトの場所、③`AIDEV_HOME` の `registry.json` と `cache/`。
 
 消さないものと、消したいときのコマンドを表示します。
 
 * kit の clone。`aidev` はこの中で動いているので、表示された `Remove-Item` / `rm -rf` を後で自分で実行します。
-* 登録済みの各 PKG に kit が置いたファイル。commit されてチームで共有しているので、消すならチームの変更として PR にします。先に xref:cli-eject[`aidev eject --yes`] を実行するか（Wiki と `aidev.yaml` は残ります）、表示された `git rm` を PKG の clone で実行します（Wiki も消えます）。
+* 登録済みの各 PKG に kit が置いたファイル。commit されてチームで共有しているので、消すならチームの変更として PR にします。先に xref:cli-uninstall[aidev uninstall <package>] を実行するか（Wiki と `aidev.yaml` は残ります）、表示された `git rm` を PKG の clone で実行します（Wiki も消えます）。
 
 対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。消すものが無くても 0 で終わります。
 
 再インストールは kit の clone で installer を実行します（xref:install[端末に aidev を入れる]）。
+
+==== `<package>` — PKG から kit の管理を外す（旧 eject）
+
+`<package>` は端末に登録された PKG の名前（`aidev doctor` の一覧）か、PKG のパスです（PKG の中なら `.`）。
+
+順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md`、他のツールの分）を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
+
+残すもの: PKG のファイル、`.aidev/knowledge/`（Wiki）、`aidev.yaml`、`.aidev/workflows/`。
+
+eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外してください。`aidev init` で再導入できます。
+
+対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。tracking branch への publish が進行中（有効な lease がある）だと `--force` 無しでは拒否します。
+
+==== `--all` — 全 PKG から外し、端末からも消す
+
+登録済みの各 PKG に `<package>` と同じ処理を順に行い、最後に端末から `aidev` を消します。どの PKG かで止まるとそこで終わります。`--yes` が要ります。
 
 === オプション
 
@@ -38,6 +58,15 @@ installer が置いたものを消します。①起動スクリプト（Windows
 
 |`--json`
 |JSON で出力する
+
+|`--all`
+|登録済みの全 PKG から kit を外し、端末からも消す
+
+|`--force`
+|`<package>`: eject 済みでも、publish が進行中でも、管理の痕跡が無くても実行する
+
+|`--keep-assets`
+|`<package>`: kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md` など）を残す
 |===
 
 === 終了コード
@@ -50,13 +79,17 @@ installer が置いたものを消します。①起動スクリプト（Windows
 |消した。消すものが無かった。`--dry-run`
 
 |1
-|`--yes` が無い
+|`--yes` が無い。`<package>` が見つからない。`<package>` に管理の痕跡が無い、publish が進行中（`--force` 無し）。`<package>` と `--all` を同時に指定した
 |===
 
 === 例
 
 [source,bash]
 ----
+aidev uninstall demo-pkg --dry-run          # その PKG から kit を外す前に確認
+aidev uninstall demo-pkg --yes
+git -C C:\work\demo-pkg add -A && git -C C:\work\demo-pkg commit -m "chore: eject from ai-dev-kit"
+
 aidev uninstall --dry-run
 aidev uninstall --yes
 rm -rf ~/ai-dev-kit            # 表示された kit の clone を消すコマンド
@@ -64,5 +97,5 @@ rm -rf ~/ai-dev-kit            # 表示された kit の clone を消すコマ�
 
 === 関連
 
-* xref:cli-eject[aidev eject] — PKG を kit の管理から外す
+* xref:cli-init[aidev init] — 再導入
 * xref:install[端末に aidev を入れる]

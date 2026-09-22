@@ -25,7 +25,7 @@ build/docs/ai-dev-kit-user-guide.en.html   # 英語
 docs/user-guide/
 ├─ index.adoc                  日本語版のルート（include 順）
 ├─ _attributes.adoc            共通 attribute
-├─ chapters/01-… 10-…          ユーザーガイド
+├─ chapters/01-… 11-…          ユーザーガイド
 ├─ chapters/cli/               コマンドリファレンス（index.adoc + 1 コマンド 1 ファイル）
 ├─ appendices/                 付録
 ├─ index-en.adoc               英語版のルート（include 順）
@@ -41,6 +41,7 @@ docs/user-guide/
 * 章とコマンドページに一意の ID を付け、内部リンクは `xref:ID[label]` で書く。両言語で同じ ID を使う。
 * コマンドページのオプションは `AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js <command> --help` と一致させる。既定値は `cli/commands/*.js` と `cli/lib/config.js` が正本。
 * 実装されていない機能は書かない。
+* 図は `[mermaid]` ブロック（Mermaid 記法）で書く。ASCII アートは使わない。ビルドが描画用の script を HTML に埋め込むので、外部依存は増えない。CLI の出力例は `[source,text]` のまま。
 * 一方の言語を変えたら、もう一方も同じ内容に更新する。
 * 「項目 | 説明」の 2 列表は `[%autowidth.stretch,options="header"]` で書く。1 列目は内容幅で折り返さず、残りが説明に回る。1 列目に複数の項目を並べるときは ` +` で改行する。
 

@@ -1,9 +1,9 @@
 # ai-dev-kit — scheduled Wiki catch-up for the tracking branch.
 #
 # Developers bring the Wiki to HEAD on their own branches (the hooks do it
-# after each commit, or they run `aidev knowledge update`), and the Wiki commit
+# after each commit, or they run `aidev sync wiki`), and the Wiki commit
 # travels in their pull request. When something is merged without it, the
-# tracking branch falls behind. This pipeline runs `aidev knowledge update` on
+# tracking branch falls behind. This pipeline runs `aidev sync wiki` on
 # the tracking branch on a clock; the CLI publishes the result as
 # `aidev/wiki-<sha12>` with a pull request that a human merges.
 #
@@ -71,14 +71,14 @@ steps:
     env:
       AIDEV_NO_UPDATE_CHECK: '1'
 
-  # On the tracking branch `knowledge update` works in a temporary worktree,
+  # On the tracking branch `sync wiki` works in a temporary worktree,
   # runs the knowledge-builder, commits on aidev/wiki-<sha12>, pushes and
   # opens (or updates) the pull request. It is a no-op when the Wiki already
   # describes HEAD.
   - script: |
       set -euo pipefail
       node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" knowledge update --branch
-    displayName: 'aidev knowledge update'
+    displayName: 'aidev sync wiki'
     env:
       AIDEV_NO_UPDATE_CHECK: '1'
       AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)

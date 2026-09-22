@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev permission configure|reconfigure|show`
+ * `aidev create policy|reconfigure|show`
  *
  * The permission policy is the kit's control surface, so it is never written
  * by an agent and never generated silently. This command produces a *candidate*
@@ -46,8 +46,6 @@ function buildCandidate(config) {
     read_only: [...cfgMod.DEFAULT_POLICY_SCOPES.read_only],
     writable_during_sync: [...cfgMod.DEFAULT_POLICY_SCOPES.writable_during_sync],
     writable: [...cfgMod.DEFAULT_POLICY_SCOPES.writable],
-    // Per-agent grants are the team's decision; the candidate never proposes any.
-    agents: {},
   };
 }
 
@@ -55,7 +53,7 @@ function renderCandidate(config, policy) {
   return [
     '# .aidev/policy.yaml — 書き込み権限ポリシー',
     '#',
-    '# このファイルは "aidev permission configure --approve" によってのみ配置されます。',
+    '# このファイルは "aidev create policy --approve" によってのみ配置されます。',
     '# エージェントは編集できません（protected に自分自身を含むため）。',
     '#',
     `# 生成元: ${cfgMod.CONFIG_NAME} (package.name=${config.package.name})`,
@@ -74,57 +72,14 @@ function renderCandidate(config, policy) {
     'writable_during_sync:',
     ...policy.writable_during_sync.map((p) => `  - "${p}"`),
     '',
-    '# 通常時に書き込み可能',
+    '# 通常時に書き込み可能（全員・全セッション）。PKG のソースを AI に書かせるのは',
+    '# ここではなく、承認済み workflow の scope.writable（.aidev/workflows/<name>/workflow.yaml）。',
     'writable:',
     ...policy.writable.map((p) => `  - "${p}"`),
-    '',
-    '# agent ごとの追加許可。CLI が起動した agent（aidev agent run、knowledge update、workflow の',
-    '# ctx.agent）にだけ効く。branch を書くと、その glob に一致するブランチ上でだけ有効。',
-    '# protected と secrets_paths はここに書いても書けない。',
-    ...(Object.keys(policy.agents || {}).length === 0
-      ? ['# agents:', '#   issue-to-pr:', '#     writable: ["src/**", "tests/**"]', '#     branch: "aidev/issue-*"', '#   test-writer:', '#     writable: ["tests/**"]', '#     branch: "aidev/tests-*"']
-      : ['agents:', ...Object.entries(policy.agents).flatMap(([name, g]) => [
-        `  ${name}:`,
-        `    writable: [${g.writable.map((p) => `"${p}"`).join(', ')}]`,
-        ...(g.branch ? [`    branch: "${g.branch}"`] : []),
-      ])]),
     '',
   ].join('\n');
 }
 
-function show(ctx) {
-  const { repoRoot, flags } = ctx;
-  const p = cfgMod.policyPath(repoRoot);
-  const exists = fs.existsSync(p);
-  const policy = cfgMod.loadPolicy(repoRoot, { required: false });
-
-  if (flags.json) {
-    ui.json({ exists, path: cfgMod.POLICY_REL, fallback: !!policy._fallback, policy });
-    return exists ? EXIT.OK : EXIT.PERMISSION;
-  }
-
-  ui.heading('aidev permission show');
-  if (!exists) {
-    ui.warn(`${cfgMod.POLICY_REL} is not present; the built-in floor is in effect.`);
-    ui.dim('    Run "aidev permission configure" to generate a candidate.');
-  }
-  for (const [section, entries] of [
-    ['protected', policy.protected],
-    ['read_only', policy.read_only],
-    ['writable_during_sync', policy.writable_during_sync],
-    ['writable', policy.writable],
-  ]) {
-    ui.out(`\n  ${section}:`);
-    if (!entries || entries.length === 0) ui.dim('    (none)');
-    else for (const e of entries) ui.out(`    • ${e}`);
-  }
-  ui.out('\n  agents (grants for agents the CLI starts):');
-  const grants = Object.entries(policy.agents || {});
-  if (grants.length === 0) ui.dim('    (none)');
-  else for (const [name, g] of grants) ui.out(`    • ${name}: ${g.writable.join(', ')}${g.branch ? ` (branch ${g.branch})` : ''}`);
-  ui.out('');
-  return exists ? EXIT.OK : EXIT.PERMISSION;
-}
 
 /**
  * Compare a proposed policy against the one in force and report what it
@@ -160,18 +115,6 @@ function detectWeakening(current, candidate) {
     if (nextWritable.has(p) && !nowWritable.has(p)) losses.push({ section: 'writable_during_sync', path: p, kind: 'escalated-to-writable' });
   }
 
-  // A per-agent grant that appears, widens, or drops its branch condition is
-  // protection given up too: it lets an agent write what nobody could before.
-  const nowAgents = current.agents || {};
-  for (const [name, g] of Object.entries(candidate.agents || {})) {
-    const before = nowAgents[name];
-    const beforePaths = set(before && before.writable);
-    for (const p of g.writable || []) {
-      if (!beforePaths.has(p)) losses.push({ section: `agents.${name}`, path: p, kind: 'agent-grant' });
-    }
-    if (before && before.branch && !g.branch) losses.push({ section: `agents.${name}`, path: before.branch, kind: 'branch-condition-removed' });
-  }
-
   return { weakening: losses.length > 0, losses };
 }
 
@@ -179,23 +122,15 @@ function detectWeakening(current, candidate) {
 function describeLoss(l) {
   switch (l.kind) {
     case 'escalated-to-writable': return `${l.path} — moves from ${l.section} to unconditionally writable`;
-    case 'agent-grant': return `${l.path} — newly writable for an agent (${l.section})`;
-    case 'branch-condition-removed': return `${l.section} — no longer limited to branch ${l.path}`;
     default: return `${l.path} — removed from ${l.section}`;
   }
 }
 
-function configure(ctx, { reconfigure = false } = {}) {
+function configure(ctx) {
   const { repoRoot, flags } = ctx;
   const config = cfgMod.loadConfig(repoRoot);
   const target = cfgMod.policyPath(repoRoot);
   const cand = candidatePath(repoRoot);
-
-  if (fs.existsSync(target) && !reconfigure && !flags.force) {
-    throw new AidevError(
-      `${cfgMod.POLICY_REL} already exists. Use "aidev permission reconfigure" to propose a change ` +
-      '(it still requires --approve), or --force to regenerate the candidate.');
-  }
 
   const policy = buildCandidate(config);
   // Validate what we are about to offer, rather than trusting the generator.
@@ -225,7 +160,7 @@ function configure(ctx, { reconfigure = false } = {}) {
       ui.out('');
       ui.info('Review the difference, then re-run with --force if every loss above is intended:');
       ui.dim(`    git diff --no-index ${cfgMod.POLICY_REL} ${CANDIDATE_REL}`);
-      ui.dim('    aidev permission reconfigure --approve --force');
+      ui.dim('    aidev create policy --approve --force');
       if (flags.json) ui.json({ ok: false, approved: false, weakening: true, losses: weakened.losses });
       return EXIT.PERMISSION;
     }
@@ -256,7 +191,7 @@ function configure(ctx, { reconfigure = false } = {}) {
       weakening: weakened.weakening, losses: weakened.losses });
     return EXIT.OK;
   }
-  ui.heading(`aidev permission ${reconfigure ? 'reconfigure' : 'configure'}`);
+  ui.heading('aidev create policy');
   ui.ok(`candidate written to ${CANDIDATE_REL}`);
   if (weakened.weakening) {
     ui.out('');
@@ -267,22 +202,12 @@ function configure(ctx, { reconfigure = false } = {}) {
   ui.out('');
   ui.info('Review it, then approve:');
   ui.dim(`    git diff --no-index ${cfgMod.POLICY_REL} ${CANDIDATE_REL}`);
-  ui.dim('    aidev permission configure --approve');
+  ui.dim('    aidev create policy --approve');
   ui.out('');
   ui.warn('The policy is never placed automatically — a human approves it, by design.');
   return EXIT.OK;
 }
 
-function run(ctx) {
-  const sub = ctx.positionals[0];
-  if (sub === 'show') return show(ctx);
-  if (sub === 'configure') return configure(ctx);
-  if (sub === 'reconfigure') return configure(ctx, { reconfigure: true });
-  throw new AidevError(
-    `unknown subcommand: aidev permission ${sub || ''} (expected: configure, reconfigure, show)`);
-}
-
 module.exports = {
-  run, FLAGS, buildCandidate, renderCandidate, CANDIDATE_REL, candidatePath, detectWeakening,
-  summary: '書き込み権限ポリシーの候補生成と承認',
+  configure, FLAGS, buildCandidate, renderCandidate, CANDIDATE_REL, candidatePath, detectWeakening,
 };

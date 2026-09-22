@@ -1,0 +1,310 @@
+[[troubleshooting]]
+== Troubleshooting
+
+Look up the symptom to find what to do. The messages are the English text `aidev` actually prints.
+
+[[troubleshooting-install]]
+=== Installation
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`aidev` is not found
+|Open a new terminal. On POSIX, add `export PATH="$HOME/.local/bin:$PATH"` to your profile. If that does not help, run the installer again.
+
+|`node not found` / `node vXX is too old`
+|Install Node.js {node-min-version} or newer and run the installer again.
+
+|`this looks like a package that uses ai-dev-kit, not the kit itself`
+|You ran the installer inside a PKG. Run it in the kit clone.
+
+|`… checkout must be on branch main`
+|Run `git switch main` in the kit clone, then try again.
+
+|`aidev doctor` shows +
+`⚠ claude not found on PATH` / `is too old`
+|Install Claude Code {claude-min-version} or newer. Generating the Wiki needs it.
+|===
+
+[[troubleshooting-status]]
+=== aidev check output
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`not an ai-dev-kit package (no aidev.yaml); nothing to check`
+|Run it inside the PKG clone. If the PKG is not adopted yet, see xref:setup-owner[Package owner steps].
+
+|`[exit 1] workflow <name> is invalid: …`
+|`.aidev/workflows/<name>/workflow.yaml` does not validate. Fix the items shown (xref:troubleshooting-workflow[workflow]).
+
+|`❌ LLM Wiki has not been generated yet`
+|`git pull`. If it is still missing, run `aidev sync wiki`. AI writes are blocked until then.
+
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD`
+|Run `aidev sync wiki`. Inside an AI tool session, the hook starts it after your next commit.
+
+|`⚠️ N page(s) still await prose regeneration`
+|Run `aidev sync wiki`. If the hook gave instructions, follow them and finish with `aidev sync wiki --no-agent`.
+
+|`⚠️ origin/main has moved ahead`
+|Merge or rebase at a good moment, then `aidev sync wiki`.
+
+|`tool config  CONFLICTS in N file(s)`
+|An `aidev sync tools` conflict is unresolved. Resolve the markers (`<<<<<<<` / `=======` / `>>>>>>>`) in those files, run `aidev sync tools` to update the record, and commit.
+
+|`tool config  kit hooks missing …`
+|The kit's hooks are gone. Restore them by hand or take the kit version with `aidev sync tools --force`.
+
+|`tool config  not recorded — run "aidev init"`
+|Run `aidev init`.
+
+|`policy  missing`
+|Run `aidev create policy --approve`.
+
+|`⚠ a stale publish lease is present`
+|A publish to the tracking branch stopped halfway. Continue with `aidev sync wiki` or discard it with `aidev sync wiki --abort`.
+
+|`⚠ N Wiki page(s) edited by hand since generation`
+|If the edits can be dropped, add `--force` to the next `aidev sync wiki`. Move anything worth keeping into the source.
+
+|`ℹ️ remote unverified`
+|The remote is unreachable. You can keep working. Check your proxy settings.
+|===
+
+[[troubleshooting-exit]]
+=== Exit codes of aidev check
+
+[cols="1,2,3",options="header"]
+|===
+|Exit code |Message |What to do
+
+|1
+|`workflow <name> is invalid: …`
+|Fix the items shown in `workflow.yaml` and submit it again with `aidev submit workflow`.
+
+|2
+|`tool configuration file(s) carry unresolved conflict markers` / `the kit's hooks are missing`
+|Resolve the conflict markers and run `aidev sync tools`, or take the kit version with `aidev sync tools --force`. The team's own edits never cause exit 2.
+
+|2
+|`.aidev/materialized.json is missing`
+|Run `aidev init` and commit.
+
+|3
+|`.aidev/policy.yaml not found`
+|Run `aidev create policy --approve`.
+
+|3
+|`failed to parse .aidev/policy.yaml`
+|Replace it with `aidev create policy --approve`.
+
+|4
+|`LLM Wiki has not been generated yet`
+|Run `aidev sync wiki` (it commits on its own once complete).
+
+|4
+|`N inventory inconsistency/ies`
+|Run `aidev sync wiki --full`.
+
+|4
+|`a stale publish lease is present`
+|Continue with `aidev sync wiki`, or `aidev sync wiki --abort`.
+
+|2 (`--strict`)
+|`the Wiki describes … but N file(s) differ at HEAD` / `N page(s) still await prose`
+|Run `aidev sync wiki` and put the Wiki commit in the same PR.
+|===
+
+[[troubleshooting-agent]]
+=== Wiki generation
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`N generation target(s) have uncommitted changes; the Wiki describes commits only`
+|Commit (or stash) the listed files, then run again.
+
+|`⚠ the knowledge-builder agent did not run`
+|Fix the AI tool's line in `aidev doctor` and run the same command again.
+
+|`✗ the knowledge-builder agent ran out of time`
+|Run the same command again. If it keeps happening, add `--agent-batch-size 10`.
+
+|`✗ knowledge-builder made no Wiki progress: 0/N`
+|Read the `Claude Code result:` lines that follow. If they mention `permission denial(s)`, review the deny rules in `.claude/settings.json` and, if needed, take the kit version with `aidev sync tools --force`.
+
+|`⚠ N completion report(s) were rejected`
+|Run the same command again. If it persists, use `--full`.
+
+|`✗ … left the Wiki checkpoint invalid …`
+|You switched branches or committed during generation. Go back to the original HEAD and run again, or run `aidev sync wiki` for the new HEAD.
+
+|`⚠ N generation target(s) still need prose; the Wiki was not committed.`
+|Prose is still pending. Run the same command again. In the hook flow, hand the remaining batches to the subagent, then `aidev sync wiki --no-agent`.
+
+|The hook gave instructions but the session did not update the Wiki
+|Run `aidev sync wiki` by hand. The Stop hook refuses only once; the second stop passes.
+
+|`✗ N Wiki page(s) were edited by hand …`
+|Add `--force`, or move the edits into the source.
+
+|`✗ --scope <path> matched no files …`
+|Give a path that is inside `package.include` in `aidev.yaml`.
+|===
+
+[[troubleshooting-publish]]
+=== Publishing to the tracking branch
+
+Messages from `aidev sync wiki` run on `main` (or with `--branch`).
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`✗ an interrupted publish is present (…; target …)`
+|A publish for another HEAD stopped halfway. Discard it with `aidev sync wiki --abort` or take it over with `--force`. For the same HEAD, the same command continues.
+
+|`✗ the Wiki is not complete (N target(s) still queued); nothing was published.`
+|Prose is still pending. Run the same command to continue in the same worktree, or `--abort` to discard it.
+
+|`✗ publish failed: …`
+|Fix the cause and run the same command again. The lease and worktree are kept. To start over, `--abort`.
+
+|`⚠ AZURE_DEVOPS_PAT is not set; …`
+|Set the environment variable and run again, or open the PR by hand from the pushed branch.
+
+|`ℹ hosting.type is generic; …` / `ℹ sync.auto_pr is false; …`
+|Normal. Open the PR by hand.
+
+|`✓ the Wiki already describes …; nothing to do.`
+|The Wiki of `main` is current. If it is waiting in a PR, `aidev check` names the branch. `git pull` after the merge.
+
+|`✗ --branch publishes a commit; it cannot be combined with --no-commit`
+|Drop `--no-commit`.
+|===
+
+[[troubleshooting-permission]]
+=== Denied writes
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|Claude reports `… is read-only (**). this session was not started by "aidev run workflow"`
+|Normal. The interactive AI cannot write PKG source. Define the job that should write source as a workflow, put the paths in its `scope.writable` and open a PR (xref:permissions-source[Letting the AI write source]).
+
+|During `aidev run workflow`: `… workflow <name> is approved but its scope.writable (…) does not cover this path`
+|That path is outside the workflow's scope. If it is needed, the package owner widens `scope.writable` and submits the workflow again.
+
+|During `aidev run workflow`: `… workflow <name> is not approved: …`
+|The definition changed during the run, or `origin/main` moved. Stop the run and check the state with `git fetch origin` and `aidev list workflows`.
+
+|`… is protected (.claude/**)`
+|Normal. Kit files are changed through a PR to the kit.
+
+|`Wiki consistency error … All writes are blocked`
+|The Wiki is missing or unreadable. Run `aidev sync wiki` (or receive it with `git pull`).
+
+|`policy could not be evaluated (…); write blocked`
+|Check with `aidev check` and replace the policy with `aidev create policy --approve`.
+
+|`aidev create policy --approve` stops with +
+`this candidate weakens the policy in force`
+|Compare with `git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml`. If the change is intended, add `--force`.
+
+|`.aidev/policy.yaml: agents.<name> grants no longer exist`
+|An old policy still has an `agents` section. Delete it and commit. The paths the AI may write go into the `scope.writable` of a workflow.
+|===
+
+[[troubleshooting-workflow]]
+=== workflow
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`workflow <name> is not approved: … is not on origin/main yet`
+|The PR of the definition is not merged. If it is merged, run `git fetch origin`.
+
+|`workflow <name> is not approved: … differs from origin/main`
+|The definition (or an agent or skill it references) was changed locally. Restore it with `git checkout origin/main -- .aidev/workflows/<name>/`, or the package owner submits it again.
+
+|`workflow <name> is not approved: origin/main is not available in this clone`
+|Run `git fetch origin`.
+
+|`aidev list workflows` shows `invalid: …`
+|`workflow.yaml` does not validate. Fix the items shown (no `objective`, no `scope.writable`, no `cost.max_usd`, a limit exceeded, quotes or pipes in `until`, a `protected` path, and so on).
+
+|`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
+|The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.
+
+|`the working tree has uncommitted changes; commit or stash them first`
+|A workflow with a `pull-request` step runs on a clean working tree.
+
+|`workflow stopped — step <id>: <until> still fails after N retries` +
+`… the same failure repeated`
+|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Make `--task` more specific, or ask the package owner to revise `prompt` or `max_retries`.
+
+|`workflow stopped — step <id>: cost limit of $N reached` +
+`… time limit of N minutes exceeded`
+|A limit was reached. Make `--task` smaller, or ask the package owner to revise the limits (a PR to the definition).
+
+|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|Normal. Open the PR by hand from the pushed branch.
+
+|`the pull request could not be opened: …`
+|The push is done. Check `AZURE_DEVOPS_PAT` and the permission to create PRs, then open the PR by hand.
+
+|After `--describe`: `the agent finished, but the workflow does not validate: …`
+|Fix the YAML written by the workflow-creator along the items shown, then run `aidev submit workflow`.
+|===
+
+[[troubleshooting-update]]
+=== After a kit update
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|`tool config` line says `newer templates available …`
+|When convenient, run `aidev sync tools` in the PKG, commit the diff and open a PR.
+
+|`aidev check` now exits with 2
+|`git pull`. If it is still 2, look at `aidev check` to see whether conflict markers or missing hooks are the cause, fix that, and run `aidev sync tools`.
+
+|`✗ N file(s) need your attention` +
+`conflict markers were written`
+|The team's edit and the kit's change touch the same lines. Resolve the markers, run `aidev sync tools`, and commit. If the kit version is fine, run `aidev sync tools --force`.
+
+|`edited locally and the template it was based on …`
+|The kit clone lacks the previous commit (a shallow clone, for instance). Run `git fetch --unshallow` in the kit clone, fix the file by hand, or run `aidev sync tools --force`.
+
+|`✗ the kit checkout has diverged from origin/main`
+|The kit clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
+|===
+
+[[troubleshooting-windows]]
+=== Windows
+
+[%autowidth.stretch,options="header"]
+|===
+|Symptom |What to do
+
+|PowerShell blocks `aidev.ps1` (execution policy)
+|Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or call `aidev.cmd` explicitly.
+
+|The hooks cannot find `aidev`
+|Start `claude` from a new terminal. The installer has already added the launcher to PATH.
+
+|Questions such as `Place this policy now?` do not appear +
+and the command ends
+|stdin is not a terminal (some IDE terminals, pipes). Run in a normal terminal, or pass the values with `--yes` / `--approve`.
+
+|`spawnSync git ETIMEDOUT`
+|The remote check timed out after 3 seconds. You can keep working. Check your proxy.
+|===
+

@@ -6,7 +6,6 @@
  * passing even if the kit shipped none. This script exercises the real files in
  * this repository against the code that consumes them:
  *
- *   - templates/root/.mcp.json   must route to an implemented `aidev mcp` server
  *   - templates/claude-assets/settings.json
  *                                its hooks must name implemented `aidev hook`
  *                                names, and its deny list must cover the
@@ -14,7 +13,7 @@
  *   - templates/root/CLAUDE.md   must exist and be tracked as a kit-owned file
  *   - agents / skills            frontmatter must parse and declare name + description
  *
- * The PKG's `.claude/`, `CLAUDE.md` and `.mcp.json` are generated from those
+ * The PKG's `.claude/` and `CLAUDE.md` are generated from those
  * templates, so the contract has two halves and both are checked here: the
  * templates must be valid, and `aidev init` must turn them into a tree whose
  * hooks are really wired. Validating only the templates would pass on a repo
@@ -33,7 +32,6 @@ const { makeRepo, copyDir, KIT_ROOT } = require('./fixtures');
 const ROOT = KIT_ROOT;
 const BIN = path.join(ROOT, 'cli', 'bin', 'aidev.js');
 const hookMod = require('../cli/commands/hook');
-const mcpMod = require('../cli/commands/mcp');
 const assets = require('../cli/lib/assets');
 const layout = require('../cli/lib/layout');
 const cfgMod = require('../cli/lib/config');
@@ -142,41 +140,6 @@ const toolsMod = require('../cli/lib/tools');
 const pathsMod = require('../cli/lib/paths');
 
 function run() {
-  // ---------------------------------------------------------------- .mcp.json
-  suite('assets: .mcp.json template');
-
-  const mcpRaw = readIfExists(`${ROOT_TEMPLATES}/.mcp.json`);
-
-  test('.mcp.json ships with the kit as a root template', () => {
-    ok(mcpRaw !== null, `${ROOT_TEMPLATES}/.mcp.json is missing; the static-asset contract requires it`);
-  });
-
-  if (mcpRaw !== null) {
-    const doc = JSON.parse(mcpRaw);
-
-    test('every server is launched through the aidev CLI', () => {
-      ok(Object.keys(doc.mcpServers || {}).length > 0, 'no servers declared');
-      for (const [name, entry] of Object.entries(doc.mcpServers || {})) {
-        eq(entry.command, 'aidev', `${name} must be launched via aidev`);
-      }
-    });
-
-    test('every declared server is actually implemented', () => {
-      for (const [name, entry] of Object.entries(doc.mcpServers || {})) {
-        const target = (entry.args || [])[1];
-        ok(Object.keys(mcpMod.SERVERS).includes(target),
-          `${name} routes to "${target}", which aidev mcp does not implement`);
-      }
-    });
-
-    // The whole reason the connection is resolved at runtime: a committed file
-    // must never be able to leak a credential or pin one PKG's endpoint.
-    test('no credential or endpoint is embedded', () => {
-      ok(!/pat|token|password|secret|dev\.azure\.com/i.test(mcpRaw),
-        '.mcp.json must not embed credentials or an organisation URL');
-    });
-  }
-
   // ------------------------------------------------------------- settings.json
   suite('assets: settings.json template');
 
@@ -311,7 +274,7 @@ function run() {
     withTempKit((repoRoot, installRoot) => {
       assets.applyTemplates(repoRoot, { installRoot });
       const tracked = assets.listStaticFiles(repoRoot, { installRoot });
-      for (const rel of ['CLAUDE.md', '.mcp.json', '.claude/settings.json']) {
+      for (const rel of ['CLAUDE.md', '.claude/settings.json']) {
         ok(tracked.includes(rel), `${rel} was materialised but is not tracked as a static asset`);
       }
     });
@@ -329,15 +292,16 @@ function run() {
   // ------------------------------------------------------------------- agents
   suite('assets: bundled agents');
 
-  const AGENTS = [
-    'agents-creator', 'convention-builder', 'issue-to-pr', 'knowledge-builder',
-    'test-writer',
-    'workflow-creator', 'permission-setting',
-  ];
+  // The kit ships machinery agents only: the ones that build the Wiki, write
+  // workflows / agents and propose the policy. Agents that do a package's
+  // development work (implementing, testing, conventions) are the package's own.
+  const AGENTS = ['agents-creator', 'knowledge-builder', 'workflow-creator', 'permission-setting'];
   const AGENT_DIR = `${CLAUDE_TEMPLATES}/agents`;
   const agentFiles = listMd(AGENT_DIR);
 
-  test('all seven documented agents ship', () => {
+  test('exactly the four machinery agents ship', () => {
+    const extra = agentFiles.map((f) => f.replace(/\.md$/, '')).filter((a) => !AGENTS.includes(a));
+    ok(extra.length === 0, `unexpected agents shipped: ${extra.join(', ')}`);
     const missing = AGENTS.filter((a) => !agentFiles.includes(`${a}.md`));
     ok(missing.length === 0, `missing agents: ${missing.join(', ') || '(none)'}`);
   });
@@ -454,9 +418,9 @@ function run() {
   suite('assets: template trees and apply');
 
   const templatePairs = assets.listTemplateFiles(ROOT);
-  const ROOT_FILES = ['CLAUDE.md', '.mcp.json'];
+  const ROOT_FILES = ['CLAUDE.md'];
 
-  test('every Claude template lands under .claude/ or as one of the two root files', () => {
+  test('every Claude template lands under .claude/ or as the root file', () => {
     ok(templatePairs.length > 0, 'no templates were discovered');
     for (const { src, dest, tool } of templatePairs) {
       ok(path.isAbsolute(src), `${dest}: src is not absolute (${src})`);
@@ -499,7 +463,7 @@ function run() {
       const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'abc' });
       ok(r.ok, `apply reported conflicts: ${JSON.stringify(r.conflicts)}`);
       eq(r.unchanged.length, 0, 'a fresh repo should have nothing already current');
-      ok(r.created.length >= 17, `expected at least 17 files, got ${r.created.length}`);
+      ok(r.created.length >= 12, `expected at least 12 files (CLAUDE.md, settings, 4 agents, skills), got ${r.created.length}`);
       eq(r.created.length, templatePairs.length, 'one file per template');
       for (const { src, dest } of assets.listTemplateFiles(installRoot)) {
         ok(fs.readFileSync(src).equals(fs.readFileSync(path.join(repoRoot, ...dest.split('/')))), `${dest} does not match its template`);
@@ -737,13 +701,13 @@ function run() {
   test('a lock written by an older kit commit is reported as outdated, and a missing file as missing', () => {
     withTempKit((repoRoot, installRoot) => {
       assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'one' });
-      fs.rmSync(path.join(repoRoot, '.mcp.json'));
+      fs.rmSync(path.join(repoRoot, 'CLAUDE.md'));
       const insp = assets.inspectConfig(repoRoot, { installRoot, kitCommit: 'two' });
       ok(insp.ok, 'missing or outdated must not fail the inspection');
-      eq(insp.missing, ['.mcp.json']);
+      eq(insp.missing, ['CLAUDE.md']);
       eq(insp.outdated, true);
       const r = assets.applyTemplates(repoRoot, { installRoot, kitCommit: 'two' });
-      eq(r.created, ['.mcp.json'], 'apply did not restore the missing file');
+      eq(r.created, ['CLAUDE.md'], 'sync did not restore the missing file');
     });
   });
 
@@ -758,7 +722,7 @@ function run() {
       ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'the fixture already had aidev.yaml; the test would prove nothing');
       ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')), 'the fixture already had settings.json');
 
-      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes'], fx.root);
       eq(r.code, 0, `init failed: ${r.out}`);
 
       // aidev.yaml: schema v2, hosting inferred as generic from the local origin.
@@ -808,7 +772,7 @@ function run() {
   test('init --approve places the policy directly', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--approve', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes', '--approve'], fx.root);
       eq(r.code, 0, `init failed: ${r.out}`);
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy placed');
       ok(!fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'no dangling candidate');
@@ -821,7 +785,7 @@ function run() {
   test('init --json on a fresh clone reports the first-time steps', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--json', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes', '--json'], fx.root);
       eq(r.code, 0, r.out);
       const docs = String(r.out).trim().split(/\n(?=\{)/).filter(Boolean);
       eq(docs.length, 1, `expected 1 JSON document, got ${docs.length}: ${r.out}`);
@@ -834,7 +798,7 @@ function run() {
       ok(names.includes('materialized.json:write'), `recorded: ${names}`);
       ok(names.includes('registry:registered'), `registered: ${names}`);
       ok(names.includes('policy:candidate'), `candidate: ${names}`);
-      // --no-wiki: the Wiki is left for a later init (the agent integration
+      // init never builds the Wiki: it is left for aidev sync wiki (the agent integration
       // suite covers the build itself).
       ok(names.includes('knowledge:pending'), `wiki left pending: ${names}`);
     } finally { fx.cleanup(); }
@@ -845,7 +809,7 @@ function run() {
     try {
       const r = aidev(['init', '--yes', '--dry-run'], fx.root);
       eq(r.code, 0, r.out);
-      for (const rel of ['aidev.yaml', 'CLAUDE.md', '.mcp.json', '.claude/settings.json',
+      for (const rel of ['aidev.yaml', 'CLAUDE.md', '.claude/settings.json',
         '.aidev/materialized.json', '.aidev/policy.candidate.yaml']) {
         ok(!fs.existsSync(path.join(fx.root, ...rel.split('/'))), `dry run wrote ${rel}`);
       }
@@ -855,9 +819,9 @@ function run() {
   test('init is idempotent and reports nothing to do the second time', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
+      eq(aidev(['init', '--yes'], fx.root).code, 0);
       const cfgBefore = fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8');
-      const r = aidev(['init', '--yes', '--json', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes', '--json'], fx.root);
       eq(r.code, 0, r.out);
 
       // The stdout contract every other command keeps: exactly one JSON document.
@@ -870,7 +834,7 @@ function run() {
       const step = j.steps.find((s) => s.step === 'tool config');
       ok(step, `no tool config step reported: ${r.out}`);
       // The files and the record came from git the second time: init reports
-      // and leaves them alone (taking newer templates is "aidev apply").
+      // and leaves them alone (taking newer templates is "aidev sync tools").
       eq(step.action, 'keep', `the second init touched the tool config: ${JSON.stringify(step)}`);
       eq(step.conflicts, 0);
       eq(fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8'), cfgBefore, 'aidev.yaml was not rewritten');
@@ -882,17 +846,17 @@ function run() {
   test('a later init leaves an edited tool file alone; apply --force restores it', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
+      eq(aidev(['init', '--yes'], fx.root).code, 0);
       const target = path.join(fx.root, '.claude', 'settings.json');
       fs.writeFileSync(target, '{"hooks":{}}\n');
 
-      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes'], fx.root);
       eq(r.code, 0, `init failed on an edited file: ${r.out}`);
       eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the edit');
       ok(/hooks are missing/.test(r.out), `init did not warn about the missing hooks: ${r.out}`);
       eq(aidev(['check', '--no-remote'], fx.root).code, 2, 'check must refuse a settings.json without the kit hooks');
 
-      eq(aidev(['apply', '--force'], fx.root).code, 0, 'apply --force did not recover');
+      eq(aidev(['sync', 'tools', '--force'], fx.root).code, 0, 'apply --force did not recover');
       ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not restore the hooks');
       ok(assets.inspectConfig(fx.root).ok, 'the record was not refreshed after --force');
     } finally { fx.cleanup(); }
@@ -904,10 +868,10 @@ function run() {
       const target = path.join(fx.root, '.claude', 'settings.json');
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, '{"hooks":{}}\n');
-      const r = aidev(['init', '--yes', '--no-wiki'], fx.root);
+      const r = aidev(['init', '--yes'], fx.root);
       eq(r.code, 2, `expected exit 2, got ${r.code}: ${r.out}`);
       eq(fs.readFileSync(target, 'utf8'), '{"hooks":{}}\n', 'init overwrote the file');
-      eq(aidev(['init', '--yes', '--force', '--no-wiki'], fx.root).code, 0, 'init --force did not recover');
+      eq(aidev(['init', '--yes', '--force'], fx.root).code, 0, 'init --force did not recover');
       ok(JSON.parse(fs.readFileSync(target, 'utf8')).hooks.PreToolUse, '--force did not place the kit version');
     } finally { fx.cleanup(); }
   });
@@ -915,7 +879,7 @@ function run() {
   test('init honours explicit flags over inference', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--no-wiki', '--name', 'explicit', '--hosting', 'azure-devops',
+      const r = aidev(['init', '--yes', '--name', 'explicit', '--hosting', 'azure-devops',
         '--org', 'o', '--project', 'p', '--repository', 'r', '--include', 'src/**',
         '--tracking-branch', 'develop', '--agent-model', 'opus'], fx.root);
       eq(r.code, 0, r.out);
@@ -934,7 +898,7 @@ function run() {
   test('init with azure-devops hosting needs the three coordinates', () => {
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--no-wiki', '--hosting', 'azure-devops'], fx.root);
+      const r = aidev(['init', '--yes', '--hosting', 'azure-devops'], fx.root);
       ok(r.code !== 0, 'refused');
       ok(/organization|--org/.test(r.out), `names what is missing: ${r.out}`);
       ok(!fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'nothing half-written');
@@ -946,7 +910,7 @@ function run() {
     // the git toplevel), so nothing kit-owned can land inside src/.
     const fx = makeRepo(BARE);
     try {
-      const r = aidev(['init', '--yes', '--no-wiki'], path.join(fx.root, 'src'));
+      const r = aidev(['init', '--yes'], path.join(fx.root, 'src'));
       eq(r.code, 0, r.out);
       ok(fs.existsSync(path.join(fx.root, 'aidev.yaml')), 'aidev.yaml at the root');
       ok(!fs.existsSync(path.join(fx.root, 'src', 'aidev.yaml')), 'nothing written into src/');
@@ -959,7 +923,7 @@ function run() {
   test('a registered clone is listed as present while it exists', () => {
     const fx = makeRepo(BARE);
     try {
-      eq(aidev(['init', '--yes', '--no-wiki'], fx.root).code, 0);
+      eq(aidev(['init', '--yes'], fx.root).code, 0);
       const env = { AIDEV_HOME: HOME };
       const listed = home.listPackages(env);
       ok(listed.present.some((p) => path.resolve(p.path).toLowerCase() === path.resolve(fx.root).toLowerCase()), 'present');

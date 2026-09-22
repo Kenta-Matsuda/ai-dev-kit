@@ -7,7 +7,7 @@
 
 * Node.js {node-min-version} 以上
 * Git
-* Claude Code {claude-min-version} 以上（Wiki の生成と対話に使います）
+* Claude Code {claude-min-version} 以上（Wiki の生成、workflow の実行、対話に使います）
 * 中央 {project-name} リポジトリの URL（以下 `<kit-url>`）
 
 === 手順
@@ -53,7 +53,7 @@ aidev doctor
 +
 `aidev doctor` の各行が `✓` か `⚠` なら問題ありません。PKG の外なので `aidev.yaml not found` の `⚠` は正常です。`✗` があれば xref:troubleshooting-install[トラブルシューティング: インストール] を見てください。
 +
-`claude` の行が `⚠ not found on PATH` なら Wiki を生成できません。Claude Code を入れてから進みます。
+`claude` の行が `⚠ not found on PATH` なら Wiki の生成と workflow の実行ができません。Claude Code を入れてから進みます。
 
 . Azure DevOps の PKG を使う場合は、PAT を環境変数に入れます。ファイルには書きません。
 +

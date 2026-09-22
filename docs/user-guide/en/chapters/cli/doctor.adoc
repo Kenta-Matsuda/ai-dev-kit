@@ -1,20 +1,30 @@
 [[cli-doctor]]
 == aidev doctor
 
-Checks the environment on this machine and in the package.
+Diagnoses the environment on this machine. With `<package>` (the name of a PKG registered on this machine, or a path) it also lists that PKG's state. The exit codes for CI belong to xref:cli-check[`aidev check`], run inside the PKG.
 
 === Synopsis
 
 [source,text]
 ----
-aidev doctor [--json]
+aidev doctor [<package>] [--json]
 ----
 
 === Description
 
-For the machine, it reports Node.js, git, where `aidev` and the kit live, whether a newer kit exists, how many packages are registered, and whether each AI tool is present and which version. Inside a package it checks every tool in `tools.default` of `aidev.yaml`; outside one, only `claude`. Inside a package it also reports `aidev.yaml`, `origin`, the policy, the tool and model agents run with, whether the token variable is set (the value is never read), the proxy, whether the remote is reachable, and the Wiki state.
+It reports Node.js, the platform, git, the version of `aidev` and where the kit lives, the kit checkout and whether a newer kit exists, `AIDEV_HOME`, the registered PKGs (count and list), whether each supported AI tool (`claude`, `copilot`, `codex`, `kiro`) is present and which version, and the proxy. The result is the same in whatever directory you run it.
 
-Each line is `✓` (ok), `⚠` (warning) or `✗` (failure).
+Each line is `✓` (ok), `⚠` (warn) or `✗` (fail). An AI tool that is not found is `⚠`. With `<package>`, the rows `package`, `aidev.yaml` (schema), `git repository` (branch), `remote origin`, `policy`, `agent tool` (`tools.agent` and model), `env <auth_env>` for Azure DevOps, `remote reachability`, `Wiki state` and `workflows` (count, approved, invalid) follow.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--json`
+|Machine-readable output
+|===
 
 === Exit codes
 
@@ -26,10 +36,10 @@ Each line is `✓` (ok), `⚠` (warning) or `✗` (failure).
 |No `✗`
 
 |1
-|One or more `✗`
+|One or more `✗` (Node.js too old, git missing, the `<package>`'s `aidev.yaml` is broken, the Wiki is broken, a workflow is invalid). `<package>` not found
 |===
 
-=== Example
+=== Examples
 
 [source,bash]
 ----
@@ -47,23 +57,26 @@ aidev doctor
   ✓ kit update             up to date
   ✓ AIDEV_HOME             C:\Users\you\AppData\Local\ai-dev-kit
   ✓ registered packages    1
-  ✓ claude                 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
-  ✓ aidev.yaml             C:\work\demo-pkg
-  ✓ aidev.yaml schema      package.name=demo-pkg, hosting=azure-devops
-  ✓ git repository         C:\work\demo-pkg
-  ✓ remote origin          https://dev.azure.com/contoso/Platform/_git/demo-pkg
-  ✓ policy                 14 protected patterns
-  ✓ agent tool             claude (aidev.yaml tools.agent; one run: --agent-tool)
-  ✓ agent model            sonnet
-  ⚠ env AZURE_DEVOPS_PAT   not set — Azure DevOps calls will fail
+  ✓   package              demo-pkg — C:\work\demo-pkg
+  ✓ claude                 Claude Code 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
+  ⚠ copilot                GitHub Copilot CLI not found on PATH — needed to run agents (aidev sync wiki, aidev run workflow) (adapter not verified against the real tool by the kit maintainers)
+  ⚠ codex                  OpenAI Codex CLI not found on PATH — …
+  ⚠ kiro                   Kiro CLI not found on PATH — …
   ✓ proxy                  none configured
-  ✓ remote reachability    origin/main = 9f8e7d6
-  ✓ Wiki state             the Wiki describes the code this work is based on.
 
-⚠ 1 warning(s); nothing blocking.
+⚠ 3 warning(s); nothing blocking.
+    For a package: aidev doctor <package name or path>. The CI gate is "aidev check" inside the clone.
+----
+
+With a package:
+
+[source,bash]
+----
+aidev doctor demo-pkg
 ----
 
 === See also
 
 * xref:install[Install aidev on your machine]
+* xref:cli-check[aidev check] — checking a PKG
 * xref:troubleshooting-install[Troubleshooting: installation]

@@ -126,9 +126,9 @@ function run() {
       const r = aidev(['uninstall', '--yes'], { env: m.env });
       eq(r.code, EXIT.OK, `exit: ${r.stderr}`);
       ok(r.stdout.includes(fx.root), `names the package: ${r.stdout}`);
-      ok(/aidev eject --yes/.test(r.stdout), 'points at eject while the CLI still exists');
+      ok(/aidev uninstall \S+ --yes/.test(r.stdout), 'points at "aidev uninstall <package>" while the CLI still exists');
       const rm = r.stdout.split('\n').find((l) => /git rm -r -q --/.test(l)) || '';
-      for (const p of ['CLAUDE.md', '.mcp.json', '.claude/settings.json', '.claude/agents', '.claude/skills', '.aidev', 'aidev.yaml']) {
+      for (const p of ['CLAUDE.md', '.claude/settings.json', '.claude/agents', '.claude/skills', '.aidev', 'aidev.yaml']) {
         ok(new RegExp(`\\s${p.replace(/\./g, '\\.')}(\\s|$)`).test(rm), `git rm names ${p}: ${rm}`);
       }
       ok(!/\s\.claude(\s|$)/.test(rm), 'does not fold .claude while settings.local.json lives there');

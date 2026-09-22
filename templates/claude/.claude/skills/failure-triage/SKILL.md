@@ -63,7 +63,7 @@ description: 失敗時の調査手順と停止判断。何回試して駄目な�
 
 1. deny の**理由文を読む**（どのパスが、どのルールに当たったか）
 2. **そのままユーザーに報告する**
-3. 権限変更が必要だと判断したら、`aidev permission reconfigure` を
+3. 権限変更が必要だと判断したら、`aidev create policy` を
    **ユーザーが対話的に実行する必要がある**旨を伝える
 
 別のツールで書く、パスを変えて書く、設定を書き換えて緩める——
@@ -102,7 +102,7 @@ description: 失敗時の調査手順と停止判断。何回試して駄目な�
 
 ## 状態が壊れて見えるとき
 
-`aidev check` と `aidev status` の**出力を添えて**報告します。
+`aidev check` と `aidev check` の**出力を添えて**報告します。
 自分で復旧を試みる前に、まず現状を保全してください。
 
 関連: [[test-and-verify]] / [[secure-coding]] / [[knowledge-update]] / [[code-review]]

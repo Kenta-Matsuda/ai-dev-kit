@@ -5,7 +5,7 @@
     "deny": [
       "Edit(.claude/**)",
       "Edit(CLAUDE.md)",
-      "Edit(.mcp.json)",
+
       "Edit(.github/copilot-instructions.md)",
       "Edit(.github/agents/**)",
       "Edit(.github/skills/**)",
@@ -27,9 +27,8 @@
     ],
     "ask": [
       "Bash(git push:*)",
-      "Bash(aidev permission configure:*)",
-      "Bash(aidev permission reconfigure:*)",
-      "Bash(aidev eject:*)",
+      "Bash(aidev create policy:*)",
+      "Bash(aidev uninstall <package>:*)",
       "Bash(aidev uninstall:*)"
     ]
   },

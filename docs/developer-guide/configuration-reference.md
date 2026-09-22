@@ -44,7 +44,7 @@ tools:
   agent_model: sonnet
   agents:
     knowledge-builder: { model: opus }
-    issue-to-pr: { tool: copilot, model: "" }
+    my-agent: { tool: copilot, model: "" }
 
 knowledge:
   max_files_per_dir: 20
@@ -90,7 +90,7 @@ references:
 | `include` | string[] | `[]`（`init`はtreeから提案） | Wiki generation targetのglob。空はinclude制限なし |
 | `exclude` | string[] | `[]`（`init`は依存物・生成物） | generation targetから除外するglob |
 
-pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`、`.mcp.json`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。kit管理pathは他toolのconfig（`.github/agents/**`、`.github/hooks/**`、`.codex/**`等、`layout.TOOL_CONFIG_GLOBS`）も含みます。`knowledge update`のclean-tree検査（`inventory.dirtyTargets`）もこの`include` / `exclude`に一致するpathだけを見ます。
+pathはPKG repository root基準です。kit管理path（`aidev.yaml`、`.aidev/**`、`.claude/**`、`CLAUDE.md`）は`include`に一致しても対象になりません。`include`はknowledge-builderの調査範囲ではなく、調査範囲は`knowledge.evidence`です。kit管理pathは他toolのconfig（`.github/agents/**`、`.github/hooks/**`、`.codex/**`等、`layout.TOOL_CONFIG_GLOBS`）も含みます。`sync wiki`のclean-tree検査（`inventory.dirtyTargets`）もこの`include` / `exclude`に一致するpathだけを見ます。
 
 ### `secrets_paths`
 
@@ -100,7 +100,7 @@ string[]、既定`[]`。次の3か所で効きます。
 - Wiki: generation targetでは`masked: true`のrecordになり、evidenceからは除外される
 - agent prompt: 「Secret patterns (never read)」として渡される
 
-変更後はpolicyを再生成してください（`aidev permission reconfigure` → review → `--approve`）。同梱`settings.json`のdeny listには`*.pem` / `*.pfx` / `*.key` / `.env*`が固定で入っています。
+変更後はpolicyを再生成してください（`aidev create policy` → review → `--approve`）。同梱`settings.json`のdeny listには`*.pem` / `*.pfx` / `*.key` / `.env*`が固定で入っています。
 
 ### `hosting`
 
@@ -120,7 +120,7 @@ string[]、既定`[]`。次の3か所で効きます。
 - `config.azure_devops` = `{organization, project, repository, auth_env}`（`type`が`azure-devops`のとき）、それ以外は`null`。`ado.js`、`mcp.js`はこれを読む
 - `config.sync.tracking_branch` = `hosting.tracking_branch`
 
-`generic`ではtracking branch上の`knowledge update`（publish）はpushまで行い、PRは手動作成の案内になります。`mcp azure-devops`は起動できません。
+`generic`ではtracking branch上の`sync wiki`（publish）はpushまで行い、PRは手動作成の案内になります。`mcp azure-devops`は起動できません。
 
 ### `tools`
 
@@ -150,7 +150,7 @@ model識別子は既知modelの列挙ではなく字形を検証します（`MOD
 
 ### `sync`
 
-section名は歴史的なもので、`aidev sync`というcommandはありません。tracking branch上の`aidev knowledge update`（publish経路、`--branch`）とremote確認の設定です。
+section名は歴史的なもので、`aidev sync`というcommandはありません。tracking branch上の`aidev sync wiki`（publish経路、`--branch`）とremote確認の設定です。
 
 | key | 型 | 既定 | 範囲 | 説明 |
 | --- | --- | --- | --- | --- |
@@ -173,7 +173,7 @@ section名は歴史的なもので、`aidev sync`というcommandはありませ
 
 ### `references`
 
-topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapping。`aidev agent run`とworkflowの`ctx.agent()`が、taskの末尾に「# Reference documents」sectionとしてtopicごとのfile一覧を付けます（`agent.resolveReferences`）。agentは自分のtopicの文書を先に読み、記述はcodeで検証する、という契約です（convention-builderは`conventions`、test-writerは`testing`）。`knowledge update`のknowledge-builderには渡しません（evidenceで全fileを見るため）。
+topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapping。workflow runnerのagent stepが、promptの末尾に「# Reference documents」sectionとしてtopicごとのfile一覧を付けます（`agent.resolveReferences`）。agentは自分のtopicの文書を先に読み、記述はcodeで検証する、という契約です（例: 規約を書くworkflowのagentは`conventions`、testを書くagentは`testing`。topic名はworkflowのobjectiveで指示する）。`sync wiki`のknowledge-builderには渡しません（evidenceで全fileを見るため）。
 
 - 要素はfileまたはdirectory。directoryは再帰的にtext file（dot始まりと`node_modules`を除く、上限200）を列挙する
 - `secrets_paths`に一致するpathは列挙せず「Not available」に書く。無いpathも同様（errorにはしない。`agent run`が警告を出す）
@@ -182,7 +182,7 @@ topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapp
 
 ## `.aidev/policy.yaml`（schema version 1）
 
-`aidev permission configure --approve`または`aidev init --approve`（対話のyes含む）だけが配置します。`ALWAYS_PROTECTED`なので実行時にagentは書けません。
+`aidev create policy --approve`または`aidev init --approve`（対話のyes含む）だけが配置します。`ALWAYS_PROTECTED`なので実行時にagentは書けません。
 
 | section | 型 | 意味 |
 | --- | --- | --- |
@@ -190,45 +190,39 @@ topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapp
 | `protected` | string[] | 常にdeny。`ALWAYS_PROTECTED`が無条件に合成される |
 | `read_only` | string[] | agentは書込不可（`writable`で個別に許可） |
 | `writable_during_sync` | string[] | 整合性ERRORかつ有効なpublish lease（`.aidev/sync.lock`）のときに書込可 |
-| `writable` | string[] | 通常時に書込可（`read_only`より先に評価） |
-| `agents.<name>.writable` | string[] | CLIが起動したagent `<name>`（子processの`AIDEV_AGENT`）にだけ追加で書込可。`protected` / secretsより下位 |
-| `agents.<name>.branch` | string | 任意。checkoutのbranchがこのglobに一致するときだけ上の許可が効く |
+| `writable` | string[] | 通常時に書込可（`read_only`より先に評価）。全員・全session向け |
+| `agents` | — | **存在しない**。書くと`validatePolicy`がerror。PKG sourceへの書込は承認済みworkflowの`scope.writable`（`architecture.md` §9） |
 
 `config.DEFAULT_POLICY_SCOPES`（候補生成と`loadPolicy`のfallbackの既定）:
 
 ```js
 read_only:            ['**']
-writable:             ['.aidev/knowledge/**', '.aidev/workflows/**', '.aidev/conventions/**', 'aidev.yaml']
+writable:             ['.aidev/knowledge/**', '.aidev/workflows/**', '.aidev/agents/**', '.aidev/skills/**', '.aidev/conventions/**', 'aidev.yaml']
 writable_during_sync: ['.aidev/knowledge/**']
 ```
 
 `config.ALWAYS_PROTECTED`:
 
 ```text
-.claude/**  CLAUDE.md  .mcp.json  .github/copilot-instructions.md  .github/agents/**  .github/skills/**
+.claude/**  CLAUDE.md  .github/copilot-instructions.md  .github/agents/**  .github/skills/**
 AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 .aidev/sync.lock  .aidev/materialized.json  .aidev/.gitignore  .aidev/ejected.json
 ```
 
-候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使い、`agents`は空（commentの記入例つき）です。`aidev.yaml`から`read_only` / `writable` / `agents`を変える設定項目は現在ありません。teamが広げるときは`.aidev/policy.yaml`を直接編集してcommitします（`--approve`は候補fileを読まず生成し直すので、手編集は候補ではなくpolicy本体に行う）。`reconfigure --approve`は生成し直した既定に戻すため、手で足した`writable` / `agents`は消えます（`agents`の追加は弱体化として`--force`を要求しますが、削除は要求しません）。
+候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使います。`aidev.yaml`から`read_only` / `writable`を変える設定項目は現在ありません。teamが広げるときは`.aidev/policy.yaml`を直接編集してcommitします（`--approve`は候補fileを読まず生成し直すので、手編集は候補ではなくpolicy本体に行う）。`reconfigure --approve`は生成し直した既定に戻すため、手で足した`writable`は消えます。
 
-`agents`の例:
+### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-```yaml
-agents:
-  issue-to-pr:
-    writable: ["src/**", "tests/**"]
-    branch: "aidev/issue-*"   # 任意
-```
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです（`name`、`description`、`objective`、`scope.writable`、`agents`、`skills`、`tool`、`model`、`steps[]`、`limits.max_minutes`、`cost.max_usd`）。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
 
 globの意味（`paths.js`）: `*`は1 segment内、`?`は1文字、`**`は0個以上のsegment、`a/**`は`a`自身も一致。`..`は照合前に字句的に解決し、Windowsの`\`は`/`へ畳みます。
 
 ## model解決の優先順位
 
 ```text
-CLI起動agent（knowledge update / agent run / workflow ctx.agent。knowledge updateは`--no-agent`で省略）:
-  tool:  --agent-tool / --tool / workflow agent.tool  >  tools.agents.<name>.tool  >  tools.agent  >  tools.default[0]
-  model: --agent-model / --model / workflow agent.model  >  tools.agents.<name>.model  >  tools.agent_model  >  DEFAULTS（sonnet）
+CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agent`で省略）:
+  tool:  --agent-tool / workflow.yaml tool  >  tools.agents.<name>.tool  >  tools.agent  >  tools.default[0]
+  model: --agent-model / workflow.yaml model  >  tools.agents.<name>.model  >  tools.agent_model  >  DEFAULTS（sonnet）
   空文字 → model flag を渡さずtool側の解決に任せる
 
 対話session: Claude Code側。managed settings > claude --model / ANTHROPIC_MODEL
@@ -241,12 +235,12 @@ CLI起動agent（knowledge update / agent run / workflow ctx.agent。knowledge u
 
 | 変数 | 読む場所 | 意味 |
 | --- | --- | --- |
-| `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`mcp.js`、`knowledge update`（publish）、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
+| `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`sync wiki`（publish）、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
 | `AIDEV_HOME` | `home.js` | registryとupdate cacheの場所 |
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
-| `AIDEV_AGENT` | `policy.js`（`decide`の既定値） | CLIが`agent.runAgent`で子processの環境に入れるagent名。hookがそれを継承し、policyの`agents.<name>`を適用する。人が設定するものではない |
+| `AIDEV_WORKFLOW` | `policy.js`（`decide`の既定値） | `aidev run workflow`が子processの環境に入れるworkflow名。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）なら`scope.writable`を許可する。人が設定するものではない |
 | `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
 | `AIDEV_DEBUG` | `aidev.js` | internal errorのstack traceを表示 |
 | `CLAUDE_PROJECT_DIR` | `aidev.js`（`hook`のみ） | repo root探索の起点 |
@@ -255,30 +249,30 @@ CLI起動agent（knowledge update / agent run / workflow ctx.agent。knowledge u
 | `NO_COLOR` | `ui.js` | 色を無効化 |
 | `XDG_DATA_HOME` / `LOCALAPPDATA` | `home.js` | `AIDEV_HOME`の既定を決める |
 | `AIDEV_BIN_DIR` | installer | launcherの配置先 |
-| `USERNAME` / `USER` | `workflow approve`、`eject` | 監査用の記録（認証ではない） |
+| `USERNAME` / `USER` | `run workflow`（`run.json`の`startedBy`）、`uninstall <package>` | 監査用の記録（認証ではない） |
 
 ## CLIが書くその他のfile
 
 | file | 書き手 | 形 |
 | --- | --- | --- |
 | `.aidev/materialized.json` | `init`、`apply` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
-| `.aidev/ejected.json` | `eject` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
+| `.aidev/ejected.json` | `uninstall <package>` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
-| `.aidev/sync.lock` | `knowledge update`（publish中は保持、ERROR状態の構造更新中は一時） | publish lease（`architecture.md` §5） |
+| `.aidev/sync.lock` | `sync wiki`（publish中は保持、ERROR状態の構造更新中は一時） | publish lease（`architecture.md` §5） |
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
 | `.aidev/cache/last-head.json` | `hook session-start` / `after-bash` | `{sha, at}`。after-bashがHEADの変化を検出する基準 |
 | `.aidev/cache/wiki-stop.json` | `hook session-stop`（`stop_hook_active`を持たないtool、現在はkiro） | `{sha, at}`。同じHEADで2回目のStopを通すためのguard。通したときに消す |
-| `.aidev/knowledge/.cache/plan.json` | `knowledge update`（prose未完了時。残り0で削除） | `{schemaVersion: 2, targetSha, mode, hasOverview, generationScope, generationTargets, batches, evidence: {include, exclude, paths, excludedSecretPatterns}, maxFilesPerDir, reportDir, finish}`。hookがsessionのsubagentに渡す |
+| `.aidev/knowledge/.cache/plan.json` | `sync wiki`（prose未完了時。残り0で削除） | `{schemaVersion: 2, targetSha, mode, hasOverview, generationScope, generationTargets, batches, evidence: {include, exclude, paths, excludedSecretPatterns}, maxFilesPerDir, reportDir, finish}`。hookがsessionのsubagentに渡す |
 | `.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md` | `agent.runAgent`（`prompt: 'file'`のtool） | agentへ渡すprompt file |
-| `.aidev/cache/evolution/<session>.md` | Claude session（Stop hookの指示で。kit開発者端末のみ） | 振り返り（事実 / 無駄と原因 / kit への提案 / 提案しないこと）。`aidev evolve run`が`done/`へ移す。`--auto`時は`<file>.evolve-launched` markerも置く |
-| `AIDEV_HOME/developer.json` | `aidev evolve enable` | `{schemaVersion: 1, enabled: true, autoEvolve, enabledAt}` |
-| `AIDEV_HOME/cache/evolve/<yyyymmdd>/`、`<yyyymmdd>-input/` | `aidev evolve run` | kit checkoutのworktree（branch `aidev/evolve-<yyyymmdd>`）と、そこへ渡す振り返りのcopy |
-| `.aidev/cache/wiki-worktree/` | `knowledge update`（publish） | HEADのdetached worktree。成功時と`--abort`で削除、失敗時は残す |
+| `.aidev/cache/evolution/<session>.md` | Claude session（Stop hookの指示で。kit開発者端末のみ） | 振り返り（事実 / 無駄と原因 / kit への提案 / 提案しないこと）。`npm run evolve -- run`が`done/`へ移す。`--auto`時は`<file>.evolve-launched` markerも置く |
+| `AIDEV_HOME/developer.json` | `npm run evolve -- enable` | `{schemaVersion: 1, enabled: true, autoEvolve, enabledAt}` |
+| `AIDEV_HOME/cache/evolve/<yyyymmdd>/`、`<yyyymmdd>-input/` | `npm run evolve -- run` | kit checkoutのworktree（branch `aidev/evolve-<yyyymmdd>`）と、そこへ渡す振り返りのcopy |
+| `.aidev/cache/wiki-worktree/` | `sync wiki`（publish） | HEADのdetached worktree。成功時と`--abort`で削除、失敗時は残す |
 | `.aidev/knowledge/.cache/agent-task-*.json` | `agent.prepareTask` | 大きいplan（`schemaVersion: 2`） |
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |
-| `.aidev/workflows/<name>/approval.json` | `workflow approve` | `{schemaVersion: 1, name, hash, approvedAt, approvedBy, limits, cost, commands}` |
-| `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`checkpoint.json` |
-| `AIDEV_HOME/registry.json` | `init`、`update`、`eject` | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
+| `.aidev/workflows/<name>/workflow.yaml` | `create workflow`（template / `--describe`でworkflow-creator） | 定義。`submit`がPRにし、`origin/<tracking_branch>`との一致が承認 |
+| `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`run.json`（`cli-reference.md`の`run`） |
+| `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall <package>` | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |
 
 ## toolごとのhook設定file

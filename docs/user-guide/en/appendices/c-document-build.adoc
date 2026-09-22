@@ -11,7 +11,7 @@ This guide is generated from the AsciiDoc sources in `{guide-source-dir}/` into 
 docs/user-guide/
 ├─ index.adoc            root of the Japanese guide
 ├─ _attributes.adoc      shared attributes
-├─ chapters/             Japanese chapters (01-overview … 10-troubleshooting)
+├─ chapters/             Japanese chapters (01-overview … 11-troubleshooting)
 │  └─ cli/               command reference (one file per command)
 ├─ appendices/           Japanese appendices
 ├─ index-en.adoc         root of the English guide
@@ -41,5 +41,6 @@ npm run docs:check    # build + validate
 * Keep the options on a command page identical to `aidev <command> --help`.
 * Use placeholders such as `<your-pat>` for secrets.
 * Do not document features that are not implemented.
+* Write diagrams as `[mermaid]` blocks (Mermaid syntax), never as ASCII art. The build inlines the renderer into the HTML, so no external dependency is added. CLI output samples stay `[source,text]`.
 * Keep the Japanese and English guides in the same structure with the same IDs.
 

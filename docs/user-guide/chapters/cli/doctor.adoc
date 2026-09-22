@@ -1,20 +1,30 @@
 [[cli-doctor]]
 == aidev doctor
 
-端末と PKG の実行環境を診断します。
+この端末の実行環境を診断します。`<package>`（端末に登録された PKG の名前か、PKG のパス）を渡すと、その PKG の状態も並べます。CI 用の終了コードは PKG の中で実行する xref:cli-check[`aidev check`] が持ちます。
 
 === 書式
 
 [source,text]
 ----
-aidev doctor [--json]
+aidev doctor [<package>] [--json]
 ----
 
 === 説明
 
-端末について、Node.js、git、`aidev` と kit の場所、新しい kit の有無、登録済み PKG 数、AI ツールの有無とバージョンを報告します。PKG の中では `aidev.yaml` の `tools.default` にある各ツールを、PKG の外では `claude` だけを調べます。PKG の中で実行すると、さらに `aidev.yaml`、`origin`、policy、agent を動かすツールとモデル、token 環境変数の有無（値は読みません）、proxy、remote への到達性、Wiki の状態を報告します。
+Node.js、platform、git、`aidev` のバージョンと kit の場所、kit の checkout と新しい kit の有無、`AIDEV_HOME`、登録済み PKG（数と一覧）、対応する AI ツール（`claude`、`copilot`、`codex`、`kiro`）の有無とバージョン、proxy を報告します。どのディレクトリで実行しても結果は同じです。
 
-各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。
+各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。AI ツールが見つからないのは `⚠` です。`<package>` を渡すと、続けて `package`、`aidev.yaml`（schema）、`git repository`（ブランチ）、`remote origin`、`policy`、`agent tool`（`tools.agent` とモデル）、Azure DevOps なら `env <auth_env>`、`remote reachability`、`Wiki state`、`workflows`（数、approved、invalid）の行が並びます。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|JSON で出力する
+|===
 
 === 終了コード
 
@@ -26,7 +36,7 @@ aidev doctor [--json]
 |`✗` が無い
 
 |1
-|`✗` が 1 つ以上ある
+|`✗` が 1 つ以上ある（Node.js が古い、git が無い、`<package>` の `aidev.yaml` が壊れている、Wiki が壊れている、invalid な workflow がある）。`<package>` が見つからない
 |===
 
 === 例
@@ -47,23 +57,26 @@ aidev doctor
   ✓ kit update             up to date
   ✓ AIDEV_HOME             C:\Users\you\AppData\Local\ai-dev-kit
   ✓ registered packages    1
-  ✓ claude                 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
-  ✓ aidev.yaml             C:\work\demo-pkg
-  ✓ aidev.yaml schema      package.name=demo-pkg, hosting=azure-devops
-  ✓ git repository         C:\work\demo-pkg
-  ✓ remote origin          https://dev.azure.com/contoso/Platform/_git/demo-pkg
-  ✓ policy                 14 protected patterns
-  ✓ agent tool             claude (aidev.yaml tools.agent; one run: --agent-tool)
-  ✓ agent model            sonnet
-  ⚠ env AZURE_DEVOPS_PAT   not set — Azure DevOps calls will fail
+  ✓   package              demo-pkg — C:\work\demo-pkg
+  ✓ claude                 Claude Code 2.1.278 (PATH (C:\Users\you\.local\bin\claude.exe))
+  ⚠ copilot                GitHub Copilot CLI not found on PATH — needed to run agents (aidev sync wiki, aidev run workflow) (adapter not verified against the real tool by the kit maintainers)
+  ⚠ codex                  OpenAI Codex CLI not found on PATH — …
+  ⚠ kiro                   Kiro CLI not found on PATH — …
   ✓ proxy                  none configured
-  ✓ remote reachability    origin/main = 9f8e7d6
-  ✓ Wiki state             the Wiki describes the code this work is based on.
 
-⚠ 1 warning(s); nothing blocking.
+⚠ 3 warning(s); nothing blocking.
+    For a package: aidev doctor <package name or path>. The CI gate is "aidev check" inside the clone.
+----
+
+PKG も見る:
+
+[source,bash]
+----
+aidev doctor demo-pkg
 ----
 
 === 関連
 
 * xref:install[端末に aidev を入れる]
+* xref:cli-check[aidev check] — PKG の検査
 * xref:troubleshooting-install[トラブルシューティング: インストール]

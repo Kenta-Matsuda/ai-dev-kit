@@ -1,7 +1,7 @@
 [[cli-update]]
 == aidev update
 
-kit 本体（`aidev` CLI とテンプレート）を更新します。PKG のファイルは変えません。
+kit 本体（`aidev` CLI とテンプレート）を更新します。それ以外は何もしません。
 
 === 書式
 
@@ -12,13 +12,11 @@ aidev update [--dry-run] [--json]
 
 === 説明
 
-kit の clone を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
+対象は取りません。`aidev sync wiki` と打つと `aidev update takes no object` で止まります。Wiki は xref:cli-sync-wiki[`aidev sync wiki`]、ツール設定は xref:cli-sync-tools[`aidev sync tools`] です。
 
-PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-apply[`aidev apply`] で、各 PKG のチームが都合のよいときに実行します（編集済みファイルのマージや衝突の解消に時間をかけられるよう、CLI の更新とは分けています）。更新後、この端末に登録された PKG のうち古い kit のテンプレートのままのものを一覧します。
+kit の clone（`aidev` CLI とテンプレート）を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
 
-Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
-
-=== オプション
+PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-sync-tools[`aidev sync tools <package>`] で、導入担当者が都合のよいときに実行して PR にします。更新後、この端末に登録された PKG のうち古い kit のテンプレートのままのものを一覧します。Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
 
 [%autowidth.stretch,options="header"]
 |===
@@ -31,8 +29,6 @@ Wiki は再生成しません。`aidev.yaml` と policy は変更しません。
 |JSON で出力する
 |===
 
-=== 終了コード
-
 [%autowidth.stretch,options="header"]
 |===
 |コード |条件
@@ -43,8 +39,6 @@ Wiki は再生成しません。`aidev.yaml` と policy は変更しません。
 |1
 |kit の clone に未コミット変更がある、`main` 以外、diverge、fetch 失敗
 |===
-
-=== 例
 
 [source,bash]
 ----
@@ -57,11 +51,11 @@ aidev update
 ℹ 2 package(s) on this machine still carry templates from an older kit:
     C:\work\demo-pkg (applied 499f940)
     C:\work\other-pkg (applied 9491efe)
-    Run "aidev apply" in each when convenient; it merges the new templates with your edits.
+    Run "aidev sync tools <package>" in each when convenient; it merges the new templates with your edits.
 ----
 
 === 関連
 
-* xref:cli-apply[aidev apply] — PKG への適用
-* xref:daily-update[日常の使い方: kit の更新と適用]
+* xref:cli-sync[aidev sync] — PKG への新しいテンプレートの取り込みと Wiki の追従
+* xref:daily-update[日常の使い方: kit の更新]
 * xref:troubleshooting-update[トラブルシューティング: kit 更新後]

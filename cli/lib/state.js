@@ -11,7 +11,7 @@
  * The verdict compares the *inventory* (the paths and blob ids the Wiki was
  * generated from) with the tree at HEAD. That needs no old commit object, so
  * it is the same after a fetch, a rebase, a squash or a force-push, and it is
- * what `aidev knowledge update` uses to decide what to regenerate.
+ * what `aidev sync wiki` uses to decide what to regenerate.
  *
  *   inventory == tree at HEAD, nothing pending   → OK (or WARN when the
  *                                                  tracking branch moved on)
@@ -130,7 +130,7 @@ function computeState(repoRoot, config, { checkRemote = true, force = false } = 
   let message;
   if (!hasWiki) {
     severity = SEVERITY.ERROR;
-    message = `LLM Wiki has not been generated yet (${layout.KNOWLEDGE_REL}/manifest.json is missing). Run "aidev init" (or "aidev knowledge update").`;
+    message = `LLM Wiki has not been generated yet (${layout.KNOWLEDGE_REL}/manifest.json is missing). Run "aidev init" (or "aidev sync wiki").`;
   } else if (!headSha) {
     severity = SEVERITY.ERROR;
     message = 'HEAD could not be resolved — is this a git repository with at least one commit?';
@@ -143,19 +143,19 @@ function computeState(repoRoot, config, { checkRemote = true, force = false } = 
   } else if (behind.behind) {
     severity = SEVERITY.WARN;
     message = `the Wiki describes ${short(kSha)}, but ${behind.changed} file(s) differ at HEAD (${short(headSha)}): `
-      + `+${behind.added} ~${behind.modified} -${behind.removed} →${behind.renamed} — run "aidev knowledge update".`;
+      + `+${behind.added} ~${behind.modified} -${behind.removed} →${behind.renamed} — run "aidev sync wiki".`;
   } else if (pendingPaths.length > 0) {
     severity = SEVERITY.WARN;
-    message = `${pendingPaths.length} page(s) still await prose regeneration — run "aidev knowledge update".`;
+    message = `${pendingPaths.length} page(s) still await prose regeneration — run "aidev sync wiki".`;
   } else if (checkRemote && !remote.ok) {
     severity = SEVERITY.UNKNOWN;
     message = `remote unverified (${remote.reason || 'unreachable'}); local state is internally consistent.`;
   } else if (localTrackingSha && localTrackingSha !== baseSha && sourceChanged(repoRoot, baseSha, localTrackingSha)) {
     severity = SEVERITY.WARN;
-    message = `origin/${branch} has moved ahead (${short(localTrackingSha)}); work may continue. Merge or rebase, then "aidev knowledge update".`;
+    message = `origin/${branch} has moved ahead (${short(localTrackingSha)}); work may continue. Merge or rebase, then "aidev sync wiki".`;
   } else if (remote.ok && remote.sha && remote.sha !== (localTrackingSha || baseSha)) {
     severity = SEVERITY.WARN;
-    message = `origin/${branch} has new commits (${short(remote.sha)}) that are not fetched yet; "git fetch" then "aidev status" to see whether the Wiki needs an update.`;
+    message = `origin/${branch} has new commits (${short(remote.sha)}) that are not fetched yet; "git fetch" then "aidev check" to see whether the Wiki needs an update.`;
   } else {
     severity = SEVERITY.OK;
     message = `the Wiki describes HEAD (${short(headSha)}).`;

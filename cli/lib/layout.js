@@ -3,8 +3,8 @@
  * Where ai-dev-kit keeps things inside a PKG clone.
  *
  * Everything the kit adds to a PKG lives under `.aidev/` plus the tool
- * configuration it materialises at the root (`.claude/`, `CLAUDE.md`,
- * `.mcp.json`). All of it is committed to the PKG repository so the whole team
+ * configuration it materialises at the root (`.claude/`, `CLAUDE.md`). MCP
+ * servers (`.mcp.json`) are the package's own. All of it is committed to the PKG repository so the whole team
  * shares one setup; only runtime state (`.aidev/cache`, leases, the sync lock)
  * is ignored, through a `.gitignore` the CLI writes into `.aidev/`.
  *
@@ -24,6 +24,8 @@ const MATERIALIZED_REL = '.aidev/materialized.json';
 const EJECT_MARKER_REL = '.aidev/ejected.json';
 const SYNC_LOCK_REL = '.aidev/sync.lock';
 const WORKFLOWS_REL = '.aidev/workflows';
+const AGENTS_REL = '.aidev/agents';
+const SKILLS_REL = '.aidev/skills';
 const CONVENTIONS_REL = '.aidev/conventions';
 const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
 
@@ -33,7 +35,7 @@ const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
  * and the tool adapters agree on one list without a require cycle.
  */
 const TOOL_CONFIG_GLOBS = Object.freeze({
-  claude: Object.freeze(['.claude/**', 'CLAUDE.md', '.mcp.json']),
+  claude: Object.freeze(['.claude/**', 'CLAUDE.md']),
   copilot: Object.freeze(['.github/copilot-instructions.md', '.github/agents/**', '.github/skills/**', '.github/hooks/**']),
   codex: Object.freeze(['AGENTS.md', '.codex/**']),
   kiro: Object.freeze(['.kiro/steering/**', '.kiro/agents/**']),
@@ -91,6 +93,7 @@ function ensureAidevGitignore(repoRoot) {
 
 module.exports = {
   CONFIG_NAME, AIDEV_DIR, KNOWLEDGE_REL, POLICY_REL, POLICY_CANDIDATE_REL, MATERIALIZED_REL,
-  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, CONVENTIONS_REL, AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
+  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, AGENTS_REL, SKILLS_REL, CONVENTIONS_REL,
+  AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
   TOOL_CONFIG_GLOBS, ALL_TOOL_CONFIG_GLOBS, KIT_MANAGED_GLOBS, isKitManaged, toPosix, abs, ensureAidevGitignore,
 };

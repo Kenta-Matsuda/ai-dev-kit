@@ -7,7 +7,7 @@ Put the `aidev` command on your own machine. Once per machine.
 
 * Node.js {node-min-version} or later
 * Git
-* Claude Code {claude-min-version} or later (used to generate the Wiki and for interactive sessions)
+* Claude Code {claude-min-version} or later (used to generate the Wiki, run workflows and for interactive sessions)
 * The URL of the central {project-name} repository (`<kit-url>` below)
 
 === Steps
@@ -53,7 +53,7 @@ aidev doctor
 +
 Every line of `aidev doctor` should be `✓` or `⚠`. You are outside a package, so the `⚠` for `aidev.yaml not found` is normal. If there is a `✗`, see xref:troubleshooting-install[Troubleshooting: installation].
 +
-If the `claude` line says `⚠ not found on PATH`, the Wiki cannot be generated. Install Claude Code before going on.
+If the `claude` line says `⚠ not found on PATH`, the Wiki cannot be generated and workflows cannot run. Install Claude Code before going on.
 
 . If you use a package hosted on Azure DevOps, put the PAT in an environment variable. Never in a file.
 +

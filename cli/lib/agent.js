@@ -4,9 +4,9 @@
  *
  * The CLI owns the structured half of the Wiki — inventory, manifest and the
  * resumable checkpoint. Prose belongs to the `knowledge-builder` agent, and
- * this module starts it. It also backs `aidev agent run` and the `ctx.agent`
- * call inside `aidev workflow`, so every agent the CLI starts goes through
- * one launcher.
+ * this module starts it. It also backs every agent step of `aidev workflow
+ * run` (and the workflow-creator behind `new --describe`), so every agent the
+ * CLI starts goes through one launcher.
  *
  * Which tool runs an agent is configuration, not code: `tools.agent` in
  * aidev.yaml is the PKG-wide choice, `tools.agents.<name>` overrides it per
@@ -16,7 +16,7 @@
  * Three properties matter more than convenience here:
  *
  *   - It runs by default. A Wiki without prose is not useful to anyone, so
- *     the command that owns the Wiki (`knowledge update`) starts the
+ *     the command that owns the Wiki (`sync wiki`) starts the
  *     agent unless `--no-agent` is passed. That flag is for CI and scripts
  *     that maintain only the structured half; cost is shown up front and
  *     progress is saved per target.
@@ -369,6 +369,24 @@ function writePromptFile(repoRoot, installRoot, { tool, agent, prompt, label }) 
 }
 
 /**
+ * The command line a run would start, without starting it (`--dry-run`
+ * output for evolve and workflow). The prompt-file position is a placeholder.
+ */
+function previewCommand({ tool, agent, model }) {
+  const adapter = toolsMod.getTool(tool);
+  const resolved = toolsMod.resolveBinary(adapter, process.env);
+  const promptArg = adapter.prompt === 'file' ? `<${PROMPT_DIR_REL}/${tool}-run-<pid>-<time>.md>` : null;
+  const argv = buildArgv({ tool, agent, model, promptArg });
+  return {
+    bin: resolved.ok ? resolved.bin : adapter.bin,
+    argv: resolved.ok ? [...resolved.argvPrefix, ...argv] : argv,
+    source: resolved.ok ? resolved.source : resolved.reason,
+    promptVia: adapter.prompt,
+    verified: adapter.verified,
+  };
+}
+
+/**
  * Run one agent to completion.
  *
  * Never rejects: every failure — missing binary, non-zero exit, timeout or an
@@ -444,9 +462,10 @@ function runAgent({
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: !!resolved.shell,
         windowsHide: true,
-        // The hook the tool runs inherits this environment, which is how the
-        // write guard learns which agent the CLI started (policy agents.<name>).
-        env: { ...env, AIDEV_AGENT: String(agent || '') },
+        // The hook the tool runs inherits this environment. The workflow
+        // runner passes AIDEV_WORKFLOW through `env`, which is how the write
+        // guard learns which approved scope applies.
+        env,
       });
     } catch (e) {
       resolve({ ok: false, skipped: true, tool, reason: `could not start ${resolved.bin}: ${e.message}` });
@@ -588,7 +607,7 @@ function assessWikiProgress(agentResult, paths, checkpointPaths, {
 /** Show the domain result after a command has re-read the checkpoint. */
 function renderWikiProgress(result, {
   human = true,
-  resumeCommand = 'aidev knowledge update',
+  resumeCommand = 'aidev sync wiki',
 } = {}) {
   if (!human || !result.ran) return;
   if (result.ok) {
@@ -776,7 +795,7 @@ async function runWikiAgent({
     ui.dim(`    repository evidence: ${evidencePaths.length} tracked, non-secret file(s)`);
     ui.dim(`    requested model: ${opts.model || `${label}'s own default (no model flag passed)`}`);
     ui.dim(`    each run has a ${formatDuration(opts.timeoutMs)} budget. Progress is saved per target,`);
-    ui.dim('    so if this stops, "aidev knowledge update" continues where it left off.');
+    ui.dim('    so if this stops, "aidev sync wiki" continues where it left off.');
   }
 
   const summary = {
@@ -828,8 +847,8 @@ async function runWikiAgent({
       if (res.result) for (const l of String(res.result).split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       if (res.stderr) for (const l of res.stderr.split('\n').slice(0, 10)) ui.dim(`    ${l}`);
       ui.dim(res.timedOut
-        ? '    Finished targets are saved. Resume with "aidev knowledge update"; raise --agent-timeout or lower --agent-batch-size if it keeps happening.'
-        : '    Finished targets are saved. Resume with "aidev knowledge update" after correcting the cause.');
+        ? '    Finished targets are saved. Resume with "aidev sync wiki"; raise --agent-timeout or lower --agent-batch-size if it keeps happening.'
+        : '    Finished targets are saved. Resume with "aidev sync wiki" after correcting the cause.');
     }
     return summary;
   };
@@ -1004,6 +1023,6 @@ module.exports = {
   DEFAULT_AGENT, DEFAULT_BATCH_SIZE, DEFAULT_TIMEOUT_MS, MAX_INLINE_PROMPT_BYTES, HEARTBEAT_MS, MIN_CLAUDE_VERSION,
   EXIT_SIGTERM, PROMPT_DIR_REL, AGENT_FLAGS, AGENT_FLAG_HELP,
   versionAtLeast, assertAgentName, assertTool, assertToolEnabled, toolLabel, formatDuration, summarizeResult,
-  buildPrompt, buildArgv, writePromptFile, prepareTask, writeTaskFile, chunk, runAgent, resolveReferences,
+  buildPrompt, buildArgv, previewCommand, writePromptFile, prepareTask, writeTaskFile, chunk, runAgent, resolveReferences,
   assessWikiProgress, renderWikiProgress, resolveOptions, runWikiAgent,
 };

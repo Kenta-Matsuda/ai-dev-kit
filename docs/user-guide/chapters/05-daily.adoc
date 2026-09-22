@@ -1,14 +1,16 @@
 [[daily]]
 == 日常の使い方
 
-毎日することは 3 つです。作業前に `aidev status` を見る。コミットしたら hook の指示どおり Wiki を追従させる（手動なら `aidev knowledge update`）。kit が新しいと言われたら `aidev update`。
+メンバーが毎日することは 3 つです。作業前に `aidev check` を見る。コミットしたら hook の指示どおり Wiki を追従させる（手動なら `aidev sync wiki`）。AI に任せる仕事は `aidev run workflow` で実行し、できた PR をレビュアーに渡す。
 
-[[daily-status]]
-=== aidev status の読み方
+kit が新しいと言われたら `aidev update` します。PKG への取り込み（`aidev sync tools`）は導入担当者が PR にします。
+
+[[daily-check]]
+=== aidev check の読み方
 
 [source,bash]
 ----
-aidev status
+aidev check
 ----
 
 2 行目の記号と文で、次にすることが決まります。
@@ -20,17 +22,17 @@ aidev status
 |`✅ the Wiki describes HEAD (…)`
 |何もしなくて構いません。
 
-|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev knowledge update"`
-|コードが進んで Wiki が古くなっています。AI ツールの中なら次のコミット後に hook が更新を始めます。今すぐなら xref:daily-wiki[aidev knowledge update]。作業は続けられます。
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev sync wiki"`
+|コードが進んで Wiki が古くなっています。AI ツールの中なら次のコミット後に hook が更新を始めます。今すぐなら xref:daily-wiki[aidev sync wiki]。作業は続けられます。
 
 |`⚠️ N page(s) still await prose regeneration`
-|本文が未生成のページがあります。`aidev knowledge update` を実行します（hook の指示が出ていればそのとおりに）。
+|本文が未生成のページがあります。`aidev sync wiki` を実行します（hook の指示が出ていればそのとおりに）。
 
 |`⚠️ origin/main has moved ahead …`
-|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで merge か rebase をし、`aidev knowledge update` を実行します。
+|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで merge か rebase をし、`aidev sync wiki` を実行します。
 
 |`⚠️ origin/main has new commits …`
-|`git fetch` してから `aidev status` をもう一度実行します。
+|`git fetch` してから `aidev check` をもう一度実行します。
 
 |`ℹ️ remote unverified …`
 |remote に届きませんでした（offline や proxy）。手元は整合しているので作業は続けられます。
@@ -41,7 +43,7 @@ aidev status
 
 その他の表示は xref:troubleshooting-status[トラブルシューティング] を見てください。
 
-続く行では、`tool config` と `policy` を確認します。`tool config` は `applied from kit <sha>` で始まり、チームが編集したファイル数（`customised`）や、新しいテンプレートがあること（`newer templates available: "aidev apply"`）を添えます。`CONFLICTS` なら `aidev apply` の衝突が未解消、`kit hooks missing` なら `.claude/settings.json` から hooks が消えています（xref:daily-apply[aidev apply]）。`policy` は `placed (N protected paths)` に、チームが agent ごとに足した許可（`agent grants: …`）を添えます。`missing` なら `aidev permission configure --approve` で解決します。
+続く行では、`tool config` と `policy` を確認します。`tool config` は `applied from kit <sha>` で始まり、チームが編集したファイル数（`customised`）や、新しいテンプレートがあること（`newer templates available: "aidev sync tools"`）を添えます。`CONFLICTS` なら `aidev sync tools` の衝突が未解消、`kit hooks missing` なら `.claude/settings.json` から hooks が消えています（xref:daily-apply[aidev sync tools]）。`policy` が `missing` なら導入担当者に `aidev create policy --approve` を依頼します。
 
 === Wiki の使われ方
 
@@ -54,13 +56,13 @@ AI は `CLAUDE.md` の指示に従い、ソースを読む前に `.aidev/knowled
 
 Wiki は今いるブランチの HEAD を説明します。コードをコミットするたびに、Wiki も同じブランチに別のコミットとして積みます。
 
-AI ツールのセッションで `git commit` すると、hook が構造を更新し、本文が必要ならセッションに「knowledge-builder をサブエージェントで起動し、終わったら `aidev knowledge update --no-agent` を実行する」と指示します。セッションがそのとおりに進めると、`.aidev/knowledge/` が `aidev: update Wiki for <sha12>` としてコミットされます。Wiki が遅れたままセッションを終えようとすると 1 回だけ止められます。
+AI ツールのセッションで `git commit` すると、hook が構造を更新し、本文が必要ならセッションに「knowledge-builder をサブエージェントで起動し、終わったら `aidev sync wiki --no-agent` を実行する」と指示します。セッションがそのとおりに進めると、`.aidev/knowledge/` が `aidev: update Wiki for <sha12>` としてコミットされます。Wiki が遅れたままセッションを終えようとすると 1 回だけ止められます。
 
 手動で行うなら次を実行します。生成対象に未コミットの変更があると止まるので、先にコミットします。
 
 [source,bash]
 ----
-aidev knowledge update
+aidev sync wiki
 ----
 
 [source,text]
@@ -71,11 +73,27 @@ aidev knowledge update
 ✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
 ----
 
-ソースのコミットと Wiki のコミットを同じ PR に入れ、レビューする人は両方を見ます。生成された Wiki のレビューはあなたの責任です。kit は PR をマージしません。
+ソースのコミットと Wiki のコミットを同じ PR に入れ、レビューする人は両方を見ます。
 
 * 途中で止まったら同じコマンドで再開します。
 * `main` の上で実行すると、`aidev/wiki-<sha12>` ブランチにコミットして PR を作ります（xref:knowledge-publish[tracking branch の上で更新する]）。
 * 夜間 pipeline が `main` の Wiki を PR にしているチームでは、マージ後に `git pull` で受け取ります。
+
+[[daily-workflow]]
+=== AI に仕事をさせる
+
+承認済みの workflow（`main` にマージされた定義）は、メンバーの誰でも実行できます。
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow implement --task "Work Item 1234 を実装する"
+----
+
+workflow は自分のブランチ `aidev/<name>-<yyyymmddHHMM>` で動き、終わると PR を作ります（Azure DevOps。`generic` では push 済みのブランチから手で作ります）。**できた PR をレビュアーに渡すところまでがあなたの仕事です。** 中身の責任は、workflow を承認した人と PR をレビューする人にあります。
+
+`main` にない workflow、`main` の内容から変えた workflow は実行できません。新しい仕事をさせたいときは導入担当者に相談します。詳しくは xref:workflows[AI に仕事をさせる] を見てください。
 
 [[daily-update]]
 === aidev update — kit を更新する
@@ -95,17 +113,17 @@ aidev knowledge update
 ✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
 ℹ 1 package(s) on this machine still carry templates from an older kit:
     C:\work\demo-pkg (applied 499f940)
-    Run "aidev apply" in each when convenient; it merges the new templates with your edits.
+    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.
 ----
 
 [[daily-apply]]
-=== aidev apply — 新しいテンプレートを PKG に取り込む
+=== aidev sync tools — 新しいテンプレートを PKG に取り込む
 
-kit を更新したら、都合のよいときに PKG のルートで実行します。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは kit 側の変更とマージされます。
+kit を更新したら、**導入担当者** が都合のよいときに PKG のルートで実行し、PR にします。メンバーはマージ後の `git pull` で同じ状態になります。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは kit 側の変更とマージされます。
 
 [source,bash]
 ----
-aidev apply
+aidev sync tools
 ----
 
 [source,text]
@@ -117,8 +135,6 @@ aidev apply
     Review with "git diff", then commit so your team receives the update.
 ----
 
-差分を確認し、コミットして PR にします。マージ後、他のメンバーは `git pull` だけで同じ状態になります。
-
 同じ箇所をチームと kit の両方が変えていた場合は、git と同じ衝突マーカーがファイルに書かれ、終了コード 2 で止まります。
 
 [source,text]
@@ -127,9 +143,36 @@ aidev apply
     ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
 ----
 
-マーカーを解消して内容を確定したら、もう一度 `aidev apply` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを kit 版に戻したいときは `aidev apply --force` です。
+マーカーを解消して内容を確定したら、もう一度 `aidev sync tools` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを kit 版に戻したいときは `aidev sync tools --force` です。
+
+[[daily-review]]
+=== レビュアーがすること
+
+{project-name} を使う開発では、次の PR が届きます。いずれも人間がマージします。
+
+[%autowidth.stretch,options="header"]
+|===
+|PR |誰が作るか |見るところ
+
+|導入・設定の PR（`aidev.yaml`、`.aidev/policy.yaml`、`.claude/**` など）
+|導入担当者
+|`secrets_paths` に漏れが無いか。policy の `writable` を広げていないか。`aidev check` が通っているか。
+
+|ソースと Wiki の PR
+|メンバー
+|ソースの変更に加えて、`aidev: update Wiki for <sha12>` のコミットが入っているか。Wiki の記述がソースと食い違っていないか（Wiki の各記述は根拠ファイルへのリンクを持ちます）。
+
+|workflow の定義の PR（`aidev: workflow <name>`）
+|導入担当者
+|**マージが承認です。** `objective`（何をさせるか）、`scope.writable`（どこを書いてよいか）、`cost.max_usd` と `limits`（いくらまで、何分まで）、`until` と `command` の内容。参照する `.aidev/agents/`・`.aidev/skills/` のファイルも同じ PR に入ります。→ xref:workflows-review[workflow の PR を見る]
+
+|workflow の成果物の PR
+|メンバー（実行した人）
+|PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。差分が `scope.writable` の中に収まっているか、テストが通っているか、`objective` どおりか。
+|===
 
 === 関連
 
 * xref:knowledge[LLM Wiki] — 状態の読み方、コミット後の流れ、再開
-* xref:cli-status[aidev status]、xref:cli-knowledge[aidev knowledge]、xref:cli-update[aidev update]、xref:cli-apply[aidev apply]
+* xref:workflows[AI に仕事をさせる] — workflow の定義・提出・実行・レビュー
+* xref:cli-check[aidev check]、xref:cli-sync-wiki[aidev sync wiki]、xref:cli-run[aidev run workflow]、xref:cli-update[aidev update]、xref:cli-sync-tools[aidev sync tools]

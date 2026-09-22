@@ -79,9 +79,6 @@ function writeStaticAssets(root, { hooks = false, realTemplates = false } = {}) 
     return;
   }
   write(path.join(root, 'CLAUDE.md'), '# test package instructions\n');
-  write(path.join(root, '.mcp.json'), `${JSON.stringify({
-    mcpServers: { 'azure-devops': { command: 'aidev', args: ['mcp', 'azure-devops'] } },
-  }, null, 2)}\n`);
   // The four kit hooks are always wired: `aidev check` refuses a settings.json
   // without them. `hooks: true` adds the team-owned hook eject must preserve.
   const settingsDoc = {
@@ -130,7 +127,7 @@ function policyYaml() {
     'protected:',
     '  - ".claude/**"',
     '  - "CLAUDE.md"',
-    '  - ".mcp.json"',
+
     '  - ".aidev/policy.yaml"',
     '  - ".aidev/sync.lock"',
     '  - ".aidev/materialized.json"',
@@ -142,6 +139,8 @@ function policyYaml() {
     'writable:',
     '  - ".aidev/knowledge/**"',
     '  - ".aidev/workflows/**"',
+    '  - ".aidev/agents/**"',
+    '  - ".aidev/skills/**"',
     '  - ".aidev/conventions/**"',
     '  - "aidev.yaml"',
     '',

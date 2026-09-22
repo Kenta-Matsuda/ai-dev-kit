@@ -1,6 +1,6 @@
 'use strict';
 /**
- * The publish lease (.aidev/sync.lock): held by `aidev knowledge update`, it permits writes
+ * The publish lease (.aidev/sync.lock): held by `aidev sync wiki`, it permits writes
  * to knowledge/** while the Wiki is missing or broken, so a sync can repair
  * the very state that otherwise blocks every write. It is TTL-bound and is
  * itself a protected path, so an agent can never mint or extend it.
@@ -51,12 +51,12 @@ function acquireSyncLease(repoRoot, { targetSha, originalSha, ttlMinutes = 120, 
     if (ev.valid) {
       throw new AidevError(
         `sync lease already held (target=${existing.targetSha}, acquired=${existing.acquiredAt}). ` +
-        'Run "aidev knowledge update" to continue it or "aidev knowledge update --abort" to release it.');
+        'Run "aidev sync wiki" to continue it or "aidev sync wiki --abort" to release it.');
     }
     throw new AidevError(
       `a stale sync lease is present (${ev.reason}; target=${existing.targetSha}). ` +
-      'Refusing to adopt it silently — run "aidev knowledge update" to continue it, ' +
-      'or "aidev knowledge update --abort" to discard the unfinished publish.');
+      'Refusing to adopt it silently — run "aidev sync wiki" to continue it, ' +
+      'or "aidev sync wiki --abort" to discard the unfinished publish.');
   }
   const lease = {
     schemaVersion: 1,

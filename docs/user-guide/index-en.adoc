@@ -34,15 +34,17 @@ include::en/chapters/04-setup-member.adoc[]
 
 include::en/chapters/05-daily.adoc[]
 
-include::en/chapters/06-knowledge.adoc[]
+include::en/chapters/06-workflows.adoc[]
 
-include::en/chapters/07-configuration.adoc[]
+include::en/chapters/07-knowledge.adoc[]
 
-include::en/chapters/08-permissions.adoc[]
+include::en/chapters/08-configuration.adoc[]
 
-include::en/chapters/09-automation.adoc[]
+include::en/chapters/09-permissions.adoc[]
 
-include::en/chapters/10-troubleshooting.adoc[]
+include::en/chapters/10-automation.adoc[]
+
+include::en/chapters/11-troubleshooting.adoc[]
 
 include::en/chapters/cli/index.adoc[]
 

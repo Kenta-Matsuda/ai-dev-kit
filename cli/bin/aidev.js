@@ -18,26 +18,34 @@ const gitMod = require('../lib/git');
 const home = require('../lib/home');
 const ui = require('../lib/ui');
 
+/**
+ * Verb first: `aidev <verb> [<object>] [<name>]`. The objects are workflow,
+ * agent, skill, wiki, kit and policy; a verb that takes one object only
+ * still names it, so every command reads the same way.
+ */
 const COMMANDS = [
-  'init', 'status', 'check', 'knowledge',
-  'agent', 'permission', 'workflow', 'apply',
-  'update', 'doctor', 'eject', 'uninstall', 'evolve',
-  'hook', 'mcp',
+  'init', 'check', 'doctor',
+  'create', 'remove', 'list', 'submit', 'run',
+  'update', 'sync', 'uninstall',
+  'hook',
 ];
 
-/** Subcommands are routed inside the command module, but listed here for help. */
+/** Objects are routed inside the command module, but listed here for help. */
 const SUBCOMMANDS = {
-  knowledge: ['update'],
-  agent: ['list', 'show', 'run'],
-  permission: ['configure', 'reconfigure', 'show'],
-  workflow: ['new', 'approve', 'run', 'list'],
-  evolve: ['enable', 'disable', 'status', 'run'],
+  create: ['workflow', 'agent', 'skill', 'policy'],
+  remove: ['workflow', 'agent', 'skill'],
+  list: ['workflows', 'agents', 'skills'],
+  submit: ['workflow'],
+  run: ['workflow'],
+  sync: ['tools', 'wiki'],
   hook: ['session-start', 'guard-write', 'quality-gate', 'after-bash', 'session-stop'],
-  mcp: ['azure-devops'],
 };
 
-/** Commands that run from tools or pipelines: never prompt, never nag. */
-const QUIET_COMMANDS = new Set(['hook', 'mcp', 'update', 'uninstall']);
+/** Commands that run from tools or pipelines: never prompt, never nag. `update` is the updater itself. */
+const QUIET_COMMANDS = new Set(['hook', 'uninstall', 'update']);
+
+/** Internal entry points (the AI tools' hooks call them); routable, not advertised. */
+const HIDDEN_COMMANDS = new Set(['hook']);
 
 const INSTALL_ROOT = path.resolve(__dirname, '..', '..');
 const VERSION = readVersion();
@@ -65,10 +73,9 @@ function usage() {
   ui.out('  usage: aidev <command> [subcommand] [options]');
   ui.out('');
   const groups = [
-    ['in a package clone', ['init', 'status', 'check', 'knowledge', 'agent', 'permission', 'workflow', 'apply']],
-    ['this machine', ['update', 'doctor', 'eject', 'uninstall']],
-    ['ai-dev-kit developers', ['evolve']],
-    ['called by tools', ['hook', 'mcp']],
+    ['develop (in a package clone)', ['run', 'create', 'submit', 'list', 'remove']],
+    ['maintain (in a package clone)', ['init', 'check', 'sync']],
+    ['this machine', ['update', 'doctor', 'uninstall']],
   ];
   for (const [title, names] of groups) {
     ui.out(`  ${title}:`);
@@ -138,7 +145,7 @@ async function updateNotice(name, flags, argv) {
     return null;
   }
   ui.dim(`  (re-running "aidev ${argv.join(' ')}" with the updated CLI.`);
-  ui.dim('   New templates reach a package only through "aidev apply", when you choose to run it.)');
+  ui.dim('   New templates reach a package only through "aidev sync tools", when you choose to run it.)');
   const r = spawnSync(process.execPath, [__filename, ...argv], {
     stdio: 'inherit',
     env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1' },
@@ -165,7 +172,7 @@ async function main(argv) {
 
   const mod = loadCommand(name);
   if (!mod) {
-    const near = COMMANDS.filter((c) => c.startsWith(name[0]));
+    const near = COMMANDS.filter((c) => c.startsWith(name[0]) && !HIDDEN_COMMANDS.has(c));
     throw new AidevError(
       `unknown command: ${name}${near.length ? ` (did you mean: ${near.join(', ')}?)` : ''}\n` +
       '    Run "aidev --help" for the full list.');
@@ -176,7 +183,10 @@ async function main(argv) {
 
   const { flags, positionals } = parseArgs(rest, mod.FLAGS || {});
   if (SUBCOMMANDS[name] && positionals.length === 0) {
-    throw new AidevError(`aidev ${name} requires a subcommand: ${SUBCOMMANDS[name].join(', ')}`);
+    throw new AidevError(`aidev ${name} needs an object: ${SUBCOMMANDS[name].join(', ')}`);
+  }
+  if (SUBCOMMANDS[name] && !SUBCOMMANDS[name].includes(positionals[0])) {
+    throw new AidevError(`aidev ${name} ${positionals[0]}: expected one of ${SUBCOMMANDS[name].join(', ')}`);
   }
 
   // Hooks may fire while the tool's current directory is a nested folder.

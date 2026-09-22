@@ -1,9 +1,14 @@
 'use strict';
 /**
- * `aidev doctor` — diagnose the machine and, when run inside one, the PKG.
+ * `aidev doctor [<package>]` — diagnose this machine: the runtime, the kit
+ * checkout, the registry and the AI tools. With a package (its registry name
+ * or a path) it also reports that package's setup and Wiki state, for a human
+ * reading a screen; the CI gate with exit codes stays `aidev check`, run in
+ * the package clone.
  *
- * Never fails on a missing credential: reporting "not set" is the useful
- * output, and a CI agent legitimately runs without an interactive token.
+ * Never fails on a missing tool or credential: reporting "not found" is the
+ * useful output, and a CI agent legitimately runs without an interactive
+ * token.
  */
 
 const fs = require('fs');
@@ -14,6 +19,7 @@ const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
 const home = require('../lib/home');
 const toolsMod = require('../lib/tools');
+const wfMod = require('../lib/workflow');
 const ui = require('../lib/ui');
 
 const FLAGS = { json: 'boolean' };
@@ -28,8 +34,51 @@ function toolVersion(cmd, args) {
   } catch { return null; }
 }
 
+/** The package rows: setup, hosting, policy, agent tool, Wiki state, workflows. */
+function packageChecks(pkgRoot, installRoot, add) {
+  const ejected = cfgMod.readEjectMarker(pkgRoot);
+  const hasConfig = fs.existsSync(cfgMod.configPath(pkgRoot));
+  add('package', 'ok', pkgRoot);
+  if (ejected) add('kit management', 'ok', `ejected${ejected.ejectedAt ? ` at ${ejected.ejectedAt}` : ''} — maintained by hand`);
+  if (!hasConfig) {
+    add('aidev.yaml', ejected ? 'ok' : 'warn', ejected ? 'not present (ejected)' : 'not found — run "aidev init" at the root of the clone');
+    return;
+  }
+  let config = null;
+  try { config = cfgMod.loadConfig(pkgRoot); add('aidev.yaml', 'ok', `package.name=${config.package.name}, hosting=${config.hosting.type}`); }
+  catch (e) { add('aidev.yaml', 'fail', e.message); return; }
+
+  add('git repository', gitMod.isRepo(pkgRoot) ? 'ok' : 'fail', gitMod.isRepo(pkgRoot) ? `on ${gitMod.currentBranch(pkgRoot) || 'detached HEAD'}` : 'not a git repository');
+  const origin = gitMod.remoteUrl(pkgRoot, 'origin');
+  add('remote origin', origin ? 'ok' : 'warn', origin || 'missing — publishing the Wiki and approving workflows need it');
+  try {
+    const pol = cfgMod.loadPolicy(pkgRoot, { required: true });
+    add('policy', 'ok', `${pol.protected.length} protected patterns`);
+  } catch (e) { add('policy', 'warn', e.message); }
+
+  const overrides = Object.keys(config.tools.agents || {});
+  add('agent tool', 'ok', `${config.tools.agent}${config.tools.agent_model ? ` (${config.tools.agent_model})` : ''}${overrides.length ? `; per-agent overrides: ${overrides.join(', ')}` : ''}`);
+  if (config.hosting.type === 'azure-devops') {
+    const authEnv = config.hosting.auth_env;
+    const has = typeof process.env[authEnv] === 'string' && process.env[authEnv].length > 0;
+    add(`env ${authEnv}`, has ? 'ok' : 'warn', has ? 'set (value not read)' : 'not set — Azure DevOps calls will fail');
+  }
+  if (gitMod.isRepo(pkgRoot)) {
+    const st = stateMod.computeState(pkgRoot, config, { force: true });
+    add('remote reachability', st.remoteOk ? 'ok' : 'warn',
+      st.remoteOk ? `origin/${st.trackingBranch} = ${stateMod.short(st.trackingSha)}` : (st.remoteReason || 'unreachable'));
+    add('Wiki state', st.severity === 'error' ? 'fail' : (st.severity === 'ok' ? 'ok' : 'warn'), st.message);
+  }
+  const workflows = wfMod.listWorkflows(pkgRoot).map((n) => ({ name: n, ...wfMod.inspect(pkgRoot, installRoot, config, n) }));
+  const invalid = workflows.filter((w) => !w.ok);
+  const approved = workflows.filter((w) => w.ok && w.approval.approved).length;
+  add('workflows', invalid.length ? 'fail' : 'ok',
+    workflows.length === 0 ? 'none — "aidev create workflow <name>"' : `${workflows.length} (${approved} approved${invalid.length ? `; invalid: ${invalid.map((w) => w.name).join(', ')}` : ''})`);
+}
+
 function run(ctx) {
-  const { repoRoot, flags, installRoot } = ctx;
+  const { flags, installRoot, positionals } = ctx;
+  const pkgRoot = positionals[0] ? home.resolvePackage(positionals[0]) : null;
   const checks = [];
   const add = (name, status, detail) => checks.push({ name, status, detail });
 
@@ -51,74 +100,29 @@ function run(ctx) {
   add('AIDEV_HOME', 'ok', home.home());
   const reg = home.listPackages();
   add('registered packages', 'ok', `${reg.present.length}${reg.missing.length ? ` (+${reg.missing.length} missing on disk)` : ''}`);
+  for (const p of reg.present) add('  package', 'ok', `${p.name || '?'} — ${p.path}`);
 
   // --- AI tools --------------------------------------------------------------
-  // Every tool the PKG lists (or Claude Code alone outside a PKG) is looked up;
-  // a missing one is a warning, since only the tool that runs agents matters.
-  let toolIds = ['claude'];
-  try {
-    const early = fs.existsSync(cfgMod.configPath(repoRoot)) ? cfgMod.loadConfig(repoRoot) : null;
-    if (early) toolIds = early.tools.default;
-  } catch { /* reported below under aidev.yaml schema */ }
-  for (const id of toolIds) {
+  for (const id of toolsMod.TOOL_IDS) {
     const tool = toolsMod.getTool(id);
     const resolved = toolsMod.resolveBinary(tool, process.env);
     const version = resolved.ok ? toolsMod.checkVersion(resolved, process.env) : null;
     const tag = tool.verified ? '' : ' (adapter not verified against the real tool by the kit maintainers)';
     if (!resolved.ok) add(id, 'warn', resolved.reason);
-    else if (version.missing) add(id, 'warn', `${tool.label} not found on PATH — needed to run agents (aidev knowledge update, aidev agent run)`);
+    else if (version.missing) add(id, 'warn', `${tool.label} not found on PATH — needed to run agents (aidev sync wiki, aidev run workflow)`);
     else if (!version.ok) add(id, 'warn', version.reason);
     else add(id, 'ok', `${tool.label} ${version.version || ''} (${resolved.source})${tag}`.replace('  ', ' '));
   }
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || null;
+  add('proxy', 'ok', proxy ? `HTTPS_PROXY=${proxy}` : 'none configured');
 
-  // --- this package ------------------------------------------------------------
-  const ejected = cfgMod.readEjectMarker(repoRoot);
-  const hasConfig = fs.existsSync(cfgMod.configPath(repoRoot));
-  if (ejected) add('kit management', 'ok', `ejected${ejected.ejectedAt ? ` at ${ejected.ejectedAt}` : ''} — maintained by hand`);
-  if (!hasConfig) {
-    add('aidev.yaml', ejected ? 'ok' : 'warn', ejected ? 'not present (ejected)' : 'not found here — run "aidev init" in a package clone to check it');
-  } else {
-    add('aidev.yaml', 'ok', repoRoot);
-    let config = null;
-    try { config = cfgMod.loadConfig(repoRoot); add('aidev.yaml schema', 'ok', `package.name=${config.package.name}, hosting=${config.hosting.type}`); }
-    catch (e) { add('aidev.yaml schema', 'fail', e.message); }
-
-    add('git repository', gitMod.isRepo(repoRoot) ? 'ok' : 'fail', gitMod.isRepo(repoRoot) ? repoRoot : 'not a git repository');
-    const origin = gitMod.remoteUrl(repoRoot, 'origin');
-    add('remote origin', origin ? 'ok' : 'warn', origin || 'missing — publishing the Wiki and the tracking branch need it');
-
-    try {
-      const pol = cfgMod.loadPolicy(repoRoot, { required: true });
-      add('policy', 'ok', `${pol.protected.length} protected patterns`);
-    } catch (e) { add('policy', 'warn', e.message); }
-
-    if (config) {
-      const overrides = Object.keys(config.tools.agents || {});
-      add('agent tool', 'ok', `${config.tools.agent} (aidev.yaml tools.agent; one run: --agent-tool)`
-        + (overrides.length ? `; per-agent overrides: ${overrides.join(', ')}` : ''));
-      add('agent model', 'ok', config.tools.agent_model
-        ? `${config.tools.agent_model} (aidev.yaml tools.agent_model; one run: --agent-model)`
-        : 'unset — Claude Code resolves it');
-      if (config.hosting.type === 'azure-devops') {
-        const authEnv = config.hosting.auth_env;
-        const has = typeof process.env[authEnv] === 'string' && process.env[authEnv].length > 0;
-        add(`env ${authEnv}`, has ? 'ok' : 'warn', has ? 'set (value not read)' : 'not set — Azure DevOps calls will fail');
-      }
-      const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || null;
-      add('proxy', 'ok', proxy ? `HTTPS_PROXY=${proxy}` : 'none configured');
-      if (gitMod.isRepo(repoRoot)) {
-        const st = stateMod.computeState(repoRoot, config, { force: true });
-        add('remote reachability', st.remoteOk ? 'ok' : 'warn',
-          st.remoteOk ? `origin/${st.trackingBranch} = ${stateMod.short(st.trackingSha)}` : (st.remoteReason || 'unreachable'));
-        add('Wiki state', st.severity === 'error' ? 'fail' : (st.severity === 'ok' ? 'ok' : 'warn'), st.message);
-      }
-    }
-  }
+  // --- one package, when named ---------------------------------------------
+  if (pkgRoot) packageChecks(pkgRoot, installRoot, add);
 
   if (flags.json) {
-    ui.json({ ok: !checks.some((c) => c.status === 'fail'), checks });
+    ui.json({ ok: !checks.some((c) => c.status === 'fail'), package: pkgRoot, checks });
   } else {
-    ui.heading('aidev doctor');
+    ui.heading(`aidev doctor${pkgRoot ? ` ${positionals[0]}` : ''}`);
     for (const c of checks) {
       const mark = { ok: '✓', warn: '⚠', fail: '✗' }[c.status];
       ui.out(`  ${mark} ${c.name.padEnd(22)} ${c.detail == null ? '' : c.detail}`);
@@ -129,8 +133,9 @@ function run(ctx) {
     if (fails === 0 && warns === 0) ui.ok('no problems found.');
     else if (fails === 0) ui.warn(`${warns} warning(s); nothing blocking.`);
     else ui.fail(`${fails} blocking problem(s), ${warns} warning(s).`);
+    if (!pkgRoot) ui.dim('    For a package: aidev doctor <package name or path>. The CI gate is "aidev check" inside the clone.');
   }
   return checks.some((c) => c.status === 'fail') ? EXIT.GENERAL : EXIT.OK;
 }
 
-module.exports = { run, FLAGS, FLAG_HELP, summary: 'この端末とPKGの実行環境を診断' };
+module.exports = { run, FLAGS, FLAG_HELP, summary: 'この端末を診断する。<package> を渡すとその PKG の状態も' };

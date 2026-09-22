@@ -1,0 +1,251 @@
+[[knowledge]]
+== LLM Wiki
+
+LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向けに説明する Markdown ページ群です。`.aidev/knowledge/` にコミットし、チームで共有します。
+
+* Wiki は **今いるブランチの HEAD** を説明します。コードをコミットしたら、Wiki も同じブランチに **別のコミット** として積みます。ソースのコミットと Wiki のコミットは同じ PR に入り、レビューする人は両方を見ます。
+* 初回は導入担当者が `aidev sync wiki --no-commit` で生成します。その後は、コミットのたびに hook が更新を始めます。手動なら `aidev sync wiki` です。どちらも knowledge-builder agent が本文を書きます。
+* Wiki は正本ではありません。各記述は根拠ファイルへのリンクを持ち、AI はリンク先で確認します。
+* Wiki が無い間、AI の書き込みはすべて止まります。
+* `aidev` が生成したものをレビューするのはあなたの責任です。kit は PR をマージしません。
+
+[[knowledge-state]]
+=== 状態の読み方
+
+セッションの開始時と `aidev check` の 2 行目に、次の形で状態が出ます。
+
+[source,text]
+----
+[ai-dev-kit] head=9f8e7d6  knowledge=9f8e7d6  tracking=9f8e7d6
+✅ the Wiki describes HEAD (9f8e7d6).
+----
+
+`head` は今の checkout のコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。判定は SHA の一致ではなく、Wiki を生成したときのファイル一覧と内容の指紋（inventory）を HEAD の木と比べて行います。rebase、squash、force-push の後でも正しく判定できます。
+
+[%autowidth.stretch,options="header"]
+|===
+|表示 |意味 |すること
+
+|`✅ the Wiki describes HEAD`
+|Wiki は HEAD と一致しています。
+|何もしなくて構いません。
+
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD (+a ~m -r →n) — run "aidev sync wiki"`
+|コードが進みました。`+` 追加、`~` 変更、`-` 削除、`→` 改名の件数です。
+|hook が次のコミット後に更新を始めます。今すぐなら `aidev sync wiki`。
+
+|`⚠️ N page(s) still await prose regeneration`
+|構造は HEAD に合っていますが、本文が未生成のページがあります。
+|`aidev sync wiki`（hook の指示が出ていればそのとおりに）。
+
+|`⚠️ origin/main has moved ahead …`
+|`main` があなたのブランチより先に進んでいます。
+|区切りの良いところで merge か rebase をし、`aidev sync wiki`。
+
+|`⚠️ origin/main has new commits … not fetched yet`
+|remote に未取得のコミットがあります。
+|`git fetch` してから `aidev check`。
+
+|`ℹ️ remote unverified …`
+|remote に届きませんでした（offline、proxy）。手元は整合しています。
+|作業を続けられます。
+
+|`❌ LLM Wiki has not been generated yet …` +
+`❌ … manifest.json does not record a valid knowledgeSha`
+|Wiki が無いか、読めません。**AI の書き込みはすべて止まります。** `aidev check` は終了コード 4 です。
+|`git pull` で来るはずなら pull。来ないなら導入担当者に確認するか、`aidev sync wiki --no-commit`。
+|===
+
+`aidev check` は `⚠️` を 0 のまま通します。`--strict` を付けると 2 になります。
+
+[[knowledge-hook-flow]]
+=== コミット後に何が起きるか
+
+AI ツールのセッションで `git commit` すると、hook（`aidev hook after-bash`）が HEAD の変化に気づき、次を行います。ネットワークにも LLM にも触れないので数秒で終わります。
+
+.コミット後の Wiki 追従。hook は構造まで、本文はセッションのサブエージェントが書く
+[mermaid]
+----
+flowchart TD
+  c["git commit（AI ツールのセッション内）"] --> h["hook: aidev hook after-bash"]
+  h --> dirty{"生成対象に<br/>未コミットの変更?"}
+  dirty -- "あり" --> stop["ファイルを列挙して何もしない<br/>（先にコミットする）"]
+  dirty -- "なし" --> st["構造を更新<br/>inventory・manifest・消えたページの削除"]
+  st --> need{"本文の書き直しが必要?"}
+  need -- "改名だけ" --> c1["hook が .aidev/knowledge/ をコミット"]
+  need -- "必要" --> plan["plan.json を書き、セッションに指示"]
+  plan --> sub["knowledge-builder を batch ごとに<br/>サブエージェントで起動"]
+  sub --> fin["aidev sync wiki --no-agent"]
+  fin --> c2["aidev: update Wiki for #60;sha12#62; としてコミット"]
+----
+
+. 生成対象（`aidev.yaml` の `package.include`）に未コミットの変更があれば、そのファイルを列挙して何もしません。コミットしてください。
+. HEAD の木と inventory を比べ、追加・変更・削除・改名を求めます。消えたファイルのページを削除し、inventory と manifest を書き直します。
+. 改名だけなら、本文は書き直しません。hook がそのまま `.aidev/knowledge/` をコミットして終わります。
+. 本文が必要なら、`.aidev/knowledge/.cache/plan.json` に batch ごとの生成対象を書き、セッションに次を指示します。
++
+[source,text]
+----
+[ai-dev-kit] the Wiki describes 1a2b3c4 but HEAD is 9f8e7d6 (+2 ~5 -0 →1). The structural update is done; 7 generation target(s) need prose in 1 batch(es).
+Do this now, before any other work:
+  1. For each batch in .aidev/knowledge/.cache/plan.json (`batches[i]`), start the "knowledge-builder" subagent with the Agent tool with this task: …
+  2. When every batch has reported, run `aidev sync wiki --no-agent`: the CLI records the reports and commits .aidev/knowledge/ as its own commit.
+  3. If the command says targets are still queued, start the subagent again for the batches it names.
+----
+
+セッションは batch ごとに knowledge-builder をサブエージェントとして起動し、終わったら `aidev sync wiki --no-agent` を実行します。CLI が完了報告を取り込み、`.aidev/knowledge/` を `aidev: update Wiki for <sha12>` というコミットにします。
+
+Wiki が HEAD より遅れたまま（または本文が未完成のまま）セッションを終えようとすると、Stop hook が 1 回だけ止めて同じ指示を出します。2 回目は警告付きで通ります。未コミットの変更があるときは止めません。
+
+hook が使えるかはツールによります（xref:cli-hook[aidev hook]）。実機で検証済みなのは Claude Code です。
+
+[[knowledge-manual]]
+=== 手動で更新する
+
+hook を使わないとき、CI、または今すぐ更新したいときは次を実行します。
+
+[source,bash]
+----
+aidev sync wiki
+----
+
+生成対象に未コミットの変更があると、そのファイルを列挙して止まります。先にコミットするか stash します。`.aidev/knowledge/` や kit の設定ファイルが汚れているのは構いません。
+
+コマンドは次の順で進みます。
+
+. 前回の実行が残した完了報告を取り込みます。
+. HEAD の木を走査し、inventory と比べます（追加・変更・削除・改名。改名だけなら本文は不要）。調査範囲のファイルが変わっていれば、全ページを対象にします。
+. 消えたファイルのページを削除し、inventory と manifest を書きます。この時点で構造は HEAD に合っています。
+. 対象を 20 件ずつの batch に分け、batch ごとに agent を 1 回起動します（1 回 30 分）。終わった分は batch ごとに保存されます。
+. すべて終わったら `.aidev/knowledge/` を `aidev: update Wiki for <sha12>` としてコミットします。
+
+[source,text]
+----
+aidev sync wiki
+  target               9f8e7d6 (HEAD of feature/login)
+  wiki describes       1a2b3c4
+  generation targets   163
+  added                2
+  modified             5
+  removed              0
+  renamed (free)       1
+  unchanged            155
+  queued now           7
+✓ manifest and 1 shard(s) written for 9f8e7d6
+ℹ 7 generation target(s) queued for the knowledge-builder agent:
+    src/api/auth.ts
+    …
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ batch 1/1 complete: 7/7 in 4m 2s ($0.5533)
+✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
+----
+
+`$` は Claude Code が報告したコストです。
+
+本文が残っている間は終了コード 1 で、コミットしません。**同じコマンド** をもう一度実行すると checkpoint から続きます。
+
+[%autowidth.stretch,options="header"]
+|===
+|表示 |すること
+
+|`✗ … ran out of time`
+|同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けるか、`aidev.yaml` の `knowledge.agent_timeout_ms` を増やします。
+
+|`⚠ … partial Wiki progress: 120/163 completed …`
+|同じコマンドで再開します。
+
+|`✗ … made no Wiki progress: 0/20`
+|1 件も終わりませんでした。続けて表示される `Claude result:` を読んで原因を直し、再開します。
+
+|`⚠ the knowledge-builder agent did not run`
+|AI ツールが見つかりません。`aidev doctor` のツールの行を直します。
+
+|`ℹ --no-agent: N generation target(s) stay queued without prose.`
+|構造だけ書きました。`aidev sync wiki` で本文を書きます。
+
+|Ctrl-C
+|同じコマンドで再開します。
+|===
+
+[[knowledge-publish]]
+=== tracking branch の上で更新する
+
+`main`（tracking branch）に直接コミットはできません。`main` を checkout した状態で `aidev sync wiki` を実行すると（または `--branch` を付けると）、CLI は一時 worktree `.aidev/cache/wiki-worktree/` で更新し、`aidev/wiki-<sha12>` ブランチにコミットして push し、PR を作ります。**あなたの checkout は触りません。**
+
+[source,text]
+----
+ℹ on main: publishing as aidev/wiki-9f8e7d6c5b4a instead of committing here.
+✓ acquired publish lease (ttl 120m)
+✓ created worktree at .aidev/cache/wiki-worktree (9f8e7d6)
+  publish branch       aidev/wiki-9f8e7d6c5b4a
+  pull request target  main
+…
+✓ pushed aidev/wiki-9f8e7d6c5b4a
+✓ opened pull request !123 https://dev.azure.com/…/pullrequest/123
+    Merging is always a human decision. After the merge, "git pull" brings the Wiki to every clone.
+✓ publish lease released
+----
+
+* PR を作るのは `aidev.yaml` の `sync.auto_pr` が `true` で、hosting が Azure DevOps で、PAT の環境変数があるときです。`generic` hosting や PAT 無しでは push まで行い、PR は手で作ります。`--no-push` なら push もしません。
+* 本文が完成したときだけ push します。途中で止まると lease（`.aidev/sync.lock`）と worktree が残ります。同じコマンドで続き、`aidev sync wiki --abort` で捨てます。
+* 夜間に自動で行うには xref:automation-ci[自動化: CI] の pipeline を使います。
+
+[[knowledge-files]]
+=== 何が生成されるか
+
+[%autowidth.stretch,options="header"]
+|===
+|パス |内容
+
+|`.aidev/knowledge/index.md`
+|入口。AI が最初に読みます。
+
+|`.aidev/knowledge/overview.md`
+|リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）。
+
+|`.aidev/knowledge/**/*.md`
+|生成対象ごとの説明ページ。
+
+|`.aidev/knowledge/manifest.json`, `inventory/*.json`
+|Wiki が説明しているコミット（`knowledgeSha`）、ファイルごとの指紋、未完了の対象。**CLI が管理します。触りません。**
+
+|`.aidev/knowledge/.cache/`
+|`plan.json`（hook がセッションに渡す batch の計画）と agent の完了報告。gitignore 済みです。
+|===
+
+[[knowledge-scope-vs-evidence]]
+=== 生成対象と調査範囲
+
+* **生成対象** — ページを作るパス。`aidev.yaml` の `package.include` です。
+* **調査範囲** — agent が裏付けに読んでよいファイル。既定は PKG 全体から `secrets_paths` を除いたものです。
+
+生成対象を `docs/**` だけにしても、agent はコードやテストを読んで確認します。調査範囲のファイルが変わると、次の更新で全ページが再生成の対象になります。
+
+[[knowledge-handedit]]
+=== 手編集しない理由
+
+ページごとにハッシュが記録され、手編集は `aidev check` / `aidev check` が検出します。
+
+[source,text]
+----
+⚠ 2 Wiki page(s) edited by hand since generation:
+    .aidev/knowledge/src/api/auth.md (modified)
+----
+
+手編集があると `aidev sync wiki` は止まり、上書きするかどうかを人間に委ねます（`--force` で上書き）。手編集は次の生成で失われます。内容が間違っているなら、ソース側（コメントや構造）を直してください。
+
+[[knowledge-scope-flag]]
+=== 一部だけ作り直す
+
+[source,bash]
+----
+aidev sync wiki --scope src/api
+----
+
+`src/api` 配下のページだけを対象にします。範囲外の変更は次回に持ち越され、その間 `aidev check` は本文未完了の警告を出します。
+
+=== 関連
+
+* xref:cli-sync-wiki[aidev sync wiki] — オプション、終了コード
+* xref:cli-hook[aidev hook] — ツールごとの hook
+* xref:configuration[aidev.yaml リファレンス] — `package.include`、`knowledge.*`、`sync.*`

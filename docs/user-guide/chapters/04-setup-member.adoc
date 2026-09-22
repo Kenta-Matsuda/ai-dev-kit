@@ -36,21 +36,21 @@ aidev init
 ✓ .aidev/policy.yaml is present
 ✓ LLM Wiki is present (.aidev/knowledge/)
 
-ℹ ready. Run "aidev status" any time, then start your AI tool (e.g. "claude") in this directory.
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[環境変数を設定] して、ターミナルを開き直します。
-* `tool config` 行に `newer templates available` → チームがまだ新しい kit のテンプレートを取り込んでいません。導入担当者が `aidev apply` して PR にします（xref:daily-apply[aidev apply]）。
-* `the LLM Wiki is not in this clone yet …` と聞かれたら → Enter（`N`）で断ります。導入担当者の PR がマージされてから `git pull` します。
+* `tool config` 行に `newer templates available` → チームがまだ新しい kit のテンプレートを取り込んでいません。導入担当者が `aidev sync tools` して PR にします（xref:daily-apply[aidev sync tools]）。
+* `the LLM Wiki is not in this clone yet …` と表示されたら → 導入担当者の PR がまだマージされていません。マージされてから `git pull` します。自分で生成しないでください。
 
 . 状態を確認します。
 +
 [source,bash]
 ----
-aidev status
+aidev check
 ----
 +
-2 行目が `✅ the Wiki describes the code this work is based on.` なら準備完了です。`⚠️` や `❌` の読み方は xref:daily-status[aidev status の読み方] を見てください。
+2 行目が `✅ the Wiki describes the code this work is based on.` なら準備完了です。`⚠️` や `❌` の読み方は xref:daily-check[aidev check の読み方] を見てください。
 
 . PKG のルートで Claude Code を起動します。
 +
@@ -64,4 +64,5 @@ claude
 === 次のステップ
 
 * 毎日の流れ → xref:daily[日常の使い方]
+* 承認済みの workflow を実行する → xref:daily-workflow[AI に仕事をさせる]
 * Claude が「書き込みを拒否された」と言ったら → xref:permissions[権限と安全性]

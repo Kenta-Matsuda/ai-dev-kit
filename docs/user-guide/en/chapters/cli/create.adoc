@@ -1,0 +1,111 @@
+[[cli-create]]
+== aidev create
+
+Writes the files of a workflow, agent or skill. It writes only; it neither runs nor submits. `policy` drafts the write-permission policy and places it with `--approve`.
+
+=== Synopsis
+
+[source,text]
+----
+aidev create workflow <name> [--describe "<text>"] [--force] [--dry-run] [--json]
+aidev create agent <name> [--describe "<text>"] [--force] [--dry-run] [--json]
+aidev create skill <name> [--force] [--dry-run] [--json]
+aidev create policy [--approve] [--force] [--dry-run] [--json]
+----
+
+=== Description
+
+[%autowidth.stretch,options="header"]
+|===
+|object |What it writes
+
+|`workflow <name>`
+|`.aidev/workflows/<name>/workflow.yaml`. By default an empty scaffold. `--describe "<text>"` has the workflow-creator agent (`tools.agent` in `aidev.yaml`) write the YAML and any `.aidev/agents/` and `.aidev/skills/` it needs. After writing it validates the result and shows it with the next steps
+
+|`agent <name>`
+|`.aidev/agents/<name>.md`. A scaffold with frontmatter (`name`, `description`, `tools`, `model: inherit`) and headings for the input/output contract, the steps and the stop conditions. `--describe "<text>"` has the agents-creator agent write it. After writing it checks that `name` in the frontmatter matches the file name
+
+|`skill <name>`
+|`.aidev/skills/<name>/SKILL.md`. A scaffold with frontmatter (`name`, `description`) and the steps. `--describe` is not available (a skill is a procedure written by a person)
+
+|`policy`
+|`.aidev/policy.candidate.yaml` (the write-permission policy candidate), built from `secrets_paths` in `aidev.yaml` and the kit defaults. `--approve` places it as `.aidev/policy.yaml` and deletes the candidate (a human decision). The same when a policy already exists (after changing `secrets_paths`, for instance). A candidate that protects less than the current policy stops with exit code 3 unless `--force` is given. Hand edits to the candidate have no effect; `writable` entries the team adds go into the placed `.aidev/policy.yaml` directly and into a PR (`create policy --approve` removes them). Takes no name
+|===
+
+Names are lowercase letters, digits and hyphens. The kit bundles only machinery agents (knowledge-builder, workflow-creator, agents-creator, permission-setting); the agents that do development work are the package's own. A PKG agent or skill takes precedence over a bundled one with the same name. After writing, edit the file, reference it from a workflow by name (`agents: [<name>]` / `skills: [<name>]`), and put it in a PR together with the workflow with `aidev submit workflow <workflow>`.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--describe <text>`
+|`workflow` / `agent`: describe it in plain language. The workflow-creator / agents-creator agent writes the file
+
+|`--approve`
+|`policy`: place the regenerated candidate as `.aidev/policy.yaml`
+
+|`--force`
+|`workflow` / `agent` / `skill`: overwrite an existing one. `policy`: place a candidate even if it protects less
+
+|`--dry-run`
+|Show what would be written; write nothing and start no agent
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Written. `--dry-run`
+
+|3
+|`policy --approve` detected a weakening (without `--force`)
+
+|1
+|Missing or bad object or name. It already exists and `--force` is absent. `--describe` given for `skill`. The agent failed (`--describe`). A name given to `policy`
+|===
+
+=== Examples
+
+Create one from plain language (package owner). workflow-creator writes the YAML and has agents-creator write the agents and skills it needs:
+
+[source,bash]
+----
+aidev create workflow e2e-tests --describe "Write Playwright tests for the main screens under tests/e2e/ and open a PR"
+----
+
+Create a PKG-specific agent and skill:
+
+[source,bash]
+----
+aidev create agent release-notes --describe "Draft release notes from the CHANGELOG and the PRs"
+aidev create skill deploy-checklist
+----
+
+[source,text]
+----
+✓ wrote .aidev/skills/deploy-checklist/SKILL.md from the template
+    edit it, reference it from a workflow (skills: [deploy-checklist]), then "aidev submit workflow <workflow>"
+----
+
+Draft the policy, read it, then place it:
+
+[source,bash]
+----
+aidev create policy
+git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
+aidev create policy --approve      # add --force when the diff weakens protection
+----
+
+=== See also
+
+* xref:permissions[Permissions and safety] — policy
+* xref:workflows-define[Putting the AI to work: Define], xref:workflows-agents-skills[Agents and skills]
+* xref:cli-submit[aidev submit], xref:cli-list[aidev list], xref:cli-remove[aidev remove]

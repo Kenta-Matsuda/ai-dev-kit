@@ -10,12 +10,14 @@ Every `aidev` command has its own page. Each page follows the same order: **Syno
 
 [source,text]
 ----
-aidev <command> [subcommand] [options] [arguments]
+aidev <verb> [<object>] [<name>] [options]
 ----
+
+A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`, `wiki`, and so on) and a name.
 
 * Options are `--name` or `--name <value>`. `--name=value` also works.
 * An option the command does not accept is an error (`unknown option: --bogus`, exit code 1).
-* `knowledge`, `agent`, `permission`, `workflow`, `evolve`, `hook` and `mcp` require a subcommand.
+* `run`, `create`, `submit`, `list`, `remove`, `update`, `configure`, `show`, `evolve`, `hook` and `mcp` require an object.
 * Commands for a PKG run inside the PKG clone (a subdirectory is fine; `init` needs the root).
 
 [[cli-common-options]]
@@ -51,10 +53,10 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |Success
 
 |1
-|General error (bad option, missing configuration, network failure, agent failure, and so on)
+|General error (bad option, missing configuration, invalid workflow, network failure, agent failure, and so on)
 
 |2
-|drift: the tool-configuration record (`.aidev/materialized.json`) is missing, conflict markers from `aidev apply` are unresolved, or the kit's hooks are gone from `.claude/settings.json`
+|drift: the tool-configuration record (`.aidev/materialized.json`) is missing, conflict markers from `aidev sync tools` are unresolved, or the kit's hooks are gone from `.claude/settings.json`
 
 |3
 |permission: the policy is missing or broken, or approval was refused
@@ -66,7 +68,28 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 [[cli-commands]]
 === Commands
 
-.Inside a PKG clone
+.Develop (inside a PKG clone)
+[%autowidth.stretch,options="header"]
+|===
+|Command |Summary
+
+|xref:cli-run[`aidev run workflow <name>`]
+|Run an approved workflow (development starts here)
+
+|xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
+|Create a workflow, agent or skill (writes the files only; runs nothing). `policy` drafts the write-permission policy and places it with `--approve`
+
+|xref:cli-submit[`aidev submit workflow <name>`]
+|Submit a workflow as a branch and a pull request (merge = approval)
+
+|xref:cli-list[`aidev list workflows\|agents\|skills`]
+|List workflows (with approval state), agents and skills
+
+|xref:cli-remove[`aidev remove workflow\|agent\|skill <name>`]
+|Remove a workflow, agent or skill (a referenced agent or skill is refused)
+|===
+
+.Maintain (inside a PKG clone)
 [%autowidth.stretch,options="header"]
 |===
 |Command |Summary
@@ -74,26 +97,11 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |xref:cli-init[`aidev init`]
 |Set up {project-name} in this PKG (interactive the first time, no questions afterwards)
 
-|xref:cli-status[`aidev status`]
-|Show the state of this PKG on one screen
-
 |xref:cli-check[`aidev check`]
-|Return the consistency check as an exit code (for CI)
+|Show the state of this PKG on one screen and return the consistency check as an exit code (for CI)
 
-|xref:cli-knowledge[`aidev knowledge update`]
-|Bring the LLM Wiki to HEAD and commit it as its own commit (a PR on the tracking branch)
-
-|xref:cli-agent[`aidev agent <list\|show\|run>`]
-|Start a bundled agent with the configured AI tool
-
-|xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
-|Place or show the write-permission policy
-
-|xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
-|Create and run approved scripts
-
-|xref:cli-apply[`aidev apply`]
-|Apply the kit's latest templates to this package (edited files are merged)
+|xref:cli-sync[`aidev sync tools\|wiki [<package>]`]
+|`tools`: take the kit's latest templates into this PKG (edited files are merged). `wiki`: bring the LLM Wiki to HEAD and commit it as its own commit
 |===
 
 .For this machine
@@ -102,19 +110,15 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |Command |Summary
 
 |xref:cli-update[`aidev update`]
-|Update the kit itself (CLI and templates); applying to a PKG is `aidev apply`
+|Update the kit itself (CLI and templates). `aidev sync tools` takes it into a PKG
 
-|xref:cli-doctor[`aidev doctor`]
-|Diagnose the environment of this machine and the PKG
+|xref:cli-doctor[`aidev doctor [<package>]`]
+|Diagnose the environment of this machine (Node.js, git, kit, AI tools). With `<package>`, also that PKG's state
 
-|xref:cli-eject[`aidev eject`]
-|Take the PKG out of kit management
-
-|xref:cli-uninstall[`aidev uninstall`]
-|Remove `aidev` from this machine
+|xref:cli-uninstall[`aidev uninstall [<package>] [--all]`]
+|Remove `aidev` from this machine. `<package>` takes that PKG out of kit management (the former eject)
 |===
 
-`aidev --help` also lists `aidev evolve`. It is for people developing {project-name} itself, on their own machine, and does not concern PKG users. Running it stops with `self-evolution is for ai-dev-kit developers only`.
 
 .Called by tools
 [%autowidth.stretch,options="header"]
@@ -122,36 +126,30 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |Command |Summary
 
 |xref:cli-hook[`aidev hook <…>`]
-|Internal command called by the AI tool's hooks
+|Internal command called by the AI tool's hooks (not listed by `aidev --help`)
 
-|xref:cli-mcp[`aidev mcp azure-devops`]
-|Internal command started from `.mcp.json`
 |===
+
+include::run.adoc[]
+
+include::create.adoc[]
+
+include::submit.adoc[]
+
+include::list.adoc[]
+
+include::remove.adoc[]
 
 include::init.adoc[]
 
-include::status.adoc[]
-
 include::check.adoc[]
 
-include::knowledge.adoc[]
-
-include::agent.adoc[]
-
-include::permission.adoc[]
-
-include::workflow.adoc[]
-
-include::apply.adoc[]
+include::sync.adoc[]
 
 include::update.adoc[]
 
 include::doctor.adoc[]
 
-include::eject.adoc[]
-
 include::uninstall.adoc[]
 
 include::hook.adoc[]
-
-include::mcp.adoc[]

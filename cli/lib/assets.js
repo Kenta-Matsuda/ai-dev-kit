@@ -4,7 +4,7 @@
  *
  * Each supported AI tool has a template tree in the kit checkout,
  * `templates/<tool>/`, laid out exactly as it lands in the PKG root. `aidev
- * init` copies the trees of the tools listed in `tools.default`; `aidev apply`
+ * init` copies the trees of the tools listed in `tools.default`; `aidev sync tools`
  * brings a PKG up to the templates of the kit that is installed now. Every
  * file that lands is committed in the PKG like any other file, so the whole
  * team shares one setup through git.

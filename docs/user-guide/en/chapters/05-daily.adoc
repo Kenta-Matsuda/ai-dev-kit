@@ -1,14 +1,16 @@
 [[daily]]
 == Daily use
 
-There are three things to do day to day. Look at `aidev status` before you start. After a commit, bring the Wiki to HEAD as the hook instructs (by hand: `aidev knowledge update`). Run `aidev update` when it says a newer kit is available.
+A member does three things every day. Look at `aidev check` before you start. After a commit, bring the Wiki along as the hook instructs (by hand: `aidev sync wiki`). Run the work handed to the AI with `aidev run workflow` and give the resulting PR to a reviewer.
 
-[[daily-status]]
-=== Reading aidev status
+Run `aidev update` when it says a newer kit is available. Taking the templates into the PKG (`aidev sync tools`) is a PR the package owner makes.
+
+[[daily-check]]
+=== Reading aidev check
 
 [source,bash]
 ----
-aidev status
+aidev check
 ----
 
 The symbol and sentence on the second line tell you what to do next.
@@ -20,17 +22,17 @@ The symbol and sentence on the second line tell you what to do next.
 |`✅ the Wiki describes HEAD (…)`
 |Nothing.
 
-|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev knowledge update"`
-|The code moved on and the Wiki is behind. Inside an AI tool session, the hook starts the update after your next commit. To do it now, run xref:daily-wiki[aidev knowledge update]. You can keep working.
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev sync wiki"`
+|The code moved on and the Wiki is behind. Inside an AI tool session, the hook starts the update after your next commit. To do it now, run xref:daily-wiki[aidev sync wiki]. You can keep working.
 
 |`⚠️ N page(s) still await prose regeneration`
-|Some pages have no text yet. Run `aidev knowledge update` (or follow the hook's instructions if they were shown).
+|Some pages have no text yet. Run `aidev sync wiki` (or follow the hook's instructions if they were shown).
 
 |`⚠️ origin/main has moved ahead …`
-|`main` is ahead of your working branch. Merge or rebase at a good moment, then run `aidev knowledge update`.
+|`main` is ahead of your working branch. Merge or rebase at a good moment, then run `aidev sync wiki`.
 
 |`⚠️ origin/main has new commits …`
-|Run `git fetch`, then `aidev status` again.
+|Run `git fetch`, then `aidev check` again.
 
 |`ℹ️ remote unverified …`
 |The remote could not be reached (offline, proxy). Your local state is consistent, so you can keep working.
@@ -41,7 +43,7 @@ The symbol and sentence on the second line tell you what to do next.
 
 For other messages, see xref:troubleshooting-status[Troubleshooting].
 
-In the lines that follow, check `tool config` and `policy`. `tool config` starts with `applied from kit <sha>` and adds how many files the team edited (`customised`) and whether newer templates exist (`newer templates available: "aidev apply"`). `CONFLICTS` means an `aidev apply` conflict is unresolved; `kit hooks missing` means the hooks are gone from `.claude/settings.json` (xref:daily-apply[aidev apply]). `policy` shows `placed (N protected paths)` plus any grants the team added per agent (`agent grants: …`). `missing` is fixed with `aidev permission configure --approve`.
+In the lines that follow, check `tool config` and `policy`. `tool config` starts with `applied from kit <sha>` and adds how many files the team edited (`customised`) and whether newer templates exist (`newer templates available: "aidev sync tools"`). `CONFLICTS` means an `aidev sync tools` conflict is unresolved; `kit hooks missing` means the hooks are gone from `.claude/settings.json` (xref:daily-apply[aidev sync tools]). If `policy` is `missing`, ask the package owner to run `aidev create policy --approve`.
 
 === How the Wiki is used
 
@@ -54,13 +56,13 @@ You never need to fix the Wiki by hand. If you find a mistake, fix the source (a
 
 The Wiki describes the HEAD of the branch you are on. Every time you commit code, the Wiki is committed on the same branch as a separate commit.
 
-When you run `git commit` inside an AI tool session, the hook updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent and then run `aidev knowledge update --no-agent`. Once the session has done that, `.aidev/knowledge/` is committed as `aidev: update Wiki for <sha12>`. If you try to end the session while the Wiki is behind, it is stopped once.
+When you run `git commit` inside an AI tool session, the hook updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent and then run `aidev sync wiki --no-agent`. Once the session has done that, `.aidev/knowledge/` is committed as `aidev: update Wiki for <sha12>`. If you try to end the session while the Wiki is behind, it is stopped once.
 
 To do it by hand, run the following. It stops if generation targets have uncommitted changes, so commit first.
 
 [source,bash]
 ----
-aidev knowledge update
+aidev sync wiki
 ----
 
 [source,text]
@@ -71,16 +73,32 @@ aidev knowledge update
 ✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
 ----
 
-Put the source commit and the Wiki commit in the same PR; the reviewer reviews both. Reviewing the generated Wiki is your responsibility. The kit never merges a PR.
+Put the source commit and the Wiki commit in the same PR; the reviewer looks at both.
 
 * If it stops part way, run the same command again.
 * Run on `main`, it commits on the branch `aidev/wiki-<sha12>` and opens a PR (xref:knowledge-publish[Updating on the tracking branch]).
 * In a team whose nightly pipeline updates the Wiki of `main` through a PR, receive it with `git pull` after the merge.
 
+[[daily-workflow]]
+=== Putting the AI to work
+
+Any member can run an approved workflow (a definition merged into `main`).
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow implement --task "Implement Work Item 1234"
+----
+
+The workflow runs on its own branch `aidev/<name>-<yyyymmddHHMM>` and opens a PR when it finishes (Azure DevOps; with `generic`, open it by hand from the pushed branch). **Your job ends when you hand the resulting PR to a reviewer.** Responsibility for the contents lies with the person who approved the workflow and the person who reviews the PR.
+
+A workflow that is not on `main`, or that differs from what is on `main`, cannot run. When you want the AI to do a new kind of work, talk to the package owner. See xref:workflows[Putting the AI to work] for details.
+
 [[daily-update]]
 === aidev update — update the kit
 
-When a newer kit exists, running a command in the package shows this:
+When a newer kit exists, running a command in the PKG shows this:
 
 [source,text]
 ----
@@ -88,24 +106,24 @@ When a newer kit exists, running a command in the package shows this:
   Update now, before running this command? (y/N):
 ----
 
-`y` updates the kit (the CLI and its templates). Package files do not change at this point. Once the update is in, the command you started is run again with the new CLI.
+`y` updates the kit (the CLI and its templates). PKG files do not change at this point. Once the update is in, the command you started is run again with the new CLI.
 
 [source,text]
 ----
 ✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
 ℹ 1 package(s) on this machine still carry templates from an older kit:
     C:\work\demo-pkg (applied 499f940)
-    Run "aidev apply" in each when convenient; it merges the new templates with your edits.
+    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.
 ----
 
 [[daily-apply]]
-=== aidev apply — take the new templates into the package
+=== aidev sync tools — take the new templates into the PKG
 
-After updating the kit, run this at the package root when it suits you. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the kit's changes.
+After updating the kit, the **package owner** runs this at the PKG root when it suits them and turns it into a PR. Members get the same state with `git pull` after the merge. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the kit's changes.
 
 [source,bash]
 ----
-aidev apply
+aidev sync tools
 ----
 
 [source,text]
@@ -117,8 +135,6 @@ aidev apply
     Review with "git diff", then commit so your team receives the update.
 ----
 
-Review the diff, commit it and open a PR. After the merge, the other members get the same state with just `git pull`.
-
 When the team and the kit changed the same lines, git-style conflict markers are written into the file and the command stops with exit code 2.
 
 [source,text]
@@ -127,9 +143,36 @@ When the team and the kit changed the same lines, git-style conflict markers are
     ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
 ----
 
-Resolve the markers, settle the content, run `aidev apply` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the kit version of every file instead, run `aidev apply --force`.
+Resolve the markers, settle the content, run `aidev sync tools` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the kit version of every file instead, run `aidev sync tools --force`.
+
+[[daily-review]]
+=== What reviewers do
+
+In development with {project-name}, the following PRs arrive. A human merges every one of them.
+
+[%autowidth.stretch,options="header"]
+|===
+|PR |Who creates it |What to look at
+
+|Adoption and setup PRs (`aidev.yaml`, `.aidev/policy.yaml`, `.claude/**` and so on)
+|Package owner
+|Is anything missing from `secrets_paths`? Has `writable` in the policy been widened? Does `aidev check` pass?
+
+|Source and Wiki PRs
+|Member
+|Besides the source changes, is the `aidev: update Wiki for <sha12>` commit included? Does the Wiki contradict the source anywhere? (Every statement in the Wiki links to the file it is based on.)
+
+|Workflow definition PRs (`aidev: workflow <name>`)
+|Package owner
+|**Merging is the approval.** `objective` (what to do), `scope.writable` (where it may write), `cost.max_usd` and `limits` (how much, how many minutes), the contents of `until` and `command`. The referenced `.aidev/agents/` and `.aidev/skills/` files are in the same PR. → xref:workflows-review[Reviewing workflow pull requests]
+
+|Workflow result PRs
+|Member (the one who ran it)
+|The PR body gives the workflow name, the run id, the starting commit and the cost. Does the diff stay inside `scope.writable`? Do the tests pass? Does it match the `objective`?
+|===
 
 === Related
 
-* xref:knowledge[The LLM Wiki] — reading the state, what happens after a commit, resuming
-* xref:cli-status[aidev status], xref:cli-knowledge[aidev knowledge], xref:cli-update[aidev update], xref:cli-apply[aidev apply]
+* xref:knowledge[LLM Wiki] — reading the state, what happens after a commit, resuming
+* xref:workflows[Putting the AI to work] — defining, submitting, running and reviewing workflows
+* xref:cli-check[aidev check], xref:cli-sync-wiki[aidev sync wiki], xref:cli-run[aidev run workflow], xref:cli-update[aidev update], xref:cli-sync-tools[aidev sync tools]

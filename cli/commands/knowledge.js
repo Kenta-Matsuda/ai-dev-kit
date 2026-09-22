@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev knowledge update` — bring the LLM Wiki to HEAD.
+ * `aidev sync wiki` — bring the LLM Wiki to HEAD.
  *
  * The Wiki describes one commit: the HEAD of the branch it is committed on.
  * This command makes that true again after the code moved, in three parts
@@ -24,7 +24,7 @@
  *
  * The hooks call the structural part on their own (`plan`) and leave the
  * prose to a subagent started by the interactive tool; the final
- * `aidev knowledge update --no-agent` then folds the reports and commits.
+ * `aidev sync wiki --no-agent` then folds the reports and commits.
  */
 
 const fs = require('fs');
@@ -65,7 +65,7 @@ const FLAG_HELP = {
 
 const WORKTREE_REL = '.aidev/cache/wiki-worktree';
 const PLAN_REL = `${inventory.CACHE_DIR_REL}/plan.json`;
-const COMMAND = 'aidev knowledge update';
+const COMMAND = 'aidev sync wiki';
 
 /** The branch a published Wiki update lands on. */
 function wikiBranchName(targetSha) {
@@ -145,7 +145,7 @@ function removePlanFile(repoRoot) {
 
 /**
  * The update proper, in `root` (the clone, or a worktree). Returns
- * { code, json, plan, remaining, committed, commitSha }.
+ * { code, json, plan, remaining, committed, commitSha, diff }.
  *
  * `commit` false leaves the result in the working tree (init, hooks, the
  * publish path which commits on its own branch). `leaseHeld` true means the
@@ -468,7 +468,10 @@ async function updateInPlace(ctx, config, root, {
       plan: remaining > 0 ? PLAN_REL : null,
     });
   }
-  return { code: commandOk ? EXIT.OK : EXIT.GENERAL, json, plan, remaining, committed, commitSha, structuredOk, agentResult };
+  return {
+    code: commandOk ? EXIT.OK : EXIT.GENERAL, json, plan, remaining, committed, commitSha, structuredOk, agentResult,
+    diff: counts(diff),
+  };
 }
 
 // --------------------------------------------------------------- publishing
@@ -620,14 +623,18 @@ async function publish(ctx, config, { silent = false } = {}) {
     if (say) say.ok(`${reused ? 'reusing' : 'created'} worktree at ${WORKTREE_REL} (${stateMod.short(targetSha)})`);
     if (say) say.table([['publish branch', prBranch], ['pull request target', config.sync.pr.target_branch]]);
 
-    const r = await updateInPlace({ ...ctx, repoRoot: work }, config, work, { silent: true, commit: false, leaseHeld: true, human: !!say });
+    // Human runs see the structural summary, the agent's start line and its
+    // heartbeat: that is the only progress a publish shows while the builder
+    // runs. JSON runs keep the inner update silent so the command emits one
+    // document, the publish result below.
+    const r = await updateInPlace({ ...ctx, repoRoot: work }, config, work, { silent: silent || !human, commit: false, leaseHeld: true, human });
     if (r.nothingToDo) {
       removeWorktree(repoRoot);
       leases.releaseSyncLease(repoRoot);
       if (!human) ui.json({ ok: true, noop: true, targetSha, branch: prBranch });
       return EXIT.OK;
     }
-    const diff = r.json?.diff || { added: 0, modified: 0, removed: 0, renamed: 0 };
+    const diff = r.diff || { added: 0, modified: 0, removed: 0, renamed: 0 };
 
     let pr = { attempted: false };
     let out = { committed: false, pushed: false };
@@ -734,15 +741,7 @@ async function update(ctx, config, { silent = false, commit = true } = {}) {
   return updateInPlace(ctx, config, repoRoot, { silent, commit, human });
 }
 
-async function run(ctx) {
-  const sub = ctx.positionals[0];
-  if (sub !== 'update') throw new AidevError(`unknown subcommand: aidev knowledge ${sub || ''} (expected: update)`);
-  const config = cfgMod.loadConfig(ctx.repoRoot);
-  return (await update(ctx, config)).code;
-}
-
 module.exports = {
-  run, update, updateInPlace, writePlanFile, readPlanFile, removePlanFile, commitWiki, wikiBranchName, commitMessage,
+  update, updateInPlace, writePlanFile, readPlanFile, removePlanFile, commitWiki, wikiBranchName, commitMessage,
   operationKey, streamId, FLAGS, FLAG_HELP, WORKTREE_REL, PLAN_REL, COMMAND,
-  summary: 'LLM WikiをHEADに追従させ、別コミットとして積む',
 };

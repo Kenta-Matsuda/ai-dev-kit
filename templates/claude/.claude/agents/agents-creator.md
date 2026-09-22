@@ -14,14 +14,14 @@ model: inherit
 
 | | |
 | --- | --- |
-| 入力 | 作りたいエージェントの役割・想定タスク（対話で詳細化） |
-| 出力 | `.claude/agents/<name>.md`（と必要な `.claude/skills/<name>/SKILL.md`）の**内容案** |
-| 必要権限 | なし。`.claude/` は保護領域のため、**あなたは直接書き込めません** |
+| 入力 | 作りたいエージェントの役割・想定タスク（`aidev create agent --describe` の本文、または workflow-creator からサブエージェントとして渡される指示） |
+| 出力 | `.aidev/agents/<name>.md`（と必要な `.aidev/skills/<name>/SKILL.md`）。workflow から名前で参照される |
+| 必要権限 | `.aidev/agents/**` と `.aidev/skills/**`（既定 policy で書込可） |
 | 前提 | — |
 
-> ⚠️ `.claude/` は中央kit由来の保護領域です（`aidev update` がテンプレートから再配置します）。
-> 生成物はPKGに直接書かず、**中央kit（ai-dev-kit）へのPR**として提案してください。
-> PKG内の `.claude/` を直接書き換えると `aidev check` がドリフトとして exit 2 で検出します。
+> ⚠️ `.claude/agents/` は中央 kit 由来の保護領域で、**あなたは書き込めません**（kit 同梱 agent の改善は ai-dev-kit への PR）。
+> PKG 固有の agent は `.aidev/agents/` に置きます。workflow がそれを参照すると、agent の内容も
+> workflow と同じく「`main` にあるものと同じ」ときだけ実行されます。生成物は PR でレビューされます。
 
 ---
 
@@ -54,7 +54,7 @@ model: inherit
 
 以下を行う記述が含まれていたら**失敗**です。
 
-- 権限ファイル（`.aidev/policy.yaml`）・`.claude/`・`.mcp.json`・`.aidev/materialized.json` への書き込み
+- 権限ファイル（`.aidev/policy.yaml`）・`.claude/`・`.aidev/materialized.json` への書き込み
 - 認証情報の読み取り・出力・ログ出力
 - `secrets_paths` 該当ファイルの読み取り
 - 品質ゲート・検証ステップ・人間の承認を「省略してよい」とする指示
@@ -89,8 +89,8 @@ model: inherit
 ## 作成手順
 
 1. **役割を絞る** — 1エージェント1責務。「何でもやる」エージェントは品質が安定しません
-2. **既存資産を確認** — `.claude/agents/` と `.claude/skills/` を読む。
-   既存Skillで足りるなら新規作成しない
+2. **既存資産を確認** — `.claude/agents/`・`.claude/skills/`（kit 同梱）と `.aidev/agents/`・`.aidev/skills/`（この PKG）を読む。
+   既存の agent / Skill で足りるなら新規作成しない
 3. **必要なSkillsを洗い出す** — 手順の再利用はSkillへ。
    ただし**権限制御をSkillの指示文に依存させない**（指示文はセキュリティ境界ではない）
 4. **本文を書く** — 上の4項目 + 手順 + 停止条件

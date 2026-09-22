@@ -1,0 +1,57 @@
+[[automation]]
+== Automation
+
+CI does two things: it stops the merge of every PR with `aidev check`, and at night it brings the Wiki of `main` up to date. In both cases a human merges the pull request. Automation that puts the AI to work is a xref:workflows[workflow].
+
+[[automation-ci]]
+=== CI
+
+Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and change `AIDEV_KIT_URL` to the URL of your central kit. CI clones the kit and runs `node cli/bin/aidev.js` directly, so `aidev` does not need to be installed. The package owner places them in the PKG.
+
+[%autowidth.stretch,options="header"]
+|===
+|File |Purpose
+
+|`pipelines/azure-pipelines-check.yml`
+|Runs `aidev check` on every PR. Make it a **required build validation** in the branch policy of `main`. Without it, an edit that removes the hooks could be merged.
+
+|`pipelines/azure-pipelines-wiki.yml`
+|Runs `aidev sync wiki --branch` on `main` daily at 18:00 UTC. It picks up what was merged without a Wiki, commits on the branch `aidev/wiki-<sha12>` and opens a PR. It publishes only when the prose is complete, so the pipeline needs the agent tool (`tools.agent`, Claude Code by default) and its credentials. Set the variables `AZURE_DEVOPS_PAT`, `ANTHROPIC_API_KEY`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`. It does nothing when the Wiki already describes the HEAD of `main`.
+|===
+
+When developers bring the Wiki to HEAD with every commit, this pipeline is a safety net.
+
+[[automation-branch-policy]]
+=== Branch policy
+
+A workflow is approved by being merged into `main`, so the branch policy of `main` is what approval really is. Set up the following.
+
+* Make the `aidev check` pipeline a required build validation
+* Add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/policy.yaml` and `aidev.yaml`
+* Forbid direct pushes to `main`
+
+=== Exit codes of aidev check
+
+The exit code of `aidev check` is the contract with CI.
+
+[%autowidth.stretch,options="header"]
+|===
+|Exit code |Meaning
+
+|0
+|Consistent. Warnings (Wiki behind HEAD, prose pending, `main` moved ahead) still return 0; `--strict` turns them into 2.
+
+|2
+|The tool configuration record (`.aidev/materialized.json`) is missing, `aidev sync tools` conflict markers remain, or the kit's hooks are gone from `.claude/settings.json`. Files the team merely edited still return 0.
+
+|3
+|`.aidev/policy.yaml` is missing or broken.
+
+|4
+|The Wiki is missing or broken, or the lease of a publish to the tracking branch expired and was left behind.
+|===
+
+=== Related
+
+* xref:cli-check[aidev check], xref:cli-sync-wiki[aidev sync wiki]
+* xref:workflows[Putting the AI to work]

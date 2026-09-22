@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Tests for the two internal-facing commands: `aidev mcp` and `aidev eject`.
+ * Tests for the two internal-facing commands: `aidev mcp` and `aidev uninstall <package>`.
  *
  * Both are run through the process boundary, because both are invoked that way
  * in production — `.mcp.json` spawns `aidev mcp`, and eject is a human action
@@ -39,8 +39,6 @@ function aidev(args, { cwd, env = {} } = {}) {
   }
 }
 
-/** The fixture's auth env var, set so mcp gets past its credential check. */
-const WITH_PAT = { AZURE_DEVOPS_PAT: 'fake-pat-for-tests' };
 
 /** Is this clone in the AIDEV_HOME registry? */
 function registered(root) {
@@ -48,119 +46,12 @@ function registered(root) {
 }
 
 function run() {
-  suite('cli: mcp');
-
-  test('a missing server name lists the known ones', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['mcp'], { cwd: fx.root });
-      eq(r.code, EXIT.GENERAL, 'exit');
-      ok(/azure-devops/.test(r.stderr), `names the options: ${r.stderr}`);
-    } finally { fx.cleanup(); }
-  });
-
-  test('an unknown server name is rejected', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['mcp', 'not-a-server'], { cwd: fx.root });
-      eq(r.code, EXIT.GENERAL, 'exit');
-      ok(/unknown mcp server/.test(r.stderr), 'message');
-    } finally { fx.cleanup(); }
-  });
-
-  test('a missing PAT fails before spawning, naming the variable', () => {
-    const fx = makeRepo();
-    try {
-      // Failing here rather than at the first tool call is the point: the
-      // operator gets a cause instead of a broken MCP connection.
-      const r = aidev(['mcp', 'azure-devops', '--dry-run'],
-        { cwd: fx.root, env: { AZURE_DEVOPS_PAT: '' } });
-      eq(r.code, EXIT.GENERAL, 'exit');
-      ok(/AZURE_DEVOPS_PAT/.test(r.stderr), 'names the env var');
-    } finally { fx.cleanup(); }
-  });
-
-  test('--json reports the resolved launch and never the credential', () => {
-    const fx = makeRepo();
-    try {
-      const r = aidev(['mcp', 'azure-devops', '--json'], { cwd: fx.root, env: WITH_PAT });
-      eq(r.code, EXIT.OK, 'exit');
-      const d = JSON.parse(r.stdout);
-      eq(d.organization, 'my-org', 'organization from aidev.yaml');
-      eq(d.project, 'my-project', 'project from aidev.yaml');
-      eq(d.authResolved, true, 'reports that auth resolved');
-      // The whole document, not just the known fields: a future addition that
-      // leaked the value would fail here.
-      ok(!r.stdout.includes(WITH_PAT.AZURE_DEVOPS_PAT), 'the PAT value appears nowhere in the output');
-    } finally { fx.cleanup(); }
-  });
-
-  test('the server version is pinned, not @latest', () => {
-    const fx = makeRepo();
-    try {
-      const d = JSON.parse(aidev(['mcp', 'azure-devops', '--json'],
-        { cwd: fx.root, env: WITH_PAT }).stdout);
-      ok(!/@latest/.test(d.package), `pinned: ${d.package}`);
-      ok(/@\d+\.\d+\.\d+$/.test(d.package), `exact version: ${d.package}`);
-      // A PKG's toolchain must not move without a reviewed kit commit, so the
-      // pin has to survive into the actual argv too.
-      ok(d.args.some((a) => a === d.package), `argv carries the pinned spec: ${d.args.join(' ')}`);
-    } finally { fx.cleanup(); }
-  });
-
-  test('the PAT is never placed on the command line', () => {
-    const fx = makeRepo();
-    try {
-      const d = JSON.parse(aidev(['mcp', 'azure-devops', '--json'],
-        { cwd: fx.root, env: WITH_PAT }).stdout);
-      // argv is world-readable through the process table; the credential goes
-      // through the child environment only.
-      ok(!d.args.some((a) => String(a).includes(WITH_PAT.AZURE_DEVOPS_PAT)), 'no PAT in argv');
-    } finally { fx.cleanup(); }
-  });
-
-  test('the base64 form of the PAT never leaks either', () => {
-    // The server wants base64("<user>:<pat>"). Base64 is encoding, not
-    // encryption, so the encoded value is exactly as sensitive as the raw one.
-    const fx = makeRepo();
-    try {
-      const r = aidev(['mcp', 'azure-devops', '--json'], { cwd: fx.root, env: WITH_PAT });
-      const encoded = Buffer.from(`aidev:${WITH_PAT.AZURE_DEVOPS_PAT}`, 'utf8').toString('base64');
-      ok(!r.stdout.includes(encoded), 'the encoded credential appears nowhere in --json');
-      ok(!r.stderr.includes(encoded), 'nor on stderr');
-      // The bare PAT, base64'd without the user prefix, must not appear either.
-      const bare = Buffer.from(WITH_PAT.AZURE_DEVOPS_PAT, 'utf8').toString('base64');
-      ok(!r.stdout.includes(bare), 'no bare base64 PAT');
-    } finally { fx.cleanup(); }
-  });
-
-  test('the launch matches the published server contract', () => {
-    // microsoft/azure-devops-mcp takes the organization POSITIONALLY and has no
-    // --organization/--project flags; passing them makes the server exit at
-    // startup. Pinned here because it is a contract with someone else's CLI.
-    const fx = makeRepo();
-    try {
-      const d = JSON.parse(aidev(['mcp', 'azure-devops', '--json'],
-        { cwd: fx.root, env: WITH_PAT }).stdout);
-      ok(!d.args.includes('--organization'), `no --organization flag: ${d.args.join(' ')}`);
-      ok(!d.args.includes('--project'), `no --project flag: ${d.args.join(' ')}`);
-      const pkgAt = d.args.indexOf(d.package);
-      eq(d.args[pkgAt + 1], 'my-org', 'organization is positional, right after the package spec');
-      // Without this the server defaults to interactive browser sign-in, which
-      // in a headless session fails as an opaque error at the first tool call.
-      const authAt = d.args.indexOf('--authentication');
-      ok(authAt > -1, `authentication mode is explicit: ${d.args.join(' ')}`);
-      eq(d.args[authAt + 1], 'pat', 'non-interactive PAT mode');
-      eq(d.credentialEnv, 'PERSONAL_ACCESS_TOKEN', 'names the variable the server actually reads');
-    } finally { fx.cleanup(); }
-  });
-
   suite('cli: eject');
 
   test('--dry-run writes nothing and removes nothing', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['eject', '--dry-run'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--dry-run'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       ok(fs.existsSync(cfgMod.lockPath(fx.root)), '.aidev/materialized.json still present');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy still present');
@@ -171,7 +62,7 @@ function run() {
   test('ejecting without --yes refuses', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['eject'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'exit');
       ok(/--yes/.test(r.stderr), 'names the confirmation flag');
       ok(fs.existsSync(cfgMod.lockPath(fx.root)), 'nothing was removed');
@@ -181,7 +72,7 @@ function run() {
   test('--yes removes the control surface and writes the marker', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['eject', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       ok(!fs.existsSync(cfgMod.lockPath(fx.root)), '.aidev/materialized.json removed');
       ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy removed');
@@ -197,7 +88,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'workflows', 'mine.yaml'), 'name: mine\n');
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, 'src', 'api', 'auth.ts')), 'PKG files intact');
       ok(fs.existsSync(path.join(fx.root, 'config', 'secrets', 'key.pem')), 'even the secret ones');
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge', 'manifest.json')), 'Wiki intact');
@@ -213,7 +104,7 @@ function run() {
     try {
       home.registerPackage(fx.root, { name: 'my-pkg' }, HOME_ENV);
       ok(registered(fx.root), 'registered first');
-      eq(aidev(['eject', '--yes'], { cwd: fx.root }).code, EXIT.OK, 'exit');
+      eq(aidev(['uninstall', '.', '--yes'], { cwd: fx.root }).code, EXIT.OK, 'exit');
       ok(!registered(fx.root), 'no longer in the registry, so "aidev update" stops listing it');
     } finally { fx.cleanup(); }
   });
@@ -222,7 +113,7 @@ function run() {
     // The spec's actual promise: 以後 check 対象外.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit 0');
       ok(/eject/i.test(r.stdout), `says so: ${r.stdout}`);
@@ -232,7 +123,7 @@ function run() {
   test('check --json stays parseable after ejecting', () => {
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       const d = JSON.parse(aidev(['check', '--no-remote', '--json'], { cwd: fx.root }).stdout);
       eq(d.ejected, true, 'flagged');
       eq(d.exitCode, EXIT.OK, 'exitCode 0');
@@ -244,7 +135,7 @@ function run() {
     // detectDrift reports noLock on every run.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       write(path.join(fx.root, 'CLAUDE.md'), '# hand-maintained now\n');
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'still 0');
     } finally { fx.cleanup(); }
@@ -253,7 +144,7 @@ function run() {
   test('eject unwires kit hooks but keeps team-owned ones', () => {
     const fx = makeRepo({ withHooks: true });
     try {
-      aidev(['eject', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       const all = JSON.stringify(s);
       ok(!/aidev(?:\.js)?\s+hook/.test(all), `no kit hooks remain: ${all}`);
@@ -267,7 +158,7 @@ function run() {
     // live hooks and no policy would be maximally locked, not unmanaged.
     const fx = makeRepo({ withHooks: true });
     try {
-      aidev(['eject', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy gone');
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       ok(!/aidev(?:\.js)?\s+hook/.test(JSON.stringify(s)), 'and no hook is left to consult it');
@@ -281,7 +172,7 @@ function run() {
     try {
       const before = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       ok(Object.keys(before.hooks || {}).length > 0, 'the real template wires hooks');
-      const r = aidev(['eject', '--yes', '--keep-assets', '--json'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes', '--keep-assets', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, r.stderr);
       ok(JSON.parse(r.stdout).hooksRemoved.length >= 4, 'every shipped hook was unwired');
       const after = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
@@ -292,8 +183,8 @@ function run() {
   test('a second eject is a no-op, not a failure', () => {
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
-      const r = aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'idempotent');
       ok(/already/i.test(r.stdout), 'says it was already ejected');
     } finally { fx.cleanup(); }
@@ -302,7 +193,7 @@ function run() {
   test('eject refuses a directory that was never kit-managed', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-bare-'));
     try {
-      const r = aidev(['eject', '--yes'], { cwd: dir });
+      const r = aidev(['uninstall', '.', '--yes'], { cwd: dir });
       eq(r.code, EXIT.GENERAL, 'exit');
       ok(/does not look kit-managed/.test(r.stderr), 'message');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -315,7 +206,7 @@ function run() {
         schemaVersion: 1, kind: 'sync', targetSha: 'c'.repeat(40), originalSha: fx.pkgSha,
         acquiredAt: new Date().toISOString(), ttlMinutes: 120,
       }));
-      const r = aidev(['eject', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
       ok(/publish/i.test(r.stderr), 'explains why');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'nothing removed');
@@ -325,9 +216,8 @@ function run() {
   test('--keep-assets leaves CLAUDE.md and .mcp.json in place', () => {
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, 'CLAUDE.md')), 'CLAUDE.md kept');
-      ok(fs.existsSync(path.join(fx.root, '.mcp.json')), '.mcp.json kept');
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'still ejected');
     } finally { fx.cleanup(); }
   });
@@ -337,9 +227,8 @@ function run() {
     // is no longer installed.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       ok(!fs.existsSync(path.join(fx.root, 'CLAUDE.md')), 'CLAUDE.md removed');
-      ok(!fs.existsSync(path.join(fx.root, '.mcp.json')), '.mcp.json removed');
       ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')), 'settings.json removed');
     } finally { fx.cleanup(); }
   });
@@ -366,7 +255,7 @@ function run() {
     // rather than judged at the git toplevel.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       fs.rmSync(cfgMod.configPath(fx.root), { force: true });
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'still exempt');
@@ -379,7 +268,7 @@ function run() {
     // would still break the pipeline.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       const r = aidev(['doctor'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `doctor exit 0: ${r.stdout}`);
     } finally { fx.cleanup(); }
@@ -389,7 +278,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.claude', 'settings.json'), '{ not json');
-      const r = aidev(['eject', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
       ok(/not valid JSON/.test(r.stderr), 'message');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'nothing removed');
@@ -401,7 +290,7 @@ function run() {
     // unwired hooks used to print a line before the document on a hooked repo.
     const fx = makeRepo({ withHooks: true });
     try {
-      const r = aidev(['eject', '--yes', '--json'], { cwd: fx.root });
+      const r = aidev(['uninstall', '.', '--yes', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       const d = JSON.parse(r.stdout);
       eq(d.ejected, true, 'flagged');
@@ -415,7 +304,7 @@ function run() {
     // as CI's on Linux, and match the policy globs, which are all "/"-shaped.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       const m = JSON.parse(fs.readFileSync(cfgMod.ejectMarkerPath(fx.root), 'utf8'));
       ok(!m.removed.some((r) => r.includes('\\')), `no backslashes: ${JSON.stringify(m.removed)}`);
       ok(m.removed.includes('.aidev/policy.yaml'), `policy recorded portably: ${JSON.stringify(m.removed)}`);
@@ -428,7 +317,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'cache', 'remote-check.json'), '{}\n');
-      aidev(['eject', '--yes', '--force'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes', '--force'], { cwd: fx.root });
       ok(!fs.existsSync(path.join(fx.root, '.aidev', 'cache')), 'cache removed');
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge')), '.aidev/knowledge kept');
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'marker in place');
@@ -442,7 +331,7 @@ function run() {
     // repo, so CI went green on a repository nobody was enforcing.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'ejected first');
       const r = aidev(['init', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `init exit: ${r.stderr}`);
@@ -459,7 +348,7 @@ function run() {
     // one, so check must say so (exit 3) rather than pass.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       aidev(['init', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'a candidate awaits approval');
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
@@ -470,7 +359,7 @@ function run() {
   test('init --approve places the policy straight away on re-adoption', () => {
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       eq(aidev(['init', '--yes', '--approve'], { cwd: fx.root }).code, EXIT.OK, 'init');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy placed');
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'fully managed again');
@@ -480,7 +369,7 @@ function run() {
   test('init --dry-run does not clear the marker', () => {
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       aidev(['init', '--yes', '--dry-run'], { cwd: fx.root });
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'still ejected after a dry run');
     } finally { fx.cleanup(); }
@@ -491,11 +380,14 @@ function run() {
     // graded the absent config and policy as blocking failures.
     const fx = makeRepo();
     try {
-      aidev(['eject', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
       fs.rmSync(cfgMod.configPath(fx.root), { force: true });
       const r = aidev(['doctor'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `doctor exit 0: ${r.stdout}`);
-      ok(/ejected/i.test(r.stdout), 'explains why nothing is expected');
+      ok(!/aidev\.yaml/.test(r.stdout), 'doctor no longer looks inside the package');
+      const c = aidev(['check'], { cwd: fx.root });
+      eq(c.code, EXIT.OK, `check exit 0: ${c.stdout}`);
+      ok(/ejected/i.test(c.stdout), 'check explains why nothing is expected');
     } finally { fx.cleanup(); }
   });
 }

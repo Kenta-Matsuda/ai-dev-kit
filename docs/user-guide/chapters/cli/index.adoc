@@ -10,12 +10,14 @@
 
 [source,text]
 ----
-aidev <command> [subcommand] [options] [arguments]
+aidev <verb> [<object>] [<name>] [options]
 ----
+
+コマンドは動詞で始まり、対象（`workflow`、`policy`、`kit`、`wiki` など）と名前が続きます。
 
 * オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
 * 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
-* `knowledge`、`agent`、`permission`、`workflow`、`evolve`、`hook`、`mcp` はサブコマンドが必須です。
+* `run`、`create`、`submit`、`list`、`remove`、`update`、`configure`、`show`、`evolve`、`hook`、`mcp` は対象（object）が必須です。
 * PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。
 
 [[cli-common-options]]
@@ -51,10 +53,10 @@ aidev <command> [subcommand] [options] [arguments]
 |成功
 
 |1
-|一般エラー（不正なオプション、設定不備、ネットワーク失敗、agent の失敗など）
+|一般エラー（不正なオプション、設定不備、不正な workflow、ネットワーク失敗、agent の失敗など）
 
 |2
-|drift: ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev apply` の衝突マーカーが未解消、または `.claude/settings.json` から kit の hooks が消えている
+|drift: ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev sync tools` の衝突マーカーが未解消、または `.claude/settings.json` から kit の hooks が消えている
 
 |3
 |permission: policy が無い・壊れている、または承認を拒否した
@@ -66,7 +68,28 @@ aidev <command> [subcommand] [options] [arguments]
 [[cli-commands]]
 === コマンド一覧
 
-.PKG の clone の中で使う
+.開発する（PKG の clone の中で）
+[%autowidth.stretch,options="header"]
+|===
+|コマンド |要約
+
+|xref:cli-run[`aidev run workflow <name>`]
+|承認済みの workflow を実行する（開発はここから）
+
+|xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
+|workflow・agent・skill を作る（書くだけで、実行はしない）。`policy` は書き込み権限 policy の候補を作り `--approve` で置く
+
+|xref:cli-submit[`aidev submit workflow <name>`]
+|workflow をブランチと PR にして提出する（マージ = 承認）
+
+|xref:cli-list[`aidev list workflows\|agents\|skills`]
+|workflow（承認状態）・agent・skill の一覧
+
+|xref:cli-remove[`aidev remove workflow\|agent\|skill <name>`]
+|workflow・agent・skill を削除する（参照されている agent・skill は拒否）
+|===
+
+.保守する（PKG の clone の中で）
 [%autowidth.stretch,options="header"]
 |===
 |コマンド |要約
@@ -74,26 +97,11 @@ aidev <command> [subcommand] [options] [arguments]
 |xref:cli-init[`aidev init`]
 |この PKG に {project-name} を導入する（初回は対話、2 人目以降は質問なし）
 
-|xref:cli-status[`aidev status`]
-|この PKG の状態を 1 画面で表示する
-
 |xref:cli-check[`aidev check`]
-|整合性を終了コードで返す（CI 用）
+|この PKG の状態を 1 画面で表示し、整合性を終了コードで返す（CI 用）
 
-|xref:cli-knowledge[`aidev knowledge update`]
-|LLM Wiki を HEAD に追従させ、別コミットとして積む（tracking branch 上では PR）
-
-|xref:cli-agent[`aidev agent <list\|show\|run>`]
-|同梱 agent を設定済みの AI ツールで起動する
-
-|xref:cli-permission[`aidev permission <configure\|reconfigure\|show>`]
-|書き込み権限 policy を置く・見る
-
-|xref:cli-workflow[`aidev workflow <new\|approve\|run\|list>`]
-|承認済みスクリプトを作る・実行する
-
-|xref:cli-apply[`aidev apply`]
-|kit の最新テンプレートをこの PKG に適用する（編集済みはマージ）
+|xref:cli-sync[`aidev sync tools\|wiki [<package>]`]
+|`tools`: kit の最新テンプレートをこの PKG に取り込む（編集済みはマージ）。`wiki`: LLM Wiki を HEAD に追従させ、別コミットとして積む
 |===
 
 .この端末に対して使う
@@ -102,19 +110,15 @@ aidev <command> [subcommand] [options] [arguments]
 |コマンド |要約
 
 |xref:cli-update[`aidev update`]
-|kit 本体（CLI とテンプレート）を更新する。PKG への適用は `aidev apply`
+|kit 本体（CLI とテンプレート）を更新する。PKG への取り込みは `aidev sync tools`
 
-|xref:cli-doctor[`aidev doctor`]
-|端末と PKG の実行環境を診断する
+|xref:cli-doctor[`aidev doctor [<package>]`]
+|端末の実行環境（Node.js、git、kit、AI ツール）を診断する。`<package>` を渡すとその PKG の状態も
 
-|xref:cli-eject[`aidev eject`]
-|kit の管理から外す
-
-|xref:cli-uninstall[`aidev uninstall`]
-|この端末から `aidev` を消す
+|xref:cli-uninstall[`aidev uninstall [<package>] [--all]`]
+|この端末から `aidev` を消す。`<package>` はその PKG を kit の管理から外す（旧 eject）
 |===
 
-`aidev --help` にはこのほかに `aidev evolve` が載っています。{project-name} 本体を開発する人が自分の端末でだけ使う機能で、PKG の利用者には関係ありません。実行しても `self-evolution is for ai-dev-kit developers only` で止まります。
 
 .ツールから呼ばれる
 [%autowidth.stretch,options="header"]
@@ -122,36 +126,30 @@ aidev <command> [subcommand] [options] [arguments]
 |コマンド |要約
 
 |xref:cli-hook[`aidev hook <…>`]
-|AI ツールの hook から呼ばれる内部コマンド
+|AI ツールの hook から呼ばれる内部コマンド（`aidev --help` には出ない）
 
-|xref:cli-mcp[`aidev mcp azure-devops`]
-|`.mcp.json` から起動される内部コマンド
 |===
+
+include::run.adoc[]
+
+include::create.adoc[]
+
+include::submit.adoc[]
+
+include::list.adoc[]
+
+include::remove.adoc[]
 
 include::init.adoc[]
 
-include::status.adoc[]
-
 include::check.adoc[]
 
-include::knowledge.adoc[]
-
-include::agent.adoc[]
-
-include::permission.adoc[]
-
-include::workflow.adoc[]
-
-include::apply.adoc[]
+include::sync.adoc[]
 
 include::update.adoc[]
 
 include::doctor.adoc[]
 
-include::eject.adoc[]
-
 include::uninstall.adoc[]
 
 include::hook.adoc[]
-
-include::mcp.adoc[]

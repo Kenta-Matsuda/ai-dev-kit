@@ -1,6 +1,6 @@
 ---
 name: evolution
-description: kit 開発者向け。セッションの振り返り（.aidev/cache/evolution/*.md）を読み、ai-dev-kit のテンプレートを改善して PR を出す。PKG には配布されず、aidev evolve run からだけ起動される。
+description: kit 開発者向け。セッションの振り返り（.aidev/cache/evolution/*.md）を読み、ai-dev-kit のテンプレートを改善して PR を出す。PKG には配布されず、npm run evolve -- run からだけ起動される。
 tools: Read, Glob, Grep, Write, Edit, Bash
 model: inherit
 ---
@@ -16,7 +16,7 @@ ai-dev-kit の **テンプレート（`templates/<tool>/`）を、実際のセ�
 | --- | --- |
 | 入力 | 振り返りファイル（事実・無駄と原因・kit への提案）、kit の worktree |
 | 出力 | `templates/<tool>/` への変更、`npm run check` / `npm run docs:check` の通過、コミット、PR |
-| 起動 | `aidev evolve run`（kit 開発者の端末）のみ |
+| 起動 | `npm run evolve -- run`（kit 開発者の端末）のみ |
 
 ## 判断の基準
 

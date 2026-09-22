@@ -8,25 +8,31 @@
  *   2. Secrets and protected paths         → deny, unconditionally, even during a sync
  *   3. Consistency error + no sync lease   → deny everything
  *   4. Consistency error + sync lease      → allow knowledge/** only
- *   5. writable paths                      → allow (Wiki, workflows, aidev.yaml)
- *   6. per-agent grant                     → allow when the CLI started this
- *                                            agent (AIDEV_AGENT) and the policy's
- *                                            agents.<name>.writable covers the path
- *                                            (and the branch, when one is required)
+ *   5. writable paths                      → allow (Wiki, workflows, agents,
+ *                                            skills, aidev.yaml)
+ *   6. approved workflow scope             → allow when the workflow runner
+ *                                            started this session (AIDEV_WORKFLOW),
+ *                                            the workflow is identical to
+ *                                            origin/<tracking_branch>, and its
+ *                                            scope.writable covers the path
  *   7. read_only paths                     → deny
  *   8. otherwise                           → allow
  *
  * Rule 2 sitting above everything else is what makes neither the sync lease
- * nor a per-agent grant capable of widening into the kit's own control
- * surface. The agent name comes from the CLI's own environment for the child
- * process, never from anything the agent writes, so it cannot be claimed.
+ * nor a workflow scope capable of widening into the kit's own control
+ * surface. The workflow name comes from the CLI's own environment for the
+ * child process, never from anything the agent writes, and the scope is read
+ * from a file that must match the reviewed branch, so neither can be claimed.
  */
 
+const path = require('path');
 const pathsMod = require('./paths');
 const leasesMod = require('./leases');
 const stateMod = require('./state');
-const gitMod = require('./git');
 const { ALWAYS_PROTECTED, DEFAULT_POLICY_SCOPES } = require('./config');
+
+/** The kit checkout that provides the running CLI (bundled agents live there). */
+const DEFAULT_INSTALL_ROOT = path.resolve(__dirname, '..', '..');
 
 const DECISION = { ALLOW: 'allow', DENY: 'deny' };
 
@@ -46,7 +52,8 @@ function deny(reason, extra = {}) {
  */
 function decide(repoRoot, targetPath, {
   config = null, policy = null, state = null, now = Date.now(),
-  agent = process.env.AIDEV_AGENT || null,
+  workflow = process.env.AIDEV_WORKFLOW || null,
+  installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
   if (rel == null) {
@@ -85,7 +92,7 @@ function decide(repoRoot, targetPath, {
       return deny(
         `Wiki consistency error (${st.message}) and no valid sync lease is held` +
         (lease ? ` (existing lease is ${ev.reason})` : '') +
-        '. All writes are blocked; run "aidev knowledge update" (or "aidev knowledge update --abort" to discard an interrupted publish).',
+        '. All writes are blocked; run "aidev sync wiki" (or "aidev sync wiki --abort" to discard an interrupted publish).',
         { rule: 'consistency-no-lease', path: rel, state: st.severity });
     }
     const syncWritable = pol.writable_during_sync && pol.writable_during_sync.length > 0
@@ -103,49 +110,45 @@ function decide(repoRoot, targetPath, {
   }
 
   // ---- 5. explicitly writable regions -------------------------------------
-  // The Wiki, workflows and aidev.yaml are the places an agent is meant to
-  // write; they sit inside the read-only PKG, so they are checked first.
+  // The Wiki, workflows, the PKG's agents and skills, and aidev.yaml are the
+  // places an agent is meant to write; they sit inside the read-only PKG, so
+  // they are checked first.
   const wHit = pathsMod.firstMatch(pol.writable || [], rel);
   if (wHit) {
     return allow(`"${rel}" is writable by policy (${wHit})`, { rule: 'writable', path: rel, pattern: wHit });
   }
 
-  // ---- 6. read-only regions ------------------------------------------------
-  // ---- 6. per-agent grant --------------------------------------------------
-  // Only for an agent the CLI started: AIDEV_AGENT is set in that child's
-  // environment by agent.runAgent and inherited by the hook. A grant may be
-  // tied to a branch, so that issue-to-pr can only edit on its own branch.
-  const grant = agent && pol.agents ? pol.agents[agent] : null;
-  if (grant) {
-    const gHit = pathsMod.firstMatch(grant.writable, rel);
-    if (gHit) {
-      if (grant.branch) {
-        let branch = null;
-        try { branch = gitMod.currentBranch(repoRoot); } catch { branch = null; }
-        if (!branch || !pathsMod.matchesAny([grant.branch], branch)) {
-          return deny(
-            `"${rel}" is writable for agent ${agent} only on branch ${grant.branch} (current: ${branch || 'detached HEAD'})`,
-            { rule: 'agent-branch', path: rel, pattern: gHit, agent });
-        }
+  // ---- 6. approved workflow scope ------------------------------------------
+  // Only for a session the workflow runner started: AIDEV_WORKFLOW is set in
+  // that child's environment by `aidev run workflow` and inherited by the
+  // hook. The scope comes from the workflow's YAML, which must be identical to
+  // origin/<tracking_branch> at this very moment — re-checked on every write,
+  // so editing the YAML mid-run only revokes the scope.
+  let scopeHint = null;
+  if (workflow) {
+    const wf = require('./workflow').inspect(repoRoot, installRoot, config, workflow);
+    if (!wf.approval.approved) {
+      scopeHint = `workflow ${workflow} is not approved: ${wf.approval.reason}`;
+    } else {
+      const sHit = pathsMod.firstMatch(wf.def.scope.writable, rel);
+      if (sHit) {
+        return allow(
+          `workflow ${workflow} may write "${rel}" (scope.writable: ${sHit}; approved on ${wf.approval.ref})`,
+          { rule: 'workflow-writable', path: rel, pattern: sHit, workflow });
       }
-      return allow(
-        `agent ${agent} may write "${rel}" (policy agents.${agent}.writable: ${gHit}${grant.branch ? `, branch ${grant.branch}` : ''})`,
-        { rule: 'agent-writable', path: rel, pattern: gHit, agent });
+      scopeHint = `workflow ${workflow} is approved but its scope.writable (${wf.def.scope.writable.join(', ') || 'empty'}) does not cover this path`;
     }
   }
 
   // ---- 7. read-only regions ------------------------------------------------
   const roHit = pathsMod.firstMatch(pol.read_only, rel);
   if (roHit) {
-    const hint = agent
-      ? (grant
-        ? `agent ${agent} is granted ${grant.writable.join(', ')}, which does not cover this path`
-        : `agent ${agent} has no grant in .aidev/policy.yaml (agents.${agent}.writable)`)
-      : 'this session was not started by the CLI as a named agent; grants in policy agents.<name> apply only then';
+    const hint = scopeHint
+      || 'this session was not started by "aidev run workflow"; PKG source is written only inside the scope.writable of an approved workflow';
     return deny(
-      `"${rel}" is read-only (${roHit}). PKG source is not written by agents by default; ${hint}. ` +
-      'A team allows it by listing paths under writable, or per agent under agents.<name>.writable, in .aidev/policy.yaml.',
-      { rule: 'read-only', path: rel, pattern: roHit });
+      `"${rel}" is read-only (${roHit}). ${hint}. ` +
+      'A team may also list paths under writable in .aidev/policy.yaml for everyone.',
+      { rule: 'read-only', path: rel, pattern: roHit, ...(workflow ? { workflow } : {}) });
   }
 
   return allow(`"${rel}" is not restricted by policy`, { rule: 'default', path: rel });

@@ -1,0 +1,71 @@
+[[cli-remove]]
+== aidev remove
+
+Deletes the files of a workflow, agent or skill. An agent or skill referenced by a workflow is not deleted.
+
+=== Synopsis
+
+[source,text]
+----
+aidev remove workflow <name> [--dry-run] [--json]
+aidev remove agent <name> [--dry-run] [--json]
+aidev remove skill <name> [--dry-run] [--json]
+----
+
+=== Description
+
+`workflow` deletes `.aidev/workflows/<name>/` including its run records (`runs/`). `agent` deletes `.aidev/agents/<name>.md`, and `skill` deletes `.aidev/skills/<name>/`. If any workflow under `.aidev/workflows/` references that agent or skill, the command refuses and names the workflow. Remove the reference and submit first. Agents and skills bundled with the kit cannot be deleted.
+
+The deletion is a change to the working tree. Commit it and open a PR; the merge delivers it to the team.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--dry-run`
+|Show what would be deleted; delete nothing
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Deleted. `--dry-run`
+
+|1
+|Missing or bad object or name. The file does not exist. The agent or skill is referenced by a workflow
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev remove skill deploy-checklist --dry-run
+aidev remove skill deploy-checklist
+----
+
+[source,text]
+----
+✓ deleted .aidev/skills/deploy-checklist/SKILL.md
+    commit the deletion and open a pull request; the change reaches the team through the merge
+----
+
+When it is referenced:
+
+[source,text]
+----
+✗ agent test-writer is referenced by workflow(s) write-tests; remove the reference (and submit) first
+----
+
+=== See also
+
+* xref:cli-create[aidev create], xref:cli-list[aidev list]
+* xref:workflows-agents-skills[Putting the AI to work: Agents and skills]

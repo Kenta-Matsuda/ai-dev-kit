@@ -1,0 +1,86 @@
+[[cli-run]]
+== aidev run
+
+Runs an approved workflow (the definition that is on `origin/main`). Development starts here.
+
+=== Synopsis
+
+[source,text]
+----
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--dry-run] [--json]
+----
+
+=== Description
+
+Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
+
+Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. The agent's child process receives `AIDEV_WORKFLOW=<name>`, and the hook allows writes to `scope.writable`. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Run] for what happens during a run.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--task <text>`
+|The instruction for this run. Handed to every agent step as data (a Work Item number, the target path, and so on)
+
+|`--task-file <path>`
+|Read `--task` from a file. Cannot be combined with `--task`
+
+|`--max-minutes <n>`
+|Lower the time limit for this run only (cannot go above 60)
+
+|`--dry-run`
+|Show the approval state, the scope, the agents and tools, the steps and the limits; start nothing
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Finished every step. `--dry-run` when approved
+
+|1
+|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the kit. A `pull-request` step with a dirty working tree. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, the time or cost limit)
+|===
+
+=== Examples
+
+Check that it is approved, then run it:
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow write-tests --dry-run --task "src/services/order.ts"
+aidev run workflow write-tests --task "src/services/order.ts"
+----
+
+[source,text]
+----
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
+    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+When it is not approved:
+
+[source,text]
+----
+✗ workflow write-tests is not approved: .aidev/workflows/write-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged)
+      Approved means identical to origin/main. Submit it ("aidev submit workflow write-tests"), have the pull request reviewed and merged, then fetch.
+----
+
+=== See also
+
+* xref:workflows[Putting the AI to work] — the fields of a definition, approval, what happens during a run, review
+* xref:cli-create[aidev create], xref:cli-submit[aidev submit], xref:cli-list[aidev list]
+* xref:permissions-source[Permissions and safety: Letting the AI write source]

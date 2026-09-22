@@ -11,7 +11,8 @@
     "lint": "node test/loadall.js",
     "check": "node test/loadall.js && node test/run.js",
     "docs:build": "node scripts/build-docs.js",
-    "docs:check": "node scripts/build-docs.js --check"
+    "docs:check": "node scripts/build-docs.js --check",
+    "evolve": "node scripts/evolve.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -24,6 +25,7 @@
   "private": true,
   "license": "UNLICENSED",
   "devDependencies": {
-    "@asciidoctor/core": "3.0.4"
+    "@asciidoctor/core": "3.0.4",
+    "mermaid": "12.0.0"
   }
 }

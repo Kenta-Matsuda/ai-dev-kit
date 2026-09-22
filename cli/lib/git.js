@@ -199,6 +199,25 @@ function fetch(cwd, remote = 'origin', branch = 'main', timeoutMs = 120000) {
     { cwd, timeoutMs });
 }
 
+/**
+ * The content of one file at a ref (`git show ref:path`), or null when the
+ * ref or the path does not exist. LF-normalised so a comparison with the
+ * working file does not depend on autocrlf.
+ */
+function showFile(cwd, ref, rel) {
+  assertSafeRef(ref, 'ref');
+  const p = String(rel).replace(/\\/g, '/');
+  if (p.startsWith('-') || p.includes('..')) throw new Error(`invalid path: ${p}`);
+  // Not through run(): that trims the output, and a byte comparison with the
+  // working file needs the content exactly as stored.
+  try {
+    const out = execFileSync('git', ['show', `${ref}:${p}`], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, env: sanitizedGitEnv(),
+    });
+    return out.replace(/\r\n/g, '\n');
+  } catch { return null; }
+}
+
 function revParse(cwd, ref) {
   assertSafeRef(ref, 'ref');
   const r = run(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd });
@@ -275,6 +294,6 @@ function hasUncommittedChanges(cwd) {
 module.exports = {
   run, must, isRepo, repoTopLevel, samePath, findRepoRoot, isSha, assertSafeRef,
   headSha, currentBranch, remoteUrl, mergeBase, treeChanged, worktreeAdd, worktreeRemove,
-  remoteSha, fetch, revParse, commitExists, isAncestor,
+  remoteSha, fetch, revParse, showFile, commitExists, isAncestor,
   lsTreeBlobs, hasUncommittedChanges, statusEntries,
 };

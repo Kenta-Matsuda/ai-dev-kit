@@ -16,7 +16,7 @@
 
 |`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `.claude/settings.json`
 |配布される agent・skill・hooks
-|`aidev init` / `aidev apply`。チームが編集でき、新しいテンプレートとはマージされる
+|`aidev init` / `aidev sync tools`。チームが編集でき、新しいテンプレートとはマージされる
 
 |`CLAUDE.md`
 |Claude への共通の指示
@@ -24,19 +24,19 @@
 
 |`.mcp.json`
 |MCP サーバーの登録
-|同上
+|PKG（kit は配布しない。人が編集する）
 
 |`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `.github/hooks/aidev.json`, `AGENTS.md`, `.codex/hooks.json`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`, `.kiro/agents/aidev.json`
 |`tools.default` に `copilot` / `codex` / `kiro` を書いたときだけ。各ツール用の指示・agent・skill・hooks
-|同上。ツールを外すと次の `aidev apply` で削除（編集済みなら残る）
+|同上。ツールを外すと次の `aidev sync tools` で削除（編集済みなら残る）
 
 |`.aidev/policy.yaml`
 |承認済みの書き込み権限 policy
-|`aidev permission … --approve`、`aidev init`。`writable` / `agents` の追加は人間が直接編集
+|`aidev create policy --approve`、`aidev init`。`writable` の追加は人間が直接編集
 
 |`.aidev/materialized.json`
-|ツール設定の記録。適用した kit のコミットと、ファイルごとのテンプレートのハッシュと適用時のハッシュ、未解消の衝突。`aidev apply` がマージの基準に、`aidev check` が判定に使う
-|`aidev init` / `aidev apply`
+|ツール設定の記録。適用した kit のコミットと、ファイルごとのテンプレートのハッシュと適用時のハッシュ、未解消の衝突。`aidev sync tools` がマージの基準に、`aidev check` が判定に使う
+|`aidev init` / `aidev sync tools`
 
 |`.aidev/knowledge/index.md`, `overview.md`, ページ
 |LLM Wiki
@@ -46,17 +46,21 @@
 |Wiki の構造と進捗
 |CLI のみ
 
-|`.aidev/workflows/<name>/`
-|workflow の定義と承認記録
-|`aidev workflow`、人間
+|`.aidev/workflows/<name>/workflow.yaml`
+|workflow の定義。`origin/main` にあるものと同じときだけ実行できる
+|`aidev create workflow`、人間。`aidev submit workflow` が PR にする
+
+|`.aidev/agents/<name>.md`, `.aidev/skills/<name>/SKILL.md`
+|この PKG 固有の agent と skill。workflow から名前で参照し、kit 同梱の同名のものより優先される
+|`aidev create workflow --describe`（workflow-creator）、対話中の AI、人間。workflow と一緒に PR に入る
 
 |`.aidev/conventions/`
 |この PKG の開発規約（`index.md`、`coding.md`、`testing.md`、`review.md`）
-|convention-builder agent が生成し、人間がレビューしてコミット。`## チーム決定` の下は人間だけが書く
+|PKG の workflow（規約を書く agent）が生成し、人間がレビューしてコミット。`## チーム決定` の下は人間だけが書く
 
 |`.aidev/.gitignore`
 |下の「コミットしないもの」を除外する
-|`aidev init` / `aidev apply`
+|`aidev init` / `aidev sync tools`
 |===
 
 `.claude/settings.local.json` は個人設定で、kit の管理外です。
@@ -79,10 +83,10 @@
 |`plan.json`（hook がセッションに渡す batch の計画）と agent の完了報告
 
 |`.aidev/workflows/*/runs/`
-|workflow の実行ログ
+|workflow の実行記録（`run.json`、`log.txt`）。コマンドの出力を含むのでコミットしない
 |===
 
-一時的に現れるもの: `.aidev/policy.candidate.yaml`（承認すると消えます）、`.aidev/ejected.json`（`aidev eject` が書き、`aidev init` が消します）。
+一時的に現れるもの: `.aidev/policy.candidate.yaml`（承認すると消えます）、`.aidev/ejected.json`（`aidev uninstall <package>` が書き、`aidev init` が消します）。
 
 === 端末側（AIDEV_HOME）
 

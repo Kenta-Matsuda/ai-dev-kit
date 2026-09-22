@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev evolve` — the kit-developer-only half of self-evolution.
+ * `npm run evolve --` — the kit-developer-only half of self-evolution.
  *
  *   - enable/disable/status keep their marker under AIDEV_HOME, never in a PKG
  *   - run is refused on an ordinary machine
@@ -15,9 +15,20 @@ const os = require('os');
 const path = require('path');
 const { suite, test, ok, eq } = require('./harness');
 const { makeRepo, write } = require('./fixtures');
-const { aidev, lastJson } = require('./completion.test');
+const { lastJson } = require('./completion.test');
 const home = require('../cli/lib/home');
-const evolveMod = require('../cli/commands/evolve');
+const evolveMod = require('../scripts/evolve');
+const { execFileSync } = require('child_process');
+
+/** The kit-developer script: `npm run evolve -- <sub>`, run here directly. */
+function evolve(root, args, { env = {} } = {}) {
+  try {
+    const out = execFileSync(process.execPath, [path.resolve(__dirname, '..', 'scripts', 'evolve.js'), ...args], {
+      cwd: root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1', ...env },
+    });
+    return { code: 0, out };
+  } catch (e) { return { code: e.status == null ? 1 : e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+}
 
 function run() {
   suite('evolve: kit developer marker and gating');
@@ -27,15 +38,15 @@ function run() {
   const fx = makeRepo();
   try {
     test('status on an ordinary machine says so; run is refused', () => {
-      const s = lastJson(aidev(fx.root, ['evolve', 'status', '--json'], { env: env() }).out);
+      const s = lastJson(evolve(fx.root, ['status', '--json'], { env: env() }).out);
       eq(s.enabled, false);
-      const r = aidev(fx.root, ['evolve', 'run'], { env: env() });
+      const r = evolve(fx.root, ['run'], { env: env() });
       eq(r.code, 1);
       ok(/kit developers only/.test(r.out), r.out);
     });
 
     test('enable writes the marker under AIDEV_HOME, not in the package', () => {
-      const r = aidev(fx.root, ['evolve', 'enable', '--json'], { env: env() });
+      const r = evolve(fx.root, ['enable', '--json'], { env: env() });
       eq(r.code, 0, r.out);
       const j = lastJson(r.out);
       eq(j.enabled, true); eq(j.autoEvolve, false);
@@ -46,20 +57,20 @@ function run() {
     });
 
     test('enable --auto records the auto flag; disable removes the marker', () => {
-      eq(lastJson(aidev(fx.root, ['evolve', 'enable', '--auto', '--json'], { env: env() }).out).autoEvolve, true);
-      eq(aidev(fx.root, ['evolve', 'disable', '--json'], { env: env() }).code, 0);
+      eq(lastJson(evolve(fx.root, ['enable', '--auto', '--json'], { env: env() }).out).autoEvolve, true);
+      eq(evolve(fx.root, ['disable', '--json'], { env: env() }).code, 0);
       ok(!fs.existsSync(path.join(HOME, 'developer.json')), 'marker still present');
       eq(home.readDeveloper({ AIDEV_HOME: HOME }).enabled, false);
       eq(home.readDeveloper({ AIDEV_HOME: HOME, AIDEV_KIT_DEVELOPER: '1' }).enabled, true, 'the env switch works without a marker');
     });
 
     test('run --dry-run lists the reflections of this package and starts nothing', () => {
-      aidev(fx.root, ['evolve', 'enable', '--json'], { env: env() });
+      evolve(fx.root, ['enable', '--json'], { env: env() });
       write(path.join(fx.root, '.aidev', 'cache', 'evolution', 'sess-9.md'), '# session sess-9\n## kit への提案\n- x\n');
       const stub = path.join(fx.root, 'never-run.js');
       fs.writeFileSync(stub, "require('fs').writeFileSync(process.env.STUB_RAN, '1');\n", 'utf8');
       const ran = path.join(fx.root, 'ran.txt');
-      const r = aidev(fx.root, ['evolve', 'run', '--dry-run', '--json'], { env: env({ AIDEV_CLAUDE_BIN: stub, STUB_RAN: ran }) });
+      const r = evolve(fx.root, ['run', '--dry-run', '--json'], { env: env({ AIDEV_CLAUDE_BIN: stub, STUB_RAN: ran }) });
       eq(r.code, 0, r.out);
       const j = lastJson(r.out);
       eq(j.dryRun, true);

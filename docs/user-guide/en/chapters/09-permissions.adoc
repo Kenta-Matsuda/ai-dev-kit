@@ -1,0 +1,158 @@
+[[permissions]]
+== Permissions and safety
+
+{project-name} decides **where the AI may write** inside the PKG in two layers.
+
+* **The policy** (`.aidev/policy.yaml`) — the places every agent and every interactive session can always write, and the places nobody can ever write. Humans place it with the CLI and review it in a PR.
+* **A workflow's `scope.writable`** — the extra places one agent may write, only while `aidev run workflow` runs an approved workflow. This is the only way the AI writes PKG source.
+
+A hook of the AI tool checks every write. Tokens are never written to files; they are passed only through environment variables.
+
+[[permissions-policy]]
+=== The policy categories
+
+[cols="1,2,3",options="header"]
+|===
+|Category |Default |Meaning
+
+|`protected`
+|Kit files such as `.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json`, plus `secrets_paths`
+|Never writable. If removed from the policy, the CLI adds them back. A workflow's `scope.writable` cannot open them either.
+
+|`read_only`
+|`**` (the whole PKG)
+|Neither agents nor interactive sessions can write here. The only exception is the `scope.writable` of an approved workflow (xref:permissions-source[Letting the AI write source]).
+
+|`writable_during_sync`
+|`.aidev/knowledge/**`
+|When the Wiki is missing or unreadable, writable only while `aidev sync wiki` rewrites the structure.
+
+|`writable`
+|`.aidev/knowledge/**`, `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/conventions/**`, `aidev.yaml`
+|Writable at any time, by every agent and every interactive session: the Wiki, workflow definitions, PKG-local agents and skills, the development conventions and the settings. All of them are reviewed in a PR, and only what is on `main` takes effect.
+|===
+
+Rules are checked top to bottom.
+
+. Paths outside the repository, `secrets_paths` and `protected` are always denied.
+. While the Wiki is missing or unreadable, everything is denied, except `.aidev/knowledge/**` written by `aidev sync wiki`.
+. A path that matches `writable` is allowed.
+. In a session started by `aidev run workflow`, a path is allowed when that workflow is approved (identical to `origin/main`) and the path matches its `scope.writable`. This is checked on every write, so changing the definition during a run turns the answer into a denial.
+. A path that matches `read_only` is denied.
+. Anything else is allowed.
+
+.The decision for each write
+[mermaid]
+----
+flowchart TD
+  w["path being written"] --> q1{"outside the repository /<br/>secrets_paths / protected?"}
+  q1 -- "yes" --> deny1["deny"]
+  q1 -- "no" --> q2{"Wiki missing or unreadable?"}
+  q2 -- "yes (except .aidev/knowledge/**)" --> deny2["deny"]
+  q2 -- "no" --> q3{"matches writable?"}
+  q3 -- "yes" --> allow1["allow"]
+  q3 -- "no" --> q4{"session started by aidev run workflow and<br/>path in the approved workflow's scope.writable?"}
+  q4 -- "yes" --> allow2["allow"]
+  q4 -- "no" --> q5{"matches read_only?"}
+  q5 -- "yes" --> deny3["deny"]
+  q5 -- "no" --> allow3["allow"]
+----
+
+[[permissions-hooks]]
+=== What the hooks do
+
+The distributed hook configuration (`.claude/settings.json` for Claude Code, `.github/hooks/aidev.json` for GitHub Copilot CLI, `.codex/hooks.json` for OpenAI Codex CLI, `.kiro/agents/aidev.json` for Kiro CLI) registers five hooks. Claude Code is the tool verified against the real binary.
+
+[cols="1,1,3",options="header"]
+|===
+|Event |Command |Action
+
+|SessionStart
+|`aidev hook session-start`
+|Puts the Wiki state and any publish in progress into the session context.
+
+|PreToolUse (Write / Edit / Bash, …)
+|`aidev hook guard-write`
+|Checks the target path against the policy and the workflow scope, and returns the reason when it denies. Also denies when the policy cannot be read.
+
+|PostToolUse (Write / Edit)
+|`aidev hook quality-gate`
+|After the AI edits a PKG file, runs the `quality_gates` commands and returns failure output to the AI.
+
+|PostToolUse (Bash)
+|`aidev hook after-bash`
+|When a commit moved HEAD and the Wiki fell behind, updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent (xref:knowledge-hook-flow[What happens after a commit]).
+
+|Stop
+|`aidev hook session-stop`
+|While the Wiki is behind HEAD, refuses to stop once and repeats the instructions.
+|===
+
+When a write is denied, the AI receives a reason like these.
+
+[source,text]
+----
+ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the scope.writable of an approved workflow. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but its scope.writable (tests/**) does not cover this path. …
+ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
+ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync wiki" …
+----
+
+An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge (the file checked is `.claude/settings.json`).
+
+[[permissions-source]]
+=== Letting the AI write source
+
+By default the PKG source is `read_only`. Neither the interactive Claude nor the subagents it calls can write it. To let the AI write source, **define that job as a workflow, put the allowed paths in its `scope.writable`, review it in a PR and merge it into `main`** (xref:workflows[Putting the AI to work]).
+
+[source,yaml]
+----
+scope:
+  writable: [src/**, tests/**]
+----
+
+This scope applies only to the agent started by `aidev run workflow <name>`. At start, `aidev` puts the workflow name into the environment variable `AIDEV_WORKFLOW` of the child process. The hook reads it and checks that the workflow is still identical to `origin/main` and that the path is inside the scope. When a human calls the same agent from an interactive `claude` session, the scope does not apply.
+
+Add paths to the policy's `writable` only when every agent and every interactive session should be able to write them at any time. `protected` paths and `secrets_paths` cannot be opened either way. Review policy changes in a PR and widen them only for as long as needed.
+
+[[permissions-commands]]
+=== Placing, changing and viewing the policy
+
+The AI cannot create the policy. The package owner places it with the CLI.
+
+[%autowidth.stretch,options="header"]
+|===
+|Command |Action
+
+|`aidev create policy --approve`
+|Places the candidate `.aidev/policy.candidate.yaml` as `.aidev/policy.yaml`. Use it after answering `N` in `aidev init`.
+
+|`aidev create policy` → `aidev create policy --approve`
+|Rebuilds and places the candidate, for example after changing `secrets_paths`. A change that weakens protection also needs `--force`. The candidate is rebuilt from `aidev.yaml`, so any `writable` entries the team added to the policy by hand are lost. Add them again after placing it, and commit.
+
+|`aidev check` / `aidev doctor <package>`
+|Show a summary of the policy in force (protected count, placed or not). For the full text, read `.aidev/policy.yaml`.
+|===
+
+[[permissions-secrets]]
+=== Secrets
+
+* Files under `secrets_paths` are never read or written by the AI and are hidden from the Wiki.
+* The PAT is passed only through the environment variable named by `hosting.auth_env` (default `AZURE_DEVOPS_PAT`). Writing it into `aidev.yaml` stops every command from starting.
+* `aidev doctor` and `aidev init` report only whether the token is set. They never read the value.
+* Workflow run records (`.aidev/workflows/*/runs/`) contain command output, so they are gitignored and never committed.
+
+=== What not to do
+
+* Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole kit as a PR to the kit).
+* Only humans edit `.aidev/policy.yaml`, and every change is reviewed in a PR (never let the AI edit it).
+* Do not put `**`, or the paths of settings and CI, in a workflow's `scope.writable`. Keep it to what the job needs.
+* When the AI reports a denied write, read the reason instead of looking for a workaround.
+* Do not put tokens in commits, logs or PR descriptions.
+
+=== Related
+
+* xref:workflows[Putting the AI to work] — `scope.writable` and approval
+* xref:cli-create[aidev create policy]
+* xref:cli-hook[aidev hook]
+* xref:configuration[aidev.yaml reference] — `secrets_paths`, `hosting.auth_env`

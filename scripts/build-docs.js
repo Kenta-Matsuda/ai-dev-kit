@@ -47,23 +47,24 @@ const REQUIRED_IDS = [
   'permissions',
   'automation',
   'troubleshooting',
+  'workflows',
   // Command Reference: one page per command
   'cli-reference',
   'cli-init',
-  'cli-status',
   'cli-check',
-  'cli-knowledge',
-  'cli-knowledge-publish',
-  'cli-agent',
-  'cli-permission',
-  'cli-workflow',
-  'cli-apply',
+  'cli-run',
+  'cli-create',
+  'cli-submit',
+  'cli-list',
+  'cli-remove',
+  'cli-sync',
+  'cli-sync-tools',
+  'cli-sync-wiki',
+  'cli-sync-wiki-publish',
   'cli-update',
   'cli-doctor',
-  'cli-eject',
   'cli-uninstall',
   'cli-hook',
-  'cli-mcp',
   // Appendices
   'environment-reference',
   'files-and-state',
@@ -182,6 +183,68 @@ function formatLogMessage(entry) {
   return `${severity}: ${message}`;
 }
 
+/**
+ * Diagrams are written as Mermaid source in the AsciiDoc:
+ *
+ *   [mermaid]
+ *   ----
+ *   flowchart LR
+ *     a --> b
+ *   ----
+ *
+ * The block becomes `<pre class="mermaid">` and the generated HTML carries
+ * mermaid.min.js inline (from the dev dependency), so the page renders the
+ * diagrams offline without any external script — the same single-file rule
+ * the stylesheet follows. The block counts on both sides are compared in
+ * validateHtml so a block that failed to convert does not pass silently.
+ */
+const MERMAID_BUNDLE = path.join(ROOT, 'node_modules', 'mermaid', 'dist', 'mermaid.min.js');
+const MERMAID_BLOCK = /^\[mermaid(?:,[^\]]*)?\]\s*$/gm;
+
+function escapeHtml(text) {
+  // `>` stays: Mermaid arrows need it and it is legal in HTML text. `<` and `&`
+  // would start a tag or an entity, so those two are escaped.
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+}
+
+function mermaidExtensions(asciidoctor) {
+  const registry = asciidoctor.Extensions.create();
+  registry.block(function block() {
+    this.named('mermaid');
+    this.onContexts(['listing', 'literal', 'open', 'paragraph']);
+    this.parseContentAs('raw');
+    this.process((parent, reader, attrs) => {
+      const source = reader.getLines().join('\n').trim();
+      if (!source) fail('an empty [mermaid] block was found');
+      const title = attrs.title ? `<div class="title">${escapeHtml(String(attrs.title))}</div>` : '';
+      const html = `<div class="mermaid-figure">${title}<pre class="mermaid">${escapeHtml(source)}</pre></div>`;
+      return this.createBlock(parent, 'pass', html, { role: 'mermaid-figure' });
+    });
+  });
+  return registry;
+}
+
+function mermaidScript() {
+  if (!fs.existsSync(MERMAID_BUNDLE)) {
+    fail(`mermaid bundle is missing: ${relative(MERMAID_BUNDLE)} (run "npm ci")`);
+  }
+  const bundle = fs.readFileSync(MERMAID_BUNDLE, 'utf8');
+  if (bundle.includes('</script')) fail('the mermaid bundle cannot be inlined as-is');
+  const init = 'mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict", '
+    + 'fontFamily: "inherit", flowchart: { htmlLabels: true, curve: "basis", wrappingWidth: 320 }, '
+    + 'sequence: { mirrorActors: false, wrap: true, width: 200 } });';
+  return `\n<script>${bundle}</script>\n<script>${init}</script>\n`;
+}
+
+function countMermaidBlocks(files) {
+  let n = 0;
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    n += (source.match(MERMAID_BLOCK) || []).length;
+  }
+  return n;
+}
+
 function convert(guide, version) {
   const asciidoctor = createAsciidoctor();
   let memoryLogger = null;
@@ -201,6 +264,7 @@ function convert(guide, version) {
     standalone: true,
     mkdirs: true,
     to_file: guide.output,
+    extension_registry: mermaidExtensions(asciidoctor),
     attributes: {
       'aidev-version': version,
       revnumber: version,
@@ -209,6 +273,14 @@ function convert(guide, version) {
       stylesheet: 'user-guide.css',
     },
   });
+
+  // Inline the renderer only when the guide has a diagram.
+  const html = fs.readFileSync(guide.output, 'utf8');
+  if (html.includes('<pre class="mermaid">')) {
+    const at = html.lastIndexOf('</body>');
+    if (at === -1) fail(`${guide.lang}: generated HTML has no </body>`);
+    fs.writeFileSync(guide.output, `${html.slice(0, at)}${mermaidScript()}${html.slice(at)}`);
+  }
 
   if (memoryLogger) {
     const diagnostics = memoryLogger.getMessages()
@@ -220,10 +292,19 @@ function convert(guide, version) {
   }
 }
 
-function validateHtml(guide, ids) {
+function validateHtml(guide, ids, files) {
   if (!fs.existsSync(guide.output)) fail(`output was not created: ${relative(guide.output)}`);
   const stat = fs.statSync(guide.output);
   const html = fs.readFileSync(guide.output, 'utf8');
+
+  const expectedDiagrams = countMermaidBlocks(files);
+  const renderedDiagrams = (html.match(/<pre class="mermaid">/g) || []).length;
+  if (expectedDiagrams !== renderedDiagrams) {
+    fail(`${guide.lang}: ${expectedDiagrams} [mermaid] block(s) in the sources but ${renderedDiagrams} rendered`);
+  }
+  if (expectedDiagrams > 0 && !html.includes('mermaid.initialize(')) {
+    fail(`${guide.lang}: diagrams are present but the Mermaid renderer was not inlined`);
+  }
 
   if (stat.size < 100000) {
     fail(`${guide.lang}: output is unexpectedly small (${stat.size} bytes)`);
@@ -267,7 +348,7 @@ function main() {
     const files = collectSources(guide.entry);
     const ids = validateSources(files);
     convert(guide, packageJson.version);
-    const bytes = validateHtml(guide, ids);
+    const bytes = validateHtml(guide, ids, files);
     process.stdout.write(
       `${action} ${relative(guide.output)} (${guide.lang}: ${files.length} AsciiDoc files, ${ids.size} IDs, ${bytes} bytes)\n`,
     );

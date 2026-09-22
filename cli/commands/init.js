@@ -31,7 +31,7 @@ const home = require('../lib/home');
 const yaml = require('../lib/yaml');
 const permission = require('./permission');
 const inventory = require('../lib/inventory');
-const knowledge = require('./knowledge');
+
 const ui = require('../lib/ui');
 
 const FLAGS = {
@@ -39,7 +39,7 @@ const FLAGS = {
   name: 'string', include: 'string', exclude: 'string', secrets: 'string',
   hosting: 'string', org: 'string', project: 'string', repository: 'string',
   'tracking-branch': 'string', tools: 'string', 'agent-model': 'string',
-  approve: 'boolean', wiki: 'boolean', 'no-wiki': 'boolean',
+  approve: 'boolean',
 };
 
 const FLAG_HELP = {
@@ -59,8 +59,6 @@ const FLAG_HELP = {
   tools: `AI coding tools to configure, comma-separated (${cfgMod.TOOLS.join(', ')}; default: claude)`,
   'agent-model': 'model for agents the CLI starts itself (default: sonnet)',
   approve: 'place the generated permission policy without asking',
-  wiki: 'build (or continue) the LLM Wiki without asking',
-  'no-wiki': 'do not build the LLM Wiki now',
 };
 
 /** Top-level directories that usually hold what a Wiki should describe. */
@@ -149,15 +147,15 @@ function buildConfigYaml(v) {
     '# whose write policy is enforced at runtime through hooks.',
     'tools:',
     `  default: [${v.tools.map(q).join(', ')}]`,
-    '  # Tool that runs agents the CLI starts (aidev knowledge update,',
-    '  # aidev agent run, workflows). Must be one of tools.default.',
+    '  # Tool that runs agents the CLI starts (aidev sync wiki,',
+    '  # aidev run workflow). Must be one of tools.default.',
     `  agent: ${q(v.tools[0])}`,
     '  # Model for those agents. "" passes no model flag and lets the tool decide.',
     `  agent_model: ${q(v.agent_model)}`,
     '  # Per-agent overrides (tool and/or model); omitted keys inherit the two above.',
     '  # agents:',
     '  #   knowledge-builder: { model: opus }',
-    '  #   issue-to-pr: { tool: copilot, model: "" }',
+    '  #   my-agent: { tool: copilot, model: "" }',
     '',
     'knowledge:',
     '  # Time budget for each agent run (survey or one batch), in ms. Default 30 minutes.',
@@ -170,8 +168,8 @@ function buildConfigYaml(v) {
     '#   lint: npm run lint',
     '#   test: npm test',
     '',
-    '# Documents "aidev agent run" hands to every agent as reference material, by topic',
-    '# (convention-builder reads "conventions", test-writer reads "testing"). Text files or',
+    '# Documents "aidev run workflow" hands to every agent as reference material, by topic',
+    '# (an agent reads the topics its workflow objective names, e.g. "conventions", "testing"). Text files or',
     '# directories of them, relative to the repo root. Excel / Word / PDF cannot be listed:',
     '# export them to Markdown or CSV, commit that, and list the exported file.',
     '# references:',
@@ -311,7 +309,7 @@ async function run(ctx) {
   // --- 4. the tool configuration --------------------------------------------
   // First time: place the templates of the chosen tools (this is the only
   // apply init performs). Later: the files and the record came from git, so
-  // init only reports; taking newer templates is "aidev apply", run by the
+  // init only reports; taking newer templates is "aidev sync tools", run by the
   // team when it suits them.
   const kitCommit = gitMod.headSha(installRoot);
   const hasLock = cfgMod.loadLock(repoRoot) != null;
@@ -343,15 +341,15 @@ async function run(ctx) {
   } else {
     const insp = assets.inspectConfig(repoRoot, { tools: toolList, installRoot, kitCommit });
     if (insp.conflicts.length > 0) {
-      say.warn(`${insp.conflicts.length} tool configuration file(s) still carry conflict markers; resolve them and run "aidev apply".`);
+      say.warn(`${insp.conflicts.length} tool configuration file(s) still carry conflict markers; resolve them and run "aidev sync tools".`);
       for (const p of insp.conflicts) say.dim(`    ! ${p}`);
     } else if (insp.hooksMissing.length > 0) {
-      say.warn(`the kit's hooks are missing from .claude/settings.json (${insp.hooksMissing.join(', ')}); run "aidev apply".`);
+      say.warn(`the kit's hooks are missing from .claude/settings.json (${insp.hooksMissing.join(', ')}); run "aidev sync tools".`);
     } else {
       say.ok(`tool configuration is recorded for ${toolList.join(', ')} (from git)`);
     }
     if (insp.outdated) {
-      say.info(`the kit installed here (${stateShort(kitCommit)}) is newer than the one these files came from (${stateShort(insp.lock.kitCommit)}); "aidev apply" takes the new templates when your team is ready.`);
+      say.info(`the kit installed here (${stateShort(kitCommit)}) is newer than the one these files came from (${stateShort(insp.lock.kitCommit)}); "aidev sync tools" takes the new templates when your team is ready.`);
     }
     steps.push({ step: 'tool config', action: 'keep', conflicts: insp.conflicts.length, outdated: insp.outdated });
   }
@@ -399,88 +397,51 @@ async function run(ctx) {
       steps.push({ step: 'policy', action: 'placed' });
     } else {
       cfgMod.writeFileAtomic(permission.candidatePath(repoRoot), text);
-      say.warn(`policy not placed. Review ${permission.CANDIDATE_REL}, then run "aidev permission configure --approve".`);
+      say.warn(`policy not placed. Review ${permission.CANDIDATE_REL}, then run "aidev create policy --approve".`);
       steps.push({ step: 'policy', action: 'candidate' });
     }
   } else {
     steps.push({ step: 'policy', action: 'pending' });
   }
 
-  // --- 9. Wiki ---------------------------------------------------------------
-  // The Wiki is part of the setup, not a separate chore: the first init builds
-  // it, and a later init picks an unfinished build up where it stopped.
-  if (flags.wiki && flags['no-wiki']) throw new AidevError('--wiki and --no-wiki cannot both be given');
+  // --- 9. Wiki: reported, not built --------------------------------------------
+  // Building the Wiki is a long agent run with its own command (`aidev update
+  // wiki`), its own exit codes and its own resume. init only says where things
+  // stand, so "init failed" always means the setup failed.
   let manifest = null;
   try { manifest = inventory.readManifest(repoRoot); } catch { manifest = null; }
   const hasWiki = manifest != null;
   const pendingPages = Array.isArray(manifest?.checkpoint?.pendingPaths) ? manifest.checkpoint.pendingPaths.length : 0;
-  let wikiComplete = hasWiki && pendingPages === 0;
-  let wikiCode = EXIT.OK;
+  const wikiComplete = hasWiki && pendingPages === 0;
   if (wikiComplete) {
     say.ok(`LLM Wiki is present (${layout.KNOWLEDGE_REL}/)`);
     steps.push({ step: 'knowledge', action: 'keep' });
-  } else if (dryRun || !config) {
-    say.info(hasWiki
-      ? `LLM Wiki is incomplete (${pendingPages} page(s) without prose); init would continue the build`
-      : 'LLM Wiki is not generated yet; init would build it');
-    steps.push({ step: 'knowledge', action: 'would-build' });
+  } else if (hasWiki) {
+    say.warn(`LLM Wiki is incomplete (${pendingPages} page(s) without prose). Run "aidev sync wiki" to continue it.`);
+    steps.push({ step: 'knowledge', action: 'pending', pendingPages });
+  } else if (firstTime) {
+    say.info('LLM Wiki is not generated yet. Run "aidev sync wiki --no-commit" to build it (it takes a while).');
+    steps.push({ step: 'knowledge', action: 'pending' });
   } else {
-    // A member whose team's Wiki is still in an open pull request must not
-    // build a second one by accident, so that case defaults to "no".
-    const teamWikiPending = !firstTime && !hasWiki;
-    let doBuild = !!flags.wiki;
-    if (!doBuild && !flags['no-wiki']) {
-      if (interactive) {
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        try {
-          say.out('');
-          if (teamWikiPending) {
-            say.info('the LLM Wiki is not in this clone yet. If your team set it up, "git pull" after their pull request merges.');
-            const a = await ask(rl, '    Build it on this machine now? (y/N)', 'N');
-            doBuild = /^y(es)?$/i.test(a);
-          } else {
-            const q = hasWiki
-              ? `    Continue building the LLM Wiki (${pendingPages} page(s) left)? (Y/n)`
-              : '    Build the LLM Wiki now? It takes a while; "aidev init" again continues where it stopped. (Y/n)';
-            const a = await ask(rl, q, 'Y');
-            doBuild = !/^n(o)?$/i.test(a);
-          }
-        } finally { rl.close(); }
-      } else {
-        doBuild = !teamWikiPending;
-      }
-    }
-    if (doBuild) {
-      say.out('');
-      const r = await knowledge.update({ ...ctx, flags: { json: !!flags.json } }, config, { silent: !!flags.json, commit: false });
-      wikiCode = r.code;
-      wikiComplete = r.code === EXIT.OK;
-      steps.push({ step: 'knowledge', action: 'built', ok: wikiComplete, result: r.json });
-    } else {
-      say.warn(hasWiki
-        ? `LLM Wiki is incomplete (${pendingPages} page(s) without prose). Run "aidev init" again to continue.`
-        : 'LLM Wiki not built. Run "aidev init --wiki" when you want to build it on this machine.');
-      steps.push({ step: 'knowledge', action: 'pending' });
-    }
+    say.info('the LLM Wiki is not in this clone yet. If your team set it up, "git pull" after their pull request merges; otherwise run "aidev sync wiki --no-commit".');
+    steps.push({ step: 'knowledge', action: 'pending' });
   }
 
-  if (flags.json) { ui.json({ ok: wikiCode === EXIT.OK, dryRun, firstTime, steps }); return wikiCode; }
+  if (flags.json) { ui.json({ ok: true, dryRun, firstTime, steps }); return EXIT.OK; }
 
   say.out('');
   if (firstTime) {
     say.info('next steps (you are setting this package up for your team):');
     const todo = [];
-    if (!policyPlaced) todo.push('aidev permission configure --approve   # after reviewing the candidate');
-    if (!wikiComplete) todo.push('aidev init                              # builds (or continues) the LLM Wiki');
+    if (!policyPlaced) todo.push('aidev create policy --approve       # after reviewing the candidate');
+    if (!wikiComplete) todo.push('aidev sync wiki --no-commit          # builds (or continues) the LLM Wiki');
     todo.push(`git add aidev.yaml .aidev ${assets.listStaticFiles(repoRoot, { tools: toolList, installRoot }).map((f) => f.split('/')[0]).filter((v, i, a) => a.indexOf(v) === i).join(' ')} && git commit`);
     todo.push('open a pull request so everyone gets the same setup');
     todo.forEach((t, i) => say.dim(`    ${i + 1}. ${t}`));
-  } else if (!wikiComplete) {
-    say.info('next: run "aidev init" again to finish the LLM Wiki, then commit .aidev/knowledge.');
   } else {
-    say.info('ready. Run "aidev status" any time, then start your AI tool (e.g. "claude") in this directory.');
+    say.info('ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.');
   }
-  return wikiCode;
+  return EXIT.OK;
 }
 
 module.exports = { run, FLAGS, FLAG_HELP, summary: 'このPKGにai-dev-kitを導入する（初回は対話、2人目以降は質問なし）', buildConfigYaml, inferHosting, inferInclude };

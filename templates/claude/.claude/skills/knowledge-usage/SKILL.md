@@ -32,12 +32,12 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
 セッション開始時の `[ai-dev-kit] head=<sha7>  knowledge=<sha7>  tracking=<sha7>` の行を思い出してください。
 
 - ✅ OK → Wikiは手元の HEAD を説明している
-- ⚠️ Wiki が HEAD より遅れ（+a ~m -r →rn） → **Wikiが古い**。コミット後は hook が更新を求めてくる。手動なら `aidev knowledge update`
+- ⚠️ Wiki が HEAD より遅れ（+a ~m -r →rn） → **Wikiが古い**。コミット後は hook が更新を求めてくる。手動なら `aidev sync wiki`
 - ⚠️ prose 未完了（N 件） → 構造は更新済みで本文がまだ。[[knowledge-update]] の手順で埋める
 - ⚠️ tracking branch が先行 → 追跡ブランチに追従遅れ。merge / rebase してから更新する
 - ❌ Wikiが無い / manifest が読めない → **Wikiが信用できない**。エラー（exit 4）。書き込みも止まる
 
-現状は `aidev status` でいつでも確認できます。
+現状は `aidev check` でいつでも確認できます。
 
 ## 食い違いを見つけたら
 
@@ -49,7 +49,7 @@ Wikiは派生情報なので、必ず古くなる窓があります。**以下�
    `selfHashes` 不一致として警告される
 
 恒久的に直すなら、生成元（ソースのコメント・構造）を改善するか、
-`aidev knowledge update --scope <path>` で再生成します。
+`aidev sync wiki --scope <path>` で再生成します。
 
 ## やってはいけないこと
 

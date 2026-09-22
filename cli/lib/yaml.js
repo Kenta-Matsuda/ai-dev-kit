@@ -8,9 +8,10 @@
  *
  * Supported: nested block maps (indentation), block sequences, inline flow
  * sequences/maps, `#` comments, single/double quoted scalars, integers,
- * floats, booleans, null. Not supported (and rejected loudly rather than
- * silently mis-parsed): anchors, aliases, tags, multi-line block scalars,
- * multiple documents.
+ * floats, booleans, null, and block scalars (`key: |` / `key: >`, with `-`
+ * to strip the final newline) for the prose in a workflow definition. Not
+ * supported (and rejected loudly rather than silently mis-parsed): anchors,
+ * aliases, tags, multiple documents.
  */
 
 class YamlError extends Error {
@@ -127,19 +128,71 @@ function splitKey(line) {
   return -1;
 }
 
+/** Fold a `>` block: lines of a paragraph join with spaces, blank lines separate paragraphs. */
+function foldLines(lines) {
+  const paragraphs = [];
+  let cur = [];
+  for (const l of lines) {
+    if (l === '') { if (cur.length) { paragraphs.push(cur.join(' ')); cur = []; } }
+    else cur.push(l.trim());
+  }
+  if (cur.length) paragraphs.push(cur.join(' '));
+  return paragraphs.join('\n');
+}
+
+/**
+ * Collect the lines of a block scalar that starts after `lines[start]`
+ * (the `key: |` row at `indent`). Content lines are the ones indented deeper
+ * than the key; blank lines belong to the block. Returns { value, next }.
+ */
+function readBlockScalar(lines, start, indent, style, chomp) {
+  const content = [];
+  let blockIndent = null;
+  let j = start + 1;
+  while (j < lines.length) {
+    const l = lines[j];
+    if (l.trim() === '') { content.push(''); j++; continue; }
+    const ind = l.length - l.trimStart().length;
+    if (blockIndent == null) {
+      if (ind <= indent) break;
+      blockIndent = ind;
+    }
+    if (ind < blockIndent) break;
+    content.push(l.slice(blockIndent));
+    j++;
+  }
+  while (content.length && content[content.length - 1] === '') content.pop();
+  let value = style === '|' ? content.join('\n') : foldLines(content);
+  if (chomp !== '-' && value !== '') value += '\n';
+  return { value, next: j };
+}
+
 function parse(text) {
   if (typeof text !== 'string') throw new YamlError('parse() expects a string');
   const rows = [];
-  text.split(/\r?\n/).forEach((raw, lineNo) => {
+  const lines = text.split(/\r?\n/);
+  for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+    const raw = lines[lineNo];
     if (/^\s*%/.test(raw)) throw new YamlError('YAML directives are not supported', lineNo);
-    if (/^---\s*$/.test(raw) || /^\.\.\.\s*$/.test(raw)) return;
+    if (/^---\s*$/.test(raw) || /^\.\.\.\s*$/.test(raw)) continue;
     const body = stripComment(raw);
-    if (body.trim() === '') return;
-    if (/\t/.test(body.slice(0, body.length - body.trimStart().length))) {
+    if (body.trim() === '') continue;
+    const indent = body.length - body.trimStart().length;
+    if (/\t/.test(body.slice(0, indent))) {
       throw new YamlError('tabs are not allowed for indentation', lineNo);
     }
-    rows.push({ indent: body.length - body.trimStart().length, text: body.trim(), lineNo });
-  });
+    const trimmed = body.trim();
+    // `key: |` / `key: >` (also `- key: |`): the scalar is the deeper-indented
+    // lines that follow, taken verbatim — comments and blanks included.
+    const block = /^((?:- )?[^\s#][^:]*:)\s*([|>])([+-]?)$/.exec(trimmed);
+    if (block) {
+      const { value, next } = readBlockScalar(lines, lineNo, indent, block[2], block[3]);
+      rows.push({ indent, text: block[1], lineNo, block: value });
+      lineNo = next - 1;
+      continue;
+    }
+    rows.push({ indent, text: trimmed, lineNo });
+  }
   if (rows.length === 0) return {};
   const [value, next] = parseBlock(rows, 0, rows[0].indent);
   if (next < rows.length) throw new YamlError('unexpected trailing content', rows[next].lineNo);
@@ -169,7 +222,7 @@ function parseSeq(rows, i, indent) {
     if (keyIdx >= 0) {
       // `- key: value` — an inline map that may continue on deeper lines.
       const virtualIndent = indent + 2;
-      const sub = [{ indent: virtualIndent, text: rest, lineNo: row.lineNo }];
+      const sub = [{ indent: virtualIndent, text: rest, lineNo: row.lineNo, ...(row.block !== undefined ? { block: row.block } : {}) }];
       let j = i + 1;
       while (j < rows.length && rows[j].indent >= virtualIndent) { sub.push(rows[j]); j++; }
       const [v, n] = parseMap(sub, 0, virtualIndent);
@@ -193,6 +246,11 @@ function parseMap(rows, i, indent) {
     let key = row.text.slice(0, keyIdx).trim();
     if (key[0] === '"' || key[0] === "'") key = unquote(key, row.lineNo);
     const rest = row.text.slice(keyIdx + 1).trim();
+    if (row.block !== undefined) {
+      out[key] = row.block;
+      i++;
+      continue;
+    }
     if (rest !== '') {
       out[key] = parseScalar(rest, row.lineNo);
       i++;

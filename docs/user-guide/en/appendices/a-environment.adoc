@@ -9,7 +9,7 @@ Never write values into files. Set them in your shell profile, as user environme
 |Variable |Description
 
 |`AZURE_DEVOPS_PAT`
-|The Azure DevOps PAT. Used by `aidev knowledge update` on the tracking branch (opening pull requests) and the MCP server. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
+|The Azure DevOps PAT. Used by `aidev sync wiki` on the tracking branch and `aidev submit workflow` (opening pull requests). An MCP server the package sets up in `.mcp.json` can use the same variable. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
 
 |`AIDEV_HOME`
 |Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the kit update-check cache.
@@ -24,8 +24,8 @@ Never write values into files. Set them in your shell profile, as user environme
 `AIDEV_KIRO_BIN`
 |Likewise for the GitHub Copilot CLI (`copilot`), OpenAI Codex CLI (`codex`) and Kiro CLI (`kiro-cli`) executables.
 
-|`AIDEV_AGENT`
-|The agent name that `aidev` sets, for the child process only, when it starts an agent. The hook uses it to apply `agents.<name>` from the policy. Do not set it yourself.
+|`AIDEV_WORKFLOW`
+|The workflow name that `aidev run workflow` sets, for the child process only, when it starts an agent. The hook uses it to check that the workflow is approved and to allow its `scope.writable`. Do not set it yourself.
 
 |`AIDEV_DEBUG`
 |When set, internal errors show a stack trace.

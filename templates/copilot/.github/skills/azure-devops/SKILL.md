@@ -10,10 +10,10 @@ description: Work Item・ブランチ・PR・Pipeline の定型操作。MCP経�
 
 ## 呼び出し口
 
-- MCPサーバー `azure-devops`（`.mcp.json` → `aidev mcp azure-devops` が起動）
-- CLI（`aidev knowledge update`）— Wiki の更新・Wiki コミット・Wiki PR の作成はこちら
+- MCP サーバー `azure-devops`（PKG が自分の `.mcp.json` に用意する。kit は配布しない。PAT は環境変数で渡し、設定 file に書かない）
+- CLI（`aidev sync wiki`）— Wiki の更新・Wiki コミット・Wiki PR の作成はこちら
 
-Work Item の状態や PR の作成・更新は MCP で行い、Wiki の更新は `aidev knowledge update` に任せてください。
+Work Item の状態や PR の作成・更新は MCP で行い、Wiki の更新は `aidev sync wiki` に任せてください。
 
 ## 原則: 状態はAPIが正本
 
@@ -25,7 +25,7 @@ Work Item・リンクされたPR・同期PRメタデータです。
 | PRがマージされたか | **PR API の `status` / `mergeStatus`**。ブランチの有無で判断しない |
 | マージ結果のSHA | **PR API の `lastMergeCommit`**。作業ブランチ先端を使わない |
 | Work Item の状態 | Work Item API。本文の記述を信用しない |
-| Wiki が説明する SHA | `manifest.json` の `knowledgeSha`（`aidev knowledge update` が HEAD を書く） |
+| Wiki が説明する SHA | `manifest.json` の `knowledgeSha`（`aidev sync wiki` が HEAD を書く） |
 
 > 🔴 **作業ブランチの先端SHAをマージ結果として使ってはいけません。**
 > squash マージは新しい単一コミットを作り、rebase マージは全SHAを付け替え、
@@ -46,9 +46,10 @@ Work Item・リンクされたPR・同期PRメタデータです。
 
 | 用途 | 名前 |
 | --- | --- |
-| issue-to-pr | `aidev/issue-<id>` |
+| workflow の実行（`aidev run workflow`） | `aidev/<workflow>-<yyyymmddHHMM>` |
+| workflow の提出（`aidev submit workflow`） | `aidev/workflow-<name>` |
 | 通常の機能開発 | `feature/<name>` |
-| Wiki 更新（tracking branch 上） | `aidev/wiki-<sha12>`（`aidev knowledge update` が一時 worktree で作り、PR を作成・更新する） |
+| Wiki 更新（tracking branch 上） | `aidev/wiki-<sha12>`（`aidev sync wiki` が一時 worktree で作り、PR を作成・更新する） |
 
 既定ブランチへ直接pushしません。force-push・履歴改変は**実行前に必ず確認**を取ります。
 

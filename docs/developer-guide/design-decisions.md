@@ -6,7 +6,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D1: tool設定はPKG cloneへ実体化し、PKG repositoryへcommitする
 
-**判断**: toolごとの`templates/<tool>/`をPKG cloneへコピーし、他のfileと同様にcommitします。PKG teamはそのcopyを編集してよく、`.aidev/materialized.json`に適用したtemplateのhashとfileのhashを記録します。`aidev update`はkit本体だけを更新し、`aidev apply`（teamが好きなときに実行）が新templateを3-way mergeで取り込み、衝突はgit同様のmarkerを書いてteamに解消を委ねます。`aidev check`は未解消conflictとkit hooksの欠落だけをexit 2にし、teamの編集は止めません。
+**判断**: toolごとの`templates/<tool>/`をPKG cloneへコピーし、他のfileと同様にcommitします。PKG teamはそのcopyを編集してよく、`.aidev/materialized.json`に適用したtemplateのhashとfileのhashを記録します。`aidev update`はkit本体だけを更新し、`aidev sync tools`（teamが好きなときに実行）が新templateを3-way mergeで取り込み、衝突はgit同様のmarkerを書いてteamに解消を委ねます。`aidev check`は未解消conflictとkit hooksの欠落だけをexit 2にし、teamの編集は止めません。
 
 **理由**: 各AI toolはproject rootの設定fileを読む前提で作られており、toolを問わず動く最も単純な方法です。commitすることでチーム全員が同じ設定を`git pull`で受け取り、CI（`aidev check`）が同じfileを検査できます。
 
@@ -22,7 +22,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **判断**: 専用のknowledge repositoryやorphan branchは作らず、WikiをPKG repositoryに置きます。共有は`aidev/wiki-<sha12>` branchのPRと人間のmergeで行います。
 
-**理由**: 「同じWiki」をチームで保つにはgitで共有する必要があり、PKG自身に置けばrepository数が増えず、Wikiとsourceが同じcommit履歴で追えます。`knowledge update`が「commit済みのinventoryがHEADのtreeと一致するか」をno-op判定に使えるのもこの配置だからです。
+**理由**: 「同じWiki」をチームで保つにはgitで共有する必要があり、PKG自身に置けばrepository数が増えず、Wikiとsourceが同じcommit履歴で追えます。`sync wiki`が「commit済みのinventoryがHEADのtreeと一致するか」をno-op判定に使えるのもこの配置だからです。
 
 **却下した代替案**:
 
@@ -42,7 +42,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D4: policyは候補生成→人間の承認→CLI配置とし、承認はlocal（PKG PR review）で完結する
 
-**判断**: `aidev permission configure`が`aidev.yaml`から機械的に候補を作り、`--approve`（または`init`の対話yes）で`.aidev/policy.yaml`へ配置します。中央登録は不要です。弱体化は`--force`を要求します。
+**判断**: `aidev create policy`が`aidev.yaml`から機械的に候補を作り、`--approve`（または`init`の対話yes）で`.aidev/policy.yaml`へ配置します。中央登録は不要です。弱体化は`--force`を要求します。
 
 **理由**: 新規PKGの導入が中央のPR mergeを待たずに始められます。policy fileはcommitされるので、その変更はPKG PRでreviewされます。
 
@@ -52,25 +52,25 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **判断**: `headSha` = HEAD、`knowledgeSha` = manifestのSHA（表示用）、`trackingSha` = remote先端。整合は`inventory.compareWithTree`、すなわちWikiを生成したときのpath / blob idの一覧とHEADのtreeの比較で判定します。ERRORはWiki欠落・manifest破損に限定し、codeが先へ進んだ状態はWARNです。
 
-**理由**: Wikiはcommitのたびに同じbranchへ別commitとして積むので、HEADと一致しているのが正常です。inventoryとの比較は旧commit objectを必要とせず、rebase / squash / force-pushの後も同じ結果になり、`knowledge update`が再生成対象を決める差分と一致します。Wiki追加commitやkit更新commitはgeneration targetを変えないので、Wikiをcommitした直後に「古い」と警告することもありません。
+**理由**: Wikiはcommitのたびに同じbranchへ別commitとして積むので、HEADと一致しているのが正常です。inventoryとの比較は旧commit objectを必要とせず、rebase / squash / force-pushの後も同じ結果になり、`sync wiki`が再生成対象を決める差分と一致します。Wiki追加commitやkit更新commitはgeneration targetを変えないので、Wikiをcommitした直後に「古い」と警告することもありません。
 
 **却下した代替案**: `merge-base(HEAD, origin/<tracking_branch>)`を対象にしたsource treeのdiff（0.6.0まで）。feature branch上のcommitをWikiが説明できず、hookによる自動追従と両立しません。`submoduleSha == knowledgeSha`の厳密一致（wrapper方式）。submoduleが無い今は成立しません。
 
 **論点**: 「WikiがHEADより遅れている」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
 
-### D6: PKG fileは既定でread-onlyとし、teamがpolicyの`agents.<name>.writable`または`writable`で広げる
+### D6: PKG fileは既定でread-onlyとし、書けるのは承認済みworkflowの`scope.writable`とpolicyの`writable`だけ
 
-**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・`aidev.yaml`のみ。PKG fileへの書込を許すのは、teamが`.aidev/policy.yaml`に書いてcommitした場合だけです。agent単位なら`agents.<name>.writable`（任意で`branch` glob）、全員向けなら`writable`です。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
+**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・agents・skills・conventions・`aidev.yaml`のみ。PKG source（`src/**`など）への書込は、`aidev run workflow`が起動したsessionで、そのworkflowが`origin/<tracking_branch>`と同一（承認済み）のとき、`scope.writable`の範囲でだけ許します（`policy.decide`の第6段）。全員・全sessionに開くなら`.aidev/policy.yaml`の`writable`です。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
 
-**理由**: agentが自分の権限を広げられない構造にするためです。`writable`も`agents`もsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。agent単位の許可は、対話sessionを含む全員に開かずにissue-to-prだけへsourceの編集を許すためにあります。
+**理由**: 「何を書いてよいか」を「何をさせるか」（workflow）と同じfileに置き、同じPR reviewで決めるためです。scopeはsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。判定は書込のたびに行うので、agentが実行中にYAMLを書き換えても、originと食い違った瞬間にscopeを失います。
 
-**却下した代替案**: 対話sessionのsub-agentもhookの入力から判別して許可する。Claude Codeのhook入力にagent識別子が含まれることを確認できていないため、当面はCLI起動（`aidev agent run` / `knowledge update` / workflow `ctx.agent`）に限ります。
+**却下した代替案**: policyのagent単位の許可（`agents.<name>.writable` + `branch`、`AIDEV_AGENT`。0.6.0〜0.7.0）。許可の置き場がworkflowと別で、teamがpolicyを手で編集する必要があり、対話sessionのsub-agentには効かず、workflowごとに範囲を変えられませんでした。承認済みworkflowのscopeに一本化し、撤去しました。
 
-**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可（policy `agents.<name>.writable` + 任意の`branch`）を足しました。誰が書いているかはCLIが子processの環境に入れる`AIDEV_AGENT`で決まり、agentは名乗れません。全員に開く`writable`と違い、CLIが起動したその agent にだけ効きます。
+**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可を足し、workflow-first化（D9）でworkflowのscopeに置き換えました。
 
 ### D7: AI toolはadapter registryで扱い、実機検証済みはClaude Codeだけとする
 
-**判断**: `cli/lib/tools.js`の`REGISTRY`に`claude` / `copilot` / `codex` / `kiro`を持ち、`tools.default`で宣言したtoolのtemplate（`templates/<tool>/`）を実体化し、CLIから起動できます（0.3.0）。実機で検証しているのは`claude`だけで、他は`verified: false`として公開仕様に沿ったargvを持ち、`aidev agent run --dry-run`でcommand lineを確認できます。hookによる書込policyの実行時強制はClaude Codeだけです。
+**判断**: `cli/lib/tools.js`の`REGISTRY`に`claude` / `copilot` / `codex` / `kiro`を持ち、`tools.default`で宣言したtoolのtemplate（`templates/<tool>/`）を実体化し、CLIから起動できます（0.3.0）。実機で検証しているのは`claude`だけで、他は`verified: false`として公開仕様に沿ったargvを持ち、`aidev run workflow --dry-run`で使うtoolとagentを確認できます。hookによる書込policyの実行時強制はClaude Codeだけです。
 
 **理由**: 設定fileの形をtoolごとに変えずに済ませ、tool固有の差をregistry 1か所に閉じるためです。「対応」と「検証済み」を分けるのは、PreToolUse相当の強制機構を持たないtoolに同じ保証を約束しないためです。
 
@@ -84,17 +84,19 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: 次に追加するproviderの優先順位。
 
-### D9: workflowのloop scriptはNode.jsで統一する
+### D9: 開発はworkflowだけから行い、workflowはYAMLのみ、承認は`origin/<tracking_branch>`との一致で判定する
 
-**判断**: `steps.js`をNode.jsで実行します。runtime依存を増やしません。
+**判断**: 利用者が開発に使うcommandは`aidev create workflow|submit|run|list`だけです（`aidev agent`は撤去）。workflowは`.aidev/workflows/<name>/workflow.yaml`の1 fileで、`objective`・`scope.writable`・`agents` / `skills`・`steps`（`agent` / `command` / `pull-request`）・`limits`・`cost`を書きます。実行logic（`until`の再試行loop、command実行、commit、push、PR）はkitのrunnerが持ちます。agentとskillは`.aidev/agents/`・`.aidev/skills/`（PKG）かkit同梱を名前で参照し、複数のworkflowで再利用します。`approve` commandと`approval.json`は無く、「承認済み」= `workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`にあるものとbyte一致、です。
 
-**理由**: CLI自体がNode.jsであり、Pythonを必須にすると導入条件が増えます。
+**理由**: 3つの役割を分けるためです。kit開発者は実行するもの（runner、step種別、同梱workflow / agent / skill）の品質を持ち、PKGの責任者は「AIに何をさせるか」をYAMLに書いてPRでreviewし、実作業者は`aidev run workflow`を実行して生成されたPRをreviewerに渡すだけで、成果物に責任を持ちません。YAMLで書けないことはkitへの変更（新しいstep種別）であり、実行codeの品質責務がkit開発者に閉じます。承認をhostingに任せるのは、誰が承認したかをPR reviewerとbranch policyが記録し、CLIの記録（環境変数由来）を認証に使わないためです。
 
-**論点**: PKGがPythonでも、`ctx.run`でPKGのtest runnerを呼ぶだけならNode.jsで足ります。Pythonでloopを書きたい要望が強ければ`runtime`拡張を検討します。
+**却下した代替案**: (1) `steps.js`（自由なJavaScript）+ content hashの`approval.json`（0.3.0〜0.7.0）。reviewerがscriptを読む必要があり、実行codeの責務がPKG側に漏れ、承認記録が手元fileでした。(2) 1 taskごとに自然言語からworkflowを生成してreviewしてから実行する形。毎taskで責任者の承認が要るので「押すだけ」にならず、実作業者が計画をreviewすると責務が戻ります。代わりにworkflowの最初のstepで計画を書かせ、PR本文で見ます。(3) workflow単位でagentを同梱する形。同じagentを複数のworkflowで使えないので、名前参照にしました。
 
-### D10: `aidev update`はkit checkoutだけを更新し、PKGへの適用は`aidev apply`に分ける
+**論点**: `pull-request` stepの直後にWikiを追従させる（runnerが`aidev sync wiki`を呼ぶ）か。PRを作らないrunの記録を中央に集めるか。claude以外のtoolでの実機検証。
 
-**判断**: `update`は`origin/main`へのfast-forwardだけを行い、`AIDEV_HOME/registry.json`のcloneのうち古いtemplateのままのものを一覧します。PKGへの適用はteamが都合のよいときに`aidev apply`で行い、結果はcommitせず利用者がreviewしてcommitします。起動時に更新の有無を通知します（`AIDEV_NO_UPDATE_CHECK=1`で抑止）。
+### D10: `aidev update`はkit checkoutだけを更新し、PKGへの適用は`aidev sync tools`に分ける
+
+**判断**: `update`は`origin/main`へのfast-forwardだけを行い、`AIDEV_HOME/registry.json`のcloneのうち古いtemplateのままのものを一覧します。PKGへの適用はteamが都合のよいときに`aidev sync tools`で行い、結果はcommitせず利用者がreviewしてcommitします。起動時に更新の有無を通知します（`AIDEV_NO_UPDATE_CHECK=1`で抑止）。
 
 **理由**: 更新のdiffがPKG PRとしてreviewされることで、kit側の変更が各PKGに「いつ・何が」入ったかが履歴に残ります。適用を分けたのは、teamの編集とのmergeやconflictの解消に時間をかけられるようにするためで、無関係なcloneの作業treeを予告なく書き換えないためでもあります（0.4.0。それ以前は`update`が現在のPKGへ再適用していました）。
 
@@ -102,11 +104,11 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D11: tracking branch上のWiki更新は一時worktreeで行い、利用者のcheckoutに触れない
 
-**判断**: tracking branch上（または`--branch`）の`knowledge update`は`.aidev/cache/wiki-worktree/`にHEADのdetached worktreeを作り、そこでinventory・agent・commitを行い、`aidev/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。feature branch上ではworktreeを使わず、そのbranchへ直接別commitを積みます。
+**判断**: tracking branch上（または`--branch`）の`sync wiki`は`.aidev/cache/wiki-worktree/`にHEADのdetached worktreeを作り、そこでinventory・agent・commitを行い、`aidev/wiki-<sha12>`をpushします。利用者のcheckoutのmanifestは変わりません。`--abort`はworktree削除とlease解放だけです。feature branch上ではworktreeを使わず、そのbranchへ直接別commitを積みます。
 
 **理由**: wrapper方式では`src`をbumpして戻す必要があり、失敗時の復旧（`originalSha`へ戻す）が複雑でした。worktreeなら利用者の未commit変更やbranchに影響せず、失敗してもworktreeを消せば元どおりです。commit対象が`.aidev/knowledge`と`.aidev/.gitignore`に限られるのも、worktree内で`git add`する範囲を絞れるからです。
 
-**トレードオフ**: 結果はPRのmerge後に`git pull`しないと手元に来ません。`status`はtracking先端のWikiが`aidev/wiki-*` branchに既にあることを注記します。
+**トレードオフ**: 結果はPRのmerge後に`git pull`しないと手元に来ません。`check`はtracking先端のWikiが`aidev/wiki-*` branchに既にあることを注記します。
 
 ### D12: Wikiの構造化状態はCLIが持ち、agentは完了報告だけを書く
 
@@ -118,7 +120,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D13: self-evolutionはkit開発者の端末だけで動かし、振り返りは同じsessionが書く
 
-**判断**: 発動条件は`AIDEV_HOME/developer.json`（`aidev evolve enable`）または`AIDEV_KIT_DEVELOPER=1`で、PKGに配布されるfileや`aidev.yaml`には置きません。Stop hookはtranscriptを集計し、閾値（tool call 30回 / 出力20k tokens）を超えた未振り返りのsessionに1回だけ`decision: block`で振り返りを書かせます。`aidev evolve run`が振り返りを集め、kit checkoutのworktree（`aidev/evolve-<date>`）で`evolution` agentを起動し、agentがtemplateを直してPRを作ります。mergeは人間です。
+**判断**: 発動条件は`AIDEV_HOME/developer.json`（`npm run evolve -- enable`）または`AIDEV_KIT_DEVELOPER=1`で、PKGに配布されるfileや`aidev.yaml`には置きません。Stop hookはtranscriptを集計し、閾値（tool call 30回 / 出力20k tokens）を超えた未振り返りのsessionに1回だけ`decision: block`で振り返りを書かせます。`npm run evolve -- run`が振り返りを集め、kit checkoutのworktree（`aidev/evolve-<date>`）で`evolution` agentを起動し、agentがtemplateを直してPRを作ります。mergeは人間です。
 
 **理由**: 後から別のagentにtranscriptを読ませるより、文脈を持つ本人が「どこで時間とtokenを無駄にしたか」を正確に言えます。PKG利用者の端末で動かさないのは、利用者にcostと挙動の差を生まないためです。変更先をkitのtemplateに限るのは、PKG内の`.claude/**`を直接変えるとdriftになるためです。
 
@@ -128,7 +130,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D14: 開発規約は`.aidev/conventions/`に置き、agentが根拠付きで生成してteamがcommitする
 
-**判断**: convention-builder agentがWikiと根拠sourceから規約を`[確定]`（toolが強制）/ `[慣習]`（多数派、件数付き）/ `[未統一]`（割れている、teamの判断待ち）/ `[提案]`（現状の規約ではない）の区分で`.aidev/conventions/`（`index.md`、`coding.md`、`testing.md`、`review.md`）へ書きます。既定policyで`writable`です。既存pageの`## チーム決定`以下はagentが変更しません。test-writer agentは`testing.md`を前提に読みます。
+**判断**: PKGのworkflow（規約を書くagent。kitは同梱しない）がWikiと根拠sourceから規約を`[確定]`（toolが強制）/ `[慣習]`（多数派、件数付き）/ `[未統一]`（割れている、teamの判断待ち）/ `[提案]`（現状の規約ではない）の区分で`.aidev/conventions/`（`index.md`、`coding.md`、`testing.md`、`review.md`）へ書きます。既定policyで`writable`です。既存pageの`## チーム決定`以下はagentが変更しません。test-writer agentは`testing.md`を前提に読みます。
 
 **理由**: `.aidev/knowledge/**`は生成物で、手編集禁止・syncでのorphan削除の対象なので、teamが決めた規約の置き場になりません。`.claude/**`とCLAUDE.mdはkit所有でPKG固有の内容を置けず、置けばdriftです。PKG sourceは既定read-onlyで、置き場がPKGごとに違うと他のagentが見つけられません。`.aidev/`はPKG固有設定の置き場として既に定義されています（D3）。
 
@@ -136,13 +138,38 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: `## チーム決定`以外を再生成で上書きする運用でよいか。SessionStart hookが規約の有無を表示すべきか。
 
+### D15: commandは動詞先行（`aidev <動詞> [<object>] [<名前>]`）とする
+
+**判断**: 利用者向けcommandは動詞で始めます。開発は`run` / `create` / `submit` / `list` / `remove`（objectは`workflow`、`create`は`agent` / `skill` / `policy`も、`remove`は`agent` / `skill`も、`list`は複数形）、保守は`init` / `check` / `sync tools|wiki [<package>]`、端末は`update`（objectなし。kit本体だけ）/ `doctor [<package>]` / `uninstall [<package>] [--all]`です。objectを1つしか取らない動詞（`run` / `submit`）でもobjectを省略しません。旧`aidev status` / `knowledge update` / `permission *` / `workflow *` / `apply` / `configure` / `show` / `eject` / `mcp` / `evolve` / `update kit|wiki`は「unknown command」または「takes no object」です（2026-09-23）。
+
+**理由**: 「何をするか」で引けるcommand面のほうが、機能名（`workflow`、`knowledge`、`permission`）で引くより覚えやすく、help一覧が役割（開発 / 保守 / 端末）で読めるためです。動詞に対してobjectを必ず書かせるのは、`aidev run x`が何を実行するのか一覧から読めるようにするためと、将来objectを増やしても文法が変わらないためです。
+
+**却下した代替案**: `aidev run <name>` / `aidev submit <name>`のようにobjectを省く形（短いが、`create` / `list` / `remove`と文法がずれる）。機能名を残して動詞を足す形（2系統の入口が残る）。
+
+### D16: `init`はWikiを生成せず、`status`は`check`に統合し、`doctor`は端末（と名指ししたPKG）を見る
+
+**判断**: `init`は設定・template・policy・registryだけを行い、Wikiは状態を報告して`aidev sync wiki --no-commit`を案内します（`--wiki` / `--no-wiki`は無い）。`check`は旧`status`の一画面表示とCI exit codeを兼ね、`aidev.yaml`が解析できない・workflowがinvalidのときexit 1を足します。`doctor`はnode / git / kit / registry / 全AI tool / proxyを見て、`<package>`（registry名かpath）を渡したときだけそのPKGの状態も一覧します。CIのexit契約は`check`だけが持ちます。
+
+**理由**: `init`のexit 1が「設定できなかった」と「Wikiの本文が未完了」の両方を意味していて、CIや手順書で区別できませんでした。`status`と`check`は同じ検査の2つの出力で、人はexit codeを気にしないので1つで足ります。`doctor`がPKGも見ると`check`と重なり、どちらを見るかが毎回問題になります。
+
+**却下した代替案**: `status`を残して`check`を「`status` + exit code」にする（2 commandが残る）。`doctor`を削って`check`に端末の検査も入れる（PKGの外で走らせるcommandが要る）。
+
+### D17: kitはframeworkであり、開発用agent・workflow・MCP serverは配布しない
+
+**判断**: kitが同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装、テスト、規約）、workflow、MCP serverはPKGのもので、`aidev create workflow --describe`の中でworkflow-creatorが必要な要素をagents-creatorのsubagentに書かせ、MCPは提案としてfinal messageに出して人が`.mcp.json`（PKG所有。kit管理外）に足します。`aidev mcp`、`templates/claude/.mcp.json`、issue-to-pr / test-writer / convention-builder、同梱workflowは撤去しました。`aidev hook`はAI toolのhooksが呼ぶ内部入口として残し（権限強制の実体）、helpには出しません。self-evolutionは`scripts/evolve.js`（`npm run evolve`）に移し、CLI commandではなくなりました。`eject`は`uninstall <package>`に、`apply`は`sync tools`に畳みました。
+
+**理由**: kitの責務を「workflowを作る・提出する・承認する・実行する仕組み」と「initなどPKGに依らず有益な処理」に限るためです。PKGごとに違う開発作業の中身をkitが配ると、kit開発者がその品質責務を負い、PKGは自分の agent を書きにくくなります。MCPは接続先も認証もPKG固有で、kitが起動役を持つ理由がありません。hookは削除できません: guard-writeがscope.writableを強制する実体で、対話sessionでも動きます。
+
+**却下した代替案**: `aidev create mcp` / `create hook`（hookはkit管理の権限強制で、PKGが作るものではない。MCPは設定形式がtoolごとに違い、追加は人が行うほうが安全）。同梱workflowを「例」として残す（kitが開発作業の中身に責務を持つことになる）。
+
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |
 | --- | --- | --- |
-| policyのcustomize | `aidev.yaml`から`read_only` / `writable` / `agents`を生成できるようにするか。`reconfigure`が手編集を消す点をどう扱うか | D4、D6 |
-| 対話sessionのagent判別 | Claude Codeのhook入力からsub-agent名を取れれば`AIDEV_AGENT`と同じ扱いに広げる | D6 |
-| `agents.<name>.writable`の範囲 | `package.include`の内側に限定するか（撤去したwork leaseはそうしていた） | D6 |
+| policyのcustomize | `aidev.yaml`から`read_only` / `writable`を生成できるようにするか。`reconfigure`が手編集を消す点をどう扱うか | D4、D6 |
+| PR後のWiki追従 | `pull-request` stepの直後にrunnerが`aidev sync wiki`を呼ぶか（今はnightly pipelineか人手） | D9、D5 |
+| 実行履歴の集約 | PRを作らないrunの`run.json`をWork Item commentや`aidev/audit` branchへ集めるか | D9 |
 | `base ahead of knowledge`の扱い | WARNのままか、`--strict`以外でもexit 2にするか | D5 |
 | 開発中のWiki追従 | branch上のHEADを対象にhookとsub-agentでWikiを追従させる案（`proposals/2026-09-21-wiki-auto-update.md`、`2026-09-22-wiki-update-flows.md`）。未実装 | D5、D11、D12 |
 | 段階的配布 | `origin/main`のmergeが即時に全員へ通知される点を、tag pinやcanaryで緩和するか | D10 |

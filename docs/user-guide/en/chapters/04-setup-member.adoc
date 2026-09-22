@@ -36,21 +36,21 @@ aidev init
 ✓ .aidev/policy.yaml is present
 ✓ LLM Wiki is present (.aidev/knowledge/)
 
-ℹ ready. Run "aidev status" any time, then start your AI tool (e.g. "claude") in this directory.
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[set the environment variable] and open a new terminal.
-* `newer templates available` on the `tool config` line → the team has not taken in the newer kit templates yet. The package owner runs `aidev apply` and opens a PR (xref:daily-apply[aidev apply]).
-* If it asks `the LLM Wiki is not in this clone yet …` → press Enter (`N`). Run `git pull` after the package owner's pull request merges.
+* `newer templates available` on the `tool config` line → the team has not taken in the newer kit templates yet. The package owner runs `aidev sync tools` and opens a PR (xref:daily-apply[aidev sync tools]).
+* `the LLM Wiki is not in this clone yet …` is shown → the package owner's PR is not merged yet. Run `git pull` after the merge. Do not build it yourself.
 
 . Check the state.
 +
 [source,bash]
 ----
-aidev status
+aidev check
 ----
 +
-You are ready when the second line is `✅ the Wiki describes the code this work is based on.` For `⚠️` and `❌`, see xref:daily-status[Reading aidev status].
+You are ready when the second line is `✅ the Wiki describes the code this work is based on.` For `⚠️` and `❌`, see xref:daily-check[Reading aidev check].
 
 . Start Claude Code at the package root.
 +
@@ -64,4 +64,5 @@ At the start of the session, one line about the Wiki state is added to the conte
 === Next steps
 
 * The daily routine → xref:daily[Daily use]
+* Run an approved workflow → xref:daily-workflow[Putting the AI to work]
 * When Claude says a write was refused → xref:permissions[Permissions and safety]

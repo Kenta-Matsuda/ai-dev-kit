@@ -1,20 +1,24 @@
 [[cli-check]]
 == aidev check
 
-整合性を検査し、結果を終了コードで返します。CI 用です。
+この PKG の状態を 1 画面で表示し、整合性を終了コードで返します。人が見るときも CI も同じコマンドです。
 
 === 書式
 
 [source,text]
 ----
-aidev check [options]
+aidev check [--strict] [--no-remote] [--json]
 ----
 
 === 説明
 
-`aidev status` と同じ検査を行い、最初に見つかった問題の種類を終了コードにします。順序は drift（2）→ policy（3）→ Wiki（4）です。
+PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（`head` / `knowledge` / `tracking` の 3 つのコミットと 1 行の判定）、Wiki のページ数と未生成のページ数、ツール設定の状態（適用した kit、編集済みファイル数、衝突、hooks の欠落）、policy の有無、workflow の数と承認済みの数、手編集、進行中の publish を表示します。
 
-`aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、何もせず 0 で終わります。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままで、`--strict` を付けると 2 になります。
+続けて、見つかった問題の種類を終了コードにします。順序は 設定・workflow（1）→ drift（2）→ policy（3）→ Wiki（4）で、最初に見つかった問題のコードを返します。
+
+`aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、その旨を表示して 0 で終わります。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままで、`--strict` を付けると 2 になります。
+
+端末そのもの（Node.js、git、kit、AI ツール）の診断は xref:cli-doctor[`aidev doctor`] です。
 
 === オプション
 
@@ -25,11 +29,11 @@ aidev check [options]
 |`--strict`
 |警告（Wiki が HEAD より遅れている、本文が未生成、tracking branch が先行）も失敗（終了コード 2）にする
 
+|`--no-remote`
+|remote に接続しない（offline、CI）
+
 |`--json`
 |JSON で出力する
-
-|`--no-remote`
-|remote に接続しない
 |===
 
 === 終了コード
@@ -39,13 +43,13 @@ aidev check [options]
 |コード |条件
 
 |0
-|整合している
+|整合している。`aidev.yaml` が無い、または eject 済み（対象外）
 
 |1
-|`aidev.yaml` が壊れているなどの一般エラー
+|`aidev.yaml` が読めない。`.aidev/workflows/` に検証を通らない workflow がある
 
 |2
-|`.aidev/materialized.json` が無い、`aidev apply` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えている。チームがツール設定ファイルを編集しただけなら通ります。`--strict` 時の警告
+|`.aidev/materialized.json` が無い、`aidev sync tools` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えている。チームがツール設定ファイルを編集しただけなら通ります。`--strict` 時の警告
 
 |3
 |`.aidev/policy.yaml` が無い、または読めない
@@ -61,26 +65,38 @@ aidev check [options]
 aidev check
 ----
 
-[source,text]
+[source,text,subs="attributes+"]
 ----
-aidev check
-  head         9f8e7d6
-  knowledge    9f8e7d6
-  tracking     9f8e7d6
-  tool config  ok (1 customised)
-  policy       valid
+aidev check — demo-pkg
+  hosting  azure-devops (demo-pkg), tracking origin/main
+  tools    claude
+  kit      {aidev-version} @ 9491efe
+
+[ai-dev-kit] head=9f8e7d6  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev sync wiki".
+
+  head / knowledge / tracking  9f8e7d6 / 1a2b3c4 / 9f8e7d6
+  Wiki                         163 page(s) for 163 target(s)
+  tool config                  applied from kit 9491efe, 1 file(s) customised
+  policy                       placed (14 protected paths)
+  workflows                    2 (1 approved)
+
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev sync wiki".
 ✓ environment is consistent.
 ----
+
+`head` は今の checkout のコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。判定は inventory と HEAD の木の比較で行うので、`knowledge` の SHA が一致しなくても内容が同じなら `✅` です。`main` の Wiki が `aidev/wiki-<sha12>` ブランチで PR 待ちのときは、その旨を 1 行添えます。
 
 失敗の例（終了コード 2）:
 
 [source,text]
 ----
-✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev apply" to record the result.
+✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev sync tools" to record the result.
     conflict: .claude/settings.json
 ----
 
 === 関連
 
+* xref:daily-check[aidev check の読み方] — 表示ごとの対処
 * xref:automation-ci[自動化: CI]
 * xref:troubleshooting-exit[トラブルシューティング: aidev check の終了コード]

@@ -1,0 +1,71 @@
+[[cli-remove]]
+== aidev remove
+
+workflow・agent・skill のファイルを削除します。workflow から参照されている agent・skill は削除しません。
+
+=== 書式
+
+[source,text]
+----
+aidev remove workflow <name> [--dry-run] [--json]
+aidev remove agent <name> [--dry-run] [--json]
+aidev remove skill <name> [--dry-run] [--json]
+----
+
+=== 説明
+
+`workflow` は `.aidev/workflows/<name>/` を実行記録（`runs/`）ごと削除します。`agent` は `.aidev/agents/<name>.md`、`skill` は `.aidev/skills/<name>/` を削除します。`.aidev/workflows/` のどれかの workflow がその agent・skill を参照していれば、workflow 名を挙げて拒否します。先に参照を外して提出してください。kit 同梱の agent・skill は削除できません。
+
+削除は作業ツリーへの変更です。コミットして PR にし、マージでチームに届きます。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--dry-run`
+|削除するものを表示し、削除しない
+
+|`--json`
+|JSON で出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|削除した。`--dry-run`
+
+|1
+|object や名前が無い・不正。該当ファイルが無い。agent・skill が workflow から参照されている
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev remove skill deploy-checklist --dry-run
+aidev remove skill deploy-checklist
+----
+
+[source,text]
+----
+✓ deleted .aidev/skills/deploy-checklist/SKILL.md
+    commit the deletion and open a pull request; the change reaches the team through the merge
+----
+
+参照されているとき:
+
+[source,text]
+----
+✗ agent test-writer is referenced by workflow(s) write-tests; remove the reference (and submit) first
+----
+
+=== 関連
+
+* xref:cli-create[aidev create]、xref:cli-list[aidev list]
+* xref:workflows-agents-skills[AI に仕事をさせる: agent と skill]

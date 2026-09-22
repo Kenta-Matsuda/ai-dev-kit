@@ -39,7 +39,7 @@ function run() {
   test('kit-owned files are denied', () => {
     const fx = makeRepo();
     try {
-      for (const p of ['.claude/settings.json', '.claude/agents/x.md', 'CLAUDE.md', '.mcp.json',
+      for (const p of ['.claude/settings.json', '.claude/agents/x.md', 'CLAUDE.md',
         '.aidev/policy.yaml', '.aidev/sync.lock', '.aidev/materialized.json',
         '.aidev/ejected.json', '.aidev/.gitignore']) {
         const d = decide(fx, p);
@@ -249,72 +249,77 @@ function run() {
       const d = decide(fx, 'src/api/auth.ts');
       eq(d.decision, 'deny');
       eq(d.rule, 'read-only');
-      ok(/listing paths under writable/.test(d.reason), d.reason);
+      ok(/inside the scope\.writable of an approved workflow/.test(d.reason), d.reason);
       eq(decide(fx, '.aidev/knowledge/x.md').rule, 'writable');
+      eq(decide(fx, '.aidev/agents/mine.md').rule, 'writable');
+      eq(decide(fx, '.aidev/skills/mine/SKILL.md').rule, 'writable');
       eq(decide(fx, 'aidev.yaml').rule, 'writable');
     } finally { fx.cleanup(); }
   });
 
-  suite('policy: per-agent grants');
+  suite('policy: approved workflow scope');
 
-  const GRANT = { 'issue-to-pr': { writable: ['src/**'], branch: null } };
-  const withGrant = (fx, agents = GRANT) => ({ ...ctx(fx), policy: { ...cfg.loadPolicy(fx.root), agents } });
+  const WF = (scope) => [
+    'name: wf', 'objective: do it', 'scope:', `  writable: [${scope}]`,
+    'steps:', '  - id: a', '    agent: dev', '    prompt: go', 'cost:', '  max_usd: 1', '',
+  ].join('\n');
+  const putOnMain = (fx, scope) => {
+    fs.mkdirSync(path.join(fx.root, '.aidev', 'agents'), { recursive: true });
+    fs.writeFileSync(path.join(fx.root, '.aidev', 'agents', 'dev.md'), '---\nname: dev\ndescription: t\n---\n\nbody\n', 'utf8');
+    fs.mkdirSync(path.join(fx.root, '.aidev', 'workflows', 'wf'), { recursive: true });
+    fs.writeFileSync(path.join(fx.root, '.aidev', 'workflows', 'wf', 'workflow.yaml'), WF(scope), 'utf8');
+    git(['add', '-A'], fx.root);
+    git(['commit', '-q', '-m', 'workflow'], fx.root);
+    git(['push', '-q', 'origin', 'main'], fx.root);
+  };
 
-  test('a granted agent started by the CLI may write inside its grant, nobody else may', () => {
+  test('a session started by the workflow runner may write inside the approved scope, nobody else may', () => {
     const fx = makeRepo();
     try {
-      const d = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: 'issue-to-pr' });
+      putOnMain(fx, 'src/**');
+      const d = decide(fx, 'src/api/auth.ts', { workflow: 'wf' });
       eq(d.decision, 'allow', d.reason);
-      eq(d.rule, 'agent-writable');
-      eq(policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: 'knowledge-builder' }).rule, 'read-only', 'another agent');
-      const anon = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx), agent: null });
+      eq(d.rule, 'workflow-writable');
+      ok(/approved on origin\/main/.test(d.reason), d.reason);
+      const anon = decide(fx, 'src/api/auth.ts', { workflow: null });
       eq(anon.rule, 'read-only', 'an interactive session');
-      ok(/not started by the CLI as a named agent/.test(anon.reason), anon.reason);
-      const outside = policy.decide(fx.root, 'docs/readme.md', { ...withGrant(fx), agent: 'issue-to-pr' });
-      eq(outside.rule, 'read-only', 'outside the grant');
+      ok(/not started by "aidev run workflow"/.test(anon.reason), anon.reason);
+      const outside = decide(fx, 'docs/readme.md', { workflow: 'wf' });
+      eq(outside.rule, 'read-only', 'outside the scope');
       ok(/does not cover this path/.test(outside.reason), outside.reason);
+      const unknown = decide(fx, 'src/api/auth.ts', { workflow: 'nope' });
+      eq(unknown.rule, 'read-only');
+      ok(/no such workflow: nope/.test(unknown.reason), unknown.reason);
     } finally { fx.cleanup(); }
   });
 
-  test('a grant never reaches protected paths or secrets', () => {
+  test('a scope never reaches protected paths or secrets, and a local edit revokes it', () => {
     const fx = makeRepo();
     try {
-      const wide = { 'issue-to-pr': { writable: ['**'], branch: null } };
-      eq(policy.decide(fx.root, 'config/secrets/key.pem', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'secrets');
-      eq(policy.decide(fx.root, '.claude/settings.json', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'protected');
-      eq(policy.decide(fx.root, '.aidev/policy.yaml', { ...withGrant(fx, wide), agent: 'issue-to-pr' }).rule, 'protected');
+      putOnMain(fx, '"**"');
+      eq(decide(fx, 'config/secrets/key.pem', { workflow: 'wf' }).rule, 'secrets');
+      eq(decide(fx, '.claude/settings.json', { workflow: 'wf' }).rule, 'protected');
+      eq(decide(fx, '.aidev/policy.yaml', { workflow: 'wf' }).rule, 'protected');
+      eq(decide(fx, 'src/x.ts', { workflow: 'wf' }).rule, 'workflow-writable');
+      // The agent widens its own scope mid-run: the file no longer matches origin/main.
+      fs.appendFileSync(path.join(fx.root, '.aidev', 'workflows', 'wf', 'workflow.yaml'), '# widened\n', 'utf8');
+      const revoked = decide(fx, 'src/x.ts', { workflow: 'wf' });
+      eq(revoked.rule, 'read-only');
+      ok(/not approved: .*differs from origin\/main/.test(revoked.reason), revoked.reason);
     } finally { fx.cleanup(); }
   });
 
-  test('a branch condition is enforced against the checkout', () => {
+  test('the workflow comes from the environment the runner sets, and old agent grants are refused', () => {
     const fx = makeRepo();
     try {
-      const scoped = { 'issue-to-pr': { writable: ['src/**'], branch: 'aidev/issue-*' } };
-      const onMain = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' });
-      eq(onMain.decision, 'deny');
-      eq(onMain.rule, 'agent-branch');
-      git(['checkout', '-q', '-b', 'aidev/issue-42'], fx.root);
-      const onBranch = policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' });
-      eq(onBranch.decision, 'allow', onBranch.reason);
-      git(['checkout', '-q', '--detach'], fx.root);
-      eq(policy.decide(fx.root, 'src/api/auth.ts', { ...withGrant(fx, scoped), agent: 'issue-to-pr' }).rule, 'agent-branch', 'detached HEAD');
-    } finally { fx.cleanup(); }
-  });
-
-  test('the policy file validates agents and the CLI passes AIDEV_AGENT to the hook', () => {
-    const fx = makeRepo();
-    try {
-      fs.appendFileSync(path.join(fx.root, '.aidev', 'policy.yaml'), 'agents:\n  issue-to-pr:\n    writable: ["src/**"]\n    branch: "aidev/issue-*"\n', 'utf8');
-      const pol = cfg.loadPolicy(fx.root);
-      eq(pol.agents, { 'issue-to-pr': { writable: ['src/**'], branch: 'aidev/issue-*' } });
-      // The hook reads the agent from the environment the CLI set for the child.
-      const withEnv = policy.decide(fx.root, 'src/x.ts', { config: cfg.loadConfig(fx.root), policy: pol });
-      eq(withEnv.rule, 'read-only', 'no AIDEV_AGENT in this process');
-      process.env.AIDEV_AGENT = 'issue-to-pr';
-      try {
-        git(['checkout', '-q', '-b', 'aidev/issue-7'], fx.root);
-        eq(policy.decide(fx.root, 'src/x.ts', { config: cfg.loadConfig(fx.root), policy: pol }).rule, 'agent-writable');
-      } finally { delete process.env.AIDEV_AGENT; }
+      putOnMain(fx, 'src/**');
+      eq(decide(fx, 'src/x.ts').rule, 'read-only', 'no AIDEV_WORKFLOW in this process');
+      process.env.AIDEV_WORKFLOW = 'wf';
+      try { eq(decide(fx, 'src/x.ts').rule, 'workflow-writable'); } finally { delete process.env.AIDEV_WORKFLOW; }
+      fs.appendFileSync(path.join(fx.root, '.aidev', 'policy.yaml'), 'agents:\n  issue-to-pr:\n    writable: ["src/**"]\n', 'utf8');
+      let message = null;
+      try { cfg.loadPolicy(fx.root); } catch (e) { message = e.message; }
+      ok(/agents\.<name> grants no longer exist/.test(message || ''), message);
     } finally { fx.cleanup(); }
   });
 

@@ -25,7 +25,7 @@ const POLICY_REL = layout.POLICY_REL;
 const SYNC_LOCK_REL = layout.SYNC_LOCK_REL;
 
 /**
- * Written by `aidev eject`. Its presence means "this repository is no longer
+ * Written by `aidev uninstall <package>`. Its presence means "this repository is no longer
  * kit-managed": the enforcement surface has been removed deliberately, and
  * the files that remain are the team's to maintain by hand.
  *
@@ -53,12 +53,17 @@ const ALWAYS_PROTECTED = Object.freeze([
 
 /**
  * The write scopes every policy starts from. The PKG is read-only for an agent;
- * the Wiki, workflows, conventions and the PKG's own aidev.yaml are the places an agent is
- * expected to write. A team widens `writable` deliberately, through the policy.
+ * the Wiki, workflows, the PKG's own agents and skills, conventions and its
+ * aidev.yaml are the places an agent is expected to write. PKG source is
+ * written only inside an approved workflow's `scope.writable` (policy.js rule
+ * 6) or where a team widens `writable` deliberately, through the policy.
  */
 const DEFAULT_POLICY_SCOPES = Object.freeze({
   read_only: Object.freeze(['**']),
-  writable: Object.freeze([`${layout.KNOWLEDGE_REL}/**`, `${layout.WORKFLOWS_REL}/**`, `${layout.CONVENTIONS_REL}/**`, layout.CONFIG_NAME]),
+  writable: Object.freeze([
+    `${layout.KNOWLEDGE_REL}/**`, `${layout.WORKFLOWS_REL}/**`, `${layout.AGENTS_REL}/**`, `${layout.SKILLS_REL}/**`,
+    `${layout.CONVENTIONS_REL}/**`, layout.CONFIG_NAME,
+  ]),
   writable_during_sync: Object.freeze([`${layout.KNOWLEDGE_REL}/**`]),
 });
 
@@ -500,19 +505,13 @@ function validatePolicy(raw, source = POLICY_REL) {
   const merged = [...ALWAYS_PROTECTED];
   for (const p of protectedList) if (!merged.includes(p)) merged.push(p);
 
-  // Per-agent grants: `agents.<name>: { writable: [globs], branch?: glob }`.
-  // Only an agent the CLI started (it sets AIDEV_AGENT in the child's
-  // environment) can claim one; protected paths and secrets stay above it.
-  if (raw.agents != null && (typeof raw.agents !== 'object' || Array.isArray(raw.agents))) {
-    throw new AidevError(`${source}: agents must be a mapping`);
-  }
-  const agents = {};
-  for (const [name, v] of Object.entries(raw.agents || {})) {
-    if (!toolsMod.AGENT_NAME_RE.test(name)) throw new AidevError(`${source}: agents has an invalid agent name ${JSON.stringify(name)}`);
-    if (v == null || typeof v !== 'object' || Array.isArray(v)) throw new AidevError(`${source}: agents.${name} must be a mapping`);
-    const writable = asArray(v.writable, `agents.${name}.writable`);
-    if (writable.length === 0) throw new AidevError(`${source}: agents.${name}.writable must list at least one path`);
-    agents[name] = { writable, branch: asString(v.branch, `agents.${name}.branch`, null) };
+  // Per-agent grants were replaced by the approved workflow's scope.writable
+  // (policy.js rule 6). A policy that still carries them is stale, not silently
+  // narrower, so it is refused with the replacement named.
+  if (raw.agents != null) {
+    throw new AidevError(
+      `${source}: agents.<name> grants no longer exist. PKG source is written inside an approved ` +
+      'workflow (scope.writable in .aidev/workflows/<name>/workflow.yaml); remove the agents section.');
   }
   return {
     version,
@@ -520,7 +519,6 @@ function validatePolicy(raw, source = POLICY_REL) {
     read_only: asArray(raw.read_only, 'read_only'),
     writable_during_sync: asArray(raw.writable_during_sync, 'writable_during_sync'),
     writable: asArray(raw.writable, 'writable'),
-    agents,
   };
 }
 
@@ -532,7 +530,7 @@ function loadPolicy(repoRoot, { required = false } = {}) {
   const p = policyPath(repoRoot);
   const text = readTextIfExists(p);
   if (text == null) {
-    if (required) throw new AidevError(`${POLICY_REL} not found — run "aidev permission configure"`);
+    if (required) throw new AidevError(`${POLICY_REL} not found — run "aidev create policy"`);
     return {
       version: 1,
       protected: [...ALWAYS_PROTECTED],

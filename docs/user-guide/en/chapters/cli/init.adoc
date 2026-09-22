@@ -1,7 +1,7 @@
 [[cli-init]]
 == aidev init
 
-Sets up {project-name} in this PKG. Interactive the first time, no questions for everyone after that.
+Sets up {project-name} in this PKG. Interactive the first time, no questions for everyone after that. It does not generate the Wiki (xref:cli-sync-wiki[`aidev sync wiki`]).
 
 === Synopsis
 
@@ -18,9 +18,9 @@ Run it at the root of the PKG clone. If there is no `aidev.yaml`, it asks four q
 * places the configuration files of the chosen tools from the kit templates (for `claude`: `.claude/**`, `CLAUDE.md`, `.mcp.json`) and records their hashes in `.aidev/materialized.json`. In a clone that already has the record it places nothing and only reports the state
 * registers this clone on this machine
 * if `.aidev/policy.yaml` is missing, shows the candidate and asks `Place this policy now? (y/N)`
-* if there is no Wiki, asks `Build the LLM Wiki now? (Y/n)` and builds it; an unfinished Wiki is resumed. The build is the same as `aidev knowledge update --no-commit`: the result stays in the working tree and you commit it
+* reports whether the Wiki is present. On the first run it shows the remaining steps as `next steps` (`aidev create policy --approve`, `aidev sync wiki --no-commit`, `git add … && git commit`, PR). For everyone after that it shows `ready. Run "aidev check" any time …`
 
-On a first-time setup the build is the default. Without the tool that runs agents (`tools.agent` in `aidev.yaml`) it writes the structure only and exits with 1 because the prose is still owed. Install the tool and run `aidev init` again, or skip with `--no-wiki`. In a clone that already has the configuration but no Wiki (the team's pull request is not merged yet) the default is not to build. `--wiki` / `--no-wiki` skip the question. If, on the first run, an existing `.claude/` or similar differs from the templates, it does not merge: it leaves those files alone and stops with exit code 2. `--force` replaces them with the kit version.
+If, on the first run, an existing `.claude/` or similar differs from the templates, it does not merge: it leaves those files alone and stops with exit code 2. `--force` replaces them with the kit version.
 
 Questions are asked only when stdin is a terminal and neither `--yes` nor `--json` is given.
 
@@ -37,7 +37,7 @@ Questions are asked only when stdin is a terminal and neither `--yes` nor `--jso
 |Do not ask questions; use the values inferred or given by flags
 
 |`--force`
-|Replace distributed files that were edited locally
+|Replace distributed files that were edited by hand
 
 |`--json`
 |Machine-readable output
@@ -52,7 +52,7 @@ Questions are asked only when stdin is a terminal and neither `--yes` nor `--jso
 |Globs excluded from generation targets, comma-separated
 
 |`--secrets <value>`
-|Secret paths never read by the AI, comma-separated globs
+|Paths never read by the AI, comma-separated globs
 
 |`--hosting <value>`
 |`azure-devops` or `generic` (default: inferred from the `origin` URL)
@@ -63,22 +63,16 @@ Questions are asked only when stdin is a terminal and neither `--yes` nor `--jso
 |Azure DevOps organization, project and repository name
 
 |`--tracking-branch <value>`
-|Branch the Wiki follows (default: `main`)
+|Branch the Wiki follows. Also the reference for workflow approval (default: `main`)
 
 |`--tools <value>`
-|AI coding tools to configure, comma-separated: `claude`, `copilot`, `codex`, `kiro` (default `claude`)
+|AI tools to configure, comma-separated: `claude`, `copilot`, `codex`, `kiro` (default `claude`)
 
 |`--agent-model <value>`
-|Model for the agent that writes the Wiki (default: `sonnet`)
+|Model for the agents `aidev` starts (default: `sonnet`)
 
 |`--approve`
-|Place the generated permission policy without asking
-
-|`--wiki`
-|Build (or continue) the LLM Wiki without asking
-
-|`--no-wiki`
-|Do not build the LLM Wiki now
+|Place the policy without asking
 |===
 
 === Exit codes
@@ -91,7 +85,7 @@ Questions are asked only when stdin is a terminal and neither `--yes` nor `--jso
 |Success
 
 |1
-|Not a git repository, no commits, run in a subdirectory, or the Azure DevOps organization and so on could not be determined. The Wiki's prose is still owed (no agent tool, or the build stopped part way; run `aidev init` again to continue)
+|Not a git repository, no commits, run in a subdirectory, or the Azure DevOps organization and so on could not be determined
 
 |2
 |On the first run, existing `.claude/**`, `CLAUDE.md`, `.mcp.json` or similar differ from the kit templates (`--force` replaces them)
@@ -106,18 +100,21 @@ First time (interactive):
 aidev init
 ----
 
+[source,text]
+----
+ℹ LLM Wiki is not generated yet. Run "aidev sync wiki --no-commit" to build it (it takes a while).
+
+ℹ next steps (you are setting this package up for your team):
+    1. aidev sync wiki --no-commit          # builds (or continues) the LLM Wiki
+    2. git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json && git commit
+    3. open a pull request so everyone gets the same setup
+----
+
 Without questions, placing the policy at the same time:
 
 [source,bash]
 ----
 aidev init --yes --include "src/**,docs/**" --approve
-----
-
-Leave the Wiki for later:
-
-[source,bash]
-----
-aidev init --no-wiki
 ----
 
 Everyone after the first person:
@@ -127,8 +124,18 @@ Everyone after the first person:
 aidev init
 ----
 
+[source,text]
+----
+✓ aidev.yaml is present (set up by your team); nothing to ask.
+✓ tool configuration is current (18 file(s) for claude)
+✓ AZURE_DEVOPS_PAT is set (value not read)
+✓ .aidev/policy.yaml is present
+✓ LLM Wiki is present (.aidev/knowledge/)
+
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
+----
+
 === See also
 
 * xref:setup-owner[Package owner steps], xref:setup-member[Member steps]
-* xref:cli-permission[aidev permission], xref:cli-knowledge[aidev knowledge]
-
+* xref:cli-create[aidev create policy], xref:cli-sync-wiki[aidev sync wiki]

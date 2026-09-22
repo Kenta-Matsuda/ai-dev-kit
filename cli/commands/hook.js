@@ -19,7 +19,7 @@
  * looks at the tool id itself.
  *
  * Wiki follow-up (`after-bash`, `session-stop`): after a commit the CLI does
- * the structural half of `aidev knowledge update` on its own and, when prose
+ * the structural half of `aidev sync wiki` on its own and, when prose
  * is owed, hands the interactive tool a plan for its knowledge-builder
  * subagents. The session cannot stop while the Wiki is behind a clean HEAD;
  * the tool's own loop guard (or the kit's, for tools without one) lets the
@@ -180,7 +180,7 @@ function sessionStart(ctx, input, adapter) {
     const ev = leases.evaluateLease(lease);
     lines.push(ev.valid
       ? `⏳ a Wiki publish is in progress (target ${stateMod.short(lease.targetSha)}); only .aidev/knowledge/** is writable.`
-      : `⚠️ a stale publish lease is present (${ev.reason}). Run "aidev knowledge update" to continue it or "aidev knowledge update --abort" to discard it.`);
+      : `⚠️ a stale publish lease is present (${ev.reason}). Run "aidev sync wiki" to continue it or "aidev sync wiki --abort" to discard it.`);
   }
   if (st.severity === stateMod.SEVERITY.ERROR) {
     lines.push('❌ writes are blocked until the LLM Wiki exists and is readable.');
@@ -497,7 +497,7 @@ async function sessionStop(ctx, input, adapter) {
     const file = reflectionPath(repoRoot, sessionId);
     const rel = path.relative(repoRoot, file).replace(/\\/g, '/');
     if (fs.existsSync(file)) {
-      // Reflection written. With --auto, hand it to `aidev evolve run` once,
+      // Reflection written. With --auto, hand it to `npm run evolve -- run` once,
       // detached: a Stop hook has no budget to wait for an agent.
       let launched = false;
       const marker = `${file}.evolve-launched`;
@@ -505,7 +505,7 @@ async function sessionStop(ctx, input, adapter) {
         try {
           fs.writeFileSync(marker, new Date().toISOString(), 'utf8');
           const child = require('child_process').spawn(process.execPath,
-            [path.join(ctx.installRoot, 'cli', 'bin', 'aidev.js'), 'evolve', 'run', '--json'],
+            [path.join(ctx.installRoot, 'scripts', 'evolve.js'), 'run', '--json'],
             { cwd: repoRoot, detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1' } });
           child.unref();
           launched = true;

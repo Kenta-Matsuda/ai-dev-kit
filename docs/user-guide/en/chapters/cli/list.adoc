@@ -1,0 +1,75 @@
+[[cli-list]]
+== aidev list
+
+Lists workflows (with their approval state), agents and skills.
+
+=== Synopsis
+
+[source,text]
+----
+aidev list workflows [--json]
+aidev list agents [--json]
+aidev list skills [--json]
+----
+
+=== Description
+
+[%autowidth.stretch,options="header"]
+|===
+|object |What it shows
+
+|`workflows`
+|The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. The kit bundles no workflows, so only this PKG's workflows are listed
+
+|`agents`
+|The PKG's `.aidev/agents/` and the agents bundled with the kit. Name, origin (`this PKG` / `kit`), description. `⚠` is added when `name` in the frontmatter differs from the file name
+
+|`skills`
+|The PKG's `.aidev/skills/` and the skills bundled with the kit. Name, origin, description
+|===
+
+With the same name, the PKG's one takes precedence over the bundled one.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Displayed
+
+|1
+|No object, or an object other than `workflows` / `agents` / `skills`
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev list workflows
+----
+
+[source,text]
+----
+aidev list workflows
+  write-tests           approved                          指定した対象のテストを既存の書き方で書き、通してから PR を作る
+  e2e-tests             not on origin/main                主要画面の IT テストを Playwright で書く
+  write-conventions     changed since origin/main         Wiki と根拠ソースから開発規約を書き、PR を作る
+
+----
+
+=== See also
+
+* xref:workflows-approval[Putting the AI to work: What approval means] — what each state means and what to do
+* xref:cli-create[aidev create], xref:cli-remove[aidev remove]

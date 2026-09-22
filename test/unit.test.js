@@ -313,7 +313,7 @@ function run() {
   });
 
   test('the protected floor covers every kit control surface', () => {
-    for (const must of ['.claude/**', 'CLAUDE.md', '.mcp.json', '.aidev/policy.yaml',
+    for (const must of ['.claude/**', 'CLAUDE.md', '.aidev/policy.yaml',
       '.aidev/sync.lock', '.aidev/materialized.json', '.aidev/.gitignore', '.aidev/ejected.json']) {
       ok(cfg.ALWAYS_PROTECTED.includes(must), `ALWAYS_PROTECTED lacks ${must}`);
     }
@@ -343,10 +343,10 @@ function run() {
       ok(p._fallback, 'flagged as the built-in fallback');
       ok(p.protected.includes('.claude/**'), 'protected floor present');
       eq(p.read_only, ['**'], 'the whole PKG is read-only');
-      eq(p.writable, ['.aidev/knowledge/**', '.aidev/workflows/**', '.aidev/conventions/**', 'aidev.yaml']);
+      eq(p.writable, ['.aidev/knowledge/**', '.aidev/workflows/**', '.aidev/agents/**', '.aidev/skills/**', '.aidev/conventions/**', 'aidev.yaml']);
       eq(p.writable_during_sync, ['.aidev/knowledge/**']);
       eq(cfg.DEFAULT_POLICY_SCOPES.read_only, ['**']);
-      throws(() => cfg.loadPolicy(fx.root, { required: true }), /permission configure/);
+      throws(() => cfg.loadPolicy(fx.root, { required: true }), /create policy/);
     } finally { fx.cleanup(); }
   });
 

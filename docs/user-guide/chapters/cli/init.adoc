@@ -1,7 +1,7 @@
 [[cli-init]]
 == aidev init
 
-この PKG に {project-name} を導入します。初回は対話、2 人目以降は質問なしです。
+この PKG に {project-name} を導入します。初回は対話、2 人目以降は質問なしです。Wiki は生成しません（xref:cli-sync-wiki[`aidev sync wiki`]）。
 
 === 書式
 
@@ -18,9 +18,9 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 * kit のテンプレートから、選んだツールの設定ファイル（`claude` なら `.claude/**`、`CLAUDE.md`、`.mcp.json`）を置き、`.aidev/materialized.json` にハッシュを記録する。既に記録がある clone では置かず、状態を報告するだけ
 * この clone を端末に登録する
 * `.aidev/policy.yaml` が無ければ候補を表示し、`Place this policy now? (y/N)` と尋ねる
-* Wiki が無ければ `Build the LLM Wiki now? (Y/n)` と尋ね、生成する。未完成の Wiki があれば続きから再開する。生成は `aidev knowledge update --no-commit` と同じで、結果は作業ツリーに残る。コミットはあなたが行う
+* Wiki の有無を報告する。初回なら `next steps` として残りの手順（`aidev create policy --approve`、`aidev sync wiki --no-commit`、`git add … && git commit`、PR）を表示する。2 人目以降なら `ready. Run "aidev check" any time …` と表示する
 
-初めての導入では Wiki の生成が既定です。agent を動かすツール（`aidev.yaml` の `tools.agent`）が無いと、構造だけ書いて本文が未生成のまま終了コード 1 で終わります。ツールを入れてから `aidev init` をもう一度実行するか、`--no-wiki` で省きます。設定は既にあるのに Wiki が無い clone（チームの PR が未マージ）では、既定は「生成しない」です。`--wiki` / `--no-wiki` で質問を省けます。初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で kit 版に置き換えます。
+初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で kit 版に置き換えます。
 
 質問は stdin が端末で、`--yes` も `--json` も無いときだけ行います。
 
@@ -63,22 +63,16 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 |Azure DevOps の組織・プロジェクト・リポジトリ名
 
 |`--tracking-branch <value>`
-|Wiki が追いかけるブランチ（既定: `main`）
+|Wiki が追いかけるブランチ。workflow の承認の基準にもなる（既定: `main`）
 
 |`--tools <value>`
 |設定する AI ツール。カンマ区切りで `claude`、`copilot`、`codex`、`kiro`（既定 `claude`）
 
 |`--agent-model <value>`
-|Wiki を書く agent のモデル（既定: `sonnet`）
+|`aidev` が起動する agent のモデル（既定: `sonnet`）
 
 |`--approve`
 |policy を尋ねずに置く
-
-|`--wiki`
-|Wiki を尋ねずに生成（または再開）する
-
-|`--no-wiki`
-|Wiki を今は生成しない
 |===
 
 === 終了コード
@@ -91,7 +85,7 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 |成功
 
 |1
-|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない。Wiki の本文が未生成のまま（agent のツールが無い、生成が途中で止まった。`aidev init` の再実行で続行）
+|git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない
 
 |2
 |初回に、既存の `.claude/**`、`CLAUDE.md`、`.mcp.json` などが kit のテンプレートと違う（`--force` で置き換え）
@@ -106,18 +100,21 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 aidev init
 ----
 
-質問なしで、policy も置き、Wiki も生成する:
+[source,text]
+----
+ℹ LLM Wiki is not generated yet. Run "aidev sync wiki --no-commit" to build it (it takes a while).
+
+ℹ next steps (you are setting this package up for your team):
+    1. aidev sync wiki --no-commit          # builds (or continues) the LLM Wiki
+    2. git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json && git commit
+    3. open a pull request so everyone gets the same setup
+----
+
+質問なしで、policy も置く:
 
 [source,bash]
 ----
 aidev init --yes --include "src/**,docs/**" --approve
-----
-
-Wiki は後回しにする:
-
-[source,bash]
-----
-aidev init --no-wiki
 ----
 
 2 人目以降:
@@ -127,7 +124,18 @@ aidev init --no-wiki
 aidev init
 ----
 
+[source,text]
+----
+✓ aidev.yaml is present (set up by your team); nothing to ask.
+✓ tool configuration is current (18 file(s) for claude)
+✓ AZURE_DEVOPS_PAT is set (value not read)
+✓ .aidev/policy.yaml is present
+✓ LLM Wiki is present (.aidev/knowledge/)
+
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
+----
+
 === 関連
 
 * xref:setup-owner[導入担当者の手順]、xref:setup-member[メンバーの手順]
-* xref:cli-permission[aidev permission]、xref:cli-knowledge[aidev knowledge]
+* xref:cli-create[aidev create policy]、xref:cli-sync-wiki[aidev sync wiki]

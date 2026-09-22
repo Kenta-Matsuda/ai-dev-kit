@@ -1,20 +1,24 @@
 [[cli-check]]
 == aidev check
 
-Checks consistency and returns the result as an exit code. Meant for CI.
+Shows the state of this PKG on one screen and returns its consistency as an exit code. The same command for people and for CI.
 
 === Synopsis
 
 [source,text]
 ----
-aidev check [options]
+aidev check [--strict] [--no-remote] [--json]
 ----
 
 === Description
 
-Runs the same checks as `aidev status` and turns the first problem found into the exit code. The order is drift (2) → policy (3) → Wiki (4).
+It shows the PKG name, hosting, tools and kit version; the Wiki state (the three commits `head` / `knowledge` / `tracking` and a one-line verdict); the number of Wiki pages and of pages without prose; the state of the tool configuration (kit applied, number of edited files, conflicts, missing hooks); whether the policy is present; the number of workflows and how many are approved; hand edits; and a publish in progress.
 
-In a directory without `aidev.yaml`, and in an ejected repository, it does nothing and exits 0. Warnings (the Wiki is behind HEAD, prose not yet generated, `main` has moved ahead) stay at 0; with `--strict` they become 2.
+It then turns the kind of problem found into the exit code. The order is configuration and workflows (1) → drift (2) → policy (3) → Wiki (4); the code of the first problem found is returned.
+
+In a directory without `aidev.yaml`, and in an ejected repository, it says so and exits 0. Warnings (the Wiki is behind HEAD, prose not yet generated, `main` has moved ahead) stay at 0; with `--strict` they become 2.
+
+Diagnosing the machine itself (Node.js, git, the kit, the AI tools) is xref:cli-doctor[`aidev doctor`].
 
 === Options
 
@@ -25,11 +29,11 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 |`--strict`
 |Treat warnings (Wiki behind HEAD, pending prose, tracking branch ahead) as failures (exit code 2)
 
+|`--no-remote`
+|Do not contact the remote (offline, CI)
+
 |`--json`
 |Machine-readable output
-
-|`--no-remote`
-|Do not contact the remote
 |===
 
 === Exit codes
@@ -39,13 +43,13 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 |Code |Condition
 
 |0
-|Consistent
+|Consistent. No `aidev.yaml`, or ejected (out of scope)
 
 |1
-|General error, such as a broken `aidev.yaml`
+|`aidev.yaml` cannot be read. A workflow in `.aidev/workflows/` fails validation
 
 |2
-|`.aidev/materialized.json` is missing, conflict markers from `aidev apply` remain, or the kit's hooks are gone from `.claude/settings.json`. A tool configuration file merely edited by the team passes. Warnings with `--strict`
+|`.aidev/materialized.json` is missing, conflict markers from `aidev sync tools` remain, or the kit's hooks are gone from `.claude/settings.json`. A tool configuration file merely edited by the team passes. Warnings with `--strict`
 
 |3
 |`.aidev/policy.yaml` is missing or cannot be read
@@ -61,26 +65,38 @@ In a directory without `aidev.yaml`, and in an ejected repository, it does nothi
 aidev check
 ----
 
-[source,text]
+[source,text,subs="attributes+"]
 ----
-aidev check
-  head         9f8e7d6
-  knowledge    9f8e7d6
-  tracking     9f8e7d6
-  tool config  ok (1 customised)
-  policy       valid
+aidev check — demo-pkg
+  hosting  azure-devops (demo-pkg), tracking origin/main
+  tools    claude
+  kit      {aidev-version} @ 9491efe
+
+[ai-dev-kit] head=9f8e7d6  knowledge=1a2b3c4  tracking=9f8e7d6
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev sync wiki".
+
+  head / knowledge / tracking  9f8e7d6 / 1a2b3c4 / 9f8e7d6
+  Wiki                         163 page(s) for 163 target(s)
+  tool config                  applied from kit 9491efe, 1 file(s) customised
+  policy                       placed (14 protected paths)
+  workflows                    2 (1 approved)
+
+⚠️ the Wiki describes 1a2b3c4, but 7 file(s) differ at HEAD (9f8e7d6): +2 ~5 -0 →1 — run "aidev sync wiki".
 ✓ environment is consistent.
 ----
+
+`head` is the commit your checkout is at, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`. The verdict compares the inventory with the tree at HEAD, so it is `✅` when the content is the same even if the `knowledge` SHA differs. When the Wiki of `main` is waiting in a PR on an `aidev/wiki-<sha12>` branch, one line says so.
 
 A failure (exit code 2):
 
 [source,text]
 ----
-✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev apply" to record the result.
+✗ [exit 2] 1 tool configuration file(s) carry unresolved conflict markers. Resolve them and run "aidev sync tools" to record the result.
     conflict: .claude/settings.json
 ----
 
 === See also
 
+* xref:daily-check[Reading aidev check] — what to do for each line
 * xref:automation-ci[Automation: CI]
 * xref:troubleshooting-exit[Troubleshooting: exit codes of aidev check]

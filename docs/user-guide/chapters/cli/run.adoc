@@ -1,0 +1,86 @@
+[[cli-run]]
+== aidev run
+
+承認済みの workflow（`origin/main` にある定義）を実行します。開発はここから始まります。
+
+=== 書式
+
+[source,text]
+----
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--dry-run] [--json]
+----
+
+=== 説明
+
+`.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
+
+手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent の子プロセスに `AIDEV_WORKFLOW=<name>` を渡し、hook が `scope.writable` への書き込みを許可します。終わると記録を `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に書きます。実行中に起きることは xref:workflows-run[実行する] を見てください。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--task <text>`
+|今回の指示。すべての agent step に「データ」として渡す（Work Item の番号、対象のパスなど）
+
+|`--task-file <path>`
+|`--task` をファイルから読む。`--task` とは併用できない
+
+|`--max-minutes <n>`
+|時間の上限をこの実行だけ下げる（60 より上にはできない）
+
+|`--dry-run`
+|承認の状態、範囲、agent とツール、手順、上限を表示し、何も始めない
+
+|`--json`
+|JSON で出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|すべての step を終えた。`--dry-run` で承認済みだった
+
+|1
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも kit にも無い。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）
+|===
+
+=== 例
+
+承認済みか確かめてから実行する:
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow write-tests --dry-run --task "src/services/order.ts"
+aidev run workflow write-tests --task "src/services/order.ts"
+----
+
+[source,text]
+----
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
+    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+未承認のとき:
+
+[source,text]
+----
+✗ workflow write-tests is not approved: .aidev/workflows/write-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged)
+      Approved means identical to origin/main. Submit it ("aidev submit workflow write-tests"), have the pull request reviewed and merged, then fetch.
+----
+
+=== 関連
+
+* xref:workflows[AI に仕事をさせる] — 定義の項目、承認、実行中に起きること、レビュー
+* xref:cli-create[aidev create]、xref:cli-submit[aidev submit]、xref:cli-list[aidev list]
+* xref:permissions-source[権限と安全性: ソースを AI に書かせるには]

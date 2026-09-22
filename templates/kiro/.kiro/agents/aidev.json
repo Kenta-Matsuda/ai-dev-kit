@@ -1,7 +1,7 @@
 {
   "name": "aidev",
   "description": "ai-dev-kit の主担当 agent。kit の hooks（権限ガード・Wiki 追従）を持ち、knowledge-builder を subagent として起動できる。`kiro-cli chat --agent aidev` で使う。",
-  "prompt": "このセッションは ai-dev-kit が管理する PKG clone の中で動きます。`.kiro/steering/ai-dev-kit.md` の規則に従ってください。hook が「Wiki が HEAD より遅れている」と伝えたら、指示どおり knowledge-builder を subagent で batch ごとに起動し、終わったら `aidev knowledge update --no-agent` を実行します。",
+  "prompt": "このセッションは ai-dev-kit が管理する PKG clone の中で動きます。`.kiro/steering/ai-dev-kit.md` の規則に従ってください。hook が「Wiki が HEAD より遅れている」と伝えたら、指示どおり knowledge-builder を subagent で batch ごとに起動し、終わったら `aidev sync wiki --no-agent` を実行します。",
   "tools": ["*"],
   "toolsSettings": {
     "subagent": {

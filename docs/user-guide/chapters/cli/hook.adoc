@@ -36,7 +36,7 @@ kit が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 |`after-bash`
 |シェルコマンドの後
-|HEAD が変わり、Wiki が遅れていて木がきれいなら、構造の更新（inventory・manifest・ページ削除）を行う。改名だけならそのままコミットする。本文が必要なら `.aidev/knowledge/.cache/plan.json` を書き、batch ごとに knowledge-builder をサブエージェント起動して最後に `aidev knowledge update --no-agent` を実行するようセッションに指示する。生成対象に未コミットの変更があれば、そのファイルを挙げるだけで何もしない
+|HEAD が変わり、Wiki が遅れていて木がきれいなら、構造の更新（inventory・manifest・ページ削除）を行う。改名だけならそのままコミットする。本文が必要なら `.aidev/knowledge/.cache/plan.json` を書き、batch ごとに knowledge-builder をサブエージェント起動して最後に `aidev sync wiki --no-agent` を実行するようセッションに指示する。生成対象に未コミットの変更があれば、そのファイルを挙げるだけで何もしない
 
 |`session-stop`
 |セッション終了
@@ -90,7 +90,7 @@ aidev hook guard-write --input /tmp/hook.json
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). PKG source is not written by agents; …"
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the scope.writable of an approved workflow. …"
   }
 }
 ----

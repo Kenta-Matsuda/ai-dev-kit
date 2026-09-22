@@ -1,0 +1,69 @@
+[[cli-submit]]
+== aidev submit
+
+Submits a workflow as a branch and a pull request. Merging the PR is the approval.
+
+=== Synopsis
+
+[source,text]
+----
+aidev submit workflow <name> [--no-push] [--dry-run] [--json]
+----
+
+=== Description
+
+Validates the definition, commits `workflow.yaml` and the PKG-local agents (`.aidev/agents/`) and skills (`.aidev/skills/`) it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes it and opens a PR (Azure DevOps; with `generic` hosting it pushes, and you open the PR by hand). The PR body states the objective, the writable scope, the agents and skills, the steps, the limits, and that merging approves this workflow.
+
+If it is already identical to `origin/main`, it prints `already matches origin/main; nothing to submit.` and does nothing.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--no-push`
+|Commit on the local branch only; do not push or open a PR
+
+|`--dry-run`
+|Show the branch, the destination and the files; create no branch, commit, push or PR
+
+|`--json`
+|Machine-readable output
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Opened a PR (or already approved). `--dry-run`
+
+|1
+|An object other than `workflow`, or no name. Invalid definition, or an agent or skill that exists neither in the PKG nor in the kit. A referenced file is missing locally. Creating the branch, committing or pushing failed
+|===
+
+=== Examples
+
+[source,bash]
+----
+git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+aidev submit workflow write-tests
+----
+
+[source,text]
+----
+aidev submit workflow write-tests
+✓ on branch aidev/workflow-write-tests
+✓ committed 3f2a9c1b7d0e (1 file(s))
+✓ pushed aidev/workflow-write-tests
+✓ pull request !124 created (aidev/workflow-write-tests → main)
+    Once it is merged, anyone with the branch fetched can run: aidev run workflow write-tests
+----
+
+=== See also
+
+* xref:workflows-submit[Putting the AI to work: Submit], xref:workflows-review[Reviewing workflow pull requests]
+* xref:cli-create[aidev create], xref:cli-run[aidev run]

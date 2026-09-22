@@ -1,6 +1,6 @@
 ---
 name: knowledge-update
-description: Wiki を HEAD に追従させる手順。hook の指示で knowledge-builder をサブエージェント起動する流れ、aidev knowledge update の使い方、状態の読み方、失敗時の判断。
+description: Wiki を HEAD に追従させる手順。hook の指示で knowledge-builder をサブエージェント起動する流れ、aidev sync wiki の使い方、状態の読み方、失敗時の判断。
 ---
 
 # knowledge-update
@@ -12,7 +12,7 @@ HEAD の木と一致するか」で行います。ソースをコミットする
 
 ## 状態の読み方
 
-セッション開始時と `aidev status` に 1 行が出ます。
+セッション開始時と `aidev check` に 1 行が出ます。
 
 ```text
 [ai-dev-kit] head=<sha7>  knowledge=<sha7>  tracking=<sha7>
@@ -21,8 +21,8 @@ HEAD の木と一致するか」で行います。ソースをコミットする
 | 状態 | 意味 | 扱い |
 | --- | --- | --- |
 | ✅ OK | Wiki は HEAD を説明している | — |
-| ⚠️ Wiki が HEAD より遅れ（+a ~m -r →rn） | ソースが変わった | コミット後に hook が更新を始める。手動なら `aidev knowledge update` |
-| ⚠️ prose 未完了（N 件） | 構造は更新済み、ページがまだ | 下の手順で knowledge-builder を起動し、`aidev knowledge update --no-agent` |
+| ⚠️ Wiki が HEAD より遅れ（+a ~m -r →rn） | ソースが変わった | コミット後に hook が更新を始める。手動なら `aidev sync wiki` |
+| ⚠️ prose 未完了（N 件） | 構造は更新済み、ページがまだ | 下の手順で knowledge-builder を起動し、`aidev sync wiki --no-agent` |
 | ⚠️ tracking branch が先行 | origin/main が進んだ | merge / rebase してから更新 |
 | ❌ Wiki が無い / manifest が読めない | 信用できない | **エラー**（exit 4）。書き込みも止まる。`aidev init` |
 
@@ -34,7 +34,7 @@ HEAD の木と一致するか」で行います。ソースをコミットする
 1. `.aidev/knowledge/.cache/plan.json` を読む。`batches[i]` ごとに生成対象が並んでいる
 2. batch ごとに **Agent tool で `knowledge-builder` サブエージェントを起動** し、次を指示する
    > `.aidev/knowledge/.cache/plan.json` を読み、batch *i* の generationTargets について knowledge-builder の契約どおりページを書き、対象ごとに完了報告を `reportDir` に書く。`targetSha` は plan の値を使う
-3. 全 batch が終わったら `aidev knowledge update --no-agent` を実行する。CLI が報告を取り込み、
+3. 全 batch が終わったら `aidev sync wiki --no-agent` を実行する。CLI が報告を取り込み、
    `.aidev/knowledge/` を `aidev: update Wiki for <sha12>` としてコミットする
 4. 「残り N 件」と言われたら、残った batch を再度サブエージェントに渡して 3 に戻る
 
@@ -44,13 +44,13 @@ Stop hook は Wiki が遅れたままだと 1 回だけ停止を拒否します�
 ## 手動で更新するとき
 
 ```bash
-aidev knowledge update             # HEAD に追従。knowledge-builder を CLI が起動し、完了したらコミット
-aidev knowledge update --dry-run   # 何が更新されるかだけ表示
-aidev knowledge update --no-agent  # 構造（inventory / manifest）だけ更新し、本文は後回し（exit 1）
-aidev knowledge update --no-commit # 作業ツリーに残す（コミットしない）
-aidev knowledge update --full      # 全対象を作り直す
-aidev knowledge update --force     # 手編集されたページを上書きする
-aidev knowledge update --abort     # 中断した publish（tracking branch 上の更新）を破棄
+aidev sync wiki             # HEAD に追従。knowledge-builder を CLI が起動し、完了したらコミット
+aidev sync wiki --dry-run   # 何が更新されるかだけ表示
+aidev sync wiki --no-agent  # 構造（inventory / manifest）だけ更新し、本文は後回し（exit 1）
+aidev sync wiki --no-commit # 作業ツリーに残す（コミットしない）
+aidev sync wiki --full      # 全対象を作り直す
+aidev sync wiki --force     # 手編集されたページを上書きする
+aidev sync wiki --abort     # 中断した publish（tracking branch 上の更新）を破棄
 ```
 
 前提: **生成対象（`package.include`）に未コミットの変更が無いこと**。あると対象ファイルを列挙して止まります。
@@ -66,11 +66,11 @@ push し、PR を作ります（`--no-push` で push しない）。開発者の
 
 | 状況 | 選ぶもの |
 | --- | --- |
-| サブエージェントが途中で止まった | 残りの batch を再度起動し、`aidev knowledge update --no-agent` |
-| CLI 起動の agent が timeout | `aidev knowledge update` を再実行（checkpoint から続き） |
+| サブエージェントが途中で止まった | 残りの batch を再度起動し、`aidev sync wiki --no-agent` |
+| CLI 起動の agent が timeout | `aidev sync wiki` を再実行（checkpoint から続き） |
 | 手編集ページで止まった | 編集を生成元へ移すか、`--force` |
 | 未コミットの対象で止まった | コミットしてから再実行 |
-| 原因が分からない | `aidev status` の出力を添えて報告。`--abort` は調査材料を消す |
+| 原因が分からない | `aidev check` の出力を添えて報告。`--abort` は調査材料を消す |
 
 ## やってはいけないこと
 

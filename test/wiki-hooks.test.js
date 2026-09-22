@@ -8,7 +8,7 @@
  *     once; the tool's loop guard (or the kit's, for Kiro) lets the second
  *     stop through
  *   - the subagents' reports are folded and committed by
- *     `aidev knowledge update --no-agent`
+ *     `aidev sync wiki --no-agent`
  *   - every tool adapter shapes the same decision in the form its tool reads
  *
  * Run: node test/wiki-hooks.test.js
@@ -103,7 +103,7 @@ function run() {
       const ctx = j.hookSpecificOutput.additionalContext;
       ok(/behind|HEAD is/.test(ctx), `explains the state: ${ctx}`);
       ok(/knowledge-builder/.test(ctx) && /Agent tool/.test(ctx), `names the subagent the Claude way: ${ctx}`);
-      ok(/aidev knowledge update --no-agent/.test(ctx), `names the finishing command: ${ctx}`);
+      ok(/aidev sync wiki --no-agent/.test(ctx), `names the finishing command: ${ctx}`);
       ok(fs.existsSync(planPath(fx.root)), 'plan.json written');
       const plan = JSON.parse(fs.readFileSync(planPath(fx.root), 'utf8'));
       eq(plan.targetSha, head, 'the plan names HEAD');
@@ -159,7 +159,7 @@ function run() {
       const head = branchWithChange(fx);
       hook(fx.root, 'after-bash', { tool_name: 'Bash', tool_input: { command: 'git commit' } });
       reportAll(fx.root);
-      const r = aidev(fx.root, ['knowledge', 'update', '--no-agent', '--json']);
+      const r = aidev(fx.root, ['sync', 'wiki', '--no-agent', '--json']);
       eq(r.code, 0, r.out);
       const j = lastJson(r.out);
       eq(j.remaining, 0);
@@ -168,7 +168,7 @@ function run() {
       const files = git(['show', '--name-only', '--format=', 'HEAD'], fx.root).split('\n').filter(Boolean);
       ok(files.every((f) => f.startsWith(`${K}/`) || f === '.aidev/.gitignore'), `only the Wiki is committed: ${files.join(', ')}`);
       ok(!fs.existsSync(planPath(fx.root)), 'the plan is removed once nothing is owed');
-      const st = lastJson(aidev(fx.root, ['status', '--no-remote', '--json']).out).state;
+      const st = lastJson(aidev(fx.root, ['check', '--no-remote', '--json']).out).state;
       eq(st.severity, 'ok', st.message);
       // Stopping is fine now.
       const stop = lastJson(hook(fx.root, 'session-stop', { session_id: 's1' }).out);

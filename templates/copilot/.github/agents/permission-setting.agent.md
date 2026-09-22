@@ -1,6 +1,6 @@
 ---
 name: permission-setting
-description: "PKG開発者との対話を通じて、そのPKGに適した権限ポリシー候補を作成する。aidev permission configure / reconfigure でユーザーが対話的に起動した場合のみ使用する。"
+description: "PKG開発者との対話を通じて、そのPKGに適した権限ポリシー候補を作成する。aidev create policy / reconfigure でユーザーが対話的に起動した場合のみ使用する。"
 ---
 
 # permission-setting
@@ -11,7 +11,7 @@ PKG固有の権限ポリシー**候補**を対話で作成します。
 
 > 🔴 **あなたは `.aidev/policy.yaml` に書き込みません。** 候補を提案するだけです。
 
-配置するのは、人間が差分を承認した後の `aidev permission configure --approve`（CLI）だけです。
+配置するのは、人間が差分を承認した後の `aidev create policy --approve`（CLI）だけです。
 これは「エージェントが自分の権限ファイルを書き換えられない」という設計の中核です。
 
 候補ファイルの書き出しすらCLIが行います。あなたの成果物は**提案内容**であって、ファイルではありません。
@@ -47,11 +47,11 @@ PKGごとに違うのは主に「秘密情報の在処」と「書き換えて�
 | 原則 | 意味 |
 | --- | --- |
 | **既定は拒否** | 迷ったら禁止側に倒す。緩めるのは後からでもできる |
-| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.mcp.json`・`.aidev/policy.yaml`・`.aidev/sync.lock`・`.aidev/materialized.json`・`.aidev/.gitignore`・`.aidev/ejected.json` は常に protected。CLIが強制的に再付与する |
+| **保護の床は削らない** | `.claude/`・`CLAUDE.md`・`.aidev/policy.yaml`・`.aidev/sync.lock`・`.aidev/materialized.json`・`.aidev/.gitignore`・`.aidev/ejected.json` は常に protected。CLIが強制的に再付与する |
 | **秘密は protected へ** | `aidev.yaml` の `secrets_paths` は protected に昇格させる（read_onlyでは足りない） |
-| **PKG全体（`**`）は read_only** | 編集させたいパスは、agent ごとに `agents.<name>.writable`（必要なら `branch` も）へ。全員に開くなら `writable` へ |
+| **PKG全体（`**`）は read_only** | AI にソースを書かせるのは policy ではなく、承認済み workflow の `scope.writable`（`.aidev/workflows/<name>/workflow.yaml`）。全員・全セッションに開くなら `writable` へ |
 | **`.aidev/knowledge/**` は writable_during_sync** | syncリース保持中（またはCLIが起動した knowledge-builder）だけ書ける |
-| **writable は最小限** | 既定は `.aidev/knowledge/**`・`.aidev/workflows/**`・`aidev.yaml` のみ |
+| **writable は最小限** | 既定は `.aidev/knowledge/**`・`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`・`.aidev/conventions/**`・`aidev.yaml` のみ |
 
 ### 権限を弱める提案をする場合
 
@@ -69,9 +69,9 @@ CLIも「権限を弱める変更」を検出して差分確認なしには配�
 4. ユーザーに次のコマンドを案内して終了する
 
 ```bash
-aidev permission configure            # 候補を .aidev/policy.candidate.yaml へ書き出す
+aidev create policy            # 候補を .aidev/policy.candidate.yaml へ書き出す
 git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
-aidev permission configure --approve  # 人間が承認して初めて配置される
+aidev create policy --approve  # 人間が承認して初めて配置される
 ```
 
 ## 停止条件

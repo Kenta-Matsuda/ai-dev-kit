@@ -11,7 +11,7 @@
 docs/user-guide/
 ├─ index.adoc            日本語版のルート
 ├─ _attributes.adoc      共通 attribute
-├─ chapters/             日本語版の章（01-overview … 10-troubleshooting）
+├─ chapters/             日本語版の章（01-overview … 11-troubleshooting）
 │  └─ cli/               コマンドリファレンス（1 コマンド 1 ファイル）
 ├─ appendices/           日本語版の付録
 ├─ index-en.adoc         英語版のルート
@@ -39,5 +39,6 @@ npm run docs:check    # 生成 + 検証
 * コマンドページのオプションは `aidev <command> --help` と一致させる。
 * 秘密情報は `<your-pat>` のような placeholder だけを書く。
 * 実装されていない機能は書かない。
+* 図は `[mermaid]` ブロック（Mermaid 記法）で書く。ASCII アートは使わない。ビルドが描画用の script を HTML に埋め込むので、外部依存は増えない。CLI の出力例は `[source,text]` のまま。
 * 日本語版と英語版は同じ構成・同じ ID を保つ。
 

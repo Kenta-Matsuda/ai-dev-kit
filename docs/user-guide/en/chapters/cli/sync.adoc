@@ -1,0 +1,279 @@
+[[cli-sync]]
+== aidev sync
+
+Brings this PKG in step with something that moved on: `tools` takes the kit templates into this PKG's tool configuration, `wiki` brings the LLM Wiki to HEAD.
+
+=== Synopsis
+
+[source,text]
+----
+aidev sync tools [<package>] [--dry-run] [--force] [--json]
+aidev sync wiki [<package>] [options]
+----
+
+`<package>` is the name of a PKG registered on this machine (listed by `aidev doctor`) or a path to one. Without it, the current PKG. Use it after `aidev update` to bring several PKGs forward from one place.
+
+[[cli-sync-tools]]
+=== aidev sync tools
+
+Takes the installed kit's latest templates into this PKG's AI tool configuration.
+
+Takes the templates of the kit installed on this machine (the one `aidev update` brought forward) and applies them to the package, for every tool in `tools.default` of `aidev.yaml`. The team may have edited the files `aidev init` placed; `apply` behaves as a **merge**, not a copy.
+
+[%autowidth.stretch,options="header"]
+|===
+|State of the file |What apply does
+
+|Untouched since the last apply
+|Replaced with the new template
+
+|Edited, and the kit did not change it
+|Kept as it is
+
+|Edited, and the kit changed it too
+|Merged three ways against the template the previous apply used. If the same lines changed, git-style conflict markers are written and the command stops with exit code 2
+
+|No longer shipped by the kit
+|Removed if untouched, kept if edited
+
+|A tool added to `tools.default`
+|Its files are placed for the first time
+|===
+
+The package team resolves conflicted files. Once the markers are gone and the content is settled, run `aidev sync tools` again: files without markers are recorded as resolved and `aidev check` passes again. Until then `aidev sync tools` leaves those files alone and `aidev check` returns exit code 2.
+
+The result is an ordinary diff in the package. Review it with `git diff`, commit, and open a pull request; after the merge the team only needs `git pull`.
+
+The merge base is the template at the kit commit of the previous apply. When the kit clone lacks that history (a shallow clone, for instance) the file cannot be merged; it is reported as a conflict and left alone, to be fixed by hand or replaced with `--force`.
+
+==== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--dry-run`
+|Show what would change; write nothing (not even the record)
+
+|`--force`
+|Take the kit version of every file, discarding local edits and conflicts
+
+|`--json`
+|Machine-readable output
+|===
+
+==== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Applied, or already current
+
+|1
+|No `aidev.yaml`, or the kit has no templates
+
+|2
+|Conflicts remain (new ones, or markers from a previous apply not yet resolved)
+|===
+
+==== Examples
+
+[source,bash]
+----
+aidev sync tools --dry-run
+aidev sync tools
+----
+
+[source,text]
+----
+aidev sync tools
+✓ applied 3 change(s) for claude
+    ~ .claude/agents/knowledge-builder.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
+    2 file(s) with local edits kept as they are
+    Review with "git diff", then commit so your team receives the update.
+----
+
+With a conflict (exit code 2):
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+    Resolve the conflict markers (or keep your version / take the kit's), then run "aidev sync tools" again
+    to record the result. "aidev sync tools --force" takes the kit version of every file instead.
+----
+
+[[cli-sync-wiki]]
+=== aidev sync wiki
+
+Updates the LLM Wiki to match the HEAD of the current branch and commits `.aidev/knowledge/` as its own commit. Only the files changed since the last run and the files left unfinished last time are taken (the delta); pages of removed files are deleted, the inventory and manifest are written, and then the knowledge-builder agent is started once per batch to write the prose. When everything is done, only `.aidev/knowledge/` (and `.aidev/.gitignore`) is committed as `aidev: update Wiki for <sha12>`.
+
+If the generation targets (`package.include` in `aidev.yaml`) have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the kit's configuration files are dirty.
+
+While prose is still pending, the exit code is 1 and nothing is committed. The remaining batches are written to `.aidev/knowledge/.cache/plan.json`. Run the same command again to continue from the checkpoint.
+
+`--no-agent` writes only the inventory and manifest and leaves the prose ungenerated (exit code 1). It is used to finish up after subagents have written the prose on the hook's instructions. It then records the completion reports and commits if nothing is left.
+
+`--no-commit` does not commit; the updated Wiki stays in the working tree. Use it during setup to put the configuration and the Wiki into one PR.
+
+If a Wiki page has been edited by hand, it stops (`--force` overwrites).
+
+[[cli-sync-wiki-publish]]
+==== When run on the tracking branch
+
+When `main` (the tracking branch) is checked out, or `--branch` is given, it updates in a temporary worktree `.aidev/cache/wiki-worktree/`, commits on the branch `aidev/wiki-<sha12>`, pushes it and opens a PR (on Azure DevOps when `sync.auto_pr` is `true` and a PAT is present; with `generic` hosting you open it by hand). Your checkout is not touched. It pushes only when the prose is complete.
+
+If it fails part way, the lease (`.aidev/sync.lock`) and the worktree stay. The same command continues; `--abort` discards them.
+
+==== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--scope <path>`
+|Regenerate only the pages under this path. The research scope stays the whole PKG
+
+|`--full`
+|Regenerate every page instead of the delta
+
+|`--dry-run`
+|Show what would be taken; write nothing
+
+|`--json`
+|Machine-readable output
+
+|`--force`
+|Overwrite Wiki pages edited by hand. Take over the lease of an interrupted publish
+
+|`--no-commit`
+|Do not commit; leave the updated Wiki in the working tree
+
+|`--branch`
+|Update in a temporary worktree, commit on the branch `aidev/wiki-<sha12>` and open a PR (automatic on the tracking branch)
+
+|`--no-push`
+|With `--branch`: only commit on the local `aidev/wiki-<sha12>`; do not push or open a PR
+
+|`--abort`
+|Discard an interrupted `--branch` publish (remove the worktree, release the lease)
+
+|`--no-agent`
+|Write only the inventory and manifest; leave the prose for later. Record completion reports if there are any
+
+|`--agent-name <name>`
+|Start this agent instead of the knowledge-builder
+
+|`--agent-tool <tool>`
+|AI tool that runs the agent (`claude`, `copilot`, `codex`, `kiro`). Only those in `tools.default` of `aidev.yaml`. Default: `tools.agents.<name>.tool`, or `tools.agent` if not set
+
+|`--agent-timeout <ms>`
+|Time budget for one agent run (default 1800000 = 30 minutes)
+
+|`--agent-model <model>`
+|Model for the agent. `""` leaves it to the tool's default
+
+|`--agent-batch-size <n>`
+|Number of files handed to the agent per run (default 20)
+
+|`--survey`
+|Always rewrite `overview.md` and `index.md` first
+
+|`--no-survey`
+|Do not rewrite `overview.md` and `index.md`
+|===
+
+==== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|The Wiki describes HEAD and was committed, or there was nothing to do. `--dry-run`, `--abort`
+
+|1
+|Prose is still pending (`--no-agent`; the agent failed, timed out or stopped part way. Run again to continue). The generation targets have uncommitted changes. Hand edits exist and `--force` is missing. No file matches `--scope`. A publish for another target was left interrupted (`--abort` or `--force`). The object is neither `tools` nor `wiki`
+|===
+
+==== Examples
+
+First generation (package owner; you commit it yourself together with the PR):
+
+[source,bash]
+----
+aidev sync wiki --no-commit
+----
+
+Update (if it stops, the same command resumes):
+
+[source,bash]
+----
+aidev sync wiki
+----
+
+Only see what would be taken:
+
+[source,bash]
+----
+aidev sync wiki --dry-run
+----
+
+[source,text]
+----
+aidev sync wiki (dry run)
+  target               9f8e7d6 (HEAD of feature/login)
+  wiki describes       1a2b3c4
+  generation targets   163
+  ...
+  queued now           7
+✓ dry run complete; nothing was written.
+    would then run the knowledge-builder agent with Claude Code for 7 generation target(s) in 1 batch(es).
+----
+
+After subagents have written the prose on the hook's instructions, record the reports and commit:
+
+[source,bash]
+----
+aidev sync wiki --no-agent
+----
+
+Regenerate only `src/api`, in small batches:
+
+[source,bash]
+----
+aidev sync wiki --scope src/api --agent-batch-size 10
+----
+
+Regenerate every page (discarding hand edits too):
+
+[source,bash]
+----
+aidev sync wiki --full --force
+----
+
+Update the Wiki of `main` through a PR (the same as the nightly pipeline):
+
+[source,bash]
+----
+aidev sync wiki --branch
+----
+
+Discard an interrupted publish:
+
+[source,bash]
+----
+aidev sync wiki --abort
+----
+
+=== See also
+
+* xref:knowledge[LLM Wiki] — reading the state, what happens after a commit, resuming
+* xref:cli-update[aidev update] — updating the kit itself
+* xref:daily-update[Everyday use: updating the kit and taking in its templates]
+* xref:cli-hook[aidev hook] — `after-bash` and `session-stop`
+* xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `sync.*`, `tools.agent_model`

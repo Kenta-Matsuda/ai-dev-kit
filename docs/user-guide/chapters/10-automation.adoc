@@ -1,0 +1,57 @@
+[[automation]]
+== 自動化
+
+CI が行うのは 2 つです。PR ごとに `aidev check` でマージを止めること、夜間に `main` の Wiki を追従させること。いずれも PR のマージは人間が行います。AI に仕事をさせる自動化は xref:workflows[workflow] です。
+
+[[automation-ci]]
+=== CI
+
+kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 kit の URL に変えて使います。CI は kit を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。PKG に置くのは導入担当者です。
+
+[%autowidth.stretch,options="header"]
+|===
+|ファイル |用途
+
+|`pipelines/azure-pipelines-check.yml`
+|PR ごとに `aidev check` を実行します。`main` の branch policy で **必須の build validation** にしてください。これが無いと hook を外す編集がマージできてしまいます。
+
+|`pipelines/azure-pipelines-wiki.yml`
+|毎日 18:00 UTC に `main` で `aidev sync wiki --branch` を実行します。Wiki 無しでマージされた分を拾い、`aidev/wiki-<sha12>` ブランチにコミットして PR を作ります。本文が完成したときだけ publish するので、pipeline に agent のツール（`tools.agent`。既定は Claude Code）とその認証情報が必要です。変数 `AZURE_DEVOPS_PAT`、`ANTHROPIC_API_KEY`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。Wiki が既に `main` の HEAD を説明していれば何もしません。
+|===
+
+開発者がコミットのたびに Wiki を追従させていれば、この pipeline は保険です。
+
+[[automation-branch-policy]]
+=== branch policy
+
+workflow の承認は「`main` にマージされたこと」なので、`main` の branch policy が承認の実体です。次を設定します。
+
+* `aidev check` の pipeline を必須の build validation にする
+* `.aidev/workflows/**`、`.aidev/agents/**`、`.aidev/skills/**`、`.aidev/policy.yaml`、`aidev.yaml` に必須レビュアーを付ける
+* `main` への直接 push を禁止する
+
+=== aidev check の終了コード
+
+`aidev check` の終了コードが CI の契約です。
+
+[%autowidth.stretch,options="header"]
+|===
+|終了コード |意味
+
+|0
+|整合しています。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままです。`--strict` で 2 になります。
+
+|2
+|ツール設定の記録（`.aidev/materialized.json`）が無い、`aidev sync tools` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えています。チームがファイルを編集しただけなら 0 です。
+
+|3
+|`.aidev/policy.yaml` が無い、または壊れています。
+
+|4
+|Wiki が無い・壊れている、または tracking branch への publish の lease が期限切れのまま残っています。
+|===
+
+=== 関連
+
+* xref:cli-check[aidev check]、xref:cli-sync-wiki[aidev sync wiki]
+* xref:workflows[AI に仕事をさせる]

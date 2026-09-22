@@ -1,0 +1,182 @@
+[[configuration]]
+== aidev.yaml reference
+
+`aidev.yaml` is the configuration file at the root of the PKG. `aidev init` creates it; commit it and share it. You can edit it by hand, and every command validates it on start.
+
+=== Example
+
+What `aidev init` writes, plus the optional keys. Omitted keys take their defaults.
+
+[source,yaml]
+----
+version: 2
+
+package:
+  name: "demo-pkg"
+  include:                      # Wiki generation targets
+    - "src/**"
+    - "docs/**"
+  exclude:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/vendor/**"
+    - "**/generated/**"
+
+secrets_paths:                  # never read or written by the AI; hidden from the Wiki
+  - ".env*"
+  - "**/secrets/**"
+  - "**/*.pem"
+  - "**/*.pfx"
+  - "**/*.key"
+
+hosting:
+  type: azure-devops            # azure-devops | generic
+  organization: "contoso"
+  project: "Platform"
+  repository: "demo-pkg"
+  auth_env: AZURE_DEVOPS_PAT    # name of the environment variable holding the PAT (never the value)
+  tracking_branch: "main"
+
+tools:
+  default: ["claude"]           # AI tools whose configuration is placed; several allowed: ["claude", "copilot"]
+  agent: claude                 # tool aidev starts agents with (one of default)
+  agent_model: "sonnet"         # model for those agents; "" leaves it to the tool
+  agents:                       # per-agent overrides (optional)
+    knowledge-builder: { model: opus }
+
+knowledge:
+  agent_timeout_ms: 1800000     # time budget per agent run (30 minutes)
+  agent_batch_size: 20          # files handed to one agent run
+
+quality_gates:                  # commands run after the AI edits a file
+  lint: npm run lint
+  test: npm test
+
+references:                     # existing documents handed to agents (text only)
+  conventions: [docs/coding-guide.md]
+  testing: [docs/testing.md, CONTRIBUTING.md]
+----
+
+=== Keys you are likely to change
+
+[cols="2,2,3",options="header"]
+|===
+|Key |Default |Description
+
+|`package.include`
+|`[]` (= every file)
+|Wiki generation targets (globs).
+
+|`package.exclude`
+|`[]`
+|Paths excluded from the generation targets.
+
+|`secrets_paths`
+|`[]`
+|Paths the AI never reads or writes and that are hidden from the Wiki. Added to the policy's `protected` list automatically.
+
+|`hosting.type`
+|`generic`
+|`azure-devops` enables pull request creation and Work Item integration. `generic` uses git only; you open PRs by hand.
+
+|`hosting.organization` / `project` / `repository`
+|(required for `azure-devops`)
+|Azure DevOps organization, project and repository names.
+
+|`hosting.auth_env`
+|`AZURE_DEVOPS_PAT`
+|The **name** of the environment variable that holds the PAT. Never the value.
+
+|`hosting.tracking_branch`
+|`main`
+|The branch the Wiki follows.
+
+|`tools.default`
+|`["claude"]`
+|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/`, `.github/skills/` and `.github/hooks/`; `codex` gets `AGENTS.md` and `.codex/`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev sync tools` (kept if they were edited).
+
+|`tools.agent`
+|First entry of `default`
+|Tool `aidev` starts agents with (`aidev sync wiki`, `aidev run workflow`, `aidev create workflow --describe`). Must be listed in `tools.default`.
+
+|`tools.agent_model`
+|`sonnet`
+|Model for those agents. `""` leaves the choice to the tool. Does not affect interactive sessions.
+
+|`tools.agents.<name>`
+|None
+|Per-agent overrides of `tool` and `model`, for example `knowledge-builder: { tool: copilot, model: "" }`. The flags of `aidev sync wiki` (`--agent-tool` / `--agent-model`) and `tool` / `model` in workflow.yaml take precedence over these.
+
+|`knowledge.agent_timeout_ms`
+|`1800000`
+|Time budget per agent run (the survey or one batch). 10000 to 7200000.
+
+|`knowledge.agent_batch_size`
+|`20`
+|Files handed to one agent run. 1 to 500. Smaller batches save progress more often.
+
+|`quality_gates.<name>`
+|none
+|Commands run at the PKG root after the AI edits a PKG file. On failure the output is returned to Claude. 120 seconds per command.
+
+|`references.<topic>`
+|none
+|Paths of existing documents (files or directories, relative to the PKG root) that `aidev run workflow` hands to the agent as reference material. `conventions` is read first by the `convention-builder` of the `write-conventions` workflow, `testing` by the `test-writer` of the `write-tests` workflow. Agents treat these as important sources that may be out of date: they verify them against the code and report where the two disagree. **Excel, Word and PDF files cannot be given as they are.** The AI tools read text only, so export them to Markdown or CSV, commit that, and list the exported file (listing an `.xlsx` or similar is a configuration error).
+|===
+
+=== Keys you normally leave alone
+
+[cols="2,2,3",options="header"]
+|===
+|Key |Default |Description
+
+|`version`
+|`2` (required)
+|Schema version.
+
+|`package.name`
+|repository name
+|PKG name used in output.
+
+|`sync.auto_pr`
+|`true`
+|`false` makes `aidev sync wiki` on the tracking branch push but not open a PR.
+
+|`sync.pr.target_branch` / `reviewers`
+|`tracking_branch` / `[]`
+|Target branch and reviewers for the Wiki update PR.
+
+|`sync.remote_check_timeout_ms` / `remote_check_ttl_minutes`
+|`3000` / `60`
+|Timeout and cache time for the remote check.
+
+|`sync.lease_ttl_minutes`
+|`120`
+|How long the lease of a publish to the tracking branch (`.aidev/sync.lock`) stays valid.
+
+|`knowledge.max_files_per_dir`
+|`20`
+|Maximum pages per Wiki directory.
+
+|`knowledge.inventory_shard_size`
+|`2000`
+|Records per inventory file.
+
+|`knowledge.evidence.include` / `exclude`
+|`["**"]` / `package.exclude`
+|Files the agent may read while researching.
+|===
+
+Unknown keys are ignored (they are not an error). A misspelled key name is not caught by `aidev doctor` either, so check the names against these tables.
+
+=== Keys you must not write
+
+`hosting.pat`, `hosting.token`, `hosting.password` and `hosting.secret` are rejected. Writing one stops every command from starting. Put the token in the environment variable named by `hosting.auth_env` (xref:environment-reference[Environment variables]).
+
+=== Related
+
+* xref:cli-init[aidev init] — flags used when generating the file
+* xref:permissions[Permissions and safety] — `secrets_paths` and the policy
+* xref:knowledge[LLM Wiki] — generation targets and research scope
+

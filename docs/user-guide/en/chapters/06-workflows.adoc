@@ -1,0 +1,331 @@
+[[workflows]]
+== Putting the AI to work (workflows)
+
+Workflows are the only entry point for handing development work to the AI (`aidev create workflow` → `aidev submit workflow` → `aidev run workflow`). You write what the AI should do in YAML, review it in a PR, merge it into `main`, and run only a definition identical to the one on `main`.
+
+There are three roles.
+
+[%autowidth.stretch,options="header"]
+|===
+|Role |What to do |Commands
+
+|Package owner
+|Define the workflow and turn it into a PR
+|`aidev create workflow`, `aidev submit workflow`
+
+|Reviewer
+|Review the definition PR and merge it. **Merging is the approval.**
+|(the hosting's PR)
+
+|Member
+|Run an approved workflow and hand the resulting PR to a reviewer
+|`aidev run workflow`, `aidev list workflows`
+|===
+
+The member who runs it is not responsible for the result. Responsibility lies with the person who reviewed the definition and the person who reviews the result PR. The machinery of a run (loops, retries, running commands, committing, opening the PR) belongs to the kit and cannot be written in the YAML. What the YAML cannot express is a request to the kit.
+
+[[workflows-flow]]
+=== Flow
+
+.The workflow flow. Merging is the approval, and only the definition on main can run
+[mermaid]
+----
+flowchart LR
+  subgraph O["Package owner"]
+    direction TB
+    n["aidev create workflow #60;name#62;<br/>template / copy a bundled one / generate from a description"]
+    d["review with git diff"]
+    s["aidev submit workflow #60;name#62;"]
+    n --> d --> s
+  end
+  subgraph R["Reviewer"]
+    direction TB
+    p1["read the definition PR"]
+    m1["merge = approval"]
+    p2["read the result PR"]
+    m2["merge"]
+    p1 --> m1
+    p2 --> m2
+  end
+  subgraph M["Member"]
+    direction TB
+    f["git fetch origin"]
+    r["aidev run workflow #60;name#62;"]
+    pr["result PR"]
+    f --> r --> pr
+  end
+  s -- "PR" --> p1
+  m1 -- "origin/main" --> f
+  pr --> p2
+----
+
+[[workflows-define]]
+=== Define (package owner)
+
+There are two ways to create a template. Each only writes `.aidev/workflows/<name>/workflow.yaml`; nothing runs.
+
+[source,bash]
+----
+aidev create workflow e2e-tests                            # empty template
+aidev create workflow e2e-tests --describe "Write Playwright tests for the main screens under tests/e2e/ and open a PR"
+----
+
+`--describe` starts the workflow-creator agent with `tools.agent` of `aidev.yaml` and has it write the YAML and, if needed, `.aidev/agents/` and `.aidev/skills/`. Afterwards the CLI validates it and shows the result and the next steps.
+
+Edit the template to fit the PKG. Most of the time you change `scope.writable` (where this job may write in this PKG) and `until` (this PKG's test command).
+
+[source,yaml]
+----
+name: write-tests                  # matches the directory name; lowercase, digits, hyphens
+description: Write tests for the given target in the existing style, make them pass, then open a PR
+
+objective: |                       # the objective handed to every agent step (required)
+  Add tests for the target named in --task. Follow the way existing tests are
+  written and run. Do not change the code under test.
+
+scope:
+  writable: [tests/**]             # paths the agents of this workflow may write (required; [] means nothing)
+
+agents: [test-writer]              # referenced by name; .aidev/agents/<name>.md first, then the kit's bundled ones
+skills: [test-and-verify, repository-discovery]   # their text is inserted into every agent step's instructions
+
+# tool: claude                     # optional; one of tools.default in aidev.yaml. Default is tools.agent
+# model: sonnet                    # optional; "" leaves it to the tool's default
+
+steps:
+  - id: survey
+    agent: test-writer
+    prompt: Find out how tests are written and run, and list the behaviours not yet covered. Do not write files.
+  - id: write
+    agent: test-writer
+    prompt: Write the listed tests in the existing style and run them.
+    until: npm test                # repeat the agent until this exits 0 (no shell)
+    max_retries: 4                 # retries for until (ceiling 10)
+  - id: pr
+    kind: pull-request             # commit the changes in scope.writable → push → PR
+
+limits:
+  max_minutes: 45                  # ceiling 60. You can lower it, not raise it
+
+cost:
+  max_usd: 8                       # required. Once the reported cost reaches this, no further agent is started
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|Key |Meaning
+
+|`objective`
+|The objective placed at the top of every agent step's instructions. Required.
+
+|`scope.writable`
+|Paths (globs) the agents may write while this workflow runs. **The only place the AI can write PKG source is this range of an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only workflow).
+
+|`agents` / `skills`
+|Referenced by name. The PKG's `.aidev/agents/<name>.md` and `.aidev/skills/<name>/SKILL.md` are looked up first; if absent, the kit's bundled ones are used. The agent definition and the skill text are inserted into the instructions, so a tool that cannot pick agents by name still works under the same contract.
+
+|`tool` / `model`
+|If omitted, `tools.agent` / `tools.agent_model` of `aidev.yaml` apply (or the per-agent `tools.agents.<name>` if present). `tool` must be one of `tools.default`.
+
+|`steps`
+|Run in order. Each step is exactly one of three kinds.
+`agent` (`prompt` required; with `until`, the agent is repeated up to `max_retries` times until it exits 0; `timeout_ms` optional),
+`command` (`command` is split on whitespace and run without a shell; any exit other than 0 fails the workflow),
+`kind: pull-request` (commit and push the changes in `scope.writable` and open a PR; `title` optional; at most one).
+
+|`limits.max_minutes`
+|Time limit for the whole workflow. Cannot exceed 60.
+
+|`cost.max_usd`
+|Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
+|===
+
+`until` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written.
+
+The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the output of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
+
+[[workflows-submit]]
+=== Submit (package owner)
+
+Once you have reviewed the definition with `git diff`, submit it.
+
+[source,bash]
+----
+git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+aidev submit workflow write-tests
+----
+
+[source,text]
+----
+aidev submit workflow write-tests
+✓ on branch aidev/workflow-write-tests
+✓ committed 3f2a9c1b7d0e (1 file(s))
+✓ pushed aidev/workflow-write-tests
+✓ pull request !124 created (aidev/workflow-write-tests → main)
+    Once it is merged, anyone with the branch fetched can run: aidev run workflow write-tests
+----
+
+* It validates the definition, commits `workflow.yaml` and the agents and skills in the PKG it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes and opens a PR (Azure DevOps). With `generic` hosting it pushes, and you open the PR by hand. With `--no-push` it does not push either.
+* The PR body gives the objective, the writable range, the agents and skills, the steps and the limits, and says that merging approves this workflow.
+* If it already matches `main`, it prints `already matches origin/main; nothing to submit.` and stops.
+
+Add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**` and `.aidev/skills/**` in the branch policy. Who approved is recorded by the PR's reviewers and git's author.
+
+[[workflows-approval]]
+=== What approval means
+
+"Approved" means that the contents of `workflow.yaml`, and of the agents and skills in the PKG it references, are **byte for byte identical to what is on `origin/<tracking branch>`** (usually `origin/main`). There is no command or file that records approval.
+
+* The check uses the last fetched `origin/main`. After a merge, run `git fetch origin` before running the workflow. The check also works offline.
+* Editing locally after approval makes the workflow unapproved at once. If a running agent rewrites `workflow.yaml` or its own definition to widen the range, it is refused, because the check runs on every write.
+* See the state with `aidev list workflows`.
+
+[source,text]
+----
+aidev list workflows
+  write-tests           approved                          指定した対象のテストを既存の書き方で書き、通してから PR を作る
+  e2e-tests             not on origin/main                主要画面の IT テストを Playwright で書く
+  write-conventions     changed since origin/main         Wiki と根拠ソースから開発規約を書き、PR を作る
+
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|State |Meaning |What to do
+
+|`approved`
+|Same as `origin/main`
+|You can run it.
+
+|`not on origin/main`
+|Not on `main` yet (not submitted, or the PR is not merged)
+|Submit it. If it is merged, `git fetch origin`.
+
+|`changed since origin/main`
+|Differs from what is on `main`
+|Review the diff and submit again, or revert with `git checkout origin/main -- .aidev/workflows/<name>/`.
+
+|`invalid: …`
+|The YAML fails validation
+|Fix the key that is shown.
+|===
+
+[[workflows-run]]
+=== Run (member)
+
+[source,bash]
+----
+git fetch origin
+aidev run workflow write-tests --dry-run --task "src/services/order.ts"
+aidev run workflow write-tests --task "src/services/order.ts"
+----
+
+`--dry-run` shows the approval state, the writable range, the agents and tools used, the steps and the limits, and starts nothing. Check with this first.
+
+`--task` is the instruction for this run (a Work Item number, a target path, and so on). It is handed to every agent step as data and cannot change the `objective` or the `scope`. Pass a long instruction with `--task-file <path>`.
+
+[source,text]
+----
+aidev run workflow write-tests
+    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests-202609230112 at 9f8e7d6… (approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
+    [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
+    [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:25:02.417Z] step write: agent finished in 8m 21s ($0.9811)
+    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1
+    [2026-09-23T01:25:19.010Z] step write: agent test-writer via claude (sonnet) attempt 2 (budget 19m 44s)
+    [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
+    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
+    [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
+    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests-202609230112
+    [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
+    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+This is what happens during a run.
+
+* A workflow with a `pull-request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
+* The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside `scope.writable`; the hook refuses writes anywhere else. The agents themselves never commit or push.
+* If `until` exits with anything other than 0, the same agent is started again with that output attached. If the same output appears twice in a row, the run stops.
+* The `pull-request` step commits and pushes only the changes in `scope.writable` and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts and the cost. If there are no changes in the range, neither a commit nor a PR is created.
+* The record is kept in `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). It is gitignored and never committed.
+
+Messages when it stops, and what to do. The exit code is 1. There is no resume; fix the cause and run again.
+
+[%autowidth.stretch,options="header"]
+|===
+|Shown |What to do
+
+|`workflow <name> is not approved: … is not on origin/main yet`
+|The PR is not merged. If it is, `git fetch origin`.
+
+|`workflow <name> is not approved: … differs from origin/main`
+|The definition was changed locally. Revert it, or ask the package owner to submit again.
+
+|`the working tree has uncommitted changes; commit or stash them first`
+|A workflow with a `pull-request` step runs from a clean working tree.
+
+|`workflow stopped — step <id>: <until> still fails after N retries` +
+`… the same failure repeated`
+|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, then make `--task` more specific or ask the package owner to revisit `max_retries` or the `prompt`.
+
+|`workflow stopped — step <id>: cost limit of $N reached` +
+`… time limit of N minutes exceeded`
+|A limit was reached. Make `--task` smaller, or ask the package owner to revisit the limits (60 minutes and the cost ceiling are part of the definition, so changing them is a PR).
+
+|`workflow stopped — step <id>: <command> exited N`
+|A `command` step failed. Read the output and fix the cause.
+
+|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|Normal. Open the PR by hand from the pushed branch.
+|===
+
+[[workflows-review]]
+=== Reviewing workflow pull requests (reviewer)
+
+Two kinds of PR arrive.
+
+*Definition PRs* (`aidev: workflow <name>`). Merging is the approval, so review them with the same weight as a result.
+
+* Is the `objective` a job the team may let that AI do?
+* Is `scope.writable` the minimum needed? Does it include the whole source (`**`) or configuration and CI paths?
+* Are `until` and `command` safe to run in this PKG? (They do not go through a shell, but the command itself does run.)
+* Are `cost.max_usd` and `limits.max_minutes` reasonable?
+* Are the referenced `.aidev/agents/` and `.aidev/skills/` files in the same PR? Do their instructions describe work outside the range, or handling of secrets?
+
+*Result PRs* (branch `aidev/<name>-<yyyymmddHHMM>`). The PR body gives the workflow name, the run id, the starting commit and the cost.
+
+* Does the diff stay inside `scope.writable`? (The hook enforces it, but check.)
+* Do the tests pass? Does `aidev check` in CI pass?
+* Does it match the `objective` and the `--task`? Are there no unrelated changes?
+
+[[workflows-bundled]]
+=== What the kit ships, and what it does not
+
+The kit ships **machinery** only: the workflow runner and its validation, the approval check, the write limits, and the agents that write workflows (workflow-creator), write agents (agents-creator), write the Wiki (knowledge-builder) and draft the policy (permission-setting).
+
+The development work itself — workflows that implement, write tests or write out conventions, and their agents — belongs to the **package**. The kit does not bundle any. The package owner creates them with `aidev create workflow <name> --describe "<what you want>"`, and workflow-creator has agents-creator write the agents and skills the workflow needs. MCP servers (reading Azure DevOps Work Items, for instance) are also the package's own, in its `.mcp.json`; the kit neither ships nor starts them.
+
+[[workflows-agents-skills]]
+=== Agents and skills
+
+An agent is a role definition handed to the AI tool (Markdown); a skill is a set of instructions. A workflow references them by name.
+
+The four agents bundled with the kit are `knowledge-builder` (writes the Wiki; used by `aidev sync wiki` and the hooks), `workflow-creator` (used by `aidev create workflow --describe`), `agents-creator` (writes new agents; used by `aidev create agent --describe` and by workflow-creator) and `permission-setting` (drafts the policy candidate). The agents that do development work are the package's own. The skills are the same as those placed in `.claude/skills/`.
+
+PKG-specific agents and skills go in `.aidev/agents/<name>.md` and `.aidev/skills/<name>/SKILL.md`. They take precedence over a bundled one of the same name. There are three ways to make them.
+
+* Write a template with `aidev create agent <name>` / `aidev create skill <name>` and edit it. For an `agent`, `--describe "<text>"` can have agents-creator write it
+* `aidev create workflow --describe`, where workflow-creator has agents-creator write the agents and skills the workflow needs
+* Have Claude write them in an interactive session (`.aidev/agents/**` and `.aidev/skills/**` are writable under the default policy)
+
+List them with `aidev list agents` / `aidev list skills`, and remove them with `aidev remove agent|skill <name>` (one referenced by a workflow is refused). All of them go into the PR together with the workflow through `aidev submit workflow`, are reviewed there, and only what is on `main` is used by a workflow.
+
+=== Related
+
+* xref:cli-run[aidev run workflow] — options, exit codes
+* xref:permissions[Permissions and safety] — how `scope.writable` relates to the policy
+* xref:configuration[aidev.yaml reference] — `tools.agent`, `tools.agents`, `references`

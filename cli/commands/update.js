@@ -1,11 +1,11 @@
 'use strict';
 /**
- * `aidev update` — bring the kit checkout forward.
+ * `aidev update` — bring the kit checkout forward. Nothing else.
  *
  * This updates the CLI and the templates it carries, and nothing in any PKG.
- * Applying the new templates to a PKG is `aidev apply`, run by each team when
- * it suits them: that step changes files the team owns and may need a merge,
- * so it must not ride along with a routine CLI update.
+ * Taking the new templates into a PKG is `aidev sync tools`, run by each team
+ * when it suits them: that step changes files the team owns and may need a
+ * merge, so it must not ride along with a routine CLI update.
  *
  * After updating, the packages registered on this machine whose recorded kit
  * commit is older are listed, so nobody has to remember which clones still
@@ -77,7 +77,10 @@ function packagesBehind(kitCommit) {
 }
 
 function run(ctx) {
-  const { installRoot, flags } = ctx;
+  const { installRoot, flags, positionals } = ctx;
+  if (positionals.length) {
+    throw new AidevError('aidev update takes no object (it updates the kit). The Wiki is "aidev sync wiki", tool configuration "aidev sync tools".');
+  }
   const dryRun = !!flags['dry-run'];
   const human = !flags.json;
 
@@ -92,13 +95,13 @@ function run(ctx) {
   const behind = packagesBehind(now);
   if (human && behind.length > 0) {
     ui.info(`${behind.length} package(s) on this machine still carry templates from an older kit:`);
-    for (const b of behind) ui.dim(`    ${b.path}${b.applied ? ` (applied ${String(b.applied).slice(0, 7)})` : ''}`);
-    ui.dim('    Run "aidev apply" in each when convenient; it merges the new templates with your edits.');
+    for (const b of behind) ui.dim(`    ${b.name || b.path}${b.applied ? ` (applied ${String(b.applied).slice(0, 7)})` : ''}`);
+    ui.dim('    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.');
   } else if (human && self.updated && !dryRun) {
-    ui.dim('    Run "aidev apply" in your package clones to take the new templates.');
+    ui.dim('    Run "aidev sync tools" in your package clones to take the new templates.');
   }
   if (flags.json) ui.json({ ok: true, dryRun, kit: self, packagesBehind: behind });
   return EXIT.OK;
 }
 
-module.exports = { run, FLAGS, FLAG_HELP, selfUpdate, packagesBehind, summary: 'ai-dev-kit 本体（CLI とテンプレート）を更新する。PKG への適用は aidev apply' };
+module.exports = { run, FLAGS, FLAG_HELP, selfUpdate, packagesBehind, summary: 'ai-dev-kit 本体（CLI とテンプレート）を更新する。PKG への反映は aidev sync tools' };

@@ -82,6 +82,25 @@ function unregisterPackage(repoRoot, env = process.env) {
 }
 
 /** Registered clones that still exist on disk, plus the ones that vanished. */
+/**
+ * A package named on the command line: a registry name, or a directory. A
+ * name that several registered packages share needs the path instead.
+ */
+function resolvePackage(ref, env = process.env) {
+  const s = String(ref == null ? '' : ref).trim();
+  if (!s) return null;
+  const reg = readRegistry(env);
+  const byName = reg.packages.filter((p) => p && p.name === s && typeof p.path === 'string' && fs.existsSync(p.path));
+  if (byName.length === 1) return byName[0].path;
+  if (byName.length > 1) {
+    throw new AidevError(`${s} names ${byName.length} registered packages (${byName.map((p) => p.path).join(', ')}); pass the path instead`);
+  }
+  const abs = path.resolve(s);
+  if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) return abs;
+  const names = reg.packages.map((p) => p && p.name).filter(Boolean);
+  throw new AidevError(`${s} is neither a registered package nor a directory${names.length ? ` (registered: ${names.join(', ')})` : ''}`);
+}
+
 function listPackages(env = process.env) {
   const reg = readRegistry(env);
   const present = [];
@@ -102,7 +121,7 @@ function developerPath(env = process.env) { return path.join(home(env), DEVELOPE
 
 /**
  * Is this machine a kit developer's? Only then does the Stop hook ask a
- * session to reflect on itself and `aidev evolve` turn reflections into a
+ * session to reflect on itself and `npm run evolve --` turn reflections into a
  * kit PR. The marker lives here, outside every PKG, so nothing distributed
  * to a PKG team can switch it on. `AIDEV_KIT_DEVELOPER=1` is the same switch
  * for environments without a writable home.
@@ -167,7 +186,7 @@ function checkForUpdate(installRoot, { env = process.env, force = false, now = D
 
 module.exports = {
   home, defaultHome, registryPath, readRegistry, writeRegistry,
-  registerPackage, unregisterPackage, listPackages,
+  registerPackage, unregisterPackage, listPackages, resolvePackage,
   developerPath, readDeveloper, isKitDeveloper, setDeveloper,
   checkForUpdate, UPDATE_CHECK_TTL_MS,
 };

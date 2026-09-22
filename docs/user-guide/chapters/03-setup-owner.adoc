@@ -1,7 +1,13 @@
 [[setup-owner]]
 == 導入担当者の手順
 
-PKG に {project-name} を初めて導入し、設定・policy・Wiki を PR にしてチームへ配ります。PKG につき 1 人が 1 回行います。
+PKG に {project-name} を初めて導入し、設定・policy・Wiki を PR にしてチームへ配ります。PKG につき 1 人が行います。**この PKG で AI に何を許し、何をさせるかを決めるのはこの人です。** メンバーは決めません。
+
+導入のあとも、次のことは導入担当者が PR にします。
+
+* 開発規約の生成と、AI に任せる仕事（workflow）の定義 → xref:setup-owner-after[導入のあとにすること]
+* kit の新しいテンプレートの取り込み（`aidev sync tools`）→ xref:daily-apply[aidev sync tools]
+* `aidev.yaml` と policy の変更 → xref:configuration[aidev.yaml リファレンス]、xref:permissions[権限と安全性]
 
 === 必要なもの
 
@@ -32,7 +38,7 @@ aidev init
 |質問 |答え方
 
 |1/4 tools
-|そのまま Enter で `claude`。複数使うなら `claude, copilot` のようにカンマ区切りで書きます（`claude`、`copilot`、`codex`、`kiro`）。
+|そのまま Enter で `claude`。複数使うなら `claude, copilot` のようにカンマ区切りで書きます（`claude`、`copilot`、`codex`、`kiro`）。どのツールを誰が使うかはチームで決め、`aidev.yaml` に残ります。
 
 |2/4 Wiki の生成対象
 |説明ページを作りたいパス（glob、カンマ区切り）。`src/**`, `docs/**` などが提案されます。Wiki の調査そのものは PKG 全体を対象にするので、ここは「ページが欲しい場所」だけで構いません。
@@ -41,10 +47,10 @@ aidev init
 |AI に読ませないパス。既定の 5 つに、証明書や設定の置き場があれば追加します。
 
 |4/4 hosting
-|`origin` の URL から推定されます。Azure DevOps なら organization / project / repository を確認し、最後に Wiki が追いかけるブランチ（既定 `main`）を答えます。
+|`origin` の URL から推定されます。Azure DevOps なら organization / project / repository を確認し、最後に Wiki が追いかけるブランチ（既定 `main`）を答えます。このブランチは workflow の承認の基準にもなります。
 |===
 +
-質問のあと、設定ファイルが書かれ、policy の要約と `Place this policy now? (y/N)` が表示されます。`y` で policy が置かれます。`N` なら候補ファイルが書かれ、次の手順で承認します。続けて `Build the LLM Wiki now? (Y/n)` と聞かれます。Enter で Wiki の生成が始まります（手順 4）。
+質問のあと、設定ファイルが書かれ、policy の要約と `Place this policy now? (y/N)` が表示されます。`y` で policy が置かれます。`N` なら候補ファイルが書かれ、次の手順で承認します。最後に `next steps` として、残りの手順（policy の承認、Wiki の生成、コミット、PR）が表示されます。`aidev init` は Wiki を生成しません。
 +
 * `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` などに kit のテンプレートと違う既存ファイルがあります。内容を退避してから `aidev init --force` を実行します。
 * `run "aidev init" at the repository root` → ルートに移動して実行します。
@@ -54,12 +60,17 @@ aidev init
 [source,bash]
 ----
 cat .aidev/policy.candidate.yaml
-aidev permission configure --approve
+aidev create policy --approve
 ----
 +
-policy の中身は xref:permissions[権限と安全性] を見てください。
+policy の中身は xref:permissions[権限と安全性] を見てください。ソースを AI に書かせる範囲は policy ではなく、あとで作る workflow の `scope.writable` に書きます。
 
-. Wiki の生成を待ちます。`aidev init` の最後の質問で Enter を押すと始まります。時間がかかります。途中で止まっても、`aidev init` をもう一度実行すると続きから再開します。
+. Wiki を生成します。`--no-commit` で結果を作業ツリーに残し、次の手順で設定と一緒にコミットします。時間がかかります。途中で止まっても、同じコマンドをもう一度実行すると続きから再開します。
++
+[source,bash]
+----
+aidev sync wiki --no-commit
+----
 +
 [source,text]
 ----
@@ -71,29 +82,53 @@ policy の中身は xref:permissions[権限と安全性] を見てください�
 ✓ knowledge-builder completed 163/163 queued generation target(s) ($4.9012)
 ----
 +
-最後が `✓ knowledge-builder completed N/N` なら完了です。それ以外で止まったら、次を確認して `aidev init` をもう一度実行します。
+最後が `✓ knowledge-builder completed N/N` なら完了です。それ以外で止まったら、次を確認して同じコマンドをもう一度実行します。
 +
 * `⚠ the knowledge-builder agent did not run` → Claude Code が見つかりません。`aidev doctor` の `claude` 行を直します。
 * `✗ … ran out of time` / `⚠ … partial Wiki progress` / Ctrl-C → 終わった分は保存されています。再実行します。
 +
-`aidev status` の 2 行目が `✅` になれば Wiki は完成です。
+`aidev check` の 2 行目が `✅` になれば Wiki は完成です。
 
 . コミットして PR を作ります。
 +
 [source,bash]
 ----
 aidev check
-git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json
+git add aidev.yaml .aidev .claude CLAUDE.md
 git commit -m "chore: adopt ai-dev-kit"
 git push -u origin feature/ai-dev-kit
 ----
 +
 `aidev check` が `✓ environment is consistent.` であることを確認してから push します。`.aidev/.gitignore` が一時ファイルを除外するので、`git add .aidev` で余計なものは入りません。`copilot` / `codex` / `kiro` も選んだ場合は、そのツールの設定ファイル（`.github/`、`AGENTS.md`、`.kiro/`）も `git add` します（xref:files-and-state[PKG 内のファイル]）。
 
-. PR をレビューしてもらい、`main` にマージします。マージ後、メンバーは xref:setup-member[メンバーの手順] で参加できます。
+. PR をレビューしてもらい、`main` にマージします。レビュアーは設定（`aidev.yaml`、policy）と Wiki の内容を見ます。マージ後、メンバーは xref:setup-member[メンバーの手順] で参加できます。
+
+[[setup-owner-after]]
+=== 導入のあとにすること
+
+いずれも導入担当者が行い、PR にします。順番は任意です。
+
+[%autowidth.stretch,options="header"]
+|===
+|すること |方法
+
+|branch policy を設定する
+|`main` に PR ごとの `aidev check` を必須の build validation にし、`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`・`.aidev/policy.yaml` に必須レビュアーを付けます。workflow の承認は「`main` にマージされたこと」なので、この設定が承認の実体です。→ xref:automation-ci[自動化: CI]
+
+|この PKG の開発規約を書き出す
+|`aidev create workflow conventions --describe "Wiki と根拠ソースからこの PKG の開発規約を .aidev/conventions/ に根拠付きで書き、PR にする"` で workflow を作って提出し、マージ後に実行します。→ xref:workflows-bundled[kit が同梱するもの、しないもの]
+
+|AI に任せる仕事を定義する
+|`aidev create workflow <name> --describe "<やりたいこと>"` で workflow（と必要な agent・skill）を作り、`scope.writable` を確認して `aidev submit workflow` します。マージされるとメンバーが実行できます。→ xref:workflows[AI に仕事をさせる]
+
+|夜間に Wiki を追従させる
+|`pipelines/azure-pipelines-wiki.yml` を PKG に置きます。→ xref:automation-ci[自動化: CI]
+
+|AI の編集後に lint / test を走らせる
+|`aidev.yaml` の `quality_gates` に書きます。→ xref:configuration[aidev.yaml リファレンス]
+|===
 
 === 次のステップ
 
-* CI に `aidev check` を入れる、夜間に Wiki を追従させる → xref:automation-ci[自動化: CI]
-* AI が編集した後に lint / test を走らせる → xref:configuration[aidev.yaml リファレンス] の `quality_gates`
-* この PKG の開発規約を根拠付きで書き出す → `aidev agent run convention-builder`（xref:cli-agent[aidev agent]）。`.aidev/conventions/` に書かれるので、`git diff` でレビューして PR にします。Wiki の生成と同じく、導入担当者が 1 人で行う手順です
+* メンバーに案内する → xref:setup-member[メンバーの手順]
+* AI に仕事をさせる → xref:workflows[AI に仕事をさせる]
