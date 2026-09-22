@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { spawnSync } = require('child_process');
 const { EXIT, AidevError } = require('../lib/errors');
 const { parseArgs } = require('../lib/args');
 const gitMod = require('../lib/git');
@@ -113,22 +114,40 @@ function commandHelp(name, mod) {
 /**
  * Tell the user a newer kit exists; in a terminal, offer to update first.
  * Bounded and cached (see home.checkForUpdate), and never fatal.
+ *
+ * Returns null to carry on with this process, or the exit code of the
+ * updated CLI when the user chose to update and the command was re-run
+ * with the new code (so "update first, then run" means exactly that).
  */
-async function updateNotice(name, flags) {
-  if (QUIET_COMMANDS.has(name) || flags.json || process.env.AIDEV_NO_UPDATE_CHECK) return;
+async function updateNotice(name, flags, argv) {
+  if (QUIET_COMMANDS.has(name) || flags.json || process.env.AIDEV_NO_UPDATE_CHECK) return null;
   let info = null;
   try { info = home.checkForUpdate(INSTALL_ROOT); } catch { info = null; }
-  if (!info || !info.newer) return;
+  if (!info || !info.newer) return null;
   ui.warn(`a newer ai-dev-kit is available (${info.localSha.slice(0, 7)} → ${info.remoteSha.slice(0, 7)}). Run "aidev update".`);
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await new Promise((resolve) => rl.question('  Update now, before running this command? (y/N): ', (a) => resolve(a.trim())));
   rl.close();
-  if (!/^y(es)?$/i.test(answer)) return;
+  if (!/^y(es)?$/i.test(answer)) return null;
+  const before = safeHead();
   const upd = loadCommand('update');
   await upd.run({ installRoot: INSTALL_ROOT, repoRoot: null, flags: {}, positionals: [], version: VERSION });
-  ui.dim('  (the updated CLI takes effect on the next command; continuing with the current one.');
+  if (safeHead() === before) {
+    ui.dim('  (the kit did not change; continuing with the current CLI.)');
+    return null;
+  }
+  ui.dim(`  (re-running "aidev ${argv.join(' ')}" with the updated CLI.`);
   ui.dim('   New templates reach a package only through "aidev apply", when you choose to run it.)');
+  const r = spawnSync(process.execPath, [__filename, ...argv], {
+    stdio: 'inherit',
+    env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1' },
+  });
+  return typeof r.status === 'number' ? r.status : EXIT.GENERAL;
+}
+
+function safeHead() {
+  try { return gitMod.headSha(INSTALL_ROOT); } catch { return null; }
 }
 
 async function main(argv) {
@@ -167,7 +186,8 @@ async function main(argv) {
     : process.cwd();
   const repoRoot = gitMod.findRepoRoot(start);
 
-  await updateNotice(name, flags);
+  const reran = await updateNotice(name, flags, argv);
+  if (reran !== null) return reran;
 
   const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, flags, positionals, argv: rest, command: name };
   const code = await mod.run(ctx);

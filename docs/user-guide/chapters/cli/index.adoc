@@ -38,7 +38,7 @@ aidev <command> [subcommand] [options] [arguments]
 |kit のバージョンを表示します。
 |===
 
-`hook`、`mcp`、`update`、`uninstall` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
+`hook`、`mcp`、`update`、`uninstall` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。更新したら、そのコマンドを新しい CLI で実行し直します。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
 
 [[cli-exit-codes]]
 === 終了コード

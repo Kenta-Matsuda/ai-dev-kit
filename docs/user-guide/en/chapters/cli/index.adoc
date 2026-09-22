@@ -38,7 +38,7 @@ aidev <command> [subcommand] [options] [arguments]
 |Print the kit version.
 |===
 
-Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day whether a newer kit exists and, if so, asks whether to update first. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
+Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day whether a newer kit exists and, if so, asks whether to update first. After an update, the command is run again with the new CLI. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
 
 [[cli-exit-codes]]
 === Exit codes

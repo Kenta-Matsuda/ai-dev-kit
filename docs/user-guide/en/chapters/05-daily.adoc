@@ -92,7 +92,7 @@ When a newer kit exists, running a command in the package shows this:
   Update now, before running this command? (y/N):
 ----
 
-`y` updates the kit (the CLI and its templates). Package files do not change at this point.
+`y` updates the kit (the CLI and its templates). Package files do not change at this point. Once the update is in, the command you started is run again with the new CLI.
 
 [source,text]
 ----
