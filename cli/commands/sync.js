@@ -1,7 +1,7 @@
 'use strict';
 /**
- * `aidev sync tools|wiki [<package>]` — bring a package in step with something
- * that moved on.
+ * `aidev sync tools|wiki [--package <name|path>]` — bring a package in step
+ * with something that moved on.
  *
  *   tools  the kit's templates → this package's AI tool configuration
  *          (`.claude/**`, `CLAUDE.md`, the other tools' files). Deliberately
@@ -17,9 +17,9 @@
  *          tracking branch, published as a pull request. Implementation in
  *          `./knowledge`.
  *
- * The package is the current clone, or the one named (a registry name or a
- * path), so a machine with several clones can be brought forward from one
- * place after `aidev update`.
+ * The package is the current clone, or the one `--package` names (a registry
+ * name or a path, resolved by the entry point), so a machine with several
+ * clones can be brought forward from one place after `aidev update`.
  */
 
 const path = require('path');
@@ -90,7 +90,7 @@ function syncTools(ctx, repoRoot) {
     layout.ensureAidevGitignore(repoRoot);
     home.registerPackage(repoRoot, { name: config.package.name, remote: gitMod.remoteUrl(repoRoot, 'origin'), kitCommit });
   }
-  if (human) render(result, { dryRun, repoRoot: ctx.positionals[1] ? repoRoot : null });
+  if (human) render(result, { dryRun, repoRoot: ctx.packageRef ? repoRoot : null });
 
   const ok = result.conflicts.length === 0;
   if (flags.json) {
@@ -111,10 +111,11 @@ async function syncWiki(ctx, repoRoot) {
 
 async function run(ctx) {
   const what = ctx.positionals[0];
-  const ref = ctx.positionals[1];
-  let repoRoot = ctx.repoRoot;
-  if (ref) repoRoot = gitMod.findRepoRoot(home.resolvePackage(ref)) || home.resolvePackage(ref);
-  if (!repoRoot) throw new AidevError('not inside a package clone; pass the package name or path: aidev sync tools <package>');
+  const repoRoot = ctx.repoRoot;
+  if (ctx.positionals[1]) {
+    throw new AidevError(`unexpected argument: ${ctx.positionals[1]} (name a package with --package ${ctx.positionals[1]})`);
+  }
+  if (!repoRoot) throw new AidevError(`not inside a package clone; run it in one or name it: aidev sync ${what} --package <name|path>`);
   if (what === 'tools') return syncTools(ctx, repoRoot);
   if (what === 'wiki') return syncWiki(ctx, repoRoot);
   throw new AidevError('aidev sync needs what to sync: tools (kit templates → this package) or wiki (HEAD → the LLM Wiki)');

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev uninstall <package>` — leave kit management.
+ * `aidev uninstall --package <name|path>` — leave kit management.
  *
  * Spec: kit管理から外す（以後 `check` 対象外・手動管理へ）. After ejecting, the
  * repository keeps everything that is *its own* — its source, the generated

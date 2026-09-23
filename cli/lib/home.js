@@ -14,7 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readJsonIfExists, writeJsonAtomic, nowIso } = require('./config');
+const { readJsonIfExists, writeJsonAtomic, nowIso, loadLock } = require('./config');
 const git = require('./git');
 const { AidevError } = require('./errors');
 
@@ -114,6 +114,16 @@ function listPackages(env = process.env) {
   return { present, missing };
 }
 
+/**
+ * The kit commit whose templates this package last took (`aidev init` or
+ * `aidev sync tools`): the package's own record first, the registry second.
+ */
+function appliedKitCommit(entry) {
+  let lock = null;
+  try { lock = loadLock(entry.path); } catch { lock = null; }
+  return (lock && lock.kitCommit) || entry.kitCommit || null;
+}
+
 // --------------------------------------------------------- kit developer
 
 const DEVELOPER_REL = 'developer.json';
@@ -187,7 +197,7 @@ function checkForUpdate(installRoot, { env = process.env, force = false, now = D
 
 module.exports = {
   home, defaultHome, registryPath, readRegistry, writeRegistry,
-  registerPackage, unregisterPackage, listPackages, resolvePackage,
+  registerPackage, unregisterPackage, listPackages, resolvePackage, appliedKitCommit,
   developerPath, readDeveloper, isKitDeveloper, setDeveloper,
   checkForUpdate, UPDATE_CHECK_TTL_MS,
 };

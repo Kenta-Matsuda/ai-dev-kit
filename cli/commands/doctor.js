@@ -1,6 +1,6 @@
 'use strict';
 /**
- * `aidev doctor [<package>]` — diagnose this machine: the runtime, the kit
+ * `aidev doctor [--package <name|path>]` — diagnose this machine: the runtime, the kit
  * checkout, the registry and the AI tools. With a package (its registry name
  * or a path) it also reports that package's setup and Wiki state, for a human
  * reading a screen; the CI gate with exit codes stays `aidev check`, run in
@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const { execFileSync } = require('child_process');
-const { EXIT } = require('../lib/errors');
+const { EXIT, AidevError } = require('../lib/errors');
 const cfgMod = require('../lib/config');
 const gitMod = require('../lib/git');
 const stateMod = require('../lib/state');
@@ -78,7 +78,8 @@ function packageChecks(pkgRoot, installRoot, add) {
 
 function run(ctx) {
   const { flags, installRoot, positionals } = ctx;
-  const pkgRoot = positionals[0] ? home.resolvePackage(positionals[0]) : null;
+  if (positionals[0]) throw new AidevError(`unexpected argument: ${positionals[0]} (name a package with --package ${positionals[0]})`);
+  const pkgRoot = ctx.packageRef ? ctx.repoRoot : null;
   const checks = [];
   const add = (name, status, detail) => checks.push({ name, status, detail });
 
@@ -122,7 +123,7 @@ function run(ctx) {
   if (flags.json) {
     ui.json({ ok: !checks.some((c) => c.status === 'fail'), package: pkgRoot, checks });
   } else {
-    ui.heading(`aidev doctor${pkgRoot ? ` ${positionals[0]}` : ''}`);
+    ui.heading(`aidev doctor${pkgRoot ? ` --package ${ctx.packageRef}` : ''}`);
     for (const c of checks) {
       const mark = { ok: '✓', warn: '⚠', fail: '✗' }[c.status];
       ui.out(`  ${mark} ${c.name.padEnd(22)} ${c.detail == null ? '' : c.detail}`);
@@ -133,9 +134,9 @@ function run(ctx) {
     if (fails === 0 && warns === 0) ui.ok('no problems found.');
     else if (fails === 0) ui.warn(`${warns} warning(s); nothing blocking.`);
     else ui.fail(`${fails} blocking problem(s), ${warns} warning(s).`);
-    if (!pkgRoot) ui.dim('    For a package: aidev doctor <package name or path>. The CI gate is "aidev check" inside the clone.');
+    if (!pkgRoot) ui.dim('    For a package: aidev doctor --package <name|path>. The CI gate is "aidev check" inside the clone.');
   }
   return checks.some((c) => c.status === 'fail') ? EXIT.GENERAL : EXIT.OK;
 }
 
-module.exports = { run, FLAGS, FLAG_HELP, summary: 'この端末を診断する。<package> を渡すとその PKG の状態も' };
+module.exports = { run, FLAGS, FLAG_HELP, summary: 'この端末を診断する。--package を渡すとその PKG の状態も' };

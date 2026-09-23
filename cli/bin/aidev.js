@@ -34,7 +34,7 @@ const COMMANDS = [
 const SUBCOMMANDS = {
   create: ['workflow', 'agent', 'skill', 'policy'],
   remove: ['workflow', 'agent', 'skill'],
-  list: ['workflows', 'agents', 'skills'],
+  list: ['workflows', 'agents', 'skills', 'packages'],
   submit: ['workflow'],
   run: ['workflow'],
   sync: ['tools', 'wiki'],
@@ -43,6 +43,13 @@ const SUBCOMMANDS = {
 
 /** Commands that run from tools or pipelines: never prompt, never nag. `update` is the updater itself. */
 const QUIET_COMMANDS = new Set(['hook', 'uninstall', 'update']);
+
+/**
+ * Commands that act on one package: `--package <name|path>` (`-p`) points them
+ * at a registered package or a clone elsewhere instead of the current
+ * directory. `update` acts on the machine only; `hook` follows the tool.
+ */
+const PACKAGE_COMMANDS = new Set(['init', 'check', 'doctor', 'create', 'remove', 'list', 'submit', 'run', 'sync', 'uninstall']);
 
 /** Internal entry points (the AI tools' hooks call them); routable, not advertised. */
 const HIDDEN_COMMANDS = new Set(['hook']);
@@ -93,6 +100,7 @@ function usage() {
   ui.table([
     ['--json', 'machine-readable output (the only thing written to stdout)'],
     ['--dry-run', 'show what would change; write nothing'],
+    ['--package, -p <name|path>', 'act on this package instead of the current clone ("aidev list packages")'],
     ['--help, -h', 'this message, or a command\'s options'],
     ['--version, -V', 'print the kit version'],
   ]);
@@ -105,6 +113,10 @@ function commandHelp(name, mod) {
   ui.out(`aidev ${name} — ${mod.summary || ''}`);
   const subs = SUBCOMMANDS[name];
   if (subs) ui.out(`\n  subcommands: ${subs.join(', ')}`);
+  if (PACKAGE_COMMANDS.has(name)) {
+    ui.out('\n  package:');
+    ui.table([['--package, -p <name|path>', 'act on this package instead of the current clone ("aidev list packages")']]);
+  }
   const help = mod.FLAG_HELP || {};
   // A flag documented as hidden is accepted for compatibility but not shown.
   const flags = Object.entries(mod.FLAGS || {}).filter(([f]) => help[f] !== false);
@@ -153,6 +165,30 @@ async function updateNotice(name, flags, argv) {
   return typeof r.status === 'number' ? r.status : EXIT.GENERAL;
 }
 
+/**
+ * Take `--package <ref>` / `--package=<ref>` / `-p <ref>` out of the command's
+ * arguments, so every command accepts it without declaring it.
+ */
+function takePackageOption(args) {
+  let ref = null;
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { rest.push(...args.slice(i)); break; }
+    let value;
+    if (a === '--package' || a === '-p') {
+      value = args[++i];
+      if (value == null || value === '') throw new AidevError(`option ${a} requires a package name or path`);
+    } else if (a.startsWith('--package=')) {
+      value = a.slice('--package='.length);
+      if (!value) throw new AidevError('option --package requires a package name or path');
+    } else { rest.push(a); continue; }
+    if (ref != null) throw new AidevError('pass --package once');
+    ref = value;
+  }
+  return { ref, rest };
+}
+
 function safeHead() {
   try { return gitMod.headSha(INSTALL_ROOT); } catch { return null; }
 }
@@ -178,8 +214,12 @@ async function main(argv) {
       '    Run "aidev --help" for the full list.');
   }
 
-  const rest = argv.slice(1);
-  if (rest.includes('--help') || rest.includes('-h')) { commandHelp(name, mod); return EXIT.OK; }
+  if (argv.slice(1).includes('--help') || argv.slice(1).includes('-h')) { commandHelp(name, mod); return EXIT.OK; }
+
+  const { ref: packageRef, rest } = takePackageOption(argv.slice(1));
+  if (packageRef != null && !PACKAGE_COMMANDS.has(name)) {
+    throw new AidevError(`aidev ${name} does not take --package (it does not act on a package)`);
+  }
 
   const { flags, positionals } = parseArgs(rest, mod.FLAGS || {});
   if (SUBCOMMANDS[name] && positionals.length === 0) {
@@ -191,15 +231,21 @@ async function main(argv) {
 
   // Hooks may fire while the tool's current directory is a nested folder.
   // Claude Code supplies the project root explicitly; start discovery there.
-  const start = name === 'hook' && process.env.CLAUDE_PROJECT_DIR
-    ? path.resolve(process.env.CLAUDE_PROJECT_DIR)
-    : process.cwd();
-  const repoRoot = gitMod.findRepoRoot(start);
+  let repoRoot;
+  if (packageRef != null) {
+    const dir = home.resolvePackage(packageRef);
+    repoRoot = gitMod.findRepoRoot(dir) || dir;
+  } else {
+    const start = name === 'hook' && process.env.CLAUDE_PROJECT_DIR
+      ? path.resolve(process.env.CLAUDE_PROJECT_DIR)
+      : process.cwd();
+    repoRoot = gitMod.findRepoRoot(start);
+  }
 
   const reran = await updateNotice(name, flags, argv);
   if (reran !== null) return reran;
 
-  const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, flags, positionals, argv: rest, command: name };
+  const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, packageRef, flags, positionals, argv: rest, command: name };
   const code = await mod.run(ctx);
   return typeof code === 'number' ? code : EXIT.OK;
 }
