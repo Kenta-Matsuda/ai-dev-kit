@@ -1,7 +1,7 @@
 [[cli-uninstall]]
 == aidev uninstall
 
-Removes `aidev` from this machine. With `--package` it takes that PKG out of kit management instead (the former eject). `--all` does that for every registered PKG and then removes `aidev` from the machine.
+Removes `aidev` from this machine. With `--package` it takes that PKG out of ADK management instead (the former eject). `--all` does that for every registered PKG and then removes `aidev` from the machine.
 
 === Synopsis
 
@@ -21,18 +21,18 @@ Removes what the installer placed: ① the launcher (Windows: `aidev.cmd` and `a
 
 It shows what it keeps, with the command to remove each item:
 
-* The kit clone. `aidev` runs from it, so run the `Remove-Item` / `rm -rf` shown afterwards, by hand.
-* The files the kit placed in each registered package. They are committed and shared with the team, so removing them is a team change that goes through a PR. Either run `aidev uninstall --package <name> --yes` first (keeps the Wiki and `aidev.yaml`), or run the `git rm` shown in that package clone (removes the Wiki too).
+* The ADK clone. `aidev` runs from it, so run the `Remove-Item` / `rm -rf` shown afterwards, by hand.
+* The files the ADK placed in each registered package. They are committed and shared with the team, so removing them is a team change that goes through a PR. Either run `aidev uninstall --package <name> --yes` first (keeps the Wiki and `aidev.yaml`), or run the `git rm` shown in that package clone (removes the Wiki too).
 
 There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With nothing left to remove it still exits 0.
 
-To install again, run the installer from a kit clone (xref:install[Installing aidev]).
+To install again, run the installer from an ADK clone (xref:install[Installing aidev]).
 
-==== `--package` — take a PKG out of kit management (the former eject)
+==== `--package` — take a PKG out of ADK management (the former eject)
 
 `--package` takes a name shown by xref:cli-list[`aidev list packages`] or a path to a PKG (`.` inside the PKG).
 
-In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
+In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the ADK placed (`.claude/**`, `CLAUDE.md`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
 
 Kept: your package files, `.aidev/knowledge/` (the Wiki), `aidev.yaml`, `.aidev/workflows/`.
 
@@ -60,13 +60,13 @@ Does what `--package` does for each registered PKG in turn, then removes `aidev`
 |Machine-readable output
 
 |`--all`
-|Take the kit out of every registered PKG, then remove the CLI from this machine
+|Take the ADK out of every registered PKG, then remove the CLI from this machine
 
 |`--force`
-|With `--package`: run even if already ejected, a publish is in progress, or no trace of kit management is found
+|With `--package`: run even if already ejected, a publish is in progress, or no trace of ADK management is found
 
 |`--keep-assets`
-|With `--package`: keep the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, …)
+|With `--package`: keep the tool configuration files the ADK placed (`.claude/**`, `CLAUDE.md`, …)
 |===
 
 === Exit codes
@@ -79,20 +79,33 @@ Does what `--package` does for each registered PKG in turn, then removes `aidev`
 |Removed. Nothing left to remove. `--dry-run`
 
 |1
-|`--yes` missing. The `--package` PKG not found, shows no trace of kit management, or has a publish in progress (without `--force`). `--package` and `--all` given together
+|`--yes` missing. The `--package` PKG not found, shows no trace of ADK management, or has a publish in progress (without `--force`). `--package` and `--all` given together
 |===
 
 === Examples
 
 [source,bash]
 ----
-aidev uninstall demo-pkg --dry-run          # preview taking the kit out of that PKG
-aidev uninstall demo-pkg --yes
+aidev uninstall --package demo-pkg --dry-run   # preview taking the ADK out of that PKG
+aidev uninstall --package demo-pkg --yes
 git -C C:\work\demo-pkg add -A && git -C C:\work\demo-pkg commit -m "chore: eject from ai-dev-kit"
 
 aidev uninstall --dry-run
 aidev uninstall --yes
-rm -rf ~/ai-dev-kit            # the command shown for the kit clone
+----
+
+Run the "remove the ADK clone" command it prints last against the path you cloned into.
+
+.Windows (PowerShell)
+[source,powershell]
+----
+Remove-Item -Recurse -Force C:\tools\ai-dev-kit
+----
+
+.macOS / Linux / WSL
+[source,bash]
+----
+rm -rf ~/ai-dev-kit
 ----
 
 === See also

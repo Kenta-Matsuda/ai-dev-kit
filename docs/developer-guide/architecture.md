@@ -512,7 +512,7 @@ workflowのagent stepが使えるMCP serverは、agentのfrontmatterの`mcp`に�
 
 `aidev update`はkit checkoutだけを進めます（`selfUpdate`: 未commit変更なし・`main` branch上を確認し、`origin/main`をfetchして`merge --ff-only`。divergeは拒否）。PKGには触れず、registryのcloneのうちlockの`kitCommit`が古いものを一覧して`aidev sync tools`を案内します。PKGへの適用（`aidev sync tools`）を分けているのは、teamの編集とのmergeやconflict解消に時間をかけられるようにするためです。
 
-更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `update` / `uninstall`以外のcommandで`home.checkForUpdate`を呼び（`--json`と`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`と比べて新しければ警告を出し、TTYなら「今updateするか」を尋ねて`update`を実行します。kit checkoutのHEADが進んだら、同じargvで新しいCLIを子processとして実行し（`AIDEV_NO_UPDATE_CHECK=1`を付けて再確認を防ぐ）、その終了codeで終わります。進まなければ現在のprocessで続けます。結果は`AIDEV_HOME/cache/update-check.json`に24時間cacheされ、確認失敗はcacheしません。
+更新されたCLIは次回起動から使われます。`aidev.js`は`hook` / `update`以外の全起動（`--help`・`--version`・不明なcommandを含む）の最初に`home.checkForUpdate`を呼び（`AIDEV_NO_UPDATE_CHECK`で抑止）、kit checkoutの`origin/main`がHEADに含まれていなければ警告をstderrに出します。TTYで`--json`でも`uninstall`でもなければ「今updateするか」を尋ねて`update`を実行します。`ls-remote`は`origin/main`のcommitを取得しないので、判定は「remote SHAがHEADの祖先か」で行います（逆向きに「HEADがremote SHAの祖先か」を問うと、未取得のcommitは常に不明となり通知が出ません）。kit checkoutのHEADが進んだら、同じargvで新しいCLIを子processとして実行し（`AIDEV_NO_UPDATE_CHECK=1`を付けて再確認を防ぐ）、その終了codeで終わります。進まなければ現在のprocessで続けます。結果は`AIDEV_HOME/cache/update-check.json`に1時間cacheされ（HEADが変わると無効）、確認失敗はcacheしません。
 
 ## 12. model解決
 

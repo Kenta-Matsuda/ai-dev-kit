@@ -20,19 +20,19 @@ aidev list packages [--json]
 |object |表示
 
 |`workflows`
-|`.aidev/workflows/` の各 workflow の状態（`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`）と説明。kit は workflow を同梱しないので、並ぶのはこの PKG の workflow だけ
+|`.aidev/workflows/` の各 workflow の状態（`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`）と説明。ADK は workflow を同梱しないので、並ぶのはこの PKG の workflow だけ
 
 |`agents`
-|PKG の `.aidev/agents/` と kit 同梱の agent。名前、由来（`this PKG` / `kit`）、説明。frontmatter の `name` がファイル名と違えば `⚠` を添える
+|PKG の `.aidev/agents/` と ADK 同梱の agent。名前、由来（`this PKG` / `ADK`）、説明。frontmatter の `name` がファイル名と違えば `⚠` を添える
 
 |`skills`
-|PKG の `.aidev/skills/` と kit 同梱の skill。名前、由来、説明
+|PKG の `.aidev/skills/` と ADK 同梱の skill。名前、由来、説明
 
 |`packages`
-|この端末で `aidev init` した PKG。名前、パス、テンプレートの状態（`templates current` / `templates from <commit>`（古い kit のまま。取り込むコマンドを添える）/ `missing`（そのパスに `aidev.yaml` が無い））。今いる PKG に `*` が付く。PKG の外でも使える
+|この端末で `aidev init` した PKG。名前、パス、テンプレートの状態（`templates current` / `templates from <commit>`（古い ADK のまま。取り込むコマンドを添える）/ `missing`（そのパスに `aidev.yaml` が無い））。今いる PKG に `*` が付く。PKG の外でも使える
 |===
 
-`workflows` / `agents` / `skills` では、同名なら PKG のものが kit 同梱のものより優先されます。
+`workflows` / `agents` / `skills` では、同名なら PKG のものが ADK 同梱のものより優先されます。
 
 `packages` に出る名前は、どのコマンドにも `--package <name>` で渡せます（xref:cli-common-options[共通オプション]）。
 
@@ -43,7 +43,7 @@ aidev list packages [--json]
 |オプション |説明
 
 |`--json`
-|JSON で出力する。`workflows` の各行は `name`・`description`・`status`・`steps`（ステップの数）・`writable`（全ステップの `writable` を合わせたもの）を持つ。`packages` の各行は `name`・`path`・`present`（`aidev.yaml` があるか）・`here`（今いる PKG か）・`templates`（`current` / `behind` / `unknown`）・`applied`（取り込んだ kit のコミット）を持つ
+|JSON で出力する。`workflows` の各行は `name`・`description`・`status`・`steps`（ステップの数）・`writable`（全ステップの `writable` を合わせたもの）を持つ。`packages` の各行は `name`・`path`・`present`（`aidev.yaml` があるか）・`here`（今いる PKG か）・`templates`（`current` / `behind` / `unknown`）・`applied`（取り込んだ ADK のコミット）を持つ
 |===
 
 === 終了コード

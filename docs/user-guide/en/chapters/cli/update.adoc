@@ -1,7 +1,7 @@
 [[cli-update]]
 == aidev update
 
-Updates the kit itself (the `aidev` CLI and its templates). Nothing else.
+Updates the ADK itself (the `aidev` CLI and its templates). Nothing else.
 
 === Synopsis
 
@@ -14,16 +14,16 @@ aidev update [--dry-run] [--json]
 
 It takes no object: `aidev sync wiki` stops with `aidev update takes no object`. The Wiki is xref:cli-sync-wiki[`aidev sync wiki`], the tool configuration xref:cli-sync-tools[`aidev sync tools`].
 
-Fast-forwards the kit clone (the `aidev` CLI and the templates) to `origin/main`. It stops if the clone has uncommitted changes, is not on `main`, or has diverged.
+Fast-forwards the ADK clone (the `aidev` CLI and the templates) to `origin/main`. It stops if the clone has uncommitted changes, is not on `main`, or has diverged.
 
-Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools --package <name>`], which the Engineering Manager runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older kit are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
+Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools --package <name>`], which the Engineering Manager runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older ADK are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
 
 [%autowidth.stretch,options="header"]
 |===
 |Option |Description
 
 |`--dry-run`
-|Show whether a newer kit exists; change nothing
+|Show whether a newer ADK exists; change nothing
 
 |`--json`
 |Machine-readable output
@@ -37,7 +37,7 @@ Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli
 |Updated, or already up to date
 
 |1
-|The kit clone has uncommitted changes, is not on `main`, has diverged, or the fetch failed
+|The ADK clone has uncommitted changes, is not on `main`, has diverged, or the fetch failed
 |===
 
 [source,bash]
@@ -57,5 +57,5 @@ aidev update
 === See also
 
 * xref:cli-sync[aidev sync] — taking the new templates into a PKG, bringing the Wiki along
-* xref:maintain-update[Updating the kit]
-* xref:troubleshooting-update[Troubleshooting: after a kit update]
+* xref:maintain-update[Updating the ADK]
+* xref:troubleshooting-update[Troubleshooting: after an ADK update]

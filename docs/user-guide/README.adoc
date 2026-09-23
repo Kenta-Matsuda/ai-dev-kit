@@ -40,6 +40,7 @@ docs/user-guide/
 * 読者がその場で必要なことだけを、短い文で書く。説明の長さより「次に何をするか」が分かることを優先する。
 * 章とコマンドページに一意の ID を付け、内部リンクは `xref:ID[label]` で書く。両言語で同じ ID を使う。
 * コマンドページのオプションは `AIDEV_NO_UPDATE_CHECK=1 node cli/bin/aidev.js <command> --help` と一致させる。既定値は `cli/commands/*.js` と `cli/lib/config.js` が正本。
+* コマンドページは `chapters/cli/index.adoc` の include とコマンド一覧の表の両方で、コマンド名のアルファベット順に並べる。表は用途ごとのグループを保ったまま、その中で並べる。
 * 実装されていない機能は書かない。
 * 図は `[mermaid]` ブロック（Mermaid 記法）で書く。ASCII アートは使わない。ビルドが描画用の script を HTML に埋め込むので、外部依存は増えない。CLI の出力例は `[source,text]` のまま。
 * 一方の言語を変えたら、もう一方も同じ内容に更新する。

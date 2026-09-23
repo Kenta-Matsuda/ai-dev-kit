@@ -43,7 +43,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 |Print the kit version.
 |===
 
-Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day whether a newer kit exists and, if so, asks whether to update first. After an update, the command is run again with the new CLI. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
+Every command except `hook` and `update` (including `--help` and `--version`) tells you when a newer kit exists. It checks at most once an hour. In a terminal it also asks whether to update first (not with `--json` or `uninstall`). After an update, the command is run again with the new CLI. The notice goes to standard error, so `--json` output is unchanged. Set `AIDEV_NO_UPDATE_CHECK=1` to turn this off.
 
 [[cli-exit-codes]]
 === Exit codes
@@ -76,20 +76,20 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |===
 |Command |Summary
 
-|xref:cli-run[`aidev run workflow <name>`]
-|Run an approved workflow (development starts here)
-
 |xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
 |Create a workflow, agent or skill (writes the files only; runs nothing). `policy` drafts the write-permission policy and places it with `--approve`
-
-|xref:cli-submit[`aidev submit workflow <name>`]
-|Submit a workflow as a branch and a pull request (merge = approval)
 
 |xref:cli-list[`aidev list workflows\|agents\|skills\|packages`]
 |List workflows (with approval state), agents and skills. `packages` lists the PKGs set up with {project-name} on this machine
 
 |xref:cli-remove[`aidev remove workflow\|agent\|skill <name>`]
 |Remove a workflow, agent or skill (a referenced agent or skill is refused)
+
+|xref:cli-run[`aidev run workflow <name>`]
+|Run an approved workflow (development starts here)
+
+|xref:cli-submit[`aidev submit workflow <name>`]
+|Submit a workflow as a branch and a pull request (merge = approval)
 |===
 
 .Maintain (inside a PKG clone)
@@ -97,11 +97,11 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |===
 |Command |Summary
 
-|xref:cli-init[`aidev init`]
-|Set up {project-name} in this PKG (interactive the first time, no questions afterwards)
-
 |xref:cli-check[`aidev check`]
 |Show the state of this PKG on one screen and return the consistency check as an exit code (for CI)
+
+|xref:cli-init[`aidev init`]
+|Set up {project-name} in this PKG (interactive the first time, no questions afterwards)
 
 |xref:cli-sync[`aidev sync tools\|wiki`]
 |`tools`: take the kit's latest templates into this PKG (edited files are merged). `wiki`: bring the LLM Wiki to HEAD and commit it as its own commit
@@ -112,14 +112,14 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 |===
 |Command |Summary
 
-|xref:cli-update[`aidev update`]
-|Update the kit itself (CLI and templates). `aidev sync tools` takes it into a PKG
-
 |xref:cli-doctor[`aidev doctor`]
 |Diagnose the environment of this machine (Node.js, git, kit, AI tools). With `--package`, also that PKG's state
 
 |xref:cli-uninstall[`aidev uninstall [--all]`]
 |Remove `aidev` from this machine. With `--package`, takes that PKG out of kit management (the former eject)
+
+|xref:cli-update[`aidev update`]
+|Update the kit itself (CLI and templates). `aidev sync tools` takes it into a PKG
 |===
 
 
@@ -133,26 +133,26 @@ Every command except `hook`, `mcp`, `update` and `uninstall` checks once a day w
 
 |===
 
-include::run.adoc[]
+include::check.adoc[]
 
 include::create.adoc[]
 
-include::submit.adoc[]
+include::doctor.adoc[]
+
+include::hook.adoc[]
+
+include::init.adoc[]
 
 include::list.adoc[]
 
 include::remove.adoc[]
 
-include::init.adoc[]
+include::run.adoc[]
 
-include::check.adoc[]
+include::submit.adoc[]
 
 include::sync.adoc[]
 
-include::update.adoc[]
-
-include::doctor.adoc[]
-
 include::uninstall.adoc[]
 
-include::hook.adoc[]
+include::update.adoc[]

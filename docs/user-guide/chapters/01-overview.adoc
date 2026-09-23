@@ -8,7 +8,7 @@
 
 各自が好きなように AI を使う状態から、**チームで決めた枠の中で AI を使う** 状態になります。
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,3",options="header"]
 |===
 |　 |導入前 |導入後
 
@@ -36,7 +36,7 @@
 
 作業内容は役割によって大きく異なります。まず自分がどちらに該当するかを確認してください。
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,6",options="header"]
 |===
 |役割 |人数 |責務
 
@@ -53,39 +53,27 @@
 [[overview-flow]]
 === 全体フロー
 
-.Engineering Manager と Developer が、それぞれ何をするか
+.青 = Engineering Manager、緑 = Developer
 [mermaid]
 ----
-sequenceDiagram
-  participant L as Engineering Manager
-  participant M as Developer
-
-  rect rgb(232, 243, 250)
-    Note over L,M: ① 準備（最初に 1 回）
-    L->>L: チーム共通の設定を用意する
-    L->>L: AI 向けのコード説明書を用意する
-    L->>M: レビューを経てチームに配る
-    M->>M: 受け取って自分の環境を整える
+flowchart TB
+  subgraph PREP["① 準備（最初に 1 回）"]
+    direction LR
+    P1["共通設定の用意"]:::em --> P2["LLM Wiki 生成"]:::em --> P3["レビューして配布"]:::em --> P4["環境セットアップ"]:::dev
   end
 
-  rect rgb(233, 247, 240)
-    Note over L,M: ② 日々の開発
-    M->>M: AI と一緒に開発してコミットする
-    M->>L: 変更をレビューへ提出
-    L->>L: 中身を確認して取り込む
+  subgraph WORK["② AI に仕事を任せる"]
+    direction LR
+    W1["workflow 定義"]:::em --> W2["workflow 承認"]:::em --> W3["workflow 実行"]:::dev --> W4["成果物レビュー"]:::em
   end
 
-  rect rgb(242, 237, 255)
-    Note over L,M: ③ AI に仕事を任せる
-    L->>L: 任せる仕事の内容と範囲を決める
-    L->>L: レビューを経て「承認済み」にする
-    M->>M: 承認済みの仕事を AI に実行させる
-    M->>L: 成果物をレビューへ提出
-    L->>L: 中身を確認して取り込む
-  end
+  PREP --> WORK
+
+  classDef em fill:#e8f3fa,stroke:#5b9bc4,color:#16242f
+  classDef dev fill:#e9f7f0,stroke:#5aa886,color:#16242f
 ----
 
-③ は ② と並行して進みます。順番に終わらせる必要はありません。
+② は日々の開発と並行して進みます。順番に終わらせる必要はありません。
 
 [[overview-terms]]
 === 用語
@@ -99,7 +87,7 @@ sequenceDiagram
 |PKG
 |{project-name} を導入する対象のリポジトリ。あなたが日々開発しているリポジトリのことです。
 
-|kit
+|ADK
 |{project-name} 本体。`aidev` コマンドの実体で、各自の端末に 1 つ置きます。
 
 |LLM Wiki
@@ -130,4 +118,4 @@ sequenceDiagram
 
 残りは必要に応じて参照する章です。困ったら xref:troubleshooting[トラブルシューティング]、設定項目は xref:configuration[aidev.yaml リファレンス]、コマンドの書式は xref:cli-reference[コマンドリファレンス]。付録に xref:knowledge[LLM Wiki] と xref:permissions[権限と安全性] の詳細があります。
 
-{project-name} 本体を保守するのは kit の開発者で、このガイドの対象外です。
+{project-name} 本体を保守するのは ADK の開発者で、このガイドの対象外です。

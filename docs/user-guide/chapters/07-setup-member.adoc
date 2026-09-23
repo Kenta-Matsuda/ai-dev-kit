@@ -40,7 +40,7 @@ aidev init
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[aidev のインストール] して、ターミナルを開き直します。
-* `tool config` 行に `newer templates available` → チームがまだ新しい kit のテンプレートを取り込んでいません。 Engineering Manager が `aidev sync tools` して PR にします（xref:maintain-sync-tools[テンプレートの取り込み]）。
+* `tool config` 行に `newer templates available` → チームがまだ新しい ADK のテンプレートを取り込んでいません。 Engineering Manager が `aidev sync tools` して PR にします（xref:maintain-sync-tools[テンプレートの取り込み]）。
 * `the LLM Wiki is not in this clone yet …` と表示されたら → Engineering Manager の PR がまだマージされていません。マージされてから `git pull` します。自分で生成しないでください。
 
 . 状態を確認します。

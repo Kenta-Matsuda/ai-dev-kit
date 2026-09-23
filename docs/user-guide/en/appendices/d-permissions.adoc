@@ -19,7 +19,7 @@ A hook of the AI tool checks every write. Tokens are never written to files; the
 |Category |Default |Meaning
 
 |`protected`
-|Kit files such as `.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json`, plus `secrets_paths`
+|ADK files such as `.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json`, plus `secrets_paths`
 |Never writable. If removed from the policy, the CLI adds them back. The `writable` of a workflow step cannot open them either.
 
 |`read_only`
@@ -138,7 +138,7 @@ In Claude Code this is enforced in two layers.
 
 An agent with `tools` or `mcp` starts only on Claude Code. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI cannot limit the tools they are given, so the workflow stops without starting anything.
 
-An agent given `Bash` can reach external systems without going through MCP. Do not give `Bash` to an agent that touches an external system. Tests are run by the kit through `until`.
+An agent given `Bash` can reach external systems without going through MCP. Do not give `Bash` to an agent that touches an external system. Tests are run by the ADK through `until`.
 
 [[permissions-commands]]
 === Placing and changing the policy
@@ -169,7 +169,7 @@ The AI cannot create the policy. The Engineering Manager places it with the CLI.
 
 === Prohibited practices
 
-* Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole kit as a PR to the kit).
+* Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole ADK as a PR to the ADK).
 * Only humans edit `.aidev/policy.yaml`, and every change is reviewed in a PR (never let the AI edit it).
 * Do not put `**`, or the paths of settings and CI, in the `writable` of a workflow step. Keep it to what that step's job needs.
 * Keep an agent's `tools` and `mcp` to what its job needs.

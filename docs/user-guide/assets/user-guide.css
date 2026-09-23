@@ -449,6 +449,17 @@ table.tableblock.fit-content td:first-child code {
   white-space: nowrap;
 }
 
+/*
+ * Tables that declare their own proportions ([cols="1,2,4"] in the sources):
+ * Asciidoctor emits a <colgroup> of percentages. Automatic layout treats those
+ * as hints and lets one long CJK cell take the row, which crushes the rest to a
+ * single character per line, so honour the declared shares instead. Only these
+ * tables carry a colgroup with widths; [%autowidth] ones are left untouched.
+ */
+table.tableblock.stretch:not(.fit-content) {
+  table-layout: fixed;
+}
+
 .admonitionblock {
   width: 100%;
   margin: 1.35rem 0 1.55rem;

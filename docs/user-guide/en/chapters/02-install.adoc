@@ -12,14 +12,21 @@ Put the `aidev` command on your own machine. Once per machine.
 
 === Procedure
 
-. Clone the kit. This clone is what `aidev` runs from, so do not delete or move it. Leave it on the `main` branch.
+. Clone the ADK. This clone is what `aidev` runs from, so do not delete or move it. Leave it on the `main` branch.
 +
+.Windows (PowerShell)
+[source,powershell]
+----
+git clone <kit-url> C:\tools\ai-dev-kit
+----
++
+.macOS / Linux / WSL
 [source,bash]
 ----
 git clone <kit-url> ~/ai-dev-kit
 ----
 +
-On Windows, a short path such as `C:\tools\ai-dev-kit` is recommended.
+The rest of this procedure assumes that path. Read it accordingly if you cloned somewhere else.
 
 . Run the installer.
 +
@@ -40,7 +47,7 @@ cd ~/ai-dev-kit
 The installer copies nothing. It places a launcher that points at the clone (Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`, POSIX: `~/.local/bin`). It succeeded if the last line is `next: aidev doctor`.
 +
 * `node not found` / `too old` → install Node.js {node-min-version} or later and run it again.
-* `this looks like a package that uses ai-dev-kit, not the kit itself` → you ran it inside a package. Run it in the kit clone.
+* `this looks like a package that uses ai-dev-kit, not the kit itself` → you ran it inside a package. Run it in the ADK clone.
 * `~/.local/bin is not on your PATH` → add the `export PATH=...` line shown to your shell profile.
 
 . **Open a new terminal** and check that it works.
@@ -77,9 +84,9 @@ aidev uninstall --dry-run   # see what would be removed
 aidev uninstall --yes
 ----
 
-This removes the launcher and `AIDEV_HOME`. The kit clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
+This removes the launcher and `AIDEV_HOME`. The ADK clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
 
 === Related information
 
-* Adopting the kit in a package for the first time → xref:setup-owner[Adopting aidev in a package]
-* Using a package that already has the kit → xref:setup-member[Getting started]
+* Adopting the ADK in a package for the first time → xref:setup-owner[Adopting aidev in a package]
+* Using a package that already has the ADK → xref:setup-member[Getting started]

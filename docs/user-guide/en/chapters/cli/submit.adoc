@@ -42,7 +42,7 @@ If it is already identical to `origin/main`, it prints `already matches origin/m
 |Opened a PR (or already approved). `--dry-run`
 
 |1
-|An object other than `workflow`, or no name. Invalid definition, or an agent or skill that exists neither in the PKG nor in the kit. A referenced file is missing locally. Creating the branch, committing or pushing failed
+|An object other than `workflow`, or no name. Invalid definition, or an agent or skill that exists neither in the PKG nor in the ADK. A referenced file is missing locally. Creating the branch, committing or pushing failed
 |===
 
 === Examples

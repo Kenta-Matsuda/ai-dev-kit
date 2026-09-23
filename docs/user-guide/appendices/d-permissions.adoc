@@ -19,7 +19,7 @@ AI ツールの hook が毎回の書き込みを検査します。token はフ�
 |区分 |既定 |意味
 
 |`protected`
-|`.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json` など kit のファイル + `secrets_paths`
+|`.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json` など ADK のファイル + `secrets_paths`
 |常に書き込み禁止。policy から消しても CLI が付け直します。workflow のステップの `writable` にも書けません。
 
 |`read_only`
@@ -138,7 +138,7 @@ Claude Code では、2 段で守ります。
 
 `tools` や `mcp` を書いた agent は、Claude Code でしか起動しません。GitHub Copilot CLI、OpenAI Codex CLI、Kiro CLI は渡すツールを絞れないため、workflow は何も始めずに止まります。
 
-`Bash` を渡した agent は、MCP を通さずに外部のシステムへ出られます。外部システムに触る agent には `Bash` を渡さないでください。テストの実行は `until` で kit が行います。
+`Bash` を渡した agent は、MCP を通さずに外部のシステムへ出られます。外部システムに触る agent には `Bash` を渡さないでください。テストの実行は `until` で ADK が行います。
 
 [[permissions-commands]]
 === policy の設置と変更
@@ -169,7 +169,7 @@ policy は AI が作れません。 Engineering Manager が CLI で置きます�
 
 === 禁止事項
 
-* `.claude/**`、`CLAUDE.md` の kit 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、kit 全体の改善は kit への PR にする）
+* `.claude/**`、`CLAUDE.md` の ADK 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、ADK 全体の改善は ADK への PR にする）
 * `.aidev/policy.yaml` は人間だけが編集し、変更は PR でレビューする（AI には編集させない）
 * workflow のステップの `writable` に `**` や設定・CI のパスを書かない。そのステップの仕事に必要な範囲だけにする
 * agent の `tools` と `mcp` は、その仕事に必要な分だけにする

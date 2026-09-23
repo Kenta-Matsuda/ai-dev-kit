@@ -12,7 +12,7 @@ aidev doctor [--package <name|path>] [--json]
 
 === 説明
 
-Node.js、platform、git、`aidev` のバージョンと kit の場所、kit の checkout と新しい kit の有無、`AIDEV_HOME`、登録済み PKG（数と一覧）、対応する AI ツール（`claude`、`copilot`、`codex`、`kiro`）の有無とバージョン、proxy を報告します。どのディレクトリで実行しても結果は同じです。
+Node.js、platform、git、`aidev` のバージョンと ADK の場所、ADK の checkout と新しい ADK の有無、`AIDEV_HOME`、登録済み PKG（数と一覧）、対応する AI ツール（`claude`、`copilot`、`codex`、`kiro`）の有無とバージョン、proxy を報告します。どのディレクトリで実行しても結果は同じです。
 
 各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。AI ツールが見つからないのは `⚠` です。`--package` を付けると、続けて `package`、`aidev.yaml`（schema）、`git repository`（ブランチ）、`remote origin`、`policy`、`agent tool`（`tools.agent` とモデル）、Azure DevOps なら `env <auth_env>`、`remote reachability`、`Wiki state`、`workflows`（数、approved、invalid）の行が並びます。
 

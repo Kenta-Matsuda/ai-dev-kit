@@ -12,13 +12,13 @@ aidev check [--strict] [--no-remote] [--json]
 
 === 説明
 
-PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（`head` / `knowledge` / `tracking` の 3 つのコミットと 1 行の判定）、Wiki のページ数と未生成のページ数、ツール設定の状態（適用した kit、編集済みファイル数、衝突、hooks の欠落）、policy の有無、workflow の数と承認済みの数、手編集、進行中の publish を表示します。
+PKG 名・hosting・ツール・ADK のバージョン、Wiki の状態（`head` / `knowledge` / `tracking` の 3 つのコミットと 1 行の判定）、Wiki のページ数と未生成のページ数、ツール設定の状態（適用した ADK、編集済みファイル数、衝突、hooks の欠落）、policy の有無、workflow の数と承認済みの数、手編集、進行中の publish を表示します。
 
 続けて、見つかった問題の種類を終了コードにします。順序は 設定・workflow（1）→ drift（2）→ policy（3）→ Wiki（4）で、最初に見つかった問題のコードを返します。
 
 `aidev.yaml` が無いディレクトリと eject 済みのリポジトリでは、その旨を表示して 0 で終わります。警告（Wiki が HEAD より遅れている、本文が未生成、`main` が進んでいる）は 0 のままで、`--strict` を付けると 2 になります。
 
-端末そのもの（Node.js、git、kit、AI ツール）の診断は xref:cli-doctor[`aidev doctor`] です。
+端末そのもの（Node.js、git、ADK、AI ツール）の診断は xref:cli-doctor[`aidev doctor`] です。
 
 === オプション
 
@@ -49,7 +49,7 @@ PKG 名・hosting・ツール・kit のバージョン、Wiki の状態（`head`
 |`aidev.yaml` が読めない。`.aidev/workflows/` に検証を通らない workflow がある
 
 |2
-|`.aidev/materialized.json` が無い、`aidev sync tools` の衝突マーカーが残っている、または `.claude/settings.json` から kit の hooks が消えている。チームがツール設定ファイルを編集しただけなら通ります。`--strict` 時の警告
+|`.aidev/materialized.json` が無い、`aidev sync tools` の衝突マーカーが残っている、または `.claude/settings.json` から ADK の hooks が消えている。チームがツール設定ファイルを編集しただけなら通ります。`--strict` 時の警告
 
 |3
 |`.aidev/policy.yaml` が無い、または読めない

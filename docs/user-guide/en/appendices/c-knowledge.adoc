@@ -10,7 +10,7 @@ This chapter is the reference for the details. The day-to-day use is covered in 
 * The Engineering Manager builds it the first time with `aidev sync wiki --no-commit`. After that, a hook starts an update after every commit; by hand, run `aidev sync wiki`. In both cases the knowledge-builder agent writes the prose.
 * The Wiki is not the source of truth. Every statement links to the file it came from, and the AI checks that file.
 * While there is no Wiki, every write by the AI is blocked.
-* Reviewing what `aidev` generates is your responsibility. The kit never merges a PR.
+* Reviewing what `aidev` generates is your responsibility. The ADK never merges a PR.
 
 [[knowledge-state]]
 === Checking the state
@@ -25,7 +25,7 @@ At the start of a session, and on the second line of `aidev check`, the state is
 
 `head` is the commit your checkout is at, `knowledge` is the commit the Wiki describes, and `tracking` is the tip of `origin/main`. The verdict does not compare SHAs. It compares the list of files and their fingerprints recorded when the Wiki was generated (the inventory) with the tree at HEAD, so it stays correct after a rebase, a squash or a force-push.
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,2",options="header"]
 |===
 |Shown |Meaning |What to do
 
@@ -112,7 +112,7 @@ Without the hooks, in CI, or when you want the update right now, run:
 aidev sync wiki
 ----
 
-If generation targets have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the kit's configuration files are dirty.
+If generation targets have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the ADK's configuration files are dirty.
 
 The command proceeds in this order.
 

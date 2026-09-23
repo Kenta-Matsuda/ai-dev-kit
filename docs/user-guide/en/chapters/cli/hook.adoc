@@ -16,9 +16,9 @@ aidev hook session-stop [--input <file>] [--tool <tool>]
 
 === Description
 
-The AI tool starts it from the hook configuration the kit places. It reads the hook input (JSON) on stdin and writes its decision (JSON) to stdout. To try it out, pass an input file with `--input <file>`. It touches neither the network nor an LLM, so it stays within the tool's hook timeout (30 seconds by default).
+The AI tool starts it from the hook configuration the ADK places. It reads the hook input (JSON) on stdin and writes its decision (JSON) to stdout. To try it out, pass an input file with `--input <file>`. It touches neither the network nor an LLM, so it stays within the tool's hook timeout (30 seconds by default).
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,6",options="header"]
 |===
 |Subcommand |When |What it does
 
@@ -47,7 +47,7 @@ The AI tool starts it from the hook configuration the kit places. It reads the h
 
 `--tool` shapes the output for the tool. The default is `claude`.
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,6",options="header"]
 |===
 |Tool |Hook configuration |Notes
 

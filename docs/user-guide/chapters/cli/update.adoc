@@ -1,7 +1,7 @@
 [[cli-update]]
 == aidev update
 
-kit 本体（`aidev` CLI とテンプレート）を更新します。それ以外は何もしません。
+ADK 本体（`aidev` CLI とテンプレート）を更新します。それ以外は何もしません。
 
 === 書式
 
@@ -14,16 +14,16 @@ aidev update [--dry-run] [--json]
 
 対象は取りません。`aidev sync wiki` と打つと `aidev update takes no object` で止まります。Wiki は xref:cli-sync-wiki[`aidev sync wiki`]、ツール設定は xref:cli-sync-tools[`aidev sync tools`] です。
 
-kit の clone（`aidev` CLI とテンプレート）を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
+ADK の clone（`aidev` CLI とテンプレート）を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
 
-PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-sync-tools[`aidev sync tools --package <name>`] で、 Engineering Manager が都合のよいときに実行して PR にします。更新後、この端末に登録された PKG のうち古い kit のテンプレートのままのものを一覧します。Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
+PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-sync-tools[`aidev sync tools --package <name>`] で、 Engineering Manager が都合のよいときに実行して PR にします。更新後、この端末に登録された PKG のうち古い ADK のテンプレートのままのものを一覧します。Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
 
 [%autowidth.stretch,options="header"]
 |===
 |オプション |説明
 
 |`--dry-run`
-|新しい kit があるかを表示し、何も変えない
+|新しい ADK があるかを表示し、何も変えない
 
 |`--json`
 |JSON で出力する
@@ -37,7 +37,7 @@ PKG には何も書きません。新しいテンプレートを PKG に取り�
 |更新した、または最新だった
 
 |1
-|kit の clone に未コミット変更がある、`main` 以外、diverge、fetch 失敗
+|ADK の clone に未コミット変更がある、`main` 以外、diverge、fetch 失敗
 |===
 
 [source,bash]
@@ -57,5 +57,5 @@ aidev update
 === 関連情報
 
 * xref:cli-sync[aidev sync] — PKG への新しいテンプレートの取り込みと Wiki の追従
-* xref:maintain-update[kit の更新]
-* xref:troubleshooting-update[トラブルシューティング: kit 更新後]
+* xref:maintain-update[ADK の更新]
+* xref:troubleshooting-update[トラブルシューティング: ADK 更新後]

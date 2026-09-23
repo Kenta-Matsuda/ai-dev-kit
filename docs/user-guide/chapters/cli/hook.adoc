@@ -16,9 +16,9 @@ aidev hook session-stop [--input <file>] [--tool <tool>]
 
 === 説明
 
-kit が置く hook 設定から AI ツールが起動します。stdin で hook の入力（JSON）を受け取り、stdout に判定（JSON）を返します。動作を確かめたいときは `--input <file>` で入力ファイルを渡せます。ネットワークにも LLM にも触れないので、ツールの hook の時間制限（既定 30 秒）に収まります。
+ADK が置く hook 設定から AI ツールが起動します。stdin で hook の入力（JSON）を受け取り、stdout に判定（JSON）を返します。動作を確かめたいときは `--input <file>` で入力ファイルを渡せます。ネットワークにも LLM にも触れないので、ツールの hook の時間制限（既定 30 秒）に収まります。
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,6",options="header"]
 |===
 |サブコマンド |いつ |動作
 
@@ -47,7 +47,7 @@ kit が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 `--tool` で出力の形をツールに合わせます。既定は `claude` です。
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,6",options="header"]
 |===
 |ツール |hook 設定 |注意
 

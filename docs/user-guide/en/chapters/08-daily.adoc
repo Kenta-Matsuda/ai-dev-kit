@@ -49,7 +49,7 @@ The symbol and sentence on the second line indicate the next action.
 
 For other messages, see xref:troubleshooting-status[Troubleshooting].
 
-In the lines that follow, check `tool config` and `policy`. If `tool config` says `newer templates available`, the team has not taken in the newer kit templates yet; tell the Engineering Manager (xref:maintain-sync-tools[Applying new templates]). If `policy` is `missing`, ask the Engineering Manager to run `aidev create policy --approve`.
+In the lines that follow, check `tool config` and `policy`. If `tool config` says `newer templates available`, the team has not taken in the newer ADK templates yet; tell the Engineering Manager (xref:maintain-sync-tools[Applying new templates]). If `policy` is `missing`, ask the Engineering Manager to run `aidev create policy --approve`.
 
 [[daily-code]]
 === Developing with the AI
