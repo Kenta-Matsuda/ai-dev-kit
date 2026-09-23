@@ -44,14 +44,13 @@ const FLAG_HELP = {
 
 /** Print one tools result for a human. */
 function render(result, { dryRun = false, repoRoot = null } = {}) {
-  const verb = (past) => (dryRun ? `would ${past.replace(/d$/, '')}` : past);
   const name = repoRoot ? `${path.basename(repoRoot)}: ` : '';
   const changed = result.created.length + result.updated.length + result.merged.length
     + result.pruned.length + result.resolved.length;
   if (changed === 0 && result.conflicts.length === 0) {
     ui.ok(`${name}tool configuration is current (${result.unchanged.length + result.kept.length} file(s) for ${result.tools.join(', ')})`);
   } else if (changed > 0) {
-    ui.ok(`${name}${verb('applied')} ${changed} change(s) for ${result.tools.join(', ')}`);
+    ui.ok(`${name}${dryRun ? 'would apply' : 'applied'} ${changed} change(s) for ${result.tools.join(', ')}`);
   }
   for (const p of result.created) ui.dim(`    + ${p}`);
   for (const p of result.updated) ui.dim(`    ~ ${p}`);
