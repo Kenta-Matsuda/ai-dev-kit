@@ -16,7 +16,7 @@ It takes no object: `aidev sync wiki` stops with `aidev update takes no object`.
 
 Fast-forwards the kit clone (the `aidev` CLI and the templates) to `origin/main`. It stops if the clone has uncommitted changes, is not on `main`, or has diverged.
 
-Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools <package>`], which the Engineering Manager runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older kit are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
+Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools --package <name>`], which the Engineering Manager runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older kit are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
 
 [%autowidth.stretch,options="header"]
 |===
@@ -49,9 +49,9 @@ aidev update
 ----
 ✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
 ℹ 2 package(s) on this machine still carry templates from an older kit:
-    C:\work\demo-pkg (applied 499f940)
-    C:\work\other-pkg (applied 9491efe)
-    Run "aidev sync tools <package>" in each when convenient; it merges the new templates with your edits.
+    demo-pkg (applied 499f940)
+    other-pkg (applied 9491efe)
+    Run "aidev sync tools --package <name>" for each when convenient; it merges the new templates with your edits.
 ----
 
 === See also

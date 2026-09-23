@@ -25,11 +25,18 @@ function heading(s) { out(`\n${C.bold}${s}${C.reset}`); }
 
 function json(value) { out(JSON.stringify(value, null, 2)); }
 
-/** Render a two-column table without depending on a formatting library. */
+/** Aligned columns; every column but the last is padded to its widest cell. */
 function table(rows) {
   if (rows.length === 0) return;
-  const w = Math.max(...rows.map((r) => String(r[0]).length));
-  for (const [k, v] of rows) out(`  ${String(k).padEnd(w)}  ${v == null ? '-' : v}`);
+  const cols = Math.max(...rows.map((r) => r.length));
+  const cell = (v) => (v == null ? '-' : String(v));
+  const widths = [];
+  for (let c = 0; c < cols - 1; c++) widths.push(Math.max(...rows.map((r) => cell(r[c]).length)));
+  for (const r of rows) {
+    const cells = [];
+    for (let c = 0; c < cols; c++) cells.push(c < cols - 1 ? cell(r[c]).padEnd(widths[c]) : cell(r[c]));
+    out(`  ${cells.join('  ').trimEnd()}`);
+  }
 }
 
 module.exports = { out, err, ok, warn, fail, info, dim, heading, json, table, C };

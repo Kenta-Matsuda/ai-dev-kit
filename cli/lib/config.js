@@ -25,7 +25,7 @@ const POLICY_REL = layout.POLICY_REL;
 const SYNC_LOCK_REL = layout.SYNC_LOCK_REL;
 
 /**
- * Written by `aidev uninstall <package>`. Its presence means "this repository is no longer
+ * Written by `aidev uninstall --package`. Its presence means "this repository is no longer
  * kit-managed": the enforcement surface has been removed deliberately, and
  * the files that remain are the team's to maintain by hand.
  *

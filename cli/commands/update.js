@@ -13,7 +13,6 @@
  */
 
 const { EXIT, AidevError } = require('../lib/errors');
-const cfgMod = require('../lib/config');
 const gitMod = require('../lib/git');
 const home = require('../lib/home');
 const ui = require('../lib/ui');
@@ -68,9 +67,7 @@ function selfUpdate(installRoot, { dryRun }) {
 function packagesBehind(kitCommit) {
   const behind = [];
   for (const p of home.listPackages().present) {
-    let lock = null;
-    try { lock = cfgMod.loadLock(p.path); } catch { lock = null; }
-    const applied = (lock && lock.kitCommit) || p.kitCommit || null;
+    const applied = home.appliedKitCommit(p);
     if (!applied || applied !== kitCommit) behind.push({ path: p.path, name: p.name || null, applied });
   }
   return behind;
@@ -96,7 +93,7 @@ function run(ctx) {
   if (human && behind.length > 0) {
     ui.info(`${behind.length} package(s) on this machine still carry templates from an older kit:`);
     for (const b of behind) ui.dim(`    ${b.name || b.path}${b.applied ? ` (applied ${String(b.applied).slice(0, 7)})` : ''}`);
-    ui.dim('    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.');
+    ui.dim('    Run "aidev sync tools --package <name>" for each when convenient; it merges the new templates with your edits.');
   } else if (human && self.updated && !dryRun) {
     ui.dim('    Run "aidev sync tools" in your package clones to take the new templates.');
   }

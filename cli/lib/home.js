@@ -14,8 +14,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readJsonIfExists, writeJsonAtomic, nowIso } = require('./config');
+const { readJsonIfExists, writeJsonAtomic, nowIso, loadLock } = require('./config');
 const git = require('./git');
+const { AidevError } = require('./errors');
 
 function defaultHome() {
   if (process.platform === 'win32') {
@@ -81,7 +82,6 @@ function unregisterPackage(repoRoot, env = process.env) {
   return before !== reg.packages.length;
 }
 
-/** Registered clones that still exist on disk, plus the ones that vanished. */
 /**
  * A package named on the command line: a registry name, or a directory. A
  * name that several registered packages share needs the path instead.
@@ -101,6 +101,7 @@ function resolvePackage(ref, env = process.env) {
   throw new AidevError(`${s} is neither a registered package nor a directory${names.length ? ` (registered: ${names.join(', ')})` : ''}`);
 }
 
+/** Registered clones that still exist on disk, plus the ones that vanished. */
 function listPackages(env = process.env) {
   const reg = readRegistry(env);
   const present = [];
@@ -111,6 +112,16 @@ function listPackages(env = process.env) {
     else missing.push(p);
   }
   return { present, missing };
+}
+
+/**
+ * The kit commit whose templates this package last took (`aidev init` or
+ * `aidev sync tools`): the package's own record first, the registry second.
+ */
+function appliedKitCommit(entry) {
+  let lock = null;
+  try { lock = loadLock(entry.path); } catch { lock = null; }
+  return (lock && lock.kitCommit) || entry.kitCommit || null;
 }
 
 // --------------------------------------------------------- kit developer
@@ -186,7 +197,7 @@ function checkForUpdate(installRoot, { env = process.env, force = false, now = D
 
 module.exports = {
   home, defaultHome, registryPath, readRegistry, writeRegistry,
-  registerPackage, unregisterPackage, listPackages, resolvePackage,
+  registerPackage, unregisterPackage, listPackages, resolvePackage, appliedKitCommit,
   developerPath, readDeveloper, isKitDeveloper, setDeveloper,
   checkForUpdate, UPDATE_CHECK_TTL_MS,
 };

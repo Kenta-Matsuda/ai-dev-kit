@@ -18,7 +18,7 @@
  * order drift → permission → consistency, so a CI log names the thing a human
  * must fix first rather than the last one detected.
  *
- * A repository carrying the eject marker (`aidev uninstall <package>`) is exempt entirely, and a
+ * A repository carrying the eject marker (`aidev uninstall --package`) is exempt entirely, and a
  * directory without aidev.yaml is "not a package": exit 0, nothing to check.
  */
 

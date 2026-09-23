@@ -1,19 +1,23 @@
 'use strict';
 /**
- * `aidev list workflows|agents|skills` — what this PKG can run and what it
- * is made of. Workflows carry their approval state; agents and skills say
- * whether they come from this PKG (`.aidev/`) or are bundled with the kit.
+ * `aidev list workflows|agents|skills|packages` — what this PKG can run and
+ * what it is made of. Workflows carry their approval state; agents and skills
+ * say whether they come from this PKG (`.aidev/`) or are bundled with the kit.
+ * `packages` is the machine's view: every clone `aidev init` set up here, the
+ * names `--package` accepts.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { EXIT, AidevError } = require('../lib/errors');
+const gitMod = require('../lib/git');
+const home = require('../lib/home');
 const layout = require('../lib/layout');
 const toolsMod = require('../lib/tools');
 const workflow = require('./workflow');
 const ui = require('../lib/ui');
 
-const KINDS = ['workflows', 'agents', 'skills'];
+const KINDS = ['workflows', 'agents', 'skills', 'packages'];
 const FLAGS = { json: 'boolean' };
 const FLAG_HELP = { json: 'machine-readable output' };
 
@@ -64,12 +68,52 @@ function listSkills(ctx) {
   return EXIT.OK;
 }
 
+/**
+ * Registered packages with whether they took this kit's templates. A clone
+ * that lost its aidev.yaml (deleted, moved, uninstalled by hand) is listed as
+ * missing so the registry never hides what it still remembers.
+ */
+function listPackages(ctx) {
+  const { installRoot, repoRoot, flags } = ctx;
+  const kitCommit = gitMod.headSha(installRoot);
+  const { present, missing } = home.listPackages();
+  const here = (p) => !!repoRoot && gitMod.samePath(p.path, repoRoot);
+  const rows = [
+    ...present.map((p) => {
+      const applied = home.appliedKitCommit(p);
+      let templates = 'unknown';
+      if (kitCommit && applied) templates = applied === kitCommit ? 'current' : 'behind';
+      return { name: p.name || path.basename(p.path), path: p.path, present: true, here: here(p), templates, applied };
+    }),
+    ...missing.map((p) => ({ name: p.name || path.basename(p.path), path: p.path, present: false, here: false, templates: null, applied: null })),
+  ];
+  if (flags.json) { ui.json({ kitCommit, packages: rows }); return EXIT.OK; }
+  ui.heading('aidev list packages');
+  if (rows.length === 0) {
+    ui.dim('    none yet. "aidev init" in a package clone registers it here.');
+    return EXIT.OK;
+  }
+  // A name two clones share cannot be passed to --package; point at the path.
+  const ref = (r) => (rows.filter((o) => o.name === r.name).length > 1 ? `"${r.path}"` : r.name);
+  const state = (r) => {
+    if (!r.present) return 'missing (no aidev.yaml there)';
+    if (r.templates === 'current') return 'templates current';
+    if (r.templates === 'behind') return `templates from ${String(r.applied).slice(0, 7)}: aidev sync tools --package ${ref(r)}`;
+    return 'templates: not recorded';
+  };
+  ui.table(rows.map((r) => [`${r.here ? '*' : ' '} ${r.name}`, r.path, state(r)]));
+  if (rows.some((r) => r.here)) ui.dim('    * = the package you are in.');
+  ui.dim('    Run a command on another package with --package <name|path>.');
+  return EXIT.OK;
+}
+
 function run(ctx) {
   const what = ctx.positionals[0];
   if (what === 'workflows') return workflow.list(ctx);
   if (what === 'agents') return listAgents(ctx);
   if (what === 'skills') return listSkills(ctx);
+  if (what === 'packages') return listPackages(ctx);
   throw new AidevError(`aidev list needs what to list: ${KINDS.join(', ')}`);
 }
 
-module.exports = { run, FLAGS, FLAG_HELP, KINDS, pkgAgents, summary: 'workflow（承認状態）/ agent / skill の一覧' };
+module.exports = { run, FLAGS, FLAG_HELP, KINDS, pkgAgents, summary: 'workflow（承認状態）/ agent / skill、この端末の PKG の一覧' };

@@ -1,7 +1,7 @@
 [[cli-list]]
 == aidev list
 
-Lists workflows (with their approval state), agents and skills.
+Lists workflows (with their approval state), agents, skills, and the PKGs on this machine.
 
 === Synopsis
 
@@ -10,6 +10,7 @@ Lists workflows (with their approval state), agents and skills.
 aidev list workflows [--json]
 aidev list agents [--json]
 aidev list skills [--json]
+aidev list packages [--json]
 ----
 
 === Description
@@ -26,9 +27,14 @@ aidev list skills [--json]
 
 |`skills`
 |The PKG's `.aidev/skills/` and the skills bundled with the kit. Name, origin, description
+
+|`packages`
+|The PKGs set up with `aidev init` on this machine. Name, path, template state (`templates current` / `templates from <commit>` (still on an older kit; the command that takes the new templates is shown) / `missing` (no `aidev.yaml` at that path)). The PKG you are in is marked `*`. Works outside a PKG too
 |===
 
-With the same name, the PKG's one takes precedence over the bundled one.
+For `workflows` / `agents` / `skills`, with the same name the PKG's one takes precedence over the bundled one.
+
+Any name listed by `packages` can be passed to any command as `--package <name>` (see xref:cli-common-options[Common options]).
 
 === Options
 
@@ -37,7 +43,7 @@ With the same name, the PKG's one takes precedence over the bundled one.
 |Option |Description
 
 |`--json`
-|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together)
+|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together). Each row of `packages` has `name`, `path`, `present` (whether `aidev.yaml` is there), `here` (whether it is the PKG you are in), `templates` (`current` / `behind` / `unknown`) and `applied` (the kit commit it took)
 |===
 
 === Exit codes
@@ -50,7 +56,7 @@ With the same name, the PKG's one takes precedence over the bundled one.
 |Displayed
 
 |1
-|No object, or an object other than `workflows` / `agents` / `skills`
+|No object, or an object other than `workflows` / `agents` / `skills` / `packages`
 |===
 
 === Examples
@@ -69,7 +75,26 @@ aidev list workflows
 
 ----
 
+Check the PKGs on this machine and bring one on an older kit forward:
+
+[source,bash]
+----
+aidev list packages
+aidev sync tools --package other-pkg
+----
+
+[source,text]
+----
+aidev list packages
+  * demo-pkg   C:\work\demo-pkg   templates current
+    other-pkg  C:\work\other-pkg  templates from 499f940: aidev sync tools --package other-pkg
+    old-pkg    C:\work\old-pkg    missing (no aidev.yaml there)
+    * = the package you are in.
+    Run a command on another package with --package <name|path>.
+----
+
 === See also
 
 * xref:workflows-approval[Putting the AI to work: What approval means] — what each state means and what to do
 * xref:cli-create[aidev create], xref:cli-remove[aidev remove]
+* xref:cli-sync-tools[aidev sync tools] — take the templates into another PKG with `--package`

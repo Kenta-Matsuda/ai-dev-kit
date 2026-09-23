@@ -28,7 +28,6 @@
     "ask": [
       "Bash(git push:*)",
       "Bash(aidev create policy:*)",
-      "Bash(aidev uninstall <package>:*)",
       "Bash(aidev uninstall:*)"
     ]
   },

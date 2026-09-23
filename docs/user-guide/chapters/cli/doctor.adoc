@@ -1,20 +1,20 @@
 [[cli-doctor]]
 == aidev doctor
 
-この端末の実行環境を診断します。`<package>`（端末に登録された PKG の名前か、PKG のパス）を渡すと、その PKG の状態も並べます。CI 用の終了コードは PKG の中で実行する xref:cli-check[`aidev check`] が持ちます。
+この端末の実行環境を診断します。`--package`（xref:cli-list[`aidev list packages`] に出る名前か、PKG のパス）を付けると、その PKG の状態も並べます。CI 用の終了コードは PKG の中で実行する xref:cli-check[`aidev check`] が持ちます。
 
 === 書式
 
 [source,text]
 ----
-aidev doctor [<package>] [--json]
+aidev doctor [--package <name|path>] [--json]
 ----
 
 === 説明
 
 Node.js、platform、git、`aidev` のバージョンと kit の場所、kit の checkout と新しい kit の有無、`AIDEV_HOME`、登録済み PKG（数と一覧）、対応する AI ツール（`claude`、`copilot`、`codex`、`kiro`）の有無とバージョン、proxy を報告します。どのディレクトリで実行しても結果は同じです。
 
-各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。AI ツールが見つからないのは `⚠` です。`<package>` を渡すと、続けて `package`、`aidev.yaml`（schema）、`git repository`（ブランチ）、`remote origin`、`policy`、`agent tool`（`tools.agent` とモデル）、Azure DevOps なら `env <auth_env>`、`remote reachability`、`Wiki state`、`workflows`（数、approved、invalid）の行が並びます。
+各行は `✓`（ok）、`⚠`（warn）、`✗`（fail）です。AI ツールが見つからないのは `⚠` です。`--package` を付けると、続けて `package`、`aidev.yaml`（schema）、`git repository`（ブランチ）、`remote origin`、`policy`、`agent tool`（`tools.agent` とモデル）、Azure DevOps なら `env <auth_env>`、`remote reachability`、`Wiki state`、`workflows`（数、approved、invalid）の行が並びます。
 
 === オプション
 
@@ -36,7 +36,7 @@ Node.js、platform、git、`aidev` のバージョンと kit の場所、kit の
 |`✗` が無い
 
 |1
-|`✗` が 1 つ以上ある（Node.js が古い、git が無い、`<package>` の `aidev.yaml` が壊れている、Wiki が壊れている、invalid な workflow がある）。`<package>` が見つからない
+|`✗` が 1 つ以上ある（Node.js が古い、git が無い、`--package` の PKG の `aidev.yaml` が壊れている、Wiki が壊れている、invalid な workflow がある）。`--package` の PKG が見つからない
 |===
 
 === 例
@@ -65,14 +65,14 @@ aidev doctor
   ✓ proxy                  none configured
 
 ⚠ 3 warning(s); nothing blocking.
-    For a package: aidev doctor <package name or path>. The CI gate is "aidev check" inside the clone.
+    For a package: aidev doctor --package <name|path>. The CI gate is "aidev check" inside the clone.
 ----
 
 PKG も見る:
 
 [source,bash]
 ----
-aidev doctor demo-pkg
+aidev doctor --package demo-pkg
 ----
 
 === 関連情報

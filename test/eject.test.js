@@ -51,7 +51,7 @@ function run() {
   test('--dry-run writes nothing and removes nothing', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['uninstall', '.', '--dry-run'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--dry-run'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       ok(fs.existsSync(cfgMod.lockPath(fx.root)), '.aidev/materialized.json still present');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy still present');
@@ -62,7 +62,7 @@ function run() {
   test('ejecting without --yes refuses', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['uninstall', '.'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'exit');
       ok(/--yes/.test(r.stderr), 'names the confirmation flag');
       ok(fs.existsSync(cfgMod.lockPath(fx.root)), 'nothing was removed');
@@ -72,7 +72,7 @@ function run() {
   test('--yes removes the control surface and writes the marker', () => {
     const fx = makeRepo();
     try {
-      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       ok(!fs.existsSync(cfgMod.lockPath(fx.root)), '.aidev/materialized.json removed');
       ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy removed');
@@ -88,7 +88,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'workflows', 'mine.yaml'), 'name: mine\n');
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, 'src', 'api', 'auth.ts')), 'PKG files intact');
       ok(fs.existsSync(path.join(fx.root, 'config', 'secrets', 'key.pem')), 'even the secret ones');
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge', 'manifest.json')), 'Wiki intact');
@@ -104,7 +104,7 @@ function run() {
     try {
       home.registerPackage(fx.root, { name: 'my-pkg' }, HOME_ENV);
       ok(registered(fx.root), 'registered first');
-      eq(aidev(['uninstall', '.', '--yes'], { cwd: fx.root }).code, EXIT.OK, 'exit');
+      eq(aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root }).code, EXIT.OK, 'exit');
       ok(!registered(fx.root), 'no longer in the registry, so "aidev update" stops listing it');
     } finally { fx.cleanup(); }
   });
@@ -113,7 +113,7 @@ function run() {
     // The spec's actual promise: 以後 check 対象外.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit 0');
       ok(/eject/i.test(r.stdout), `says so: ${r.stdout}`);
@@ -123,7 +123,7 @@ function run() {
   test('check --json stays parseable after ejecting', () => {
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       const d = JSON.parse(aidev(['check', '--no-remote', '--json'], { cwd: fx.root }).stdout);
       eq(d.ejected, true, 'flagged');
       eq(d.exitCode, EXIT.OK, 'exitCode 0');
@@ -135,7 +135,7 @@ function run() {
     // detectDrift reports noLock on every run.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       write(path.join(fx.root, 'CLAUDE.md'), '# hand-maintained now\n');
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'still 0');
     } finally { fx.cleanup(); }
@@ -144,7 +144,7 @@ function run() {
   test('eject unwires kit hooks but keeps team-owned ones', () => {
     const fx = makeRepo({ withHooks: true });
     try {
-      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       const all = JSON.stringify(s);
       ok(!/aidev(?:\.js)?\s+hook/.test(all), `no kit hooks remain: ${all}`);
@@ -158,7 +158,7 @@ function run() {
     // live hooks and no policy would be maximally locked, not unmanaged.
     const fx = makeRepo({ withHooks: true });
     try {
-      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       ok(!fs.existsSync(cfgMod.policyPath(fx.root)), 'policy gone');
       const s = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       ok(!/aidev(?:\.js)?\s+hook/.test(JSON.stringify(s)), 'and no hook is left to consult it');
@@ -172,7 +172,7 @@ function run() {
     try {
       const before = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
       ok(Object.keys(before.hooks || {}).length > 0, 'the real template wires hooks');
-      const r = aidev(['uninstall', '.', '--yes', '--keep-assets', '--json'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes', '--keep-assets', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, r.stderr);
       ok(JSON.parse(r.stdout).hooksRemoved.length >= 4, 'every shipped hook was unwired');
       const after = JSON.parse(fs.readFileSync(path.join(fx.root, '.claude', 'settings.json'), 'utf8'));
@@ -183,8 +183,8 @@ function run() {
   test('a second eject is a no-op, not a failure', () => {
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
-      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'idempotent');
       ok(/already/i.test(r.stdout), 'says it was already ejected');
     } finally { fx.cleanup(); }
@@ -193,7 +193,7 @@ function run() {
   test('eject refuses a directory that was never kit-managed', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-bare-'));
     try {
-      const r = aidev(['uninstall', '.', '--yes'], { cwd: dir });
+      const r = aidev(['uninstall', '--package', '.', '--yes'], { cwd: dir });
       eq(r.code, EXIT.GENERAL, 'exit');
       ok(/does not look kit-managed/.test(r.stderr), 'message');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -206,7 +206,7 @@ function run() {
         schemaVersion: 1, kind: 'sync', targetSha: 'c'.repeat(40), originalSha: fx.pkgSha,
         acquiredAt: new Date().toISOString(), ttlMinutes: 120,
       }));
-      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
       ok(/publish/i.test(r.stderr), 'explains why');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'nothing removed');
@@ -216,7 +216,7 @@ function run() {
   test('--keep-assets leaves CLAUDE.md and .mcp.json in place', () => {
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes', '--keep-assets'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes', '--keep-assets'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, 'CLAUDE.md')), 'CLAUDE.md kept');
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'still ejected');
     } finally { fx.cleanup(); }
@@ -227,7 +227,7 @@ function run() {
     // is no longer installed.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       ok(!fs.existsSync(path.join(fx.root, 'CLAUDE.md')), 'CLAUDE.md removed');
       ok(!fs.existsSync(path.join(fx.root, '.claude', 'settings.json')), 'settings.json removed');
     } finally { fx.cleanup(); }
@@ -255,7 +255,7 @@ function run() {
     // rather than judged at the git toplevel.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       fs.rmSync(cfgMod.configPath(fx.root), { force: true });
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'still exempt');
@@ -268,7 +268,7 @@ function run() {
     // would still break the pipeline.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       const r = aidev(['doctor'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `doctor exit 0: ${r.stdout}`);
     } finally { fx.cleanup(); }
@@ -278,7 +278,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.claude', 'settings.json'), '{ not json');
-      const r = aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.GENERAL, 'refused');
       ok(/not valid JSON/.test(r.stderr), 'message');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'nothing removed');
@@ -290,7 +290,7 @@ function run() {
     // unwired hooks used to print a line before the document on a hooked repo.
     const fx = makeRepo({ withHooks: true });
     try {
-      const r = aidev(['uninstall', '.', '--yes', '--json'], { cwd: fx.root });
+      const r = aidev(['uninstall', '--package', '.', '--yes', '--json'], { cwd: fx.root });
       eq(r.code, EXIT.OK, 'exit');
       const d = JSON.parse(r.stdout);
       eq(d.ejected, true, 'flagged');
@@ -304,7 +304,7 @@ function run() {
     // as CI's on Linux, and match the policy globs, which are all "/"-shaped.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       const m = JSON.parse(fs.readFileSync(cfgMod.ejectMarkerPath(fx.root), 'utf8'));
       ok(!m.removed.some((r) => r.includes('\\')), `no backslashes: ${JSON.stringify(m.removed)}`);
       ok(m.removed.includes('.aidev/policy.yaml'), `policy recorded portably: ${JSON.stringify(m.removed)}`);
@@ -317,7 +317,7 @@ function run() {
     const fx = makeRepo();
     try {
       write(path.join(fx.root, '.aidev', 'cache', 'remote-check.json'), '{}\n');
-      aidev(['uninstall', '.', '--yes', '--force'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes', '--force'], { cwd: fx.root });
       ok(!fs.existsSync(path.join(fx.root, '.aidev', 'cache')), 'cache removed');
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'knowledge')), '.aidev/knowledge kept');
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'marker in place');
@@ -331,7 +331,7 @@ function run() {
     // repo, so CI went green on a repository nobody was enforcing.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'ejected first');
       const r = aidev(['init', '--yes'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `init exit: ${r.stderr}`);
@@ -348,7 +348,7 @@ function run() {
     // one, so check must say so (exit 3) rather than pass.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       aidev(['init', '--yes'], { cwd: fx.root });
       ok(fs.existsSync(path.join(fx.root, '.aidev', 'policy.candidate.yaml')), 'a candidate awaits approval');
       const r = aidev(['check', '--no-remote'], { cwd: fx.root });
@@ -359,7 +359,7 @@ function run() {
   test('init --approve places the policy straight away on re-adoption', () => {
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       eq(aidev(['init', '--yes', '--approve'], { cwd: fx.root }).code, EXIT.OK, 'init');
       ok(fs.existsSync(cfgMod.policyPath(fx.root)), 'policy placed');
       eq(aidev(['check', '--no-remote'], { cwd: fx.root }).code, EXIT.OK, 'fully managed again');
@@ -369,7 +369,7 @@ function run() {
   test('init --dry-run does not clear the marker', () => {
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       aidev(['init', '--yes', '--dry-run'], { cwd: fx.root });
       ok(fs.existsSync(cfgMod.ejectMarkerPath(fx.root)), 'still ejected after a dry run');
     } finally { fx.cleanup(); }
@@ -380,7 +380,7 @@ function run() {
     // graded the absent config and policy as blocking failures.
     const fx = makeRepo();
     try {
-      aidev(['uninstall', '.', '--yes'], { cwd: fx.root });
+      aidev(['uninstall', '--package', '.', '--yes'], { cwd: fx.root });
       fs.rmSync(cfgMod.configPath(fx.root), { force: true });
       const r = aidev(['doctor'], { cwd: fx.root });
       eq(r.code, EXIT.OK, `doctor exit 0: ${r.stdout}`);

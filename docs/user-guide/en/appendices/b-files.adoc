@@ -86,7 +86,7 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |Workflow run records (`run.json`, `log.txt`). They contain command output, so they are never committed
 |===
 
-Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aidev/ejected.json` (written by `aidev uninstall <package>`, removed by `aidev init`).
+Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aidev/ejected.json` (written by `aidev uninstall --package`, removed by `aidev init`).
 
 === On this machine (AIDEV_HOME)
 

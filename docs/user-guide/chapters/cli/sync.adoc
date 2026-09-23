@@ -7,11 +7,11 @@
 
 [source,text]
 ----
-aidev sync tools [<package>] [--dry-run] [--force] [--json]
-aidev sync wiki [<package>] [options]
+aidev sync tools [--package <name|path>] [--dry-run] [--force] [--json]
+aidev sync wiki [--package <name|path>] [options]
 ----
 
-`<package>` は端末に登録された PKG の名前（`aidev doctor` の一覧）か、PKG のパスです。省略するとカレントの PKG です。`aidev update` のあと、複数の PKG を 1 か所から追従させるときに使います。
+`--package` を省略するとカレントの PKG が対象です。`--package` には xref:cli-list[`aidev list packages`] に出る名前か、PKG のパスを渡します。`aidev update` のあと、複数の PKG を 1 か所から追従させるときに使います。
 
 [[cli-sync-tools]]
 === aidev sync tools
@@ -84,6 +84,14 @@ kit の最新テンプレートを、この PKG の AI ツール設定に取り�
 ----
 aidev sync tools --dry-run
 aidev sync tools
+----
+
+別の PKG を、どこからでも:
+
+[source,bash]
+----
+aidev list packages
+aidev sync tools --package demo-pkg
 ----
 
 [source,text]

@@ -13,6 +13,8 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { suite, test, eq, ok } = require('./harness');
 const { makeRepo, advancePkg, pullPkg, write, git } = require('./fixtures');
+const gitLib = require('../cli/lib/git');
+const home = require('../cli/lib/home');
 const { EXIT } = require('../cli/lib/errors');
 const layout = require('../cli/lib/layout');
 
@@ -873,6 +875,80 @@ function run() {
       const d = JSON.parse(aidev(['doctor', '--json'], { cwd: fx.root }).stdout);
       ok(Array.isArray(d.checks) && d.checks.length > 0, 'lists checks');
     } finally { fx.cleanup(); }
+  });
+
+  suite('cli: packages (list packages, --package)');
+
+  /** Two clones in a private registry, so the names are known and nothing else is listed. */
+  function withPackages(fn) {
+    const env = { AIDEV_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-home-pkgs-')) };
+    const a = makeRepo({ realTemplates: true });
+    const b = makeRepo({ realTemplates: true });
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-outside-'));
+    try {
+      eq(aidev(['sync', 'tools'], { cwd: a.root, env }).code, EXIT.OK, 'sync a');
+      eq(aidev(['sync', 'tools'], { cwd: b.root, env }).code, EXIT.OK, 'sync b');
+      // Distinct names: both fixtures share one package name in aidev.yaml.
+      home.registerPackage(a.root, { name: 'pkg-a', kitCommit: home.readRegistry(env).packages[0].kitCommit }, env);
+      home.registerPackage(b.root, { name: 'pkg-b', kitCommit: home.readRegistry(env).packages[1].kitCommit }, env);
+      fn({ a, b, env, outside });
+    } finally {
+      a.cleanup(); b.cleanup();
+      fs.rmSync(outside, { recursive: true, force: true });
+      fs.rmSync(env.AIDEV_HOME, { recursive: true, force: true });
+    }
+  }
+
+  test('list packages shows every registered clone and marks the current one', () => {
+    withPackages(({ a, env }) => {
+      const r = aidev(['list', 'packages'], { cwd: a.root, env });
+      eq(r.code, EXIT.OK, r.stderr);
+      ok(/\* pkg-a/.test(r.stdout), `pkg-a marked: ${r.stdout}`);
+      ok(/ {2}pkg-b/.test(r.stdout), `pkg-b listed: ${r.stdout}`);
+      const d = JSON.parse(aidev(['list', 'packages', '--json'], { cwd: a.root, env }).stdout);
+      eq(d.packages.map((p) => p.name), ['pkg-a', 'pkg-b'], 'names');
+      eq(d.packages.map((p) => p.here), [true, false], 'here');
+      eq(d.packages.map((p) => p.present), [true, true], 'present');
+    });
+  });
+
+  test('list packages works outside a package and reports a clone that is gone', () => {
+    withPackages(({ b, env, outside }) => {
+      fs.rmSync(path.join(b.root, 'aidev.yaml'));
+      const d = JSON.parse(aidev(['list', 'packages', '--json'], { cwd: outside, env }).stdout);
+      eq(d.packages.find((p) => p.name === 'pkg-b').present, false, 'missing');
+      const r = aidev(['list', 'packages'], { cwd: outside, env });
+      ok(/missing/.test(r.stdout), r.stdout);
+    });
+  });
+
+  test('--package runs a command on a registered package by name or path', () => {
+    withPackages(({ a, b, env, outside }) => {
+      const byName = JSON.parse(aidev(['sync', 'tools', '--package', 'pkg-b', '--dry-run', '--json'], { cwd: outside, env }).stdout);
+      ok(gitLib.samePath(byName.package, b.root), `by name: ${byName.package}`);
+      const byPath = JSON.parse(aidev(['sync', 'tools', `--package=${a.root}`, '--dry-run', '--json'], { cwd: b.root, env }).stdout);
+      ok(gitLib.samePath(byPath.package, a.root), `by path: ${byPath.package}`);
+      const checked = JSON.parse(aidev(['check', '-p', 'pkg-a', '--json', '--no-remote'], { cwd: outside, env }).stdout);
+      ok(checked.managed !== false && checked.package, `check -p ran on the package: ${JSON.stringify(checked)}`);
+      const doc = JSON.parse(aidev(['doctor', '--package', 'pkg-a', '--json'], { cwd: outside, env }).stdout);
+      ok(gitLib.samePath(doc.package, a.root), 'doctor reports that package');
+    });
+  });
+
+  test('--package rejects an unknown name, a machine command and a positional package', () => {
+    withPackages(({ a, env, outside }) => {
+      const unknown = aidev(['sync', 'tools', '--package', 'nope'], { cwd: outside, env });
+      eq(unknown.code, EXIT.GENERAL, 'unknown');
+      ok(/neither a registered package nor a directory \(registered: pkg-a, pkg-b\)/.test(unknown.stderr), unknown.stderr);
+      const upd = aidev(['update', '--package', 'pkg-a'], { cwd: outside, env });
+      eq(upd.code, EXIT.GENERAL, 'update');
+      ok(/does not take --package/.test(upd.stderr), upd.stderr);
+      const pos = aidev(['sync', 'tools', 'pkg-a'], { cwd: a.root, env });
+      eq(pos.code, EXIT.GENERAL, 'positional');
+      ok(/unexpected argument: pkg-a \(name a package with --package pkg-a\)/.test(pos.stderr), pos.stderr);
+      const none = aidev(['sync', 'tools', '--package'], { cwd: outside, env });
+      ok(/requires a package name or path/.test(none.stderr), none.stderr);
+    });
   });
 }
 

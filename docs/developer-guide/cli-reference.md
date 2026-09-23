@@ -9,6 +9,7 @@
 - optionは各commandの`FLAGS`で宣言され、未知のoptionはエラー（exit 1）。`--flag=value`形式も可。boolean flagに`=true|false`以外の値は不可。`--`以降はpositional
 - subcommandを持つcommand（`knowledge`、`agent`、`permission`、`workflow`、`evolve`、`hook`、`mcp`）はsubcommand必須
 - repo rootは`git.findRepoRoot(cwd)`（`aidev.yaml`または`.aidev/`を上へ探索）。`hook`だけは`CLAUDE_PROJECT_DIR`を起点にする
+- `--package <name|path>`（`-p`、`--package=<v>`）は`aidev.js`の`takePackageOption`が各commandの`parseArgs`より先に取り除き、`home.resolvePackage`（registry名、同名が複数ならerror、なければdirectory）→`findRepoRoot(dir) || dir`をrepo rootにする。`ctx.packageRef`に元の値が入る。受け付けるのは`PACKAGE_COMMANDS`（`init` / `check` / `doctor` / `create` / `remove` / `list` / `submit` / `run` / `sync` / `uninstall`）だけで、`update`と`hook`はexit 1（黙って無視しない）。2回指定、値なしもexit 1。`--`以降は見ない。`--help`は`PACKAGE_COMMANDS`に`package:`欄を出す
 - `hook`・`mcp`・`update`・`uninstall`（`QUIET_COMMANDS`）以外は実行前にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`または`--json`で抑止）、新しければ警告し、TTYなら先に`update`するか尋ねる（PKGへの適用は別途`apply`）
 - `AidevError`は`ui.fail`でstderrへ出し、`code`をexit codeにする。それ以外の例外は`internal error`としてexit 1、`AIDEV_DEBUG=1`でstack traceを出す
 
@@ -76,11 +77,11 @@ kit本体だけを更新します。objectは取りません（`aidev update wik
 --dry-run --json
 ```
 
-kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。PKGには触れません。更新後、registryのcloneのうちlockの`kitCommit`が現在と違うものを一覧し、`aidev sync tools <package>`を案内します。JSONは`{ok, dryRun, kit: {updated, from, to, versionFrom, versionTo}, packagesBehind: [{path, name, applied}]}`。
+kit checkout（`installRoot`）を`origin/main`へfast-forward-onlyで更新します。未commit変更、`main`以外のbranch、divergeは拒否（exit 1）。PKGには触れません。更新後、registryのcloneのうちlockの`kitCommit`が現在と違うものを一覧し、`aidev sync tools --package <name>`を案内します。JSONは`{ok, dryRun, kit: {updated, from, to, versionFrom, versionTo}, packagesBehind: [{path, name, applied}]}`。
 
-### `aidev sync tools|wiki [<package>]`
+### `aidev sync tools|wiki [--package <name|path>]`
 
-`<package>`はregistryの名前かpath（`home.resolvePackage`）。省略時はcwdのPKG。`aidev update`のあと、端末上の複数PKGを1か所から追従させるためにあります。flagは両objectの和集合（`--force`は両方で意味がある: toolsは編集を捨ててkit版、wikiは手編集pageの上書き / staleなleaseの引き継ぎ）。
+対象PKGは共通の`--package`（省略時はcwdのPKG）。2つ目のpositional（旧`<package>`）は`unexpected argument`でexit 1。`aidev update`のあと、端末上の複数PKGを1か所から追従させるためにあります。flagは両objectの和集合（`--force`は両方で意味がある: toolsは編集を捨ててkit版、wikiは手編集pageの上書き / staleなleaseの引き継ぎ）。
 
 #### `aidev sync tools`
 
@@ -155,27 +156,28 @@ remove:  --json --dry-run
 
 - `create agent <name>`: `.aidev/agents/<name>.md`のtemplate（frontmatter（`name`・`description`・`skills: []`・`tools`・`mcp: []`・`model: inherit`）+ 入出力契約 / 手順 / 停止条件）。`--describe`は`agents-creator`を`tools.agent`で起動し、書いたあとfrontmatterの`name`と`skills` / `tools` / `mcp`の書式を検証。`create skill <name>`: `.aidev/skills/<name>/SKILL.md`のtemplate（`--describe`は無い）。既存は`--force`
 - `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧。同名はPKGが優先
+- `list packages`: registry（`home.listPackages`）の全PKG。PKGの外でも動く。`templates`は`home.appliedKitCommit`（PKGのlockの`kitCommit`、無ければregistryの値）とkit checkoutのHEADを比べて`current` / `behind` / `unknown`。`aidev.yaml`が消えたentryは`present: false`で残す（registryからは消さない）。cwdのPKGに`*`。`behind`の行には`aidev sync tools --package <name>`（名前が重複するならpath）を添える。JSONは`{kitCommit, packages: [{name, path, present, here, templates, applied}]}`
 - `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。PKGのworkflowのstepが名指すagent、そのagentがfrontmatterの`skills`に挙げるskillは拒否。commitは人が行う
 - `create policy [--approve] [--force] [--dry-run]`: 権限policyの候補生成と配置（`permission.configure`。旧`permission configure|reconfigure`）。名前は取らない
 - 動作: 候補を`aidev.yaml`から生成し`validatePolicy`で検証。`--approve`なしなら`.aidev/policy.candidate.yaml`を書く。`--approve`で`.aidev/policy.yaml`へ配置し候補を削除。policyが既にあっても同じ（旧`reconfigure`は無い）
 - `--approve`は候補fileを読まず、その場で`aidev.yaml`から生成した内容を配置する。手で編集した候補や、現行policyに手で足した`writable`は引き継がれない（teamの追加は`.aidev/policy.yaml`を直接編集してPRでreviewする）
 - 現行policyより保護が減る（protected / read_only / writable_during_syncからの削除、sync時のみ書込可のpathがwritableへ昇格）場合、`--approve`だけでは配置せずexit 3。`--approve --force`で配置
 - `--dry-run`は候補を表示するだけ（`--approve`と併用しても書かない）
-- 有効なpolicyの表示は`aidev check`（policy行）と`aidev doctor <package>`（policy行）。`agents`キーを持つpolicyは`validatePolicy`がexit 3で拒否する
+- 有効なpolicyの表示は`aidev check`（policy行）と`aidev doctor --package <name>`（policy行）。`agents`キーを持つpolicyは`validatePolicy`がexit 3で拒否する
 - 実装は`cli/commands/permission.js`（`configure` / `show`）。`configure.js` / `show.js`は動詞の入口
 - `create workflow --describe`はworkflow-creatorに、参照できるagent / skillの一覧とschemaのtemplateを添える。kitは開発用agent・workflowを同梱しないので、足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書き、MCPは`.mcp.json`（PKG所有）への追加案としてfinal messageに出す
 
-### `aidev doctor [<package>]`
+### `aidev doctor [--package <name|path>]`
 
-`--json`。この端末を見ます: node（20以上）、platform、git、aidevのversionと`installRoot`、kit checkoutのcommit、kit更新の有無、`AIDEV_HOME`、登録PKG（数と一覧）、registryの全AI tool（`tools.js`）の有無とversion、proxy。`<package>`（registry名かpath）を渡すと、そのPKGの`aidev.yaml`（schema）、git repo / branch、origin、policy、agent tool / model、auth env、remote到達性、Wiki状態、workflows（数、approved、invalid）も✓ / ⚠ / ✗で並べます。✗があればexit 1。CIのexit契約は`aidev check`だけが持ちます。
+`--json`。この端末を見ます: node（20以上）、platform、git、aidevのversionと`installRoot`、kit checkoutのcommit、kit更新の有無、`AIDEV_HOME`、登録PKG（数と一覧）、registryの全AI tool（`tools.js`）の有無とversion、proxy。`--package`を付けたときだけ、そのPKGの`aidev.yaml`（schema）、git repo / branch、origin、policy、agent tool / model、auth env、remote到達性、Wiki状態、workflows（数、approved、invalid）も✓ / ⚠ / ✗で並べます。✗があればexit 1。CIのexit契約は`aidev check`だけが持ちます。
 
-### `aidev uninstall [<package>] [--all]`
+### `aidev uninstall [--package <name|path>] [--all]`
 
 ```text
 --yes --dry-run --json --all --force --keep-assets
 ```
 
-- 引数なし: この端末からCLIを消す（下記）。`<package>`: そのPKGからkitを外す（旧`eject`。`cli/lib/eject.js`）。`--all`: 登録PKG全部を外してからCLIを消す。`<package>`と`--all`は排他。どれも`--yes`必須、`--dry-run`で予告
+- 引数なし: この端末からCLIを消す（下記）。`--package`: そのPKGからkitを外す（旧`eject`。`cli/lib/eject.js`）。`--all`: 登録PKG全部を外してからCLIを消す。`--package`と`--all`は排他。positionalはexit 1。どれも`--yes`必須、`--dry-run`で予告
 
 #### 端末（引数なし、または`--all`の最後）
 
@@ -185,9 +187,9 @@ remove:  --json --dry-run
 
 installerが置いたものをこの端末から消します。順序: bin directory（`AIDEV_BIN_DIR`、既定はWindows `%LOCALAPPDATA%ai-dev-kitin`、POSIX `~/.local/bin`）の`aidev.cmd` / `aidev.ps1` / `aidev`のうち"Generated by ai-dev-kit"を含むものを削除 → Windowsではuser PATHからbin directoryを除去（PowerShell経由、best-effort、entryがあるときだけ書く） → `AIDEV_HOME`の`registry.json`と`cache/`を削除 → 空になったbin directoryと`AIDEV_HOME`を削除。`--yes`なしでは一覧を表示してexit 1。消すものが無くてもexit 0。
 
-削除しないもの: kit checkout（`installRoot`。実行中のprocessの居場所で、Windowsでは内側からの削除が不安定）と登録済みPKG内のkit所有file（commit済みでteam共有）。どちらも消すcommandを表示します。PKG向けには`aidev uninstall <package> --yes`と、`assets.listStaticFiles`を`collapsePaths`で「kit所有fileしか無いdirectory」まで畳んだ`git rm -r -q -- …`（`.aidev`と`aidev.yaml`を含む。ejectと違いWikiも消える）を出します。
+削除しないもの: kit checkout（`installRoot`。実行中のprocessの居場所で、Windowsでは内側からの削除が不安定）と登録済みPKG内のkit所有file（commit済みでteam共有）。どちらも消すcommandを表示します。PKG向けには`aidev uninstall --package "<path>" --yes`と、`assets.listStaticFiles`を`collapsePaths`で「kit所有fileしか無いdirectory」まで畳んだ`git rm -r -q -- …`（`.aidev`と`aidev.yaml`を含む。ejectと違いWikiも消える）を出します。
 
-#### `<package>`（旧eject）
+#### `--package`（旧eject）
 
 ```text
 --yes --dry-run --json --force --keep-assets

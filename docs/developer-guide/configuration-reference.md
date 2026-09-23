@@ -264,14 +264,14 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `NO_COLOR` | `ui.js` | 色を無効化 |
 | `XDG_DATA_HOME` / `LOCALAPPDATA` | `home.js` | `AIDEV_HOME`の既定を決める |
 | `AIDEV_BIN_DIR` | installer | launcherの配置先 |
-| `USERNAME` / `USER` | `run workflow`（`run.json`の`startedBy`）、`uninstall <package>` | 監査用の記録（認証ではない） |
+| `USERNAME` / `USER` | `run workflow`（`run.json`の`startedBy`）、`uninstall --package` | 監査用の記録（認証ではない） |
 
 ## CLIが書くその他のfile
 
 | file | 書き手 | 形 |
 | --- | --- | --- |
 | `.aidev/materialized.json` | `init`、`apply` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
-| `.aidev/ejected.json` | `uninstall <package>` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
+| `.aidev/ejected.json` | `uninstall --package` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
 | `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
 | `.aidev/sync.lock` | `sync wiki`（publish中は保持、ERROR状態の構造更新中は一時） | publish lease（`architecture.md` §5） |
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
@@ -287,7 +287,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |
 | `.aidev/workflows/<name>/workflow.yaml` | `create workflow`（template / `--describe`でworkflow-creator） | 定義。`submit`がPRにし、`origin/<tracking_branch>`との一致が承認 |
 | `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`run.json`（`cli-reference.md`の`run`） |
-| `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall <package>` | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
+| `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall --package`（書く）。`list packages`、`update`、`doctor`、`--package`（読む） | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |
 
 ## toolごとのhook設定file
