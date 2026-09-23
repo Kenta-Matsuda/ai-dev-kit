@@ -10,7 +10,7 @@
 - subcommandを持つcommand（`knowledge`、`agent`、`permission`、`workflow`、`evolve`、`hook`、`mcp`）はsubcommand必須
 - repo rootは`git.findRepoRoot(cwd)`（`aidev.yaml`または`.aidev/`を上へ探索）。`hook`だけは`CLAUDE_PROJECT_DIR`を起点にする
 - `--package <name|path>`（`-p`、`--package=<v>`）は`aidev.js`の`takePackageOption`が各commandの`parseArgs`より先に取り除き、`home.resolvePackage`（registry名、同名が複数ならerror、なければdirectory）→`findRepoRoot(dir) || dir`をrepo rootにする。`ctx.packageRef`に元の値が入る。受け付けるのは`PACKAGE_COMMANDS`（`init` / `check` / `doctor` / `create` / `remove` / `list` / `submit` / `run` / `sync` / `uninstall`）だけで、`update`と`hook`はexit 1（黙って無視しない）。2回指定、値なしもexit 1。`--`以降は見ない。`--help`は`PACKAGE_COMMANDS`に`package:`欄を出す
-- `hook`・`mcp`・`update`・`uninstall`（`QUIET_COMMANDS`）以外は実行前にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`または`--json`で抑止）、新しければ警告し、TTYなら先に`update`するか尋ねる（PKGへの適用は別途`apply`）
+- `hook`・`update`（`QUIET_COMMANDS`）以外は、`--help`・`--version`を含め起動直後にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`で抑止）、新しければstderrに警告する。TTYで`--json`でも`uninstall`（`NO_OFFER_COMMANDS`）でもなければ先に`update`するか尋ねる（PKGへの適用は別途`aidev sync tools`）
 - `AidevError`は`ui.fail`でstderrへ出し、`code`をexit codeにする。それ以外の例外は`internal error`としてexit 1、`AIDEV_DEBUG=1`でstack traceを出す
 
 ### 終了code（`cli/lib/errors.js`）

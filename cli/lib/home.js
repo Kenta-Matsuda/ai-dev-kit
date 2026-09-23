@@ -158,11 +158,11 @@ function setDeveloper({ enabled, autoEvolve = false }, env = process.env) {
 // ------------------------------------------------------------ update check
 
 const UPDATE_CACHE_REL = path.join('cache', 'update-check.json');
-const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 3000;
 
 /**
- * Is a newer kit available? Cached for a day and bounded to a few seconds,
+ * Is a newer kit available? Cached for an hour and bounded to a few seconds,
  * because this runs before ordinary commands and must never make them slow or
  * fail. Returns { newer, localSha, remoteSha, cached } or null when unknown.
  */
@@ -187,9 +187,11 @@ function checkForUpdate(installRoot, { env = process.env, force = false, now = D
     // Unknown: do not cache a failure as "no update", just try again next time.
     return null;
   }
-  // Newer only when origin/main is strictly ahead of the local checkout. A
-  // checkout that is ahead (a maintainer's branch) or diverged is not "behind".
-  const newer = res.sha !== localSha && git.isAncestor(installRoot, localSha, res.sha) === true;
+  // Newer whenever origin/main has a commit the local checkout lacks. ls-remote
+  // does not download that commit, so ask the question the local objects can
+  // answer: is origin/main already contained in HEAD? Only a checkout that is
+  // level with or ahead of origin/main (a maintainer's branch) says yes.
+  const newer = res.sha !== localSha && git.isAncestor(installRoot, res.sha, localSha) !== true;
   const entry = { checkedAt: new Date(now).toISOString(), localSha, remoteSha: res.sha, newer };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); writeJsonAtomic(file, entry); } catch { /* best effort */ }
   return { newer, localSha, remoteSha: res.sha, cached: false };

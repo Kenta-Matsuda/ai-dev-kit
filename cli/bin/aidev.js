@@ -41,8 +41,15 @@ const SUBCOMMANDS = {
   hook: ['session-start', 'guard-write', 'quality-gate', 'after-bash', 'session-stop'],
 };
 
-/** Commands that run from tools or pipelines: never prompt, never nag. `update` is the updater itself. */
-const QUIET_COMMANDS = new Set(['hook', 'uninstall', 'update']);
+/**
+ * No update notice: the AI tools call `hook` and read its output, and `update`
+ * is the updater itself. Every other invocation — help and --version included —
+ * says when a newer kit exists.
+ */
+const QUIET_COMMANDS = new Set(['hook', 'update']);
+
+/** Say the notice, but do not offer to update before these. */
+const NO_OFFER_COMMANDS = new Set(['uninstall']);
 
 /**
  * Commands that act on one package: `--package <name|path>` (`-p`) points them
@@ -131,19 +138,29 @@ function commandHelp(name, mod) {
 }
 
 /**
- * Tell the user a newer kit exists; in a terminal, offer to update first.
- * Bounded and cached (see home.checkForUpdate), and never fatal.
+ * Tell the user a newer kit exists. Bounded and cached (see
+ * home.checkForUpdate), never fatal, and written to stderr so `--json` output
+ * stays clean. Returns the check result, or null when there is nothing to say.
+ */
+function updateNotice(argv) {
+  if (QUIET_COMMANDS.has(argv[0]) || process.env.AIDEV_NO_UPDATE_CHECK) return null;
+  let info = null;
+  try { info = home.checkForUpdate(INSTALL_ROOT); } catch { info = null; }
+  if (!info || !info.newer) return null;
+  const { C } = ui;
+  ui.err(`${C.yellow}⚠${C.reset} a newer ai-dev-kit is available (${info.localSha.slice(0, 7)} → ${String(info.remoteSha).slice(0, 7)}). Run "aidev update".`);
+  return info;
+}
+
+/**
+ * In a terminal, offer to update before running the command.
  *
  * Returns null to carry on with this process, or the exit code of the
  * updated CLI when the user chose to update and the command was re-run
  * with the new code (so "update first, then run" means exactly that).
  */
-async function updateNotice(name, flags, argv) {
-  if (QUIET_COMMANDS.has(name) || flags.json || process.env.AIDEV_NO_UPDATE_CHECK) return null;
-  let info = null;
-  try { info = home.checkForUpdate(INSTALL_ROOT); } catch { info = null; }
-  if (!info || !info.newer) return null;
-  ui.warn(`a newer ai-dev-kit is available (${info.localSha.slice(0, 7)} → ${info.remoteSha.slice(0, 7)}). Run "aidev update".`);
+async function offerUpdate(name, flags, argv) {
+  if (NO_OFFER_COMMANDS.has(name) || flags.json) return null;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await new Promise((resolve) => rl.question('  Update now, before running this command? (y/N): ', (a) => resolve(a.trim())));
@@ -194,6 +211,8 @@ function safeHead() {
 }
 
 async function main(argv) {
+  const update = updateNotice(argv);
+
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
     usage();
     return EXIT.OK;
@@ -242,8 +261,10 @@ async function main(argv) {
     repoRoot = gitMod.findRepoRoot(start);
   }
 
-  const reran = await updateNotice(name, flags, argv);
-  if (reran !== null) return reran;
+  if (update) {
+    const reran = await offerUpdate(name, flags, argv);
+    if (reran !== null) return reran;
+  }
 
   const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, packageRef, flags, positionals, argv: rest, command: name };
   const code = await mod.run(ctx);
