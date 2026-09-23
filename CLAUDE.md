@@ -8,7 +8,7 @@ PKG へ配布される `CLAUDE.md` は `templates/root/CLAUDE.md` です。こ�
 
 1. `docs/developer-guide/architecture.md` で設計を確認してから変更する
 2. `npm run check`（全モジュールのロード確認 + テスト）を通す
-3. docs を変更したら `npm run docs:check`（AsciiDoc のビルド検証）を通す
+3. docs を変更したら `npm run docs:check`（利用者ガイドと developer guide のビルド検証）を通す
 4. テストは実 `claude` を起動しない。エージェント実行は `AIDEV_CLAUDE_BIN` のスタブで検証する
 
 ## 守ること

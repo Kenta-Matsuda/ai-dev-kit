@@ -338,7 +338,247 @@ function validateHtml(guide, ids, files) {
   return stat.size;
 }
 
-function main() {
+/**
+ * Developer guide: the Markdown under docs/developer-guide becomes one HTML
+ * page shaped like the Asciidoctor output (header, left TOC, sect0 per file,
+ * sect1.. per heading), so the user guide stylesheet applies unchanged.
+ * Links between the files (`architecture.md#…`) turn into in-page anchors;
+ * a link whose target is missing fails the build.
+ */
+const DEV_SOURCE_ROOT = path.join(ROOT, 'docs', 'developer-guide');
+const DEV_GUIDE = {
+  lang: 'ja',
+  output: path.join(OUTPUT_DIR, 'ai-dev-kit-developer-guide.html'),
+  title: 'ai-dev-kit Developer Guide',
+  files: [
+    'README.md',
+    'architecture.md',
+    'cli-reference.md',
+    'configuration-reference.md',
+    'design-decisions.md',
+    'implementation-status.md',
+  ],
+  proposalsDir: 'proposals',
+};
+
+function slugify(text) {
+  // GitHub's heading anchors, so `file.md#fragment` links written for GitHub resolve here too.
+  return text.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-');
+}
+
+function plainText(tokens) {
+  return (tokens || []).map((t) => (t.tokens ? plainText(t.tokens) : t.text || '')).join('');
+}
+
+function developerSources() {
+  const files = DEV_GUIDE.files.map((f) => path.join(DEV_SOURCE_ROOT, f));
+  const dir = path.join(DEV_SOURCE_ROOT, DEV_GUIDE.proposalsDir);
+  if (fs.existsSync(dir)) {
+    for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.md')).sort()) files.push(path.join(dir, f));
+  }
+  for (const file of files) {
+    if (!fs.existsSync(file)) fail(`developer guide file does not exist: ${relative(file)}`);
+  }
+  return files;
+}
+
+function docId(file) {
+  const rel = path.relative(DEV_SOURCE_ROOT, file).split(path.sep).join('/').replace(/\.md$/, '');
+  return slugify(rel.replace(/\//g, '-'));
+}
+
+async function convertDeveloperGuide(version) {
+  const { Marked } = await import('marked');
+  const files = developerSources();
+  const ids = new Set();
+  const links = [];
+  let current = null;
+
+  function uniqueId(base) {
+    let id = base;
+    for (let n = 1; ids.has(id); n += 1) id = `${base}-${n}`;
+    ids.add(id);
+    return id;
+  }
+
+  function rewriteHref(href) {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return href; // http:, mailto:, …
+    const m = /^([^#]*)(?:#(.*))?$/.exec(href);
+    const [, target, fragment] = m;
+    let file = current;
+    if (target) {
+      if (!target.endsWith('.md')) return href;
+      file = path.resolve(path.dirname(current), decodeURIComponent(target));
+    }
+    const rel = path.relative(DEV_SOURCE_ROOT, file);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return href;
+    const anchor = fragment ? `${docId(file)}-${slugify(decodeURIComponent(fragment))}` : docId(file);
+    links.push({ anchor, href, file: current });
+    return `#${anchor}`;
+  }
+
+  const marked = new Marked({ gfm: true });
+  marked.use({
+    renderer: {
+      link(token) {
+        const href = rewriteHref(token.href);
+        if (href === token.href) return false;
+        return `<a href="${href}">${this.parser.parseInline(token.tokens)}</a>`;
+      },
+      code(token) {
+        if (token.lang !== 'mermaid') return false;
+        const source = token.text.trim();
+        if (!source) fail(`an empty mermaid block was found in ${relative(current)}`);
+        return `<div class="mermaid-figure"><pre class="mermaid">${escapeHtml(source)}</pre></div>\n`;
+      },
+    },
+  });
+
+  const toc = [];
+  const body = [];
+  let mermaidBlocks = 0;
+
+  for (const file of files) {
+    current = file;
+    const source = fs.readFileSync(file, 'utf8');
+    mermaidBlocks += (source.match(/^```mermaid\s*$/gm) || []).length;
+    const tokens = marked.lexer(source);
+    const base = docId(file);
+    const open = []; // heading depths of the open sect divs
+    let pending = [];
+    let part = null;
+
+    const flush = () => {
+      if (pending.length === 0) return;
+      pending.links = tokens.links;
+      body.push(marked.parser(pending));
+      pending = [];
+    };
+    const closeTo = (depth) => {
+      while (open.length > 0 && open[open.length - 1] >= depth) {
+        const d = open.pop();
+        body.push(d === 2 ? '</div>\n</div>\n' : '</div>\n');
+      }
+    };
+
+    for (const token of tokens) {
+      if (token.type !== 'heading') {
+        pending.push(token);
+        continue;
+      }
+      flush();
+      const html = marked.parseInline(token.text);
+      if (token.depth === 1 && !part) {
+        if (ids.has(base)) fail(`duplicate document ID ${base} (${relative(file)})`);
+        ids.add(base);
+        part = { id: base, html, children: [] };
+        toc.push(part);
+        body.push(`<h1 id="${base}" class="sect0"><a class="anchor" href="#${base}"></a><a class="link" href="#${base}">${html}</a></h1>\n`);
+        continue;
+      }
+      if (!part) fail(`${relative(file)} must start with a "# " title`);
+      const depth = Math.max(2, Math.min(token.depth, 6));
+      closeTo(depth);
+      const id = uniqueId(`${base}-${slugify(plainText(token.tokens))}`);
+      const level = depth - 1;
+      body.push(`<div class="sect${level}">\n<h${depth} id="${id}"><a class="anchor" href="#${id}"></a><a class="link" href="#${id}">${html}</a></h${depth}>\n`);
+      if (depth === 2) body.push('<div class="sectionbody">\n');
+      open.push(depth);
+      if (depth === 2) part.children.push({ id, html, children: [] });
+      else if (depth === 3 && part.children.length > 0) part.children[part.children.length - 1].children.push({ id, html });
+    }
+    flush();
+    closeTo(0);
+    if (!part) fail(`${relative(file)} has no "# " title`);
+  }
+
+  for (const link of links) {
+    if (!ids.has(link.anchor)) fail(`unresolved link "${link.href}" in ${relative(link.file)}`);
+  }
+
+  const tocHtml = ['<ul class="sectlevel0">'];
+  for (const p of toc) {
+    tocHtml.push(`<li><a href="#${p.id}">${p.html}</a>`);
+    if (p.children.length > 0) {
+      tocHtml.push('<ul class="sectlevel1">');
+      for (const c of p.children) {
+        tocHtml.push(`<li><a href="#${c.id}">${c.html}</a>`);
+        if (c.children.length > 0) {
+          tocHtml.push('<ul class="sectlevel2">');
+          for (const g of c.children) tocHtml.push(`<li><a href="#${g.id}">${g.html}</a></li>`);
+          tocHtml.push('</ul>');
+        }
+        tocHtml.push('</li>');
+      }
+      tocHtml.push('</ul>');
+    }
+    tocHtml.push('</li>');
+  }
+  tocHtml.push('</ul>');
+
+  const content = body.join('')
+    .replace(/<table>/g, '<table class="tableblock frame-ends grid-rows stripes-even stretch">');
+  const css = fs.readFileSync(path.join(STYLES_DIR, 'user-guide.css'), 'utf8');
+  let html = `<!DOCTYPE html>
+<html lang="${DEV_GUIDE.lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="ai-dev-kit 本体（CLI・template・同梱 Agents / Skills）を設計・実装・レビューする人のための資料">
+<title>${DEV_GUIDE.title}</title>
+<style>
+${css}
+</style>
+</head>
+<body class="book toc2 toc-left">
+<div id="header">
+<h1>${DEV_GUIDE.title}</h1>
+<div class="details">
+<span id="revnumber">version ${escapeHtml(version)}</span>
+</div>
+<div id="toc" class="toc2">
+<div id="toctitle">目次</div>
+${tocHtml.join('\n')}
+</div>
+</div>
+<div id="content">
+${content}
+</div>
+<div id="footer">
+<div id="footer-text">
+Version ${escapeHtml(version)}<br>
+</div>
+</div>
+</body>
+</html>
+`;
+  if (html.includes('<pre class="mermaid">')) {
+    const at = html.lastIndexOf('</body>');
+    html = `${html.slice(0, at)}${mermaidScript()}${html.slice(at)}`;
+  }
+
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(DEV_GUIDE.output, html);
+  return { files, ids, mermaidBlocks, html };
+}
+
+function validateDeveloperHtml({ ids, mermaidBlocks, html }) {
+  const rendered = (html.match(/<pre class="mermaid">/g) || []).length;
+  if (rendered !== mermaidBlocks) {
+    fail(`developer guide: ${mermaidBlocks} mermaid block(s) in the sources but ${rendered} rendered`);
+  }
+  for (const f of DEV_GUIDE.files) {
+    const id = docId(path.join(DEV_SOURCE_ROOT, f));
+    if (!html.includes(`id="${id}"`)) fail(`developer guide: generated HTML is missing ${f}`);
+  }
+  if (/<(?:link|script)\b[^>]+(?:href|src)=["']https?:/i.test(html)) {
+    fail('developer guide: generated HTML depends on an external stylesheet or script');
+  }
+  if (ids.size < DEV_GUIDE.files.length) fail(`developer guide: only ${ids.size} IDs were found`);
+  return Buffer.byteLength(html);
+}
+
+async function main() {
   if (UNKNOWN_ARGS.length > 0) fail(`unknown argument(s): ${UNKNOWN_ARGS.join(', ')}`);
   const guides = ONLY_LANG ? LANGUAGES.filter((g) => g.lang === ONLY_LANG) : LANGUAGES;
   if (guides.length === 0) fail(`unknown language: ${ONLY_LANG} (expected: ${LANGUAGES.map((g) => g.lang).join(', ')})`);
@@ -354,14 +594,21 @@ function main() {
       `${action} ${relative(guide.output)} (${guide.lang}: ${files.length} AsciiDoc files, ${ids.size} IDs, ${bytes} bytes)\n`,
     );
   }
+
+  // The developer guide is Japanese only, so --lang en skips it.
+  if (!ONLY_LANG || ONLY_LANG === DEV_GUIDE.lang) {
+    const result = await convertDeveloperGuide(packageJson.version);
+    const bytes = validateDeveloperHtml(result);
+    process.stdout.write(
+      `${action} ${relative(DEV_GUIDE.output)} (developer: ${result.files.length} Markdown files, ${result.ids.size} IDs, ${bytes} bytes)\n`,
+    );
+  }
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   process.stderr.write(`${error && error.message ? error.message : String(error)}\n`);
   process.exitCode = 1;
-}
+});
 
 
 

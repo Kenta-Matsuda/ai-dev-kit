@@ -2,7 +2,7 @@
 
 このディレクトリは、**ai-dev-kit本体（CLI・template・同梱Agents/Skills）を設計・実装・レビュー・リリースする人**のための資料です。
 
-利用者向けの導入・日常運用は`docs/user-guide/`（AsciiDoc、`npm run docs:build`で日本語版と英語版のHTML）を正本とします。ここには対象PKGの業務知識を置かず、逆にai-dev-kitの内部実装を利用者向けガイドや生成Wikiへ混在させないでください。
+利用者向けの導入・日常運用は`docs/user-guide/`（AsciiDoc、`npm run docs:build`で日本語版と英語版のHTML）を正本とします。このdeveloper guide（Markdown）も同じcommandで`build/docs/ai-dev-kit-developer-guide.html`の1ページにまとまります。ここには対象PKGの業務知識を置かず、逆にai-dev-kitの内部実装を利用者向けガイドや生成Wikiへ混在させないでください。
 
 対象は **PKG clone方式**（0.2.0で採用、現在は`package.json`の版）です。`aidev`は利用者のPKG git cloneの中で動き、kitが追加するファイルはすべてそのPKG repositoryへcommitされます。
 
@@ -55,7 +55,7 @@
 | 同梱Agents / Skills | `templates/claude/.claude/agents/`、`templates/claude/.claude/skills/`（他toolの形式は`templates/copilot/`、`templates/codex/`、`templates/kiro/`に手で同期） |
 | installer | `scripts/install.ps1`、`scripts/install.sh` |
 | pipeline例 | `pipelines/` |
-| 利用者ガイド | `docs/user-guide/`、`scripts/build-docs.js` |
+| 利用者ガイド / developer guideのbuild | `docs/user-guide/`、`docs/developer-guide/`、`scripts/build-docs.js` |
 
 ## 保守者向け検証
 
@@ -63,7 +63,7 @@
 npm run lint        # 全moduleのload確認（test/loadall.js）
 npm test            # test/run.js（各suiteはnode test/<file>.jsで単独実行可）
 npm run check       # 上記2つ
-npm run docs:check  # 利用者ガイドのbuildと必須ID検証
+npm run docs:check  # 利用者ガイド（必須ID検証）とdeveloper guide（file間linkの解決）のbuild
 ```
 
 testは実際の`claude`を起動しません。agent経路は`AIDEV_CLAUDE_BIN`でstubを指します。CLIを起動するtestは`AIDEV_HOME`を一時directoryへ、`AIDEV_NO_UPDATE_CHECK=1`を必ず設定します（設定しないとregistryが本物のhomeへ書かれ、update checkがnetworkへ出ます）。self-evolutionのtestは`AIDEV_HOME`を一時directoryにした上で`npm run evolve -- enable`か`AIDEV_KIT_DEVELOPER=1`で開発者端末の状態を作り、`evolve run`の実起動（kit checkoutのworktree作成）は行いません。
