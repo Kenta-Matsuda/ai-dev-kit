@@ -591,6 +591,28 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
+  test('guard-write never approves an MCP call for the person, and refuses one a workflow step was not granted', () => {
+    const fx = makeRepo();
+    try {
+      write(path.join(fx.root, '.aidev', 'agents', 'reader.md'), '---\nname: reader\ndescription: t\nmcp: [tickets]\n---\n\nRead.\n');
+      write(path.join(fx.root, '.aidev', 'workflows', 'wf', 'workflow.yaml'), [
+        'name: wf', 'objective: read', 'steps:', '  - id: a', '    agent: reader', '    writable: []', '    prompt: go',
+        'cost:', '  max_usd: 1', '',
+      ].join('\n'));
+      git(['add', '-A'], fx.root);
+      git(['commit', '-q', '-m', 'wf'], fx.root);
+      git(['push', '-q', 'origin', 'main'], fx.root);
+      const call = (tool, env) => hook('guard-write', { tool_name: tool, tool_input: {} }, fx.root, env);
+      const outside = call('mcp__billing__charge', {});
+      eq([outside.code, outside.stdout.trim()], [EXIT.OK, ''], 'no answer: the tool\'s own permission settings decide');
+      const inRun = { AIDEV_WORKFLOW: 'wf', AIDEV_WORKFLOW_STEP: 'a' };
+      eq(call('mcp__tickets__get', inRun).stdout.trim(), '', 'a granted server: no answer either (the launch pre-approved it)');
+      const refused = call('mcp__billing__charge', inRun);
+      ok(DENIED.test(refused.stdout), `denied: ${refused.stdout}`);
+      ok(/not among the MCP servers of agent reader \(tickets\)/.test(refused.stdout), refused.stdout);
+    } finally { fx.cleanup(); }
+  });
+
   test('guard-write allows the Wiki and aidev.yaml', () => {
     const fx = makeRepo();
     try {

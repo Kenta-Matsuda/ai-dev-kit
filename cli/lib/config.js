@@ -55,7 +55,7 @@ const ALWAYS_PROTECTED = Object.freeze([
  * The write scopes every policy starts from. The PKG is read-only for an agent;
  * the Wiki, workflows, the PKG's own agents and skills, conventions and its
  * aidev.yaml are the places an agent is expected to write. PKG source is
- * written only inside an approved workflow's `scope.writable` (policy.js rule
+ * written only inside the `writable` of an approved workflow's step (policy.js rule
  * 6) or where a team widens `writable` deliberately, through the policy.
  */
 const DEFAULT_POLICY_SCOPES = Object.freeze({
@@ -505,13 +505,13 @@ function validatePolicy(raw, source = POLICY_REL) {
   const merged = [...ALWAYS_PROTECTED];
   for (const p of protectedList) if (!merged.includes(p)) merged.push(p);
 
-  // Per-agent grants were replaced by the approved workflow's scope.writable
+  // Per-agent grants were replaced by the approved workflow's per-step writable
   // (policy.js rule 6). A policy that still carries them is stale, not silently
   // narrower, so it is refused with the replacement named.
   if (raw.agents != null) {
     throw new AidevError(
       `${source}: agents.<name> grants no longer exist. PKG source is written inside an approved ` +
-      'workflow (scope.writable in .aidev/workflows/<name>/workflow.yaml); remove the agents section.');
+      'workflow step (steps[].writable in .aidev/workflows/<name>/workflow.yaml); remove the agents section.');
   }
   return {
     version,

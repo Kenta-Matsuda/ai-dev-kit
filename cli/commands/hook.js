@@ -134,6 +134,21 @@ function guardWrite(ctx, input, adapter) {
     return emitDecision(adapter, false, 'ai-dev-kit: hook payload was not valid JSON, so the write could not be evaluated; blocked.');
   }
 
+  // Inside a workflow run, the step's agent may call only what its
+  // frontmatter grants (tools, MCP servers). Outside one this says nothing.
+  const { tool } = toolCall(input);
+  if (process.env.AIDEV_WORKFLOW) {
+    let wfConfig;
+    try { wfConfig = cfgMod.loadConfig(repoRoot, { required: false }); } catch (e) {
+      return emitDecision(adapter, false, `ai-dev-kit: configuration could not be read (${e.message}); tool call blocked.`);
+    }
+    const t = policyMod.decideToolUse(repoRoot, tool, { config: wfConfig });
+    if (t) return emitDecision(adapter, false, `ai-dev-kit: ${t.reason}`);
+  }
+  // An MCP call writes no file this guard can see. Answering "allow" would
+  // approve it on the person's behalf, so the tool's own permissions decide.
+  if (/^mcp__/.test(tool)) return EXIT.OK;
+
   const targets = targetsFrom(input);
   if (targets.length === 0) {
     // Nothing identifiable to govern. For Bash this is the documented limit of

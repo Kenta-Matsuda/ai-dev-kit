@@ -35,14 +35,23 @@ frontmatter に以下が揃っていること。
 ---
 name: <ファイル名と一致するkebab-case>
 description: <いつ起動されるかが読み取れる1〜2文>
+skills: [<prompt に本文を入れる skill>]   # 無ければ []
 tools: <必要最小限のツール>
+mcp: [<使う MCP server>]                 # PKG の .mcp.json のキー。無ければ []
 model: inherit
 ---
 ```
 
+`skills`・`tools`・`mcp` はこのエージェントの**能力**です。workflow から起動されると、kit は
+`skills` の本文を指示に入れ、Claude Code を `tools` と `mcp` にあるものだけで起動します。
+書き込める場所（制約）は agent ではなく、workflow の各ステップの `writable` が決めます。
+
 - `name` はファイル名（拡張子なし）と**完全一致**
 - `description` は「何をするか」だけでなく「**いつ起動されるか**」を含む
 - `tools` は**最小権限**。`Write` が要らないエージェントに `Write` を与えない
+- `mcp` は仕事に要る server だけ。外部システムに触るエージェントに `Bash` を与えない
+  （`Bash` があれば MCP を通さずに外部へ出られ、`mcp` の制限が意味を失う）
+- 権限の違う仕事は別のエージェントにする（例：読むだけの `ticket-reader` と、更新する `ticket-updater`）
 - `model` は **`inherit` 固定**。frontmatter のモデルはセッションのモデルより常に優先され、
   上から上書きする手段がありません。ここに具体的なモデル名を書くと、
   `.claude/settings.json`（kit既定）・`.claude/settings.local.json`（個人）・

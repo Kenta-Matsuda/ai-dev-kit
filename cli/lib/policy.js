@@ -10,11 +10,11 @@
  *   4. Consistency error + sync lease      → allow knowledge/** only
  *   5. writable paths                      → allow (Wiki, workflows, agents,
  *                                            skills, aidev.yaml)
- *   6. approved workflow scope             → allow when the workflow runner
- *                                            started this session (AIDEV_WORKFLOW),
- *                                            the workflow is identical to
- *                                            origin/<tracking_branch>, and its
- *                                            scope.writable covers the path
+ *   6. approved workflow step              → allow when the workflow runner
+ *                                            started this session (AIDEV_WORKFLOW
+ *                                            and AIDEV_WORKFLOW_STEP), the workflow
+ *                                            is identical to origin/<tracking_branch>,
+ *                                            and that step's writable covers the path
  *   7. read_only paths                     → deny
  *   8. otherwise                           → allow
  *
@@ -53,6 +53,7 @@ function deny(reason, extra = {}) {
 function decide(repoRoot, targetPath, {
   config = null, policy = null, state = null, now = Date.now(),
   workflow = process.env.AIDEV_WORKFLOW || null,
+  step = process.env.AIDEV_WORKFLOW_STEP || null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
@@ -126,17 +127,21 @@ function decide(repoRoot, targetPath, {
   // so editing the YAML mid-run only revokes the scope.
   let scopeHint = null;
   if (workflow) {
-    const wf = require('./workflow').inspect(repoRoot, installRoot, config, workflow);
+    const wfMod = require('./workflow');
+    const wf = wfMod.inspect(repoRoot, installRoot, config, workflow);
+    const access = wf.approval.approved && step ? wfMod.stepAccess(wf.def, wf.deps, step) : null;
     if (!wf.approval.approved) {
       scopeHint = `workflow ${workflow} is not approved: ${wf.approval.reason}`;
+    } else if (!access) {
+      scopeHint = `workflow ${workflow} has no step ${step || '(none named)'}, so nothing is writable`;
     } else {
-      const sHit = pathsMod.firstMatch(wf.def.scope.writable, rel);
+      const sHit = pathsMod.firstMatch(access.writable, rel);
       if (sHit) {
         return allow(
-          `workflow ${workflow} may write "${rel}" (scope.writable: ${sHit}; approved on ${wf.approval.ref})`,
-          { rule: 'workflow-writable', path: rel, pattern: sHit, workflow });
+          `workflow ${workflow} step ${step} may write "${rel}" (writable: ${sHit}; approved on ${wf.approval.ref})`,
+          { rule: 'workflow-writable', path: rel, pattern: sHit, workflow, step });
       }
-      scopeHint = `workflow ${workflow} is approved but its scope.writable (${wf.def.scope.writable.join(', ') || 'empty'}) does not cover this path`;
+      scopeHint = `workflow ${workflow} is approved but the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
     }
   }
 
@@ -144,7 +149,7 @@ function decide(repoRoot, targetPath, {
   const roHit = pathsMod.firstMatch(pol.read_only, rel);
   if (roHit) {
     const hint = scopeHint
-      || 'this session was not started by "aidev run workflow"; PKG source is written only inside the scope.writable of an approved workflow';
+      || 'this session was not started by "aidev run workflow"; PKG source is written only inside the writable of an approved workflow step';
     return deny(
       `"${rel}" is read-only (${roHit}). ${hint}. ` +
       'A team may also list paths under writable in .aidev/policy.yaml for everyone.',
@@ -213,6 +218,38 @@ function tokenize(segment) {
   return out;
 }
 
+/**
+ * Whether a workflow step's agent may call this tool at all. Null means "no
+ * opinion": outside a workflow run, or a tool the agent was granted. The
+ * runner already launches the tool with only the granted tools and MCP
+ * servers; this is the second line, for a tool that ignores or changes those
+ * launch flags. Fails closed: a run whose workflow cannot be read or is no
+ * longer approved may call nothing through this hook.
+ */
+function decideToolUse(repoRoot, toolName, {
+  config = null,
+  workflow = process.env.AIDEV_WORKFLOW || null,
+  step = process.env.AIDEV_WORKFLOW_STEP || null,
+  installRoot = DEFAULT_INSTALL_ROOT,
+} = {}) {
+  if (!workflow) return null;
+  const wfMod = require('./workflow');
+  const wf = wfMod.inspect(repoRoot, installRoot, config, workflow);
+  if (!wf.approval.approved) {
+    return deny(`workflow ${workflow} is not approved: ${wf.approval.reason}`, { rule: 'workflow-tool', workflow, tool: toolName });
+  }
+  const access = step ? wfMod.stepAccess(wf.def, wf.deps, step) : null;
+  if (!access) {
+    return deny(`workflow ${workflow} has no step ${step || '(none named)'}`, { rule: 'workflow-tool', workflow, tool: toolName });
+  }
+  if (wfMod.toolGranted(access, toolName)) return null;
+  const what = String(toolName).startsWith('mcp__')
+    ? `the MCP servers of agent ${access.step.agent} (${access.mcp.join(', ') || 'none'})`
+    : `the tools of agent ${access.step.agent} (${(access.tools || []).join(', ')})`;
+  return deny(`${toolName} is not among ${what}; the agent's frontmatter grants them`,
+    { rule: 'workflow-tool', workflow, step, tool: toolName });
+}
+
 /** Decide a batch of paths; the first denial wins. */
 function decideMany(repoRoot, targets, opts = {}) {
   const results = [];
@@ -224,4 +261,4 @@ function decideMany(repoRoot, targets, opts = {}) {
   return { decision: DECISION.ALLOW, reason: 'no target violates policy', results };
 }
 
-module.exports = { DECISION, decide, decideMany, extractBashTargets, WRITE_COMMANDS };
+module.exports = { DECISION, decide, decideMany, decideToolUse, extractBashTargets, WRITE_COMMANDS };
