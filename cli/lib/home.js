@@ -16,6 +16,7 @@ const os = require('os');
 const path = require('path');
 const { readJsonIfExists, writeJsonAtomic, nowIso } = require('./config');
 const git = require('./git');
+const { AidevError } = require('./errors');
 
 function defaultHome() {
   if (process.platform === 'win32') {
@@ -81,7 +82,6 @@ function unregisterPackage(repoRoot, env = process.env) {
   return before !== reg.packages.length;
 }
 
-/** Registered clones that still exist on disk, plus the ones that vanished. */
 /**
  * A package named on the command line: a registry name, or a directory. A
  * name that several registered packages share needs the path instead.
@@ -101,6 +101,7 @@ function resolvePackage(ref, env = process.env) {
   throw new AidevError(`${s} is neither a registered package nor a directory${names.length ? ` (registered: ${names.join(', ')})` : ''}`);
 }
 
+/** Registered clones that still exist on disk, plus the ones that vanished. */
 function listPackages(env = process.env) {
   const reg = readRegistry(env);
   const present = [];
