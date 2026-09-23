@@ -94,7 +94,7 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 |`tools.default`
 |`["claude"]`
-|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`・`.github/hooks/`、`codex` は `AGENTS.md`・`.codex/`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を kit のテンプレートから生成します。外したツールのファイルは次の `aidev sync tools` で消えます（編集済みなら残ります）。
+|設定ファイルを置く AI ツール。`claude`、`copilot`、`codex`、`kiro` から 1 つ以上。`claude` は `.claude/`・`CLAUDE.md`・`.mcp.json`、`copilot` は `.github/copilot-instructions.md`・`.github/agents/`・`.github/skills/`・`.github/hooks/`、`codex` は `AGENTS.md`・`.codex/`、`kiro` は `.kiro/steering/`・`.kiro/agents/` を ADK のテンプレートから生成します。外したツールのファイルは次の `aidev sync tools` で消えます（編集済みなら残ります）。
 
 |`tools.agent`
 |`default` の先頭

@@ -24,7 +24,7 @@ The files {project-name} places in a package clone, and whether they are committ
 
 |`.mcp.json`
 |MCP server registration. The agent of a workflow step can use only the servers here that its frontmatter lists in `mcp`
-|The package (the kit does not ship it; edited by people)
+|The package (the ADK does not ship it; edited by people)
 
 |`.github/copilot-instructions.md`, `.github/agents/<agent>.agent.md`, `.github/skills/*/**`, `.github/hooks/aidev.json`, `AGENTS.md`, `.codex/hooks.json`, `.kiro/steering/ai-dev-kit.md`, `.kiro/agents/<agent>.json`, `.kiro/agents/aidev.json`
 |Only when `tools.default` lists `copilot` / `codex` / `kiro`: the instructions, agents, skills and hooks for each tool
@@ -35,7 +35,7 @@ The files {project-name} places in a package clone, and whether they are committ
 |`aidev create policy --approve`, `aidev init`. `writable` additions are edited in directly by humans
 
 |`.aidev/materialized.json`
-|The tool-configuration record: the kit commit applied, per file the template hash and the hash at apply time, and unresolved conflicts. `aidev sync tools` merges against it and `aidev check` judges by it
+|The tool-configuration record: the ADK commit applied, per file the template hash and the hash at apply time, and unresolved conflicts. `aidev sync tools` merges against it and `aidev check` judges by it
 |`aidev init` / `aidev sync tools`
 
 |`.aidev/knowledge/index.md`, `overview.md`, pages
@@ -63,7 +63,7 @@ The files {project-name} places in a package clone, and whether they are committ
 |`aidev init` / `aidev sync tools`
 |===
 
-`.claude/settings.local.json` is personal and outside the kit's management.
+`.claude/settings.local.json` is personal and outside the ADK's management.
 
 === Not committed
 
@@ -90,4 +90,4 @@ Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aide
 
 === On this machine (AIDEV_HOME)
 
-Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `Developer.json` (irrelevant to users).
+Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the ADK update check). The ADK itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `Developer.json` (irrelevant to users).

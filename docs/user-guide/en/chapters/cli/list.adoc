@@ -20,16 +20,16 @@ aidev list packages [--json]
 |object |What it shows
 
 |`workflows`
-|The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. The kit bundles no workflows, so only this PKG's workflows are listed
+|The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. The ADK bundles no workflows, so only this PKG's workflows are listed
 
 |`agents`
-|The PKG's `.aidev/agents/` and the agents bundled with the kit. Name, origin (`this PKG` / `kit`), description. `⚠` is added when `name` in the frontmatter differs from the file name
+|The PKG's `.aidev/agents/` and the agents bundled with the ADK. Name, origin (`this PKG` / `ADK`), description. `⚠` is added when `name` in the frontmatter differs from the file name
 
 |`skills`
-|The PKG's `.aidev/skills/` and the skills bundled with the kit. Name, origin, description
+|The PKG's `.aidev/skills/` and the skills bundled with the ADK. Name, origin, description
 
 |`packages`
-|The PKGs set up with `aidev init` on this machine. Name, path, template state (`templates current` / `templates from <commit>` (still on an older kit; the command that takes the new templates is shown) / `missing` (no `aidev.yaml` at that path)). The PKG you are in is marked `*`. Works outside a PKG too
+|The PKGs set up with `aidev init` on this machine. Name, path, template state (`templates current` / `templates from <commit>` (still on an older ADK; the command that takes the new templates is shown) / `missing` (no `aidev.yaml` at that path)). The PKG you are in is marked `*`. Works outside a PKG too
 |===
 
 For `workflows` / `agents` / `skills`, with the same name the PKG's one takes precedence over the bundled one.
@@ -43,7 +43,7 @@ Any name listed by `packages` can be passed to any command as `--package <name>`
 |Option |Description
 
 |`--json`
-|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together). Each row of `packages` has `name`, `path`, `present` (whether `aidev.yaml` is there), `here` (whether it is the PKG you are in), `templates` (`current` / `behind` / `unknown`) and `applied` (the kit commit it took)
+|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together). Each row of `packages` has `name`, `path`, `present` (whether `aidev.yaml` is there), `here` (whether it is the PKG you are in), `templates` (`current` / `behind` / `unknown`) and `applied` (the ADK commit it took)
 |===
 
 === Exit codes
@@ -75,7 +75,7 @@ aidev list workflows
 
 ----
 
-Check the PKGs on this machine and bring one on an older kit forward:
+Check the PKGs on this machine and bring one on an older ADK forward:
 
 [source,bash]
 ----

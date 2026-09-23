@@ -10,7 +10,7 @@ LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向け
 * 初回は Engineering Manager が `aidev sync wiki --no-commit` で生成します。その後は、コミットのたびに hook が更新を始めます。手動なら `aidev sync wiki` です。どちらも knowledge-builder agent が本文を書きます。
 * Wiki は正本ではありません。各記述は根拠ファイルへのリンクを持ち、AI はリンク先で確認します。
 * Wiki が無い間、AI の書き込みはすべて止まります。
-* `aidev` が生成したものをレビューするのはあなたの責任です。kit は PR をマージしません。
+* `aidev` が生成したものをレビューするのはあなたの責任です。ADK は PR をマージしません。
 
 [[knowledge-state]]
 === 状態の確認
@@ -25,7 +25,7 @@ LLM Wiki は、PKG のコードの構造と各ファイルの役割を AI 向け
 
 `head` は今の checkout のコミット、`knowledge` は Wiki が説明しているコミット、`tracking` は `origin/main` の先端です。判定は SHA の一致ではなく、Wiki を生成したときのファイル一覧と内容の指紋（inventory）を HEAD の木と比べて行います。rebase、squash、force-push の後でも正しく判定できます。
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,2",options="header"]
 |===
 |表示 |意味 |すること
 
@@ -112,7 +112,7 @@ hook を使わないとき、CI、または今すぐ更新したいときは次�
 aidev sync wiki
 ----
 
-生成対象に未コミットの変更があると、そのファイルを列挙して止まります。先にコミットするか stash します。`.aidev/knowledge/` や kit の設定ファイルが汚れているのは構いません。
+生成対象に未コミットの変更があると、そのファイルを列挙して止まります。先にコミットするか stash します。`.aidev/knowledge/` や ADK の設定ファイルが汚れているのは構いません。
 
 コマンドは次の順で進みます。
 

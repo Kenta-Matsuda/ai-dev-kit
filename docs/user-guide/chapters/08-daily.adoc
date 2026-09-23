@@ -49,7 +49,7 @@ aidev check
 
 その他の表示は xref:troubleshooting-status[トラブルシューティング: aidev check の表示] を見てください。
 
-続く行では `tool config` と `policy` を確認します。`tool config` に `newer templates available` と出たら、チームがまだ新しい kit のテンプレートを取り込んでいません。 Engineering Manager に伝えてください（xref:maintain-sync-tools[テンプレートの取り込み]）。`policy` が `missing` なら、 Engineering Manager に `aidev create policy --approve` を依頼します。
+続く行では `tool config` と `policy` を確認します。`tool config` に `newer templates available` と出たら、チームがまだ新しい ADK のテンプレートを取り込んでいません。 Engineering Manager に伝えてください（xref:maintain-sync-tools[テンプレートの取り込み]）。`policy` が `missing` なら、 Engineering Manager に `aidev create policy --approve` を依頼します。
 
 [[daily-code]]
 === AI を用いた開発

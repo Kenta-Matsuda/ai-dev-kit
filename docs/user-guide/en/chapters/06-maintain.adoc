@@ -7,11 +7,11 @@
 |===
 |Task |When performed
 
-|xref:maintain-update[Updating the kit]
-|When a newer kit is announced
+|xref:maintain-update[Updating the ADK]
+|When a newer ADK is announced
 
 |xref:maintain-sync-tools[Applying new templates]
-|After updating the kit
+|After updating the ADK
 
 |xref:maintain-settings[Changing configuration]
 |As the need arises
@@ -21,9 +21,9 @@
 |===
 
 [[maintain-update]]
-=== Updating the kit
+=== Updating the ADK
 
-When a newer kit exists, running a command in the PKG shows this. Developers see it on their machines too.
+When a newer ADK exists, running any `aidev` command shows this. Developers see it on their machines too.
 
 [source,text]
 ----
@@ -31,7 +31,7 @@ When a newer kit exists, running a command in the PKG shows this. Developers see
   Update now, before running this command? (y/N):
 ----
 
-`y` updates the kit (the CLI and its templates). **PKG files do not change at this point.** Once the update is in, the command you started is run again with the new CLI.
+`y` updates the ADK (the CLI and its templates). **PKG files do not change at this point.** Once the update is in, the command you started is run again with the new CLI.
 
 [source,text]
 ----
@@ -44,7 +44,7 @@ When a newer kit exists, running a command in the PKG shows this. Developers see
 [[maintain-sync-tools]]
 === Applying new templates
 
-After updating the kit, **the Engineering Manager** runs this at the PKG root when it suits them and turns it into a PR. Developers get the same state with `git pull` after the merge. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the kit's changes.
+After updating the ADK, **the Engineering Manager** runs this at the PKG root when it suits them and turns it into a PR. Developers get the same state with `git pull` after the merge. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the ADK's changes.
 
 [source,bash]
 ----
@@ -60,7 +60,7 @@ aidev sync tools
     Review with "git diff", then commit so your team receives the update.
 ----
 
-When the team and the kit changed the same lines, git-style conflict markers are written into the file and the command stops with exit code 2.
+When the team and the ADK changed the same lines, git-style conflict markers are written into the file and the command stops with exit code 2.
 
 [source,text]
 ----
@@ -68,7 +68,7 @@ When the team and the kit changed the same lines, git-style conflict markers are
     ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
 ----
 
-Resolve the markers, settle the content, run `aidev sync tools` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the kit version of every file instead, run `aidev sync tools --force`.
+Resolve the markers, settle the content, run `aidev sync tools` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the ADK version of every file instead, run `aidev sync tools --force`.
 
 [[maintain-settings]]
 === Changing configuration
@@ -122,10 +122,10 @@ The `agent tool` row of `aidev doctor --package <name>` shows the model currentl
 
 ==== Interactive sessions
 
-`aidev.yaml` has no effect on interactive sessions. Claude Code takes its model from `"model"` in the PKG's `.claude/settings.json` (the kit ships `sonnet`). To change it for the whole team, edit that file and open a PR. Your edit survives `aidev sync tools`. A Developer who wants a different model for themselves uses `.claude/settings.local.json` (not managed by the kit) or `/model` during the session. The model of Copilot and the other tools is set in that tool's own configuration.
+`aidev.yaml` has no effect on interactive sessions. Claude Code takes its model from `"model"` in the PKG's `.claude/settings.json` (the ADK ships `sonnet`). To change it for the whole team, edit that file and open a PR. Your edit survives `aidev sync tools`. A Developer who wants a different model for themselves uses `.claude/settings.local.json` (not managed by the ADK) or `/model` during the session. The model of Copilot and the other tools is set in that tool's own configuration.
 
 === Related information
 
 * xref:review[Review and merge] — what to look at in each PR
 * xref:cli-update[aidev update], xref:cli-sync-tools[aidev sync tools], xref:cli-check[aidev check]
-* xref:troubleshooting-update[Troubleshooting: after a kit update]
+* xref:troubleshooting-update[Troubleshooting: after an ADK update]

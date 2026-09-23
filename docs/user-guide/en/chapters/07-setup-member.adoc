@@ -1,7 +1,7 @@
 [[setup-member]]
 == Getting started
 
-Start using your AI tool in a package that already has the kit. No questions, three commands. **You decide nothing** — you take the setup the Engineering Manager decided on as it is.
+Start using your AI tool in a package that already has the ADK. No questions, three commands. **You decide nothing** — you take the setup the Engineering Manager decided on as it is.
 
 === Prerequisites
 
@@ -40,7 +40,7 @@ aidev init
 ----
 +
 * `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[Installing aidev] and open a new terminal.
-* `newer templates available` on the `tool config` line → the team has not taken in the newer kit templates yet. The Engineering Manager runs `aidev sync tools` and opens a PR (xref:maintain-sync-tools[Applying new templates]).
+* `newer templates available` on the `tool config` line → the team has not taken in the newer ADK templates yet. The Engineering Manager runs `aidev sync tools` and opens a PR (xref:maintain-sync-tools[Applying new templates]).
 * `the LLM Wiki is not in this clone yet …` is shown → the Engineering Manager's PR is not merged yet. Run `git pull` after the merge. Do not build it yourself.
 
 . Check the state.

@@ -1,7 +1,7 @@
 [[cli-sync]]
 == aidev sync
 
-Brings this PKG in step with something that moved on: `tools` takes the kit templates into this PKG's tool configuration, `wiki` brings the LLM Wiki to HEAD.
+Brings this PKG in step with something that moved on: `tools` takes the ADK templates into this PKG's tool configuration, `wiki` brings the LLM Wiki to HEAD.
 
 === Synopsis
 
@@ -16,9 +16,9 @@ Without `--package`, the current PKG. `--package` takes a name shown by xref:cli
 [[cli-sync-tools]]
 === aidev sync tools
 
-Takes the installed kit's latest templates into this PKG's AI tool configuration.
+Takes the installed ADK's latest templates into this PKG's AI tool configuration.
 
-Takes the templates of the kit installed on this machine (the one `aidev update` brought forward) and applies them to the package, for every tool in `tools.default` of `aidev.yaml`. The team may have edited the files `aidev init` placed; `apply` behaves as a **merge**, not a copy.
+Takes the templates of the ADK installed on this machine (the one `aidev update` brought forward) and applies them to the package, for every tool in `tools.default` of `aidev.yaml`. The team may have edited the files `aidev init` placed; `apply` behaves as a **merge**, not a copy.
 
 [%autowidth.stretch,options="header"]
 |===
@@ -27,13 +27,13 @@ Takes the templates of the kit installed on this machine (the one `aidev update`
 |Untouched since the last apply
 |Replaced with the new template
 
-|Edited, and the kit did not change it
+|Edited, and the ADK did not change it
 |Kept as it is
 
-|Edited, and the kit changed it too
+|Edited, and the ADK changed it too
 |Merged three ways against the template the previous apply used. If the same lines changed, git-style conflict markers are written and the command stops with exit code 2
 
-|No longer shipped by the kit
+|No longer shipped by the ADK
 |Removed if untouched, kept if edited
 
 |A tool added to `tools.default`
@@ -44,7 +44,7 @@ The package team resolves conflicted files. Once the markers are gone and the co
 
 The result is an ordinary diff in the package. Review it with `git diff`, commit, and open a pull request; after the merge the team only needs `git pull`.
 
-The merge base is the template at the kit commit of the previous apply. When the kit clone lacks that history (a shallow clone, for instance) the file cannot be merged; it is reported as a conflict and left alone, to be fixed by hand or replaced with `--force`.
+The merge base is the template at the ADK commit of the previous apply. When the ADK clone lacks that history (a shallow clone, for instance) the file cannot be merged; it is reported as a conflict and left alone, to be fixed by hand or replaced with `--force`.
 
 ==== Options
 
@@ -56,7 +56,7 @@ The merge base is the template at the kit commit of the previous apply. When the
 |Show what would change; write nothing (not even the record)
 
 |`--force`
-|Take the kit version of every file, discarding local edits and conflicts
+|Take the ADK version of every file, discarding local edits and conflicts
 
 |`--json`
 |Machine-readable output
@@ -72,7 +72,7 @@ The merge base is the template at the kit commit of the previous apply. When the
 |Applied, or already current
 
 |1
-|No `aidev.yaml`, or the kit has no templates
+|No `aidev.yaml`, or the ADK has no templates
 
 |2
 |Conflicts remain (new ones, or markers from a previous apply not yet resolved)
@@ -120,7 +120,7 @@ With a conflict (exit code 2):
 
 Updates the LLM Wiki to match the HEAD of the current branch and commits `.aidev/knowledge/` as its own commit. Only the files changed since the last run and the files left unfinished last time are taken (the delta); pages of removed files are deleted, the inventory and manifest are written, and then the knowledge-builder agent is started once per batch to write the prose. When everything is done, only `.aidev/knowledge/` (and `.aidev/.gitignore`) is committed as `aidev: update Wiki for <sha12>`.
 
-If the generation targets (`package.include` in `aidev.yaml`) have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the kit's configuration files are dirty.
+If the generation targets (`package.include` in `aidev.yaml`) have uncommitted changes, it lists those files and stops. Commit or stash them first. It does not matter if `.aidev/knowledge/` or the ADK's configuration files are dirty.
 
 While prose is still pending, the exit code is 1 and nothing is committed. The remaining batches are written to `.aidev/knowledge/.cache/plan.json`. Run the same command again to continue from the checkpoint.
 
@@ -281,7 +281,7 @@ aidev sync wiki --abort
 === See also
 
 * xref:knowledge[LLM Wiki] — reading the state, what happens after a commit, resuming
-* xref:cli-update[aidev update] — updating the kit itself
-* xref:maintain-update[Updating the kit]
+* xref:cli-update[aidev update] — updating the ADK itself
+* xref:maintain-update[Updating the ADK]
 * xref:cli-hook[aidev hook] — `after-bash` and `session-stop`
 * xref:configuration[aidev.yaml reference] — `package.include`, `knowledge.*`, `sync.*`, `tools.agent_model`

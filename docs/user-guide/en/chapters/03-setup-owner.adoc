@@ -14,7 +14,7 @@ This chapter is the one-time adoption. What you keep doing afterwards is in xref
 
 === Procedure
 
-. Create a working branch at the PKG root.
+. Create a working branch at the PKG root. `<pkg>` is the path of the PKG clone listed in the prerequisites.
 +
 [source,bash]
 ----
@@ -48,7 +48,7 @@ aidev init
 +
 After the questions, the configuration files are written and a summary of the policy is shown with `Place this policy now? (y/N)`. `y` places the policy. `N` writes a candidate file that you approve in the next step. At the end, `next steps` lists the remaining steps (approving the policy, building the Wiki, committing, the PR). `aidev init` does not build the Wiki.
 +
-* `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` or similar already contains files that differ from the kit templates. Save their contents somewhere, then run `aidev init --force`.
+* `✗ N file(s) already exist here and differ from the ADK templates` → `.claude/` or similar already contains files that differ from the ADK templates. Save their contents somewhere, then run `aidev init --force`.
 * `run "aidev init" at the repository root` → move to the root and run it there.
 
 . Approve the policy (only if you answered `N` in step 2). Read the candidate and place it once you agree with it.
@@ -120,7 +120,7 @@ Without this, a change that widens what the AI may write, or one that removes th
 
 CI does two things: it stops the merge of a PR with `aidev check`, and at night it brings the Wiki of `main` up to date. In both cases a human does the merging.
 
-Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and change `AIDEV_KIT_URL` to the URL of your central kit. CI clones the kit and runs `node cli/bin/aidev.js` directly, so `aidev` does not need to be installed.
+Copy the Azure Pipelines examples from the ADK's `pipelines/` into the PKG and change `AIDEV_KIT_URL` to the URL of your central ADK. CI clones the ADK and runs `node cli/bin/aidev.js` directly, so `aidev` does not need to be installed.
 
 [%autowidth.stretch,options="header"]
 |===

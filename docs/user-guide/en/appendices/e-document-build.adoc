@@ -21,7 +21,7 @@ docs/user-guide/
 
 === Build and check
 
-Run from the root of the kit repository.
+Run from the root of the ADK repository.
 
 [source,bash]
 ----

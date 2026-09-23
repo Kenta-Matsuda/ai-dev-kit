@@ -12,13 +12,13 @@ aidev check [--strict] [--no-remote] [--json]
 
 === Description
 
-It shows the PKG name, hosting, tools and kit version; the Wiki state (the three commits `head` / `knowledge` / `tracking` and a one-line verdict); the number of Wiki pages and of pages without prose; the state of the tool configuration (kit applied, number of edited files, conflicts, missing hooks); whether the policy is present; the number of workflows and how many are approved; hand edits; and a publish in progress.
+It shows the PKG name, hosting, tools and ADK version; the Wiki state (the three commits `head` / `knowledge` / `tracking` and a one-line verdict); the number of Wiki pages and of pages without prose; the state of the tool configuration (ADK applied, number of edited files, conflicts, missing hooks); whether the policy is present; the number of workflows and how many are approved; hand edits; and a publish in progress.
 
 It then turns the kind of problem found into the exit code. The order is configuration and workflows (1) → drift (2) → policy (3) → Wiki (4); the code of the first problem found is returned.
 
 In a directory without `aidev.yaml`, and in an ejected repository, it says so and exits 0. Warnings (the Wiki is behind HEAD, prose not yet generated, `main` has moved ahead) stay at 0; with `--strict` they become 2.
 
-Diagnosing the machine itself (Node.js, git, the kit, the AI tools) is xref:cli-doctor[`aidev doctor`].
+Diagnosing the machine itself (Node.js, git, the ADK, the AI tools) is xref:cli-doctor[`aidev doctor`].
 
 === Options
 
@@ -49,7 +49,7 @@ Diagnosing the machine itself (Node.js, git, the kit, the AI tools) is xref:cli-
 |`aidev.yaml` cannot be read. A workflow in `.aidev/workflows/` fails validation
 
 |2
-|`.aidev/materialized.json` is missing, conflict markers from `aidev sync tools` remain, or the kit's hooks are gone from `.claude/settings.json`. A tool configuration file merely edited by the team passes. Warnings with `--strict`
+|`.aidev/materialized.json` is missing, conflict markers from `aidev sync tools` remain, or the ADK's hooks are gone from `.claude/settings.json`. A tool configuration file merely edited by the team passes. Warnings with `--strict`
 
 |3
 |`.aidev/policy.yaml` is missing or cannot be read

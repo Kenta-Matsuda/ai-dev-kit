@@ -5,7 +5,7 @@ AI に開発作業を任せる入口は workflow だけです。「何をさせ�
 
 役割ごとの分担です。
 
-[%autowidth.stretch,options="header"]
+[cols="1,3,2",options="header"]
 |===
 |役割 |作業 |参照先
 
@@ -24,7 +24,7 @@ AI に開発作業を任せる入口は workflow だけです。「何をさせ�
 
 **実行した Developer は成果物に責任を負いません。** 責任は、定義をレビューした人と、成果物の PR をレビューする人にあります。
 
-ループ・再試行・コマンド実行・コミット・PR 作成といった実行の仕組みは kit が持ち、定義には書けません。定義で表せないことは kit への要望です。
+ループ・再試行・コマンド実行・コミット・PR 作成といった実行の仕組みは ADK が持ち、定義には書けません。定義で表せないことは ADK への要望です。
 
 [[workflows-flow]]
 === 全体フロー
@@ -68,15 +68,15 @@ flowchart LR
 
 [source,bash]
 ----
-aidev create workflow e2e-tests                            # 空の雛形
-aidev create workflow e2e-tests --describe "tests/e2e/ に主要画面の Playwright テストを書いて PR にする"
+aidev create workflow write-tests                          # 空の雛形
+aidev create workflow write-tests --describe "指定した対象のテストを既存の書き方で書き、通してから PR にする"
 ----
 
 `--describe` は workflow-creator agent を起動して YAML を書かせます。足りない agent・skill があれば、workflow-creator が agents-creator をサブエージェントとして起動し、`.aidev/agents/`・`.aidev/skills/` に書かせます。外部システム（Work Item、チケット、DB）が要るときは、PKG の `.mcp.json` に足す MCP server の定義案を報告に書きます（追加は人が行います）。書いたあと CLI が検証し、結果と次の手順を表示します。
 
 定義は 2 か所に分かれます。
 
-[%autowidth.stretch,options="header"]
+[cols="1,3,3",options="header"]
 |===
 |書く場所 |決めること |例
 
@@ -148,7 +148,7 @@ cost:
 |そのステップの agent が書けるパス（glob）。**PKG のソースを AI が書けるのは、承認済み workflow の、いま動いているステップのこの範囲だけです。** `protected`（`.claude/**`、`.aidev/policy.yaml` など）と `secrets_paths` は書けません。`[]` なら何も書けません（調査だけのステップ）。
 
 |command step
-|`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（kit が実行するコマンドなので、書き込みの検問はかかりません）。
+|`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
 
 |`kind: pull-request`
 |各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` 任意。1 つまでです。
@@ -164,7 +164,7 @@ cost:
 
 `until` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。
 
-各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。代わりに、**前の agent step の最終報告を、kit が後の agent step の指示に入れます**。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
+各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。代わりに、**前の agent step の最終報告を、ADK が後の agent step の指示に入れます**。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
 
 安全弁は省略できず、上げられません。時間の上限（60 分）、step ごとの再試行回数（10 回）、費用の上限（必須）、同じ失敗の検知（`until` の出力が 2 回続けて同じなら停止）、agent 1 回の起動は `timeout_ms` と残り時間の短い方で打ち切りです。
 
@@ -213,7 +213,7 @@ aidev list workflows
 
 ----
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,4",options="header"]
 |===
 |状態 |意味 |対処
 
@@ -324,7 +324,7 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 
 困っていることから、直す場所を探します。
 
-[%autowidth.stretch,options="header"]
+[cols="2,1,3",options="header"]
 |===
 |困っていること |直す場所 |直し方
 
@@ -400,11 +400,11 @@ aidev submit workflow write-tests
 
 agent は AI ツールに渡す役割の定義（Markdown）、skill は手順書です。workflow のステップは agent を名前で参照し、agent は自分が使う skill を名前で参照します。
 
-kit が同梱するのは **仕組み** だけです。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）の 4 つです。
+ADK が同梱するのは **仕組み** だけです。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）の 4 つです。
 
-開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。kit は同梱しません。 Engineering Manager が `aidev create workflow <name> --describe "<やりたいこと>"` で作ります。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。kit はそれを配布も起動もしません。
+開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。ADK は同梱しません。 Engineering Manager が `aidev create workflow <name> --describe "<やりたいこと>"` で作ります。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。ADK はそれを配布も起動もしません。
 
-PKG 固有の agent・skill は `.aidev/agents/<name>.md`、`.aidev/skills/<name>/SKILL.md` に置きます。同名の kit 同梱のものより優先されます。作り方は 3 つです。
+PKG 固有の agent・skill は `.aidev/agents/<name>.md`、`.aidev/skills/<name>/SKILL.md` に置きます。同名の ADK 同梱のものより優先されます。作り方は 3 つです。
 
 * `aidev create agent <name>` / `aidev create skill <name>` で雛形を書き、編集する。`agent` は `--describe "<text>"` で agents-creator に書かせることもできる
 * `aidev create workflow --describe` で、workflow-creator が必要な agent・skill を agents-creator に書かせる
@@ -429,7 +429,7 @@ model: inherit
 |項目 |意味
 
 |`skills`
-|その agent の指示に本文が入る skill。PKG の `.aidev/skills/<name>/SKILL.md` を先に探し、無ければ kit 同梱のものを使います。
+|その agent の指示に本文が入る skill。PKG の `.aidev/skills/<name>/SKILL.md` を先に探し、無ければ ADK 同梱のものを使います。
 
 |`tools`
 |Claude Code で使える組み込みツール（`Read`、`Edit`、`Bash` など）。ここに無いツールは渡されません。省略するとツールの既定のすべてです。
@@ -439,7 +439,7 @@ model: inherit
 |===
 
 * `tools` や `mcp` を書いた agent は、Claude Code でしか動きません。Copilot CLI などは、渡すツールを絞れないためです。
-* 外部システムに触る agent には `Bash` を渡さないでください。`Bash` があれば MCP を通さずに外部へ出られるので、`mcp` で絞っても意味がなくなります。テストの実行は agent ではなく、`until` で kit が行います。
+* 外部システムに触る agent には `Bash` を渡さないでください。`Bash` があれば MCP を通さずに外部へ出られるので、`mcp` で絞っても意味がなくなります。テストの実行は agent ではなく、`until` で ADK が行います。
 * 権限の違う仕事は、別の agent にします（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。
 
 一覧は `aidev list agents` / `aidev list skills`、削除は `aidev remove agent|skill <name>`（workflow から参照されているものは拒否）です。どれも `aidev submit workflow` で workflow と一緒に PR に入り、レビューされ、`main` にあるものだけが workflow から使われます。

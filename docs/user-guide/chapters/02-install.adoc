@@ -12,14 +12,21 @@
 
 === 手順
 
-. kit を clone します。この clone が `aidev` の実体になるので、消したり動かしたりしないでください。ブランチは `main` のままにします。
+. ADK を clone します。この clone が `aidev` の実体になるので、消したり動かしたりしないでください。ブランチは `main` のままにします。
 +
+.Windows（PowerShell）
+[source,powershell]
+----
+git clone <kit-url> C:\tools\ai-dev-kit
+----
++
+.macOS / Linux / WSL
 [source,bash]
 ----
 git clone <kit-url> ~/ai-dev-kit
 ----
 +
-Windows では `C:\tools\ai-dev-kit` のような短いパスをおすすめします。
+以降の手順はこのパスを前提にします。別の場所に clone したときは読み替えてください。
 
 . installer を実行します。
 +
@@ -40,7 +47,7 @@ cd ~/ai-dev-kit
 installer はファイルをコピーせず、clone を指す起動スクリプトを置きます（Windows: `%LOCALAPPDATA%\ai-dev-kit\bin`、POSIX: `~/.local/bin`）。最後に `next: aidev doctor` と出れば成功です。
 +
 * `node not found` / `too old` → Node.js {node-min-version} 以上を入れて再実行します。
-* `this looks like a package that uses ai-dev-kit, not the kit itself` → PKG の中で実行しています。kit の clone で実行します。
+* `this looks like a package that uses ai-dev-kit, not the kit itself` → PKG の中で実行しています。ADK の clone で実行します。
 * `~/.local/bin is not on your PATH` → 表示された `export PATH=...` をシェルの profile に追加します。
 
 . **新しいターミナルを開き**、動作を確認します。
@@ -77,7 +84,7 @@ aidev uninstall --dry-run   # 消すものを確認する
 aidev uninstall --yes
 ----
 
-起動スクリプトと `AIDEV_HOME` を消します。kit の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
+起動スクリプトと `AIDEV_HOME` を消します。ADK の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
 
 === 関連情報
 

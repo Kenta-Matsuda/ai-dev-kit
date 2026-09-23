@@ -7,7 +7,7 @@ AI が作った変更を取り込むかどうかを決めるのは人間です�
 
 PR は 4 種類あり、種類ごとに確認する観点が異なります。
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,2",options="header"]
 |===
 |PR の種類 |作成者 |参照先
 
@@ -74,7 +74,7 @@ aidev run workflow write-tests --dry-run
 
 ==== 確認すること
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,4",options="header"]
 |===
 |見る所 |問題がない状態 |危ないサイン
 

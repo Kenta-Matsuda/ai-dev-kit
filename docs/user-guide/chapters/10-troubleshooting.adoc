@@ -11,16 +11,16 @@
 |症状 |対処
 
 |`aidev` が見つからない
-|新しいターミナルを開きます。POSIX では `export PATH="$HOME/.local/bin:$PATH"` を profile に追加します。それでも駄目なら installer を再実行します。
+|新しいターミナルを開きます。それでも駄目なら、起動スクリプトのディレクトリが PATH にあるか確認します。Windows は `%LOCALAPPDATA%\ai-dev-kit\bin`（ユーザー環境変数の PATH に追加）、POSIX は `export PATH="$HOME/.local/bin:$PATH"` を profile に追加します。直らなければ installer を再実行します。
 
 |`node not found` / `node vXX is too old`
 |Node.js {node-min-version} 以上を入れて installer を再実行します。
 
 |`this looks like a package that uses ai-dev-kit, not the kit itself`
-|PKG の中で installer を実行しています。kit の clone で実行します。
+|PKG の中で installer を実行しています。ADK の clone で実行します。
 
 |`… checkout must be on branch main`
-|kit の clone で `git switch main` してから実行します。
+|ADK の clone で `git switch main` してから実行します。
 
 |`aidev doctor` で +
 `⚠ claude not found on PATH` / `is too old`
@@ -55,8 +55,8 @@
 |`tool config  CONFLICTS in N file(s)`
 |`aidev sync tools` の衝突が未解消です。該当ファイルのマーカー（`<<<<<<<` / `=======` / `>>>>>>>`）を解消し、`aidev sync tools` を実行して記録を更新し、コミットします。
 
-|`tool config  kit hooks missing …`
-|kit の hooks が消えています。`aidev sync tools --force` で kit 版に戻すか、hooks を手で戻します。
+|`tool config  ADK hooks missing …`
+|ADK の hooks が消えています。`aidev sync tools --force` で ADK 版に戻すか、hooks を手で戻します。
 
 |`tool config  not recorded — run "aidev init"`
 |`aidev init` を実行します。
@@ -86,8 +86,8 @@
 |`workflow.yaml` の表示された項目を直し、`aidev submit workflow` で提出し直します。
 
 |2
-|`tool configuration file(s) carry unresolved conflict markers` / `the kit's hooks are missing`
-|衝突マーカーを解消して `aidev sync tools` を実行するか、`aidev sync tools --force` で kit 版にします。チームの編集そのものは 2 になりません。
+|`tool configuration file(s) carry unresolved conflict markers` / `the ADK's hooks are missing`
+|衝突マーカーを解消して `aidev sync tools` を実行するか、`aidev sync tools --force` で ADK 版にします。チームの編集そのものは 2 になりません。
 
 |2
 |`.aidev/materialized.json is missing`
@@ -135,7 +135,7 @@
 |同じコマンドで再開します。繰り返すなら `--agent-batch-size 10` を付けます。
 
 |`✗ knowledge-builder made no Wiki progress: 0/N`
-|続く `Claude Code result:` を読みます。`permission denial(s)` があれば `.claude/settings.json` の deny 設定を確認し、必要なら `aidev sync tools --force` で kit 版に戻します。
+|続く `Claude Code result:` を読みます。`permission denial(s)` があれば `.claude/settings.json` の deny 設定を確認し、必要なら `aidev sync tools --force` で ADK 版に戻します。
 
 |`⚠ N completion report(s) were rejected`
 |同じコマンドで再実行します。続くなら `--full`。
@@ -208,7 +208,7 @@
 |実行中に定義が変わったか、`origin/main` が動きました。実行を止め、`git fetch origin` と `aidev list workflows` で状態を確かめます。
 
 |`… is protected (.claude/**)`
-|正常です。kit のファイルは kit への PR で変えます。
+|正常です。ADK のファイルは ADK への PR で変えます。
 
 |`Wiki consistency error … All writes are blocked`
 |Wiki が無いか読めません。`aidev sync wiki`（または `git pull` で受け取る）。
@@ -243,7 +243,7 @@
 |`aidev list workflows` が `invalid: …`
 |`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`cost.max_usd` が無い、知らない項目がある、上限超過、`until` に引用符やパイプ、`protected` のパスなど）を直します。
 
-|`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
+|`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |agent 名の誤りか、PKG 固有の agent が未コミットです。名前を直すか、`.aidev/agents/<name>.md` を同じ PR に入れます。
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
@@ -275,7 +275,7 @@
 |===
 
 [[troubleshooting-update]]
-=== kit の更新後
+=== ADK の更新後
 
 [%autowidth.stretch,options="header"]
 |===
@@ -289,13 +289,13 @@
 
 |`✗ N file(s) need your attention` +
 `conflict markers were written`
-|チームの編集と kit の変更が同じ箇所です。マーカーを解消して `aidev sync tools` を実行し、コミットします。kit 版にしてよければ `aidev sync tools --force` です。
+|チームの編集と ADK の変更が同じ箇所です。マーカーを解消して `aidev sync tools` を実行し、コミットします。ADK 版にしてよければ `aidev sync tools --force` です。
 
 |`edited locally and the template it was based on …`
-|kit の clone に前回のコミットがありません（shallow clone など）。kit の clone で `git fetch --unshallow` するか、手で直すか `aidev sync tools --force` にします。
+|ADK の clone に前回のコミットがありません（shallow clone など）。ADK の clone で `git fetch --unshallow` するか、手で直すか `aidev sync tools --force` にします。
 
-|`✗ the kit checkout has diverged from origin/main`
-|kit の clone にローカルコミットがあります。捨ててよければ `git reset --hard origin/main`。
+|`✗ the ADK checkout has diverged from origin/main`
+|ADK の clone にローカルコミットがあります。捨ててよければ `git reset --hard origin/main`。
 |===
 
 [[troubleshooting-windows]]

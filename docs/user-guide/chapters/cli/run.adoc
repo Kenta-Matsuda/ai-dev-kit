@@ -48,7 +48,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 |すべての step を終えた。`--dry-run` で承認済みで、起動前に止まる問題が無かった
 
 |1
-|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも kit にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）
 |===
 
 === 例

@@ -12,7 +12,7 @@ aidev doctor [--package <name|path>] [--json]
 
 === Description
 
-It reports Node.js, the platform, git, the version of `aidev` and where the kit lives, the kit checkout and whether a newer kit exists, `AIDEV_HOME`, the registered PKGs (count and list), whether each supported AI tool (`claude`, `copilot`, `codex`, `kiro`) is present and which version, and the proxy. The result is the same in whatever directory you run it.
+It reports Node.js, the platform, git, the version of `aidev` and where the ADK lives, the ADK checkout and whether a newer ADK exists, `AIDEV_HOME`, the registered PKGs (count and list), whether each supported AI tool (`claude`, `copilot`, `codex`, `kiro`) is present and which version, and the proxy. The result is the same in whatever directory you run it.
 
 Each line is `✓` (ok), `⚠` (warn) or `✗` (fail). An AI tool that is not found is `⚠`. With `--package`, the rows `package`, `aidev.yaml` (schema), `git repository` (branch), `remote origin`, `policy`, `agent tool` (`tools.agent` and model), `env <auth_env>` for Azure DevOps, `remote reachability`, `Wiki state` and `workflows` (count, approved, invalid) follow.
 

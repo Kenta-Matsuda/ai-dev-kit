@@ -15,12 +15,12 @@ aidev init [options]
 PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 つの質問（tools、Wiki の生成対象、秘密パス、hosting）をして `aidev.yaml` を書きます。既にあれば何も聞きません。どちらの場合も次を行います。
 
 * `.aidev/.gitignore` を書く
-* kit のテンプレートから、選んだツールの設定ファイル（`claude` なら `.claude/**`、`CLAUDE.md`、`.mcp.json`）を置き、`.aidev/materialized.json` にハッシュを記録する。既に記録がある clone では置かず、状態を報告するだけ
+* ADK のテンプレートから、選んだツールの設定ファイル（`claude` なら `.claude/**`、`CLAUDE.md`、`.mcp.json`）を置き、`.aidev/materialized.json` にハッシュを記録する。既に記録がある clone では置かず、状態を報告するだけ
 * この clone を端末に登録する
 * `.aidev/policy.yaml` が無ければ候補を表示し、`Place this policy now? (y/N)` と尋ねる
 * Wiki の有無を報告する。初回なら `next steps` として残りの手順（`aidev create policy --approve`、`aidev sync wiki --no-commit`、`git add … && git commit`、PR）を表示する。2 人目以降なら `ready. Run "aidev check" any time …` と表示する
 
-初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で kit 版に置き換えます。
+初回に既存の `.claude/` などがあってテンプレートと違う場合はマージせず、そのファイルを残して終了コード 2 で止まります。`--force` で ADK 版に置き換えます。
 
 質問は stdin が端末で、`--yes` も `--json` も無いときだけ行います。
 
@@ -88,7 +88,7 @@ PKG の clone のルートで実行します。`aidev.yaml` が無ければ 4 �
 |git リポジトリでない、コミットが無い、サブディレクトリで実行した、Azure DevOps の組織などが決まらない
 
 |2
-|初回に、既存の `.claude/**`、`CLAUDE.md`、`.mcp.json` などが kit のテンプレートと違う（`--force` で置き換え）
+|初回に、既存の `.claude/**`、`CLAUDE.md`、`.mcp.json` などが ADK のテンプレートと違う（`--force` で置き換え）
 |===
 
 === 例
@@ -106,7 +106,7 @@ aidev init
 
 ℹ next steps (you are setting this package up for your team):
     1. aidev sync wiki --no-commit          # builds (or continues) the LLM Wiki
-    2. git add aidev.yaml .aidev .claude CLAUDE.md .mcp.json && git commit
+    2. git add aidev.yaml .aidev .claude CLAUDE.md && git commit
     3. open a pull request so everyone gets the same setup
 ----
 

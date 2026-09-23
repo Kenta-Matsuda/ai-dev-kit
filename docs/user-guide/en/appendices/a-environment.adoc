@@ -12,10 +12,10 @@ Never write values into files. Set them in your shell profile, as user environme
 |The Azure DevOps PAT. Used by `aidev sync wiki` on the tracking branch and `aidev submit workflow` (opening pull requests). An MCP server the package sets up in `.mcp.json` can use the same variable. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
 
 |`AIDEV_HOME`
-|Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the kit update-check cache.
+|Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the ADK update-check cache.
 
 |`AIDEV_NO_UPDATE_CHECK`
-|When set, the check for a newer kit is skipped. Set it to `1` in CI.
+|When set, the check for a newer ADK is skipped. Set it to `1` in CI.
 
 |`AIDEV_CLAUDE_BIN`
 |Points directly at the Claude Code executable. Normally unset.
@@ -44,7 +44,7 @@ Never write values into files. Set them in your shell profile, as user environme
 
 |`AIDEV_KIT_URL` / `AIDEV_KIT_REF` +
 `AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
-|Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly Wiki update.
+|Pipeline variables used by `pipelines/*.yml`: the central ADK URL and branch, and the bot name and e-mail for the nightly Wiki update.
 
 |`ANTHROPIC_API_KEY`
 |The API key `pipelines/azure-pipelines-wiki.yml` hands to Claude Code. Not needed on a Developer's machine, where Claude Code's own login is used.

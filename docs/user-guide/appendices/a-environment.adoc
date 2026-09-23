@@ -12,10 +12,10 @@
 |Azure DevOps の PAT。tracking branch 上の `aidev sync wiki`（PR 作成）と `aidev submit workflow` が使います。PKG が `.mcp.json` に用意する MCP server も同じ変数を使えます。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
 
 |`AIDEV_HOME`
-|端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と kit 更新確認のキャッシュを置きます。
+|端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と ADK 更新確認のキャッシュを置きます。
 
 |`AIDEV_NO_UPDATE_CHECK`
-|設定すると新しい kit の確認をしません。CI では `1` にします。
+|設定すると新しい ADK の確認をしません。CI では `1` にします。
 
 |`AIDEV_CLAUDE_BIN`
 |Claude Code の実行ファイルを直接指定します。通常は未設定です。
@@ -44,7 +44,7 @@
 
 |`AIDEV_KIT_URL` / `AIDEV_KIT_REF` +
 `AIDEV_BOT_NAME` / `AIDEV_BOT_EMAIL`
-|`pipelines/*.yml` が使う pipeline 変数。中央 kit の URL とブランチ、夜間の Wiki 更新の bot の名前とメール。
+|`pipelines/*.yml` が使う pipeline 変数。中央 ADK の URL とブランチ、夜間の Wiki 更新の bot の名前とメール。
 
 |`ANTHROPIC_API_KEY`
 |`pipelines/azure-pipelines-wiki.yml` が Claude Code に渡す API キー。開発者の端末では Claude Code 自身の認証を使うので不要です。

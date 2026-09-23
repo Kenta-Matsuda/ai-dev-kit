@@ -7,7 +7,7 @@ A human decides what gets taken in. {project-name} opens PRs; it never merges th
 
 There are four kinds of pull request, each with its own review criteria.
 
-[%autowidth.stretch,options="header"]
+[cols="1,1,2",options="header"]
 |===
 |Pull request type |Created by |Reference
 
@@ -74,7 +74,7 @@ aidev run workflow write-tests --dry-run
 
 ==== What to check
 
-[%autowidth.stretch,options="header"]
+[cols="1,2,4",options="header"]
 |===
 |Where to look |Fine |Warning sign
 

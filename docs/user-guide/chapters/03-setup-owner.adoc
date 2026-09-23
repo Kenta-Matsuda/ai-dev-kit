@@ -14,7 +14,7 @@ PKG に {project-name} を初めて導入し、チーム共通の設定・AI の
 
 === 手順
 
-. PKG のルートで作業ブランチを切ります。
+. PKG のルートで作業ブランチを切ります。`<pkg>` は前提条件に挙げた PKG の clone のパスです。
 +
 [source,bash]
 ----
@@ -48,7 +48,7 @@ aidev init
 +
 質問のあと、設定ファイルが書かれ、policy の要約と `Place this policy now? (y/N)` が表示されます。`y` で policy が置かれます。`N` なら候補ファイルが書かれ、次の手順で承認します。最後に `next steps` として、残りの手順（policy の承認、Wiki の生成、コミット、PR）が表示されます。`aidev init` は Wiki を生成しません。
 +
-* `✗ N file(s) already exist here and differ from the kit templates` → `.claude/` などに kit のテンプレートと違う既存ファイルがあります。内容を退避してから `aidev init --force` を実行します。
+* `✗ N file(s) already exist here and differ from the ADK templates` → `.claude/` などに ADK のテンプレートと違う既存ファイルがあります。内容を退避してから `aidev init --force` を実行します。
 * `run "aidev init" at the repository root` → ルートに移動して実行します。
 
 . policy を承認します（手順 2 で `N` にした場合だけ）。候補を読み、納得したら置きます。
@@ -120,7 +120,7 @@ workflow の承認は「`main` にマージされたこと」です。つまり 
 
 CI が行うのは 2 つです。PR ごとに `aidev check` でマージを止めることと、夜間に `main` の Wiki を追従させることです。いずれもマージは人間が行います。
 
-kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 kit の URL に変えて使います。CI は kit を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。
+ADK の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 ADK の URL に変えて使います。CI は ADK を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。
 
 [%autowidth.stretch,options="header"]
 |===

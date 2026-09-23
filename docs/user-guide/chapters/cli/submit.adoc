@@ -42,7 +42,7 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 |PR を作った（または既に承認済み）。`--dry-run`
 
 |1
-|`workflow` 以外の object、名前が無い。定義が不正、agent か skill が PKG にも kit にも無い。参照するファイルが手元に無い。ブランチ作成・コミット・push の失敗
+|`workflow` 以外の object、名前が無い。定義が不正、agent か skill が PKG にも ADK にも無い。参照するファイルが手元に無い。ブランチ作成・コミット・push の失敗
 |===
 
 === 例

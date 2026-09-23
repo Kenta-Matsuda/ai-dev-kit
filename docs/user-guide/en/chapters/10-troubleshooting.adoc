@@ -11,16 +11,16 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Symptom |What to do
 
 |`aidev` is not found
-|Open a new terminal. On POSIX, add `export PATH="$HOME/.local/bin:$PATH"` to your profile. If that does not help, run the installer again.
+|Open a new terminal. If that does not help, check that the launcher directory is on your PATH: on Windows `%LOCALAPPDATA%\ai-dev-kit\bin` (add it to the user PATH), on POSIX add `export PATH="$HOME/.local/bin:$PATH"` to your profile. If it still does not work, run the installer again.
 
 |`node not found` / `node vXX is too old`
 |Install Node.js {node-min-version} or newer and run the installer again.
 
 |`this looks like a package that uses ai-dev-kit, not the kit itself`
-|You ran the installer inside a PKG. Run it in the kit clone.
+|You ran the installer inside a PKG. Run it in the ADK clone.
 
 |`… checkout must be on branch main`
-|Run `git switch main` in the kit clone, then try again.
+|Run `git switch main` in the ADK clone, then try again.
 
 |`aidev doctor` shows +
 `⚠ claude not found on PATH` / `is too old`
@@ -55,8 +55,8 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |`tool config  CONFLICTS in N file(s)`
 |An `aidev sync tools` conflict is unresolved. Resolve the markers (`<<<<<<<` / `=======` / `>>>>>>>`) in those files, run `aidev sync tools` to update the record, and commit.
 
-|`tool config  kit hooks missing …`
-|The kit's hooks are gone. Restore them by hand or take the kit version with `aidev sync tools --force`.
+|`tool config  ADK hooks missing …`
+|The ADK's hooks are gone. Restore them by hand or take the ADK version with `aidev sync tools --force`.
 
 |`tool config  not recorded — run "aidev init"`
 |Run `aidev init`.
@@ -86,8 +86,8 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Fix the items shown in `workflow.yaml` and submit it again with `aidev submit workflow`.
 
 |2
-|`tool configuration file(s) carry unresolved conflict markers` / `the kit's hooks are missing`
-|Resolve the conflict markers and run `aidev sync tools`, or take the kit version with `aidev sync tools --force`. The team's own edits never cause exit 2.
+|`tool configuration file(s) carry unresolved conflict markers` / `the ADK's hooks are missing`
+|Resolve the conflict markers and run `aidev sync tools`, or take the ADK version with `aidev sync tools --force`. The team's own edits never cause exit 2.
 
 |2
 |`.aidev/materialized.json is missing`
@@ -135,7 +135,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Run the same command again. If it keeps happening, add `--agent-batch-size 10`.
 
 |`✗ knowledge-builder made no Wiki progress: 0/N`
-|Read the `Claude Code result:` lines that follow. If they mention `permission denial(s)`, review the deny rules in `.claude/settings.json` and, if needed, take the kit version with `aidev sync tools --force`.
+|Read the `Claude Code result:` lines that follow. If they mention `permission denial(s)`, review the deny rules in `.claude/settings.json` and, if needed, take the ADK version with `aidev sync tools --force`.
 
 |`⚠ N completion report(s) were rejected`
 |Run the same command again. If it persists, use `--full`.
@@ -208,7 +208,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |The definition changed during the run, or `origin/main` moved. Stop the run and check the state with `git fetch origin` and `aidev list workflows`.
 
 |`… is protected (.claude/**)`
-|Normal. Kit files are changed through a PR to the kit.
+|Normal. ADK files are changed through a PR to the ADK.
 
 |`Wiki consistency error … All writes are blocked`
 |The Wiki is missing or unreadable. Run `aidev sync wiki` (or receive it with `git pull`).
@@ -243,7 +243,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |`aidev list workflows` shows `invalid: …`
 |`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `cost.max_usd`, an unknown key, a limit exceeded, quotes or pipes in `until`, a `protected` path, and so on).
 
-|`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
+|`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
@@ -275,7 +275,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |===
 
 [[troubleshooting-update]]
-=== After a kit update
+=== After an ADK update
 
 [%autowidth.stretch,options="header"]
 |===
@@ -289,13 +289,13 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 
 |`✗ N file(s) need your attention` +
 `conflict markers were written`
-|The team's edit and the kit's change touch the same lines. Resolve the markers, run `aidev sync tools`, and commit. If the kit version is fine, run `aidev sync tools --force`.
+|The team's edit and the ADK's change touch the same lines. Resolve the markers, run `aidev sync tools`, and commit. If the ADK version is fine, run `aidev sync tools --force`.
 
 |`edited locally and the template it was based on …`
-|The kit clone lacks the previous commit (a shallow clone, for instance). Run `git fetch --unshallow` in the kit clone, fix the file by hand, or run `aidev sync tools --force`.
+|The ADK clone lacks the previous commit (a shallow clone, for instance). Run `git fetch --unshallow` in the ADK clone, fix the file by hand, or run `aidev sync tools --force`.
 
-|`✗ the kit checkout has diverged from origin/main`
-|The kit clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
+|`✗ the ADK checkout has diverged from origin/main`
+|The ADK clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
 |===
 
 [[troubleshooting-windows]]

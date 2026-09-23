@@ -7,11 +7,11 @@
 |===
 |作業 |実施時期
 
-|xref:maintain-update[kit の更新]
-|新しい kit があると通知されたとき
+|xref:maintain-update[ADK の更新]
+|新しい ADK があると通知されたとき
 
 |xref:maintain-sync-tools[テンプレートの取り込み]
-|kit を更新したあと
+|ADK を更新したあと
 
 |xref:maintain-settings[設定の変更]
 |必要が生じたとき
@@ -21,9 +21,9 @@
 |===
 
 [[maintain-update]]
-=== kit の更新
+=== ADK の更新
 
-新しい kit があると、PKG でコマンドを実行したときに次のように表示されます。これは Developer の端末にも出ます。
+新しい ADK があると、`aidev` コマンドを実行したときに次のように表示されます。これは Developer の端末にも出ます。
 
 [source,text]
 ----
@@ -31,7 +31,7 @@
   Update now, before running this command? (y/N):
 ----
 
-`y` で kit（CLI とテンプレート）を更新します。**PKG のファイルはこの時点では変わりません。** 更新できたら、実行しようとしたコマンドを新しい CLI でそのまま実行し直します。
+`y` で ADK（CLI とテンプレート）を更新します。**PKG のファイルはこの時点では変わりません。** 更新できたら、実行しようとしたコマンドを新しい CLI でそのまま実行し直します。
 
 [source,text]
 ----
@@ -44,7 +44,7 @@
 [[maintain-sync-tools]]
 === テンプレートの取り込み
 
-kit を更新したら、**Engineering Manager が** 都合のよいときに PKG のルートで実行し、PR にします。Developer はマージ後の `git pull` で同じ状態になります。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは kit 側の変更とマージされます。
+ADK を更新したら、**Engineering Manager が** 都合のよいときに PKG のルートで実行し、PR にします。Developer はマージ後の `git pull` で同じ状態になります。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは ADK 側の変更とマージされます。
 
 [source,bash]
 ----
@@ -60,7 +60,7 @@ aidev sync tools
     Review with "git diff", then commit so your team receives the update.
 ----
 
-同じ箇所をチームと kit の両方が変えていた場合は、git と同じ衝突マーカーがファイルに書かれ、終了コード 2 で止まります。
+同じ箇所をチームと ADK の両方が変えていた場合は、git と同じ衝突マーカーがファイルに書かれ、終了コード 2 で止まります。
 
 [source,text]
 ----
@@ -68,7 +68,7 @@ aidev sync tools
     ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
 ----
 
-マーカーを解消して内容を確定したら、もう一度 `aidev sync tools` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを kit 版に戻したいときは `aidev sync tools --force` です。
+マーカーを解消して内容を確定したら、もう一度 `aidev sync tools` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを ADK 版に戻したいときは `aidev sync tools --force` です。
 
 [[maintain-settings]]
 === 設定の変更
@@ -122,10 +122,10 @@ tools:
 
 ==== 対話セッション
 
-`aidev.yaml` は対話セッションに影響しません。Claude Code のモデルは PKG の `.claude/settings.json` の `"model"`（kit の初期値は `sonnet`）で決まります。チーム全体で変えるならこのファイルを編集して PR にします。編集した内容は `aidev sync tools` でも保持されます。Developer が自分だけ変えるときは `.claude/settings.local.json`（kit の管理外）か、セッション中の `/model` を使います。Copilot などほかのツールのモデルは、そのツール自身の設定で変えます。
+`aidev.yaml` は対話セッションに影響しません。Claude Code のモデルは PKG の `.claude/settings.json` の `"model"`（ADK の初期値は `sonnet`）で決まります。チーム全体で変えるならこのファイルを編集して PR にします。編集した内容は `aidev sync tools` でも保持されます。Developer が自分だけ変えるときは `.claude/settings.local.json`（ADK の管理外）か、セッション中の `/model` を使います。Copilot などほかのツールのモデルは、そのツール自身の設定で変えます。
 
 === 関連情報
 
 * xref:review[レビューとマージ] — 届く PR の見方
 * xref:cli-update[aidev update]、xref:cli-sync-tools[aidev sync tools]、xref:cli-check[aidev check]
-* xref:troubleshooting-update[トラブルシューティング: kit 更新後]
+* xref:troubleshooting-update[トラブルシューティング: ADK 更新後]

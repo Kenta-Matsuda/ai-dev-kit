@@ -94,7 +94,7 @@ references:                     # existing documents handed to agents (text only
 
 |`tools.default`
 |`["claude"]`
-|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/`, `.github/skills/` and `.github/hooks/`; `codex` gets `AGENTS.md` and `.codex/`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the kit templates. The files of a tool you remove are deleted at the next `aidev sync tools` (kept if they were edited).
+|AI tools whose configuration files are placed in the PKG: one or more of `claude`, `copilot`, `codex`, `kiro`. `claude` gets `.claude/`, `CLAUDE.md` and `.mcp.json`; `copilot` gets `.github/copilot-instructions.md`, `.github/agents/`, `.github/skills/` and `.github/hooks/`; `codex` gets `AGENTS.md` and `.codex/`; `kiro` gets `.kiro/steering/` and `.kiro/agents/`, all generated from the ADK templates. The files of a tool you remove are deleted at the next `aidev sync tools` (kept if they were edited).
 
 |`tools.agent`
 |First entry of `default`
