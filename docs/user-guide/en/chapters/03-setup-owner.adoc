@@ -1,22 +1,18 @@
 [[setup-owner]]
-== Package owner steps
+== Adopting aidev in a package
 
-Adopt {project-name} in a PKG for the first time, and share the setup, the policy and the Wiki with the team through a PR. One person does this once per PKG. **This person decides what the AI is allowed to do and what it is asked to do in this PKG.** Members do not decide.
+Adopt {project-name} in a PKG for the first time, and prepare the shared setup, the AI's write permissions and the description of the code for the AI, then hand them to the team. One person does this once per PKG. **This person decides what the AI is allowed to do and what it is asked to do in this PKG.** Developers do not decide.
 
-After adoption, the package owner also turns the following into PRs.
+This chapter is the one-time adoption. What you keep doing afterwards is in xref:maintain[Maintenance].
 
-* Generating the development conventions and defining the work handed to the AI (workflows) → xref:setup-owner-after[After adoption]
-* Taking in new kit templates (`aidev sync tools`) → xref:daily-apply[aidev sync tools]
-* Changing `aidev.yaml` and the policy → xref:configuration[aidev.yaml reference], xref:permissions[Permissions and safety]
+=== Prerequisites
 
-=== What you need
-
-* xref:install[Install aidev on your machine] is done, and `aidev doctor` shows `✓` for `claude`
+* xref:install[Installing aidev] is done, and `aidev doctor` shows `✓` for `claude`
 * A clone of the PKG with at least one commit and `origin` set
 * For Azure DevOps, `AZURE_DEVOPS_PAT` is set
 * Generating the Wiki takes time. Expect a few minutes to fifteen minutes per 20 generation targets
 
-=== Steps
+=== Procedure
 
 . Create a working branch at the PKG root.
 +
@@ -101,34 +97,70 @@ git push -u origin feature/ai-dev-kit
 +
 Make sure `aidev check` says `✓ environment is consistent.` before you push. `.aidev/.gitignore` excludes the temporary files, so `git add .aidev` adds nothing you do not want. If you also chose `copilot` / `codex` / `kiro`, `git add` that tool's configuration files too (`.github/`, `AGENTS.md`, `.kiro/`; see xref:files-and-state[Files in the PKG]).
 
-. Have the PR reviewed and merge it into `main`. The reviewer looks at the setup (`aidev.yaml`, the policy) and the contents of the Wiki. After the merge, members can join with xref:setup-member[Member steps].
+. Have the PR reviewed and merge it into `main`. The reviewer looks at the setup (`aidev.yaml`, the policy) and the contents of the Wiki. After the merge, Developers can join with xref:setup-member[Getting started].
 
-[[setup-owner-after]]
-=== After adoption
+[[setup-owner-guardrails]]
+=== Required configuration
 
-The package owner does all of these and turns them into PRs. Any order.
+Both of the following are configured as part of adoption. Without them, a change that widens what the AI may write can land without review.
+
+[[maintain-branch-policy]]
+==== Branch policy configuration
+
+A workflow is approved by being merged into `main`, so **the branch policy of `main` is what approval really is.** Set up the following.
+
+* Make the `aidev check` pipeline a required build validation
+* Add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/policy.yaml` and `aidev.yaml`
+* Forbid direct pushes to `main`
+
+Without this, a change that widens what the AI may write, or one that removes the write limits, can land without review.
+
+[[maintain-ci]]
+==== CI configuration
+
+CI does two things: it stops the merge of a PR with `aidev check`, and at night it brings the Wiki of `main` up to date. In both cases a human does the merging.
+
+Copy the Azure Pipelines examples from the kit's `pipelines/` into the PKG and change `AIDEV_KIT_URL` to the URL of your central kit. CI clones the kit and runs `node cli/bin/aidev.js` directly, so `aidev` does not need to be installed.
 
 [%autowidth.stretch,options="header"]
 |===
-|What to do |How
+|File |Purpose
 
-|Set the branch policy
-|Make `aidev check` on every PR a required build validation for `main`, and add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**` and `.aidev/policy.yaml`. Workflow approval means "merged into `main`", so this setting is what approval really is. → xref:automation-ci[Automation: CI]
+|`pipelines/azure-pipelines-check.yml`
+|Runs `aidev check` on every PR. Make it a **required build validation** in the branch policy of `main`. Without it, an edit that removes the write limits could be merged.
 
-|Write out the development conventions of this PKG
-|Create a workflow with `aidev create workflow conventions --describe "Write this PKG's development conventions, with evidence, from the Wiki and the source into .aidev/conventions/ and open a PR"`, submit it, and run it after the merge. → xref:workflows-bundled[What the kit ships, and what it does not]
+|`pipelines/azure-pipelines-wiki.yml`
+|Runs `aidev sync wiki --branch` on `main` daily at 18:00 UTC. It picks up what was merged without a Wiki, commits on the branch `aidev/wiki-<sha12>` and opens a PR. It publishes only when the prose is complete, so the pipeline needs the agent tool (`tools.agent`, Claude Code by default) and its credentials. Set the variables `AZURE_DEVOPS_PAT`, `ANTHROPIC_API_KEY`, `AIDEV_BOT_NAME` and `AIDEV_BOT_EMAIL`. It does nothing when the Wiki already describes the HEAD of `main`.
+|===
+
+When Developers bring the Wiki to HEAD with every commit, the nightly pipeline is a safety net.
+
+The exit code of `aidev check` is the contract with CI; see xref:cli-exit-codes[Command Reference: Exit codes] for what each code means.
+
+[[setup-owner-after]]
+=== Post-adoption tasks
+
+With the above in place, work through these in order. The Engineering Manager does all of them and turns them into PRs.
+
+[%autowidth.stretch,options="header"]
+|===
+|Task |Method
+
+|Tell the Developers
+|→ xref:setup-member[Getting started]
 
 |Define the work handed to the AI
-|Create the workflow (and the agents and skills it needs) with `aidev create workflow <name> --describe "<what you want>"`, check `scope.writable`, then `aidev submit workflow`. Once merged, members can run it. → xref:workflows[Putting the AI to work]
+|Describe what you want, create the processing workflow, check where it may write, and submit it. Once merged, Developers can run it. → xref:workflows[Delegating work to the AI]
 
-|Bring the Wiki along at night
-|Put `pipelines/azure-pipelines-wiki.yml` in the PKG. → xref:automation-ci[Automation: CI]
+|Write out the development conventions of this PKG
+|Create a processing workflow that writes this PKG's conventions, with evidence, from the Wiki and the source; submit it and run it after the merge. → xref:workflows-define[Defining a workflow]
 
 |Run lint / test after the AI edits files
 |Write them in `quality_gates` of `aidev.yaml`. → xref:configuration[aidev.yaml reference]
 |===
 
-=== Next steps
+=== Related information
 
-* Guide the members → xref:setup-member[Member steps]
-* Put the AI to work → xref:workflows[Putting the AI to work]
+* What you keep doing → xref:maintain[Maintenance]
+* Put the AI to work → xref:workflows[Delegating work to the AI]
+* Take in what comes back → xref:review[Review and merge]

@@ -77,6 +77,6 @@ aidev doctor demo-pkg
 
 === See also
 
-* xref:install[Install aidev on your machine]
+* xref:install[Installing aidev]
 * xref:cli-check[aidev check] — checking a PKG
 * xref:troubleshooting-install[Troubleshooting: installation]

@@ -26,7 +26,7 @@ installer が置いたものを消します。①起動スクリプト（Windows
 
 対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。消すものが無くても 0 で終わります。
 
-再インストールは kit の clone で installer を実行します（xref:install[端末に aidev を入れる]）。
+再インストールは kit の clone で installer を実行します（xref:install[aidev のインストール]）。
 
 ==== `<package>` — PKG から kit の管理を外す（旧 eject）
 
@@ -95,7 +95,7 @@ aidev uninstall --yes
 rm -rf ~/ai-dev-kit            # 表示された kit の clone を消すコマンド
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:cli-init[aidev init] — 再導入
-* xref:install[端末に aidev を入れる]
+* xref:install[aidev のインストール]

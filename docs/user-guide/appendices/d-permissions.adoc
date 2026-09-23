@@ -1,4 +1,5 @@
 [[permissions]]
+[appendix]
 == 権限と安全性
 
 {project-name} は、AI が PKG の中で **書いてよい場所** を 2 段で決めます。
@@ -59,7 +60,7 @@ flowchart TD
 ----
 
 [[permissions-hooks]]
-=== hook が何をするか
+=== hook の動作
 
 配布される hook 設定（Claude Code は `.claude/settings.json`、GitHub Copilot CLI は `.github/hooks/aidev.json`、OpenAI Codex CLI は `.codex/hooks.json`、Kiro CLI は `.kiro/agents/aidev.json`）は 5 つの hook を登録します。実機で検証済みなのは Claude Code です。
 
@@ -81,7 +82,7 @@ flowchart TD
 
 |PostToolUse（Bash）
 |`aidev hook after-bash`
-|コミットで HEAD が変わり Wiki が遅れたら、構造を更新し、本文が必要なら knowledge-builder をサブエージェントで起動するようセッションに指示します（xref:knowledge-hook-flow[コミット後に何が起きるか]）。
+|コミットで HEAD が変わり Wiki が遅れたら、構造を更新し、本文が必要なら knowledge-builder をサブエージェントで起動するようセッションに指示します（xref:knowledge-hook-flow[コミット後の処理]）。
 
 |Stop
 |`aidev hook session-stop`
@@ -101,9 +102,9 @@ ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync
 hook を外す編集は `aidev check` が終了コード 2 で検出し、CI がマージを止めます（検査するのは `.claude/settings.json` です）。
 
 [[permissions-source]]
-=== ソースを AI に書かせるには
+=== AI にソースを書かせる方法
 
-既定では PKG のソースは `read_only` で、対話中の Claude も、それが呼ぶサブエージェントも書けません。AI にソースを書かせたいときは、**その仕事を workflow として定義し、`scope.writable` に書いてよい範囲を書き、PR でレビューして `main` に入れます**（xref:workflows[AI に仕事をさせる]）。
+既定では PKG のソースは `read_only` で、対話中の AI も、それが呼ぶサブエージェントも書けません。AI にソースを書かせたいときは、**その仕事を workflow として定義し、`scope.writable` に書いてよい範囲を書き、PR でレビューして `main` に入れます**（xref:workflows[AI への作業委譲]）。
 
 [source,yaml]
 ----
@@ -116,9 +117,9 @@ scope:
 すべての agent と対話セッションにいつでも開きたい場合だけ、policy の `writable` に足します。`protected` と `secrets_paths` はどちらの方法でも書けません。policy の変更は PR でレビューし、必要な期間だけ広げることを勧めます。
 
 [[permissions-commands]]
-=== policy を置く・変える・見る
+=== policy の設置と変更
 
-policy は AI が作れません。導入担当者が CLI で置きます。
+policy は AI が作れません。 Engineering Manager が CLI で置きます。
 
 [%autowidth.stretch,options="header"]
 |===
@@ -142,7 +143,7 @@ policy は AI が作れません。導入担当者が CLI で置きます。
 * `aidev doctor` と `aidev init` は token の有無だけを報告し、値は読みません。
 * workflow の実行記録（`.aidev/workflows/*/runs/`）にはコマンドの出力が入るため、gitignore 済みでコミットされません。
 
-=== してはいけないこと
+=== 禁止事項
 
 * `.claude/**`、`CLAUDE.md` の kit 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、kit 全体の改善は kit への PR にする）
 * `.aidev/policy.yaml` は人間だけが編集し、変更は PR でレビューする（AI には編集させない）
@@ -150,9 +151,9 @@ policy は AI が作れません。導入担当者が CLI で置きます。
 * AI が「拒否された」と報告したら、回避策を探さず理由を読む
 * token をコミット・ログ・PR 本文に含めない
 
-=== 関連
+=== 関連情報
 
-* xref:workflows[AI に仕事をさせる] — `scope.writable` と承認
+* xref:workflows[AI への作業委譲] — `scope.writable` と承認
 * xref:cli-create[aidev create policy]
 * xref:cli-hook[aidev hook]
 * xref:configuration[aidev.yaml リファレンス] — `secrets_paths`、`hosting.auth_env`

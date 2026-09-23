@@ -11,7 +11,7 @@
 docs/user-guide/
 ├─ index.adoc            日本語版のルート
 ├─ _attributes.adoc      共通 attribute
-├─ chapters/             日本語版の章（01-overview … 11-troubleshooting）
+├─ chapters/             日本語版の章（01-overview … 10-troubleshooting）
 │  └─ cli/               コマンドリファレンス（1 コマンド 1 ファイル）
 ├─ appendices/           日本語版の付録
 ├─ index-en.adoc         英語版のルート
@@ -32,7 +32,7 @@ npm run docs:check    # 生成 + 検証
 
 `docs:check` は、include 先が存在すること、ID が重複しないこと、`xref:` の参照先があること、`TODO` が残っていないこと、必須の章 ID がそろっていること、HTML が外部 stylesheet / script に依存しないことを両言語で検証します。
 
-=== 書き方
+=== 執筆規約
 
 * 読者がその場で必要なことだけを、短い文で書く。難しい言葉を使わない。
 * 章とコマンドページには一意の ID（`[[knowledge]]`、`[[cli-init]]`）を付け、リンクは `xref:` で書く。

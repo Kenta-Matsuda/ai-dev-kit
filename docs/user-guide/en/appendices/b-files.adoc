@@ -90,4 +90,4 @@ Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aide
 
 === On this machine (AIDEV_HOME)
 
-Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `developer.json` (irrelevant to users).
+Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the kit update check). The kit itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `Developer.json` (irrelevant to users).

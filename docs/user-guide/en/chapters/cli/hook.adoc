@@ -40,7 +40,7 @@ The AI tool starts it from the hook configuration the kit places. It reads the h
 
 |`session-stop`
 |Session end
-|When the Wiki is behind HEAD (or its prose is unfinished) on a clean tree, refuses to stop once and repeats the `after-bash` instructions. The second stop passes with a warning. A tree with uncommitted changes never blocks. On an ai-dev-kit developer's machine it also asks for a reflection
+|When the Wiki is behind HEAD (or its prose is unfinished) on a clean tree, refuses to stop once and repeats the `after-bash` instructions. The second stop passes with a warning. A tree with uncommitted changes never blocks. On an ai-dev-kit Developer's machine it also asks for a reflection
 |===
 
 === Hook configuration per tool
@@ -97,6 +97,6 @@ aidev hook guard-write --input /tmp/hook.json
 
 === See also
 
-* xref:knowledge-hook-flow[The LLM Wiki: what happens after a commit]
-* xref:permissions-hooks[Permissions and safety: what the hooks do]
+* xref:knowledge-hook-flow[Processing after a commit]
+* xref:permissions-hooks[Hook behaviour]
 * xref:configuration[aidev.yaml reference] — `quality_gates`

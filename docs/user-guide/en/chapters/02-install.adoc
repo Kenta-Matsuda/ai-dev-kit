@@ -1,16 +1,16 @@
 [[install]]
-== Install aidev on your machine
+== Installing aidev
 
 Put the `aidev` command on your own machine. Once per machine.
 
-=== What you need
+=== Prerequisites
 
 * Node.js {node-min-version} or later
 * Git
 * Claude Code {claude-min-version} or later (used to generate the Wiki, run workflows and for interactive sessions)
 * The URL of the central {project-name} repository (`<kit-url>` below)
 
-=== Steps
+=== Procedure
 
 . Clone the kit. This clone is what `aidev` runs from, so do not delete or move it. Leave it on the `main` branch.
 +
@@ -79,7 +79,7 @@ aidev uninstall --yes
 
 This removes the launcher and `AIDEV_HOME`. The kit clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
 
-=== Next steps
+=== Related information
 
-* Adopting the kit in a package for the first time → xref:setup-owner[Package owner steps]
-* Using a package that already has the kit → xref:setup-member[Member steps]
+* Adopting the kit in a package for the first time → xref:setup-owner[Adopting aidev in a package]
+* Using a package that already has the kit → xref:setup-member[Getting started]

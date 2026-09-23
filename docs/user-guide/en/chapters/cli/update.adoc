@@ -16,7 +16,7 @@ It takes no object: `aidev sync wiki` stops with `aidev update takes no object`.
 
 Fast-forwards the kit clone (the `aidev` CLI and the templates) to `origin/main`. It stops if the clone has uncommitted changes, is not on `main`, or has diverged.
 
-Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools <package>`], which the package owner runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older kit are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
+Nothing is written into the PKG. Taking the new templates into a PKG is xref:cli-sync-tools[`aidev sync tools <package>`], which the Engineering Manager runs when it suits them and turns into a PR. After updating, the packages registered on this machine that still carry templates from an older kit are listed. It does not regenerate the Wiki. It does not change `aidev.yaml` or the policy. It does not commit.
 
 [%autowidth.stretch,options="header"]
 |===
@@ -57,5 +57,5 @@ aidev update
 === See also
 
 * xref:cli-sync[aidev sync] — taking the new templates into a PKG, bringing the Wiki along
-* xref:daily-update[Everyday use: updating the kit]
+* xref:maintain-update[Updating the kit]
 * xref:troubleshooting-update[Troubleshooting: after a kit update]

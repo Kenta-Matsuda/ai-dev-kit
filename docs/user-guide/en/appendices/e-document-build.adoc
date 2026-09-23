@@ -11,7 +11,7 @@ This guide is generated from the AsciiDoc sources in `{guide-source-dir}/` into 
 docs/user-guide/
 ├─ index.adoc            root of the Japanese guide
 ├─ _attributes.adoc      shared attributes
-├─ chapters/             Japanese chapters (01-overview … 11-troubleshooting)
+├─ chapters/             Japanese chapters (01-overview … 10-troubleshooting)
 │  └─ cli/               command reference (one file per command)
 ├─ appendices/           Japanese appendices
 ├─ index-en.adoc         root of the English guide
@@ -34,7 +34,7 @@ npm run docs:check    # build + validate
 
 `docs:check` verifies, for both languages, that every included file exists, that IDs are unique, that every `xref:` target exists, that no `TODO` is left, that the required chapter IDs are present, and that the HTML depends on no external stylesheet or script.
 
-=== Writing rules
+=== Writing conventions
 
 * Write only what the reader needs at that moment, in short sentences. Avoid jargon.
 * Give every chapter and command page a unique ID (`[[knowledge]]`, `[[cli-init]]`) and link with `xref:`.

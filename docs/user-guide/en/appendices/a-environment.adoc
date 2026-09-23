@@ -47,10 +47,10 @@ Never write values into files. Set them in your shell profile, as user environme
 |Pipeline variables used by `pipelines/*.yml`: the central kit URL and branch, and the bot name and e-mail for the nightly Wiki update.
 
 |`ANTHROPIC_API_KEY`
-|The API key `pipelines/azure-pipelines-wiki.yml` hands to Claude Code. Not needed on a developer's machine, where Claude Code's own login is used.
+|The API key `pipelines/azure-pipelines-wiki.yml` hands to Claude Code. Not needed on a Developer's machine, where Claude Code's own login is used.
 |===
 
-=== Examples
+=== Example configuration
 
 .PowerShell (this session only)
 [source,powershell]
@@ -70,7 +70,7 @@ $env:AZURE_DEVOPS_PAT = "<your-pat>"
 export AZURE_DEVOPS_PAT="<your-pat>"
 ----
 
-=== Handling tokens safely
+=== Handling precautions
 
 * Inject tokens from a secret manager or pipeline secret variables; avoid commands that leave them in the shell history.
 * Do not paste `env` output into issues or pull requests.

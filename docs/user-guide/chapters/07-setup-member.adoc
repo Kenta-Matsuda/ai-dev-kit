@@ -1,0 +1,68 @@
+[[setup-member]]
+== 利用の開始
+
+導入済みの PKG で AI ツールを使い始めます。質問はなく、3 つのコマンドで終わります。**決めることは何もありません。** Engineering Manager が決めた設定をそのまま受け取ります。
+
+=== 事前準備
+
+* xref:install[aidev のインストール] が終わっている
+* Engineering Manager の PR が `main` にマージされている
+* Azure DevOps の PKG なら `AZURE_DEVOPS_PAT` を設定済み
+
+=== 手順
+
+. PKG を clone するか、最新を取り込みます。
++
+[source,bash]
+----
+git clone <pkg-url>
+cd <pkg>
+# 既に clone がある場合
+git pull
+----
+
+. `aidev init` を実行します。設定は既にあるので質問はありません。
++
+[source,bash]
+----
+aidev init
+----
++
+[source,text]
+----
+✓ aidev.yaml is present (set up by your team); nothing to ask.
+✓ tool configuration is current (18 file(s) for claude)
+✓ AZURE_DEVOPS_PAT is set (value not read)
+✓ .aidev/policy.yaml is present
+✓ LLM Wiki is present (.aidev/knowledge/)
+
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
+----
++
+* `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[aidev のインストール] して、ターミナルを開き直します。
+* `tool config` 行に `newer templates available` → チームがまだ新しい kit のテンプレートを取り込んでいません。 Engineering Manager が `aidev sync tools` して PR にします（xref:maintain-sync-tools[テンプレートの取り込み]）。
+* `the LLM Wiki is not in this clone yet …` と表示されたら → Engineering Manager の PR がまだマージされていません。マージされてから `git pull` します。自分で生成しないでください。
+
+. 状態を確認します。
++
+[source,bash]
+----
+aidev check
+----
++
+2 行目が `✅ the Wiki describes the code this work is based on.` なら準備完了です。`⚠️` や `❌` の読み方は xref:daily-check[作業開始前の状態確認] を見てください。
+
+. PKG のルートで Claude Code を起動します。
++
+[source,bash]
+----
+claude
+----
++
+セッション開始時に、Wiki の状態が 1 行でコンテキストに入ります。Claude は `.aidev/knowledge/index.md` から調べ始めます。
+
+=== 関連情報
+
+* 日々の開発の流れ → xref:daily[日常の開発作業]
+* 承認済みの workflow を実行する → xref:daily-workflow[workflow の実行]
+* AI が「書き込みを拒否された」と言ったら → xref:permissions[権限と安全性]

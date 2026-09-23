@@ -135,7 +135,7 @@ aidev init
 ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
 ----
 
-=== 関連
+=== 関連情報
 
-* xref:setup-owner[導入担当者の手順]、xref:setup-member[メンバーの手順]
+* xref:setup-owner[PKG への導入]、xref:setup-member[利用の開始]
 * xref:cli-create[aidev create policy]、xref:cli-sync-wiki[aidev sync wiki]

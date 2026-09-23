@@ -1,0 +1,125 @@
+[[daily]]
+== Day-to-day development
+
+**This chapter is for Developers.** It covers working with the AI day to day in a PKG that has already been set up.
+
+Day-to-day work consists of three tasks.
+
+. Check the state with `aidev check` before starting work
+. Develop with the AI and commit, keeping the LLM Wiki current after each commit
+. Submit the change for review
+
+To delegate a larger task to the AI, run an approved workflow (xref:daily-workflow[Running a workflow]).
+
+[[daily-check]]
+=== Checking the state before you start
+
+[source,bash]
+----
+aidev check
+----
+
+The symbol and sentence on the second line indicate the next action.
+
+[%autowidth.stretch,options="header"]
+|===
+|Message |Action
+
+|`✅ the Wiki describes HEAD (…)`
+|Nothing. Start working.
+
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev sync wiki"`
+|The code moved on and the Wiki is behind. Inside an AI tool session, the update starts automatically after your next commit. To do it now, see xref:daily-wiki[Keeping the Wiki current]. You can keep working.
+
+|`⚠️ N page(s) still await prose regeneration`
+|Some pages have no text yet. Run `aidev sync wiki` (or follow the instructions if the AI tool showed any).
+
+|`⚠️ origin/main has moved ahead …`
+|`main` is ahead of your working branch. Merge or rebase at a good moment, then run `aidev sync wiki`.
+
+|`⚠️ origin/main has new commits …`
+|Run `git fetch`, then `aidev check` again.
+
+|`ℹ️ remote unverified …`
+|The remote could not be reached (offline, proxy). Your local state is consistent, so you can keep working.
+
+|`❌ LLM Wiki has not been generated yet …`
+|There is no Wiki. **While this lasts, every write by the AI is blocked.** If `git pull` should bring it, pull. If not, ask the Engineering Manager.
+|===
+
+For other messages, see xref:troubleshooting-status[Troubleshooting].
+
+In the lines that follow, check `tool config` and `policy`. If `tool config` says `newer templates available`, the team has not taken in the newer kit templates yet; tell the Engineering Manager (xref:maintain-sync-tools[Applying new templates]). If `policy` is `missing`, ask the Engineering Manager to run `aidev create policy --approve`.
+
+[[daily-code]]
+=== Developing with the AI
+
+Start your AI tool at the PKG root.
+
+[source,bash]
+----
+claude
+----
+
+The AI reads the LLM Wiki (`.aidev/knowledge/index.md`) first and investigates the source from there. Every statement in the Wiki links to the file it is based on, so the AI confirms it there.
+
+You never need to fix the Wiki by hand. If you find a mistake, fix the source (a comment or the structure) and let the next update pick it up. Hand edits are detected, and the next generation asks before overwriting them (xref:knowledge-handedit[Why hand edits are discouraged]).
+
+The AI may report that a write was refused. Do not look for a way around it — read the reason it printed (xref:permissions[Permissions and safety]). By default the AI cannot write the PKG's source. To have the AI write source, use a workflow.
+
+[[daily-wiki]]
+=== Keeping the Wiki current
+
+The LLM Wiki describes **the HEAD of the branch you are on**. Every time you commit code, the Wiki is committed on the same branch as **a separate commit**. Put the source commit and the Wiki commit in the same PR; the reviewer looks at both.
+
+When you run `git commit` inside an AI tool session, the session is told how to update it. **Follow those instructions and the Wiki is committed for you.** If you try to end the session while the Wiki is behind, it is stopped once.
+
+To do it by hand, run the following. It stops if generation targets have uncommitted changes, so commit first.
+
+[source,bash]
+----
+aidev sync wiki
+----
+
+[source,text]
+----
+✓ manifest and 1 shard(s) written for 9f8e7d6
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ batch 1/1 complete: 7/7 in 4m 2s ($0.5533)
+✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
+----
+
+* If it stops part way, run **the same command** again and it resumes.
+* Run on `main`, it commits on a separate branch and opens a PR. Your checkout is left alone (xref:knowledge-publish[Updating on the tracking branch]).
+
+See xref:knowledge[LLM Wiki] for details.
+
+[[daily-workflow]]
+=== Running a workflow
+
+Any Developer can run an approved workflow — one the Engineering Manager defined and that was merged into `main` after review.
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow implement --task "Implement Work Item 1234"
+----
+
+The workflow runs on its own branch and opens a PR when it finishes. **Your job ends when you send the resulting PR for review.** Responsibility for the contents lies with the person who approved the workflow and the person who reviews the PR.
+
+A workflow that is not on `main`, or that differs from what is on `main`, cannot run. When you want the AI to do a new kind of work, talk to the Engineering Manager. See xref:workflows-run[Running a workflow] for details.
+
+[[daily-pr]]
+=== Submitting for review
+
+Put the source changes and the Wiki changes in the same PR. It should contain a commit named `aidev: update Wiki for <sha12>`.
+
+CI runs `aidev check` and blocks the merge if anything is inconsistent. What the reviewer looks at is in xref:review[Review and merge].
+
+=== Related information
+
+* xref:knowledge[LLM Wiki] — reading the state, update details, how to resume
+* xref:workflows[Delegating work to the AI] — running workflows and what to do when one stops
+* xref:permissions[Permissions and safety] — why a write is refused
+* xref:cli-check[aidev check], xref:cli-sync-wiki[aidev sync wiki], xref:cli-run[aidev run workflow]

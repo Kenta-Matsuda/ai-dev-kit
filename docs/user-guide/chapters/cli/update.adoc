@@ -16,7 +16,7 @@ aidev update [--dry-run] [--json]
 
 kit の clone（`aidev` CLI とテンプレート）を `origin/main` に fast-forward します。clone に未コミットの変更がある、`main` 以外にいる、diverge している場合は止まります。
 
-PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-sync-tools[`aidev sync tools <package>`] で、導入担当者が都合のよいときに実行して PR にします。更新後、この端末に登録された PKG のうち古い kit のテンプレートのままのものを一覧します。Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
+PKG には何も書きません。新しいテンプレートを PKG に取り込むのは xref:cli-sync-tools[`aidev sync tools <package>`] で、 Engineering Manager が都合のよいときに実行して PR にします。更新後、この端末に登録された PKG のうち古い kit のテンプレートのままのものを一覧します。Wiki は再生成しません。`aidev.yaml` と policy は変更しません。コミットもしません。
 
 [%autowidth.stretch,options="header"]
 |===
@@ -54,8 +54,8 @@ aidev update
     Run "aidev sync tools <package>" in each when convenient; it merges the new templates with your edits.
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:cli-sync[aidev sync] — PKG への新しいテンプレートの取り込みと Wiki の追従
-* xref:daily-update[日常の使い方: kit の更新]
+* xref:maintain-update[kit の更新]
 * xref:troubleshooting-update[トラブルシューティング: kit 更新後]

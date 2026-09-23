@@ -45,7 +45,8 @@ const REQUIRED_IDS = [
   'knowledge',
   'configuration',
   'permissions',
-  'automation',
+  'review',
+  'maintain',
   'troubleshooting',
   'workflows',
   // Command Reference: one page per command

@@ -137,5 +137,5 @@ aidev init
 
 === See also
 
-* xref:setup-owner[Package owner steps], xref:setup-member[Member steps]
+* xref:setup-owner[Adopting aidev in a package], xref:setup-member[Getting started]
 * xref:cli-create[aidev create policy], xref:cli-sync-wiki[aidev sync wiki]

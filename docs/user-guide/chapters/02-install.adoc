@@ -1,9 +1,9 @@
 [[install]]
-== 端末に aidev を入れる
+== aidev のインストール
 
 自分の端末に `aidev` コマンドを入れます。端末につき 1 回です。
 
-=== 必要なもの
+=== 事前準備
 
 * Node.js {node-min-version} 以上
 * Git
@@ -79,7 +79,7 @@ aidev uninstall --yes
 
 起動スクリプトと `AIDEV_HOME` を消します。kit の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
 
-=== 次のステップ
+=== 関連情報
 
-* PKG に初めて導入する → xref:setup-owner[導入担当者の手順]
-* 導入済みの PKG を使う → xref:setup-member[メンバーの手順]
+* PKG に初めて導入する → xref:setup-owner[PKG への導入]
+* 導入済みの PKG を使う → xref:setup-member[利用の開始]

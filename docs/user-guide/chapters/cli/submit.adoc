@@ -63,7 +63,7 @@ aidev submit workflow write-tests
     Once it is merged, anyone with the branch fetched can run: aidev run workflow write-tests
 ----
 
-=== 関連
+=== 関連情報
 
-* xref:workflows-submit[AI に仕事をさせる: 提出する]、xref:workflows-review[workflow の PR を見る]
+* xref:workflows-submit[workflow の提出]、xref:review-workflow-def[workflow 定義の PR]
 * xref:cli-create[aidev create]、xref:cli-run[aidev run]

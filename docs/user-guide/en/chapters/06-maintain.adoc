@@ -1,0 +1,93 @@
+[[maintain]]
+== Maintenance
+
+**This chapter is for the Engineering Manager.** These tasks are performed as needed once the package is in use. Each one goes through a pull request.
+
+[%autowidth.stretch,options="header"]
+|===
+|Task |When performed
+
+|xref:maintain-update[Updating the kit]
+|When a newer kit is announced
+
+|xref:maintain-sync-tools[Applying new templates]
+|After updating the kit
+
+|xref:maintain-settings[Changing configuration]
+|As the need arises
+|===
+
+[[maintain-update]]
+=== Updating the kit
+
+When a newer kit exists, running a command in the PKG shows this. Developers see it on their machines too.
+
+[source,text]
+----
+⚠ a newer ai-dev-kit is available (9491efe → e0aa66c). Run "aidev update".
+  Update now, before running this command? (y/N):
+----
+
+`y` updates the kit (the CLI and its templates). **PKG files do not change at this point.** Once the update is in, the command you started is run again with the new CLI.
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
+ℹ 1 package(s) on this machine still carry templates from an older kit:
+    C:\work\demo-pkg (applied 499f940)
+    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.
+----
+
+[[maintain-sync-tools]]
+=== Applying new templates
+
+After updating the kit, **the Engineering Manager** runs this at the PKG root when it suits them and turns it into a PR. Developers get the same state with `git pull` after the merge. The team may have edited files under `.claude/` and so on: untouched files are replaced, edited files are merged with the kit's changes.
+
+[source,bash]
+----
+aidev sync tools
+----
+
+[source,text]
+----
+✓ applied 3 change(s) for claude
+    ~ .claude/agents/knowledge-builder.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
+    Review with "git diff", then commit so your team receives the update.
+----
+
+When the team and the kit changed the same lines, git-style conflict markers are written into the file and the command stops with exit code 2.
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+----
+
+Resolve the markers, settle the content, run `aidev sync tools` again to update the record, and commit. Until then `aidev check` returns exit code 2. To take the kit version of every file instead, run `aidev sync tools --force`.
+
+[[maintain-settings]]
+=== Changing configuration
+
+Turn each of these into a PR and have it reviewed.
+
+[%autowidth.stretch,options="header"]
+|===
+|What you want to change |How
+
+|Wiki generation targets, secret paths, which AI tools to use, the lint / test run after an AI edit, and so on
+|Edit `aidev.yaml`. → xref:configuration[aidev.yaml reference]
+
+|Where the AI may and may not always write
+|Regenerate the policy and place it. → xref:permissions-commands[Placing and changing the policy]
+
+|Adding or changing the jobs handed to the AI
+|Create a workflow and submit it. → xref:workflows-define[Defining a workflow]
+|===
+
+=== Related information
+
+* xref:review[Review and merge] — what to look at in each PR
+* xref:cli-update[aidev update], xref:cli-sync-tools[aidev sync tools], xref:cli-check[aidev check]
+* xref:troubleshooting-update[Troubleshooting: after a kit update]

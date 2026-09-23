@@ -3,7 +3,7 @@
 
 `aidev.yaml` is the configuration file at the root of the PKG. `aidev init` creates it; commit it and share it. You can edit it by hand, and every command validates it on start.
 
-=== Example
+=== Example configuration
 
 What `aidev init` writes, plus the optional keys. Omitted keys take their defaults.
 
@@ -58,7 +58,7 @@ references:                     # existing documents handed to agents (text only
   testing: [docs/testing.md, CONTRIBUTING.md]
 ----
 
-=== Keys you are likely to change
+=== Principal settings
 
 [cols="2,2,3",options="header"]
 |===
@@ -125,7 +125,7 @@ references:                     # existing documents handed to agents (text only
 |Paths of existing documents (files or directories, relative to the PKG root) that `aidev run workflow` hands to the agent as reference material. `conventions` is read first by the `convention-builder` of the `write-conventions` workflow, `testing` by the `test-writer` of the `write-tests` workflow. Agents treat these as important sources that may be out of date: they verify them against the code and report where the two disagree. **Excel, Word and PDF files cannot be given as they are.** The AI tools read text only, so export them to Markdown or CSV, commit that, and list the exported file (listing an `.xlsx` or similar is a configuration error).
 |===
 
-=== Keys you normally leave alone
+=== Settings that can stay at their defaults
 
 [cols="2,2,3",options="header"]
 |===
@@ -170,11 +170,11 @@ references:                     # existing documents handed to agents (text only
 
 Unknown keys are ignored (they are not an error). A misspelled key name is not caught by `aidev doctor` either, so check the names against these tables.
 
-=== Keys you must not write
+=== Prohibited settings
 
 `hosting.pat`, `hosting.token`, `hosting.password` and `hosting.secret` are rejected. Writing one stops every command from starting. Put the token in the environment variable named by `hosting.auth_env` (xref:environment-reference[Environment variables]).
 
-=== Related
+=== Related information
 
 * xref:cli-init[aidev init] — flags used when generating the file
 * xref:permissions[Permissions and safety] — `secrets_paths` and the policy

@@ -70,7 +70,7 @@ $env:AZURE_DEVOPS_PAT = "<your-pat>"
 export AZURE_DEVOPS_PAT="<your-pat>"
 ----
 
-=== 安全な扱い
+=== 取り扱い上の注意
 
 * token は secret manager や pipeline の secret variable から注入し、shell history に残るコマンドを避けます。
 * `env` の出力を issue や PR に貼りません。

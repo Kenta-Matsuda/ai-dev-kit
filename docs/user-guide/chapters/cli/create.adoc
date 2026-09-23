@@ -89,7 +89,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 
 === 例
 
-自然言語から作る（導入担当者）。workflow-creator が YAML を書き、必要な agent・skill は agents-creator に書かせる:
+自然言語から作る（Engineering Manager）。workflow-creator が YAML を書き、必要な agent・skill は agents-creator に書かせる:
 
 [source,bash]
 ----
@@ -119,7 +119,7 @@ git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
 aidev create policy --approve      # 保護を弱める差分があるときは --force も付ける
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:permissions[権限と安全性] — policy
 * xref:workflows-define[AI に仕事をさせる: 定義する]、xref:workflows-agents-skills[agent と skill]

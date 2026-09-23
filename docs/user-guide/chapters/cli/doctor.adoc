@@ -75,8 +75,8 @@ PKG も見る:
 aidev doctor demo-pkg
 ----
 
-=== 関連
+=== 関連情報
 
-* xref:install[端末に aidev を入れる]
+* xref:install[aidev のインストール]
 * xref:cli-check[aidev check] — PKG の検査
 * xref:troubleshooting-install[トラブルシューティング: インストール]
