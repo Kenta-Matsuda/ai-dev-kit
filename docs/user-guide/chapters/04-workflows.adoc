@@ -315,6 +315,86 @@ aidev run workflow write-tests
 |正常です。push 済みのブランチから手で PR を作ります。
 |===
 
+[[workflows-fix]]
+=== workflow の修正（Engineering Manager）
+
+workflow を直すきっかけは 2 つあります。定義の PR でレビューする人から指摘を受けたとき、そして実行した結果（成果物の PR）が期待と違ったときです。どちらも、直すのは **定義（`workflow.yaml` と agent・skill）** です。成果物の PR だけを手で直しても、次に実行すれば同じ結果になります。
+
+==== どこを直すか
+
+困っていることから、直す場所を探します。
+
+[%autowidth.stretch,options="header"]
+|===
+|困っていること |直す場所 |直し方
+
+|調査したステップの結果が、次のステップで使われない
+|調査ステップの `prompt`
+|「結果を最終報告に列挙する」と書きます。次のステップに渡るのは最終報告だけです。
+
+|書き込みが拒否されて止まる（`is read-only`）
+|そのステップの `writable`
+|必要なパスを足します。足すのは、そのステップに本当に要る場所だけにします。
+
+|頼んでいないファイルまで変えている
+|そのステップの `writable` と `prompt`
+|`writable` を狭め、`prompt` に「〜は変えない」と書きます。
+
+|手順を知らずに、やり方がばらばらになる
+|agent の `skills`
+|手順書（skill）を書き、agent の `skills` に足します。
+
+|外部システム（チケットなど）を見られない
+|agent の `mcp` と PKG の `.mcp.json`
+|`.mcp.json` に server を登録し（人が行います）、agent の `mcp` に名前を足します。
+
+|必要なツールが無いと言われる
+|agent の `tools`
+|そのツールを足します。外部システムに触る agent には `Bash` を足さず、別の agent に分けます。
+
+|`until` がずっと失敗して止まる
+|`until`、`max_retries`、ステップの分け方
+|`until` のコマンドがこの PKG で本当に通るかを手で確かめます。仕事が大きすぎるなら、ステップを分けます。
+
+|費用や時間の上限で止まる
+|`cost.max_usd`、`limits.max_minutes`
+|実行の記録（`.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間を見て決めます。時間は 60 分を超えられません。
+|===
+
+agent・skill は、それを使うすべての workflow で共有されています。**agent.md を直すと、その agent を使う他の workflow の動きも変わります。** 1 つの workflow だけ変えたいときは、agent を分けます（`aidev create agent <新しい名前>`）。
+
+==== 直して提出し直す
+
+. 定義の PR がまだマージされていないなら、そのブランチ（`aidev/workflow-<name>`）に居ることを確かめます。`aidev submit workflow` の後は、そのブランチに居ます。
++
+[source,bash]
+----
+git checkout aidev/workflow-write-tests    # 別のブランチに移っていたときだけ
+----
++
+マージ済みの workflow を直すときは、最新の `main` から始めます（`git checkout main`、`git pull`）。
+. `workflow.yaml`・agent・skill を編集します。
+. 書き方の間違いがないかを確かめます。`invalid:` と出たら、表示された項目を直します。
++
+[source,bash]
+----
+aidev list workflows
+----
+. ステップごとの内容を表示して、意図どおりかを見ます。未承認なので最後に「refused」と出ますが、内容の確認には使えます。
++
+[source,bash]
+----
+aidev run workflow write-tests --dry-run
+----
+. もう一度提出します。同じブランチに修正のコミットが積まれ、PR があれば本文も新しい内容に更新されます。
++
+[source,bash]
+----
+aidev submit workflow write-tests
+----
+
+マージされると、新しい定義が承認済みになります。マージ前の手元の変更は、自分の clone だけのものです。他の人は、その間も `main` にある前の定義を実行できます。
+
 [[workflows-agents-skills]]
 === agent と skill
 
@@ -367,6 +447,7 @@ model: inherit
 === 関連情報
 
 * xref:review-workflow-def[workflow 定義の PR]、xref:review-workflow-result[workflow 成果物の PR]
+* xref:workflows-fix[workflow の修正] — 直す場所と、提出し直す手順
 * xref:cli-run[aidev run workflow] — オプション、終了コード
 * xref:permissions[権限と安全性] — ステップの `writable` と policy の関係
 * xref:configuration[aidev.yaml リファレンス] — `tools.agent`、`tools.agents`、`references`

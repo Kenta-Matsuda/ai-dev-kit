@@ -54,16 +54,72 @@ The most common PR, from day-to-day development. The source changes and the LLM 
 
 It arrives as a commit named `aidev: workflow <name>`. **Merging is the approval.** Once you take it in, any Developer can run this workflow. Review it with the same weight as a result.
 
-The "Steps" section of the PR body lists, for each step, the agent, where it may write, and that agent's skills, tools and MCP servers. Read that first, then check in this order.
+==== Reading order
 
-* Is the `objective` a job the team may let that AI do?
-* Is each step's `writable` the minimum needed? Is a survey-only step `[]`? Does any include the whole source (`**`) or configuration and CI paths?
-* Are each agent's `tools` and `mcp` only what its job needs? Does an agent that touches an external system have `Bash`? (With `Bash` it can reach outside without going through MCP.) An agent without `tools` can use every built-in tool.
-* Are `until` and `command` safe to run in this PKG? (They do not go through a shell, but the command itself does run.)
-* Are `cost.max_usd` and `limits.max_minutes` reasonable?
-* Are the referenced `.aidev/agents/` and `.aidev/skills/` files in the same PR? **Do not stop at the YAML; read the agent and skill text too.** Most of the actual instructions to the AI are there. Do they describe work outside the range, or handling of secrets?
+. **The "Steps" section of the PR body** — the steps are listed top to bottom in the order they run, each with its agent, where it may write (writes), and that agent's skills, tools and MCP servers. Get the overall picture here first.
+. **`workflow.yaml`** — read the `objective` (what the AI is asked to do), each step's `prompt` (the instruction for that step), `until` (how the end is judged) and the limits.
+. **The agent's `.md` (`.aidev/agents/`)** — check in the frontmatter at the top what the agent can use (`skills`, `tools`, `mcp`), and read in the body how it is told to behave.
+. **The skill's `SKILL.md` (`.aidev/skills/`)** — the procedure handed to the agent.
 
-See xref:workflows-define[Defining a workflow] for details.
+**Do not stop at the YAML.** Most of what the AI is actually told is in the agent and skill bodies.
+
+To see the same list on your machine, fetch the pull request's branch and run `--dry-run`. It is not approved, so the last line says "refused", but each step's details are shown.
+
+[source,bash]
+----
+git fetch origin
+git checkout aidev/workflow-write-tests
+aidev run workflow write-tests --dry-run
+----
+
+==== What to check
+
+[%autowidth.stretch,options="header"]
+|===
+|Where to look |Fine |Warning sign
+
+|`objective`
+|A job the team may give to AI, and it also says what not to do
+|The scope is vague ("fix it nicely" and so on)
+
+|Each step's `writable`
+|Only the places that step needs. A step that only investigates has `[]`
+|`**` (everything), config, CI or deploy paths, or writes in a survey step
+
+|The agent's `tools`
+|Only the tools the job needs
+|No `tools` at all (every built-in tool is available), or `Write` / `Edit` on an agent that does not write
+
+|The agent's `mcp`
+|Only the servers the job needs
+|A server that can also update, on an agent that only needs to read
+
+|`tools` and `mcp` together
+|An agent that touches external systems has no `Bash`
+|An agent with both `mcp` and `Bash` (with `Bash` it can reach outside without going through MCP)
+
+|`until` and `command`
+|Commands that are safe to run in this PKG (tests, lint and so on)
+|Commands that deploy, delete data or send things outside (no shell is involved, but the command itself does run)
+
+|`cost.max_usd`, `limits.max_minutes`
+|They fit the size of the job
+|Large limits for a small job
+
+|Agent and skill bodies
+|They ask only for work inside the scope
+|They ask for out-of-scope work, printing secrets, or skipping verification
+
+|Files in the same PR
+|The referenced `.aidev/agents/` and `.aidev/skills/` files are included
+|An agent or skill that should be referenced is missing from "Files under review" in the PR body
+|===
+
+Agents and skills are shared by every workflow that uses them. When a PR changes an agent's .md, read it knowing that **it also affects the other workflows that use that agent**.
+
+==== Asking for changes
+
+If something is wrong, do not merge; write a comment on the PR. Say which step, what, and why it is a problem, plus a suggested fix ("set `writable` of `survey` to `[]`" and so on), so the person fixing it does not have to guess. How to fix is in xref:workflows-fix[Fixing a workflow]. Fixes are added to the same PR, so read it again in the same order.
 
 [[review-workflow-result]]
 === Workflow result pull requests
@@ -73,6 +129,8 @@ It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the 
 * Does the diff stay inside the steps' `writable`? (Writes are limited automatically, but check.)
 * Do the tests pass? Does `aidev check` in CI pass?
 * Does it match the `objective` and the `--task`? Are there no unrelated changes?
+
+If results keep missing the mark, do not just fix the result by hand; fix the definition. The next run would give the same result otherwise (xref:workflows-fix[Fixing a workflow]).
 
 === Related information
 

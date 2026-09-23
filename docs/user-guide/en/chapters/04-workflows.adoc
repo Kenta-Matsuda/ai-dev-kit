@@ -315,6 +315,86 @@ Messages when it stops, and what to do. The exit code is 1. There is no resume; 
 |Normal. Open the PR by hand from the pushed branch.
 |===
 
+[[workflows-fix]]
+=== Fixing a workflow (Engineering Manager)
+
+There are two reasons to fix a workflow: the reviewer of the definition pull request asks for changes, or a run's result (the result pull request) is not what you expected. In both cases you fix **the definition (`workflow.yaml` and the agents and skills)**. Fixing only the result pull request by hand does not help: the next run gives the same result.
+
+==== Where to fix
+
+Start from the problem you see.
+
+[%autowidth.stretch,options="header"]
+|===
+|Problem |Where to fix |How
+
+|The survey step's findings are not used by the next step
+|The survey step's `prompt`
+|Write "list the results in your final report". Only the final report reaches the next step.
+
+|A write is denied and the run stops (`is read-only`)
+|That step's `writable`
+|Add the path it needs. Add only places that step really needs.
+
+|It changes files you did not ask for
+|That step's `writable` and `prompt`
+|Narrow `writable`, and write "do not change …" in the `prompt`.
+
+|It does not know the procedure, so the way of working varies
+|The agent's `skills`
+|Write the procedure as a skill and add it to the agent's `skills`.
+
+|It cannot see an external system (tickets and so on)
+|The agent's `mcp` and the PKG's `.mcp.json`
+|Register the server in `.mcp.json` (a person does this) and add its name to the agent's `mcp`.
+
+|It says a tool it needs is missing
+|The agent's `tools`
+|Add that tool. Do not add `Bash` to an agent that touches external systems; split it into another agent instead.
+
+|`until` keeps failing and the run stops
+|`until`, `max_retries`, how the steps are split
+|Check by hand that the `until` command really passes in this PKG. If the job is too big, split the step.
+
+|It stops at the cost or time limit
+|`cost.max_usd`, `limits.max_minutes`
+|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json`). Time cannot go above 60 minutes.
+|===
+
+Agents and skills are shared by every workflow that uses them. **Changing an agent's .md also changes how the other workflows that use that agent behave.** To change only one workflow, make a separate agent (`aidev create agent <new-name>`).
+
+==== Fix and submit again
+
+. If the definition pull request is not merged yet, make sure you are on its branch (`aidev/workflow-<name>`). After `aidev submit workflow` you are on that branch.
++
+[source,bash]
+----
+git checkout aidev/workflow-write-tests    # only if you moved to another branch
+----
++
+To fix a workflow that is already merged, start from the latest `main` (`git checkout main`, `git pull`).
+. Edit `workflow.yaml`, the agents and the skills.
+. Check for mistakes in how it is written. If it shows `invalid:`, fix the item it names.
++
+[source,bash]
+----
+aidev list workflows
+----
+. Show each step's details and check they are what you meant. It is not approved, so the last line says "refused", but you can still use it to check the content.
++
+[source,bash]
+----
+aidev run workflow write-tests --dry-run
+----
+. Submit again. The fix is added as a commit on the same branch, and if a pull request exists, its body is updated to the new content.
++
+[source,bash]
+----
+aidev submit workflow write-tests
+----
+
+Once merged, the new definition is approved. Until then your local change exists only in your clone; others can keep running the previous definition that is on `main`.
+
 [[workflows-agents-skills]]
 === Agents and skills
 
@@ -367,6 +447,7 @@ List them with `aidev list agents` / `aidev list skills`, and remove them with `
 === Related information
 
 * xref:review-workflow-def[Workflow definition pull requests], xref:review-workflow-result[Workflow result pull requests]
+* xref:workflows-fix[Fixing a workflow] — where to fix, and how to submit again
 * xref:cli-run[aidev run workflow] — options, exit codes
 * xref:permissions[Permissions and safety] — how a step's `writable` relates to the policy
 * xref:configuration[aidev.yaml reference] — `tools.agent`, `tools.agents`, `references`
