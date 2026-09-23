@@ -56,6 +56,21 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |JSON で出力する
 |===
 
+=== 実行中の表示
+
+`--describe` で agent が動いている間は、agent がツールを呼ぶたびに 1 行ずつ表示します（経過時間、ツール名、対象）。agent が起動したサブエージェントの動きは字下げして表示します。15 秒以上何も来ないときだけ「still running」の行を出します。`--json` ではこの表示は出ません。
+
+----
+ℹ starting workflow-creator via claude (sonnet)…
+     0:04  Read aidev.yaml
+     0:05  Glob packages/**
+     1:07  Agent agents-creator: Create test-writer PKG agent
+     1:20    Read packages/backend/package.json
+     1:52    Write .aidev/agents/test-writer.md
+     2:30  Write .aidev/workflows/unit-tests/workflow.yaml
+✓ wrote .aidev/workflows/unit-tests/workflow.yaml (3 step(s); scope: packages/**/*.test.ts) in 2m 41s ($0.3120)
+----
+
 === 終了コード
 
 [%autowidth.stretch,options="header"]

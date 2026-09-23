@@ -87,6 +87,99 @@ function formatDuration(durationMs) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+/** " in 3m 12s ($0.4210)" for a finished run; cost only when the tool reported one. */
+function runSummary(res) {
+  if (!res || res.durationMs == null) return '';
+  const cost = res.costUsd != null ? ` (${Number(res.costUsd).toFixed(4)})` : '';
+  return ` in ${formatDuration(res.durationMs)}${cost}`;
+}
+
+/** m:ss (h:mm:ss past an hour) for the clock column of a progress line. */
+function formatClock(durationMs) {
+  const total = Math.max(0, Math.floor(Number(durationMs || 0) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+/** Widest progress line: fits a 100-column terminal with the indent. */
+const PROGRESS_LINE_CHARS = 92;
+
+/** Agent output on one printable line: control bytes gone, whitespace folded, truncated. */
+function oneLine(text, max = PROGRESS_LINE_CHARS) {
+  const folded = toolsMod.stripControl(text).replace(/\s+/g, ' ').trim();
+  return folded.length > max ? `${folded.slice(0, max - 1)}…` : folded;
+}
+
+/** A path as the progress line shows it: repo-relative with forward slashes. */
+function progressPath(repoRoot, p) {
+  if (!p || typeof p !== 'string') return '';
+  let shown = p;
+  if (repoRoot && path.isAbsolute(p)) {
+    const rel = path.relative(repoRoot, p);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) shown = rel;
+  }
+  return shown.replace(/\\/g, '/');
+}
+
+/** What one tool call did, in the words a person reads on the progress line. */
+function describeToolUse({ name, input }, repoRoot) {
+  const i = input && typeof input === 'object' ? input : {};
+  const rel = (v) => progressPath(repoRoot, v);
+  switch (name) {
+    case 'Read': case 'Write': case 'Edit': case 'MultiEdit': case 'NotebookEdit':
+      return `${name} ${rel(i.file_path || i.notebook_path)}`;
+    case 'Glob': case 'Grep':
+      return `${name} ${i.pattern || ''}${i.path ? ` in ${rel(i.path)}` : ''}`;
+    case 'Bash': case 'PowerShell':
+      return `${name} ${i.command || ''}`;
+    case 'Agent': case 'Task':
+      return `Agent ${i.subagent_type || ''}${i.description ? `: ${i.description}` : ''}`;
+    case 'Skill': return `Skill ${i.skill || ''}`;
+    case 'WebFetch': return `WebFetch ${i.url || ''}`;
+    case 'WebSearch': return `WebSearch ${i.query || ''}`;
+    default: {
+      const first = Object.values(i).find((v) => typeof v === 'string' && v.trim());
+      return first ? `${name} ${first}` : String(name || 'tool');
+    }
+  }
+}
+
+/**
+ * The human progress printer for runAgent's `onProgress`.
+ *
+ * With a tool that streams events (Claude Code) it prints one dim line per
+ * tool call and per message, subagent activity indented one level, and a
+ * "still running" line only when nothing has arrived for a while. With a tool
+ * that prints nothing until it exits, it falls back to the elapsed time.
+ *
+ *   status()  optional; appended to the waiting lines (batch progress, …)
+ */
+function progressReporter({ repoRoot, status = null } = {}) {
+  const names = new Map(); // tool_use id → tool name, so a failure names its tool
+  const line = (elapsedMs, text) => ui.dim(`    ${formatClock(elapsedMs).padStart(5)}  ${text}`);
+  return ({ elapsedMs, event, quietMs }) => {
+    if (!event) {
+      const extra = typeof status === 'function' ? `, ${status()}` : '';
+      line(elapsedMs, quietMs != null
+        ? `… still running, no output for ${formatDuration(quietMs)}${extra}`
+        : `… ${formatDuration(elapsedMs)} elapsed${extra}`);
+      return;
+    }
+    const indent = event.nested ? '  ' : '';
+    if (event.kind === 'tool') {
+      if (event.id) names.set(event.id, event.name);
+      line(elapsedMs, indent + oneLine(describeToolUse(event, repoRoot)));
+    } else if (event.kind === 'text') {
+      line(elapsedMs, `${indent}“${oneLine(event.text, PROGRESS_LINE_CHARS - 4)}”`);
+    } else if (event.kind === 'error') {
+      const name = names.get(event.toolUseId);
+      line(elapsedMs, `${indent}✗ ${name ? `${name}: ` : ''}${oneLine(event.text, PROGRESS_LINE_CHARS - 8)}`);
+    }
+  };
+}
+
 const assertAgentName = toolsMod.assertAgentName;
 
 /** Compare a version with the Claude Code feature floor (kept for callers that only know Claude). */
@@ -477,15 +570,46 @@ function runAgent({
     let timedOut = false;
     let killTimer = null;
 
-    child.stdout.on('data', (d) => { stdout += d; });
+    // Decoding per stream keeps a multi-byte character that straddles two
+    // chunks intact (the result text is often Japanese).
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    const emit = (payload) => {
+      try { onProgress(payload); } catch { /* diagnostics must not stop the tool */ }
+    };
+    // A tool with a `progress` adapter streams one event per line while it
+    // works; each event reaches onProgress as it arrives. The full stdout is
+    // still kept for `parse`, which reads the final result from it.
+    const streaming = typeof onProgress === 'function' && typeof adapter.progress === 'function';
+    let lastEventAt = startedAt;
+    let pending = '';
+    child.stdout.on('data', (d) => {
+      stdout += d;
+      if (!streaming) return;
+      pending += d;
+      let nl;
+      while ((nl = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, nl);
+        pending = pending.slice(nl + 1);
+        for (const event of adapter.progress(line)) {
+          lastEventAt = Date.now();
+          emit({ elapsedMs: lastEventAt - startedAt, event });
+        }
+      }
+    });
     child.stderr.on('data', (d) => { stderr += d; });
     // A process that exits before consuming stdin may close the pipe. That is
     // reported by its exit/result, not as an unhandled EPIPE in this parent.
     child.stdin.on('error', () => {});
     child.stdin.end(adapter.prompt === 'stdin' ? String(prompt == null ? '' : prompt) : '', 'utf8');
 
+    // The heartbeat is the only progress a non-streaming tool gives. With a
+    // streaming tool it speaks only when the tool has been silent for a while.
     const heartbeat = typeof onProgress === 'function' ? setInterval(() => {
-      try { onProgress({ elapsedMs: Date.now() - startedAt }); } catch { /* diagnostics must not stop the tool */ }
+      const now = Date.now();
+      if (!streaming) { emit({ elapsedMs: now - startedAt, event: null }); return; }
+      const quietMs = now - lastEventAt;
+      if (quietMs >= HEARTBEAT_MS) emit({ elapsedMs: now - startedAt, event: null, quietMs });
     }, HEARTBEAT_MS) : null;
 
     const deadline = timeoutMs > 0 ? setTimeout(() => {
@@ -816,7 +940,7 @@ async function runWikiAgent({
     const res = await runAgent({
       repoRoot, installRoot, tool: opts.tool, agent: opts.agent, prompt,
       timeoutMs: opts.timeoutMs, model: opts.model, label: runLabel,
-      onProgress: human ? ({ elapsedMs }) => ui.dim(`    ${describe()}, ${formatDuration(elapsedMs)} elapsed…`) : null,
+      onProgress: human ? progressReporter({ repoRoot, status: describe }) : null,
     });
     addCost(res);
     return res;
@@ -1022,7 +1146,8 @@ function referencesText(entries, files) {
 module.exports = {
   DEFAULT_AGENT, DEFAULT_BATCH_SIZE, DEFAULT_TIMEOUT_MS, MAX_INLINE_PROMPT_BYTES, HEARTBEAT_MS, MIN_CLAUDE_VERSION,
   EXIT_SIGTERM, PROMPT_DIR_REL, AGENT_FLAGS, AGENT_FLAG_HELP,
-  versionAtLeast, assertAgentName, assertTool, assertToolEnabled, toolLabel, formatDuration, summarizeResult,
+  versionAtLeast, assertAgentName, assertTool, assertToolEnabled, toolLabel, formatDuration, formatClock, describeToolUse,
+  progressReporter, runSummary, summarizeResult,
   buildPrompt, buildArgv, previewCommand, writePromptFile, prepareTask, writeTaskFile, chunk, runAgent, resolveReferences,
   assessWikiProgress, renderWikiProgress, resolveOptions, runWikiAgent,
 };

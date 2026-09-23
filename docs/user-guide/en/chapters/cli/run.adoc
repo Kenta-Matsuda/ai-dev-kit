@@ -14,7 +14,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 
 Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
 
-Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. The agent's child process receives `AIDEV_WORKFLOW=<name>`, and the hook allows writes to `scope.writable`. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Run] for what happens during a run.
+Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. The agent's child process receives `AIDEV_WORKFLOW=<name>`, and the hook allows writes to `scope.writable`. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Run] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
 
 === Options
 

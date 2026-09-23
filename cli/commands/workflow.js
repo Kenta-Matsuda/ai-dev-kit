@@ -166,7 +166,7 @@ async function createByDescription(ctx, name) {
   const res = await agentMod.runAgent({
     repoRoot, installRoot, tool, agent: 'workflow-creator', definition: creator.body, prompt,
     model: settings.model, timeoutMs: agentMod.DEFAULT_TIMEOUT_MS, label: `wf-new-${name}`,
-    onProgress: flags.json ? null : ({ elapsedMs }) => ui.dim(`    workflow-creator: ${agentMod.formatDuration(elapsedMs)} elapsed…`),
+    onProgress: flags.json ? null : agentMod.progressReporter({ repoRoot }),
   });
   if (!res.ok) {
     if (flags.json) ui.json({ ok: false, name, reason: res.reason });
@@ -180,7 +180,7 @@ async function createByDescription(ctx, name) {
     ui.warn(`the agent finished, but the workflow does not validate: ${problem}`);
     ui.dim('    Fix the YAML by hand, then check with "aidev list workflows".');
   } else {
-    ui.ok(`wrote ${rel} (${def.steps.length} step(s); scope: ${def.scope.writable.join(', ') || 'nothing writable'})`);
+    ui.ok(`wrote ${rel} (${def.steps.length} step(s); scope: ${def.scope.writable.join(', ') || 'nothing writable'})${agentMod.runSummary(res)}`);
   }
   if (res.result) ui.dim(`    ${agentMod.summarizeResult(res.result, 600).replace(/\n/g, '\n    ')}`);
   nextSteps(name);
@@ -486,7 +486,7 @@ async function runWorkflow(ctx) {
     const res = await agentMod.runAgent({
       repoRoot, installRoot, tool, agent: step.agent, definition: wfMod.definitionForPrompt(agent, skills),
       prompt, model, timeoutMs, env, label: `wf-${name}-${step.id}`,
-      onProgress: flags.json ? null : ({ elapsedMs }) => ui.dim(`    ${step.id}: ${agentMod.formatDuration(elapsedMs)} elapsed…`),
+      onProgress: flags.json ? null : agentMod.progressReporter({ repoRoot }),
     });
     if (res.costUsd != null) spentUsd += Number(res.costUsd) || 0;
     log(`step ${step.id}: agent ${res.ok ? 'finished' : `failed: ${res.reason}`} in ${agentMod.formatDuration(res.durationMs)}`

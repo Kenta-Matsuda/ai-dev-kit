@@ -102,6 +102,63 @@ function plainTextResult({ stdout, stderr, exitCode }) {
   return { ok: true, result: out, costUsd: undefined, sessionId: undefined, permissionDenials: 0 };
 }
 
+/** Parse one line of a JSON-lines stream; null for anything that is not a JSON object. */
+function jsonLine(line) {
+  const text = String(line == null ? '' : line).trim();
+  if (!text.startsWith('{')) return null;
+  try { const v = JSON.parse(text); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+
+/**
+ * The final `result` record of a Claude Code stream-json run (the last one
+ * wins). Also accepts a single JSON object, which is what `--output-format
+ * json` prints, so a stub that answers with one object still parses.
+ */
+function claudeResultRecord(stdout) {
+  let result = null;
+  for (const line of String(stdout || '').split('\n')) {
+    const rec = jsonLine(line);
+    if (rec && rec.type === 'result') result = rec;
+  }
+  if (result) return result;
+  const whole = jsonLine(stdout);
+  return whole && whole.type == null && 'result' in whole ? whole : null;
+}
+
+/**
+ * Turn one stream-json line into progress events: [{ kind, ... }], empty when
+ * the line carries nothing a person watching the run needs to see.
+ *
+ *   tool    { kind: 'tool', id, name, input, nested }   the agent called a tool
+ *   text    { kind: 'text', text, nested }              the agent said something
+ *   error   { kind: 'error', toolUseId, text, nested }  a tool call failed or was denied
+ *
+ * `nested` is true for events from a subagent (Claude Code sets
+ * parent_tool_use_id on them).
+ */
+function claudeStreamProgress(line) {
+  const rec = jsonLine(line);
+  if (!rec || !rec.message || !Array.isArray(rec.message.content)) return [];
+  const nested = rec.parent_tool_use_id != null;
+  const out = [];
+  if (rec.type === 'assistant') {
+    for (const block of rec.message.content) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'tool_use') out.push({ kind: 'tool', id: block.id, name: String(block.name || ''), input: block.input || {}, nested });
+      else if (block.type === 'text' && String(block.text || '').trim()) out.push({ kind: 'text', text: String(block.text), nested });
+    }
+  } else if (rec.type === 'user') {
+    for (const block of rec.message.content) {
+      if (!block || typeof block !== 'object' || block.type !== 'tool_result' || !block.is_error) continue;
+      const content = block.content;
+      const text = typeof content === 'string' ? content
+        : Array.isArray(content) ? content.map((c) => (c && c.text) || '').join(' ') : '';
+      out.push({ kind: 'error', toolUseId: block.tool_use_id, text, nested });
+    }
+  }
+  return out;
+}
+
 /**
  * The registry. Field meanings:
  *
@@ -113,6 +170,7 @@ function plainTextResult({ stdout, stderr, exitCode }) {
  *   namedAgents  the tool selects an agent by name from materialised config
  *   argv(opts)   fixed flags + validated identifiers; never free text except `promptArg`
  *   parse(...)   turn stdout/stderr/exit into { ok, result, costUsd, sessionId, permissionDenials, reason }
+ *   progress     optional: (line) => progress events for one line of stdout, while the tool runs
  *   configGlobs  repo-relative globs the kit owns for this tool (protected, drift-checked)
  *   configDirs   directories pruned when they end up empty
  */
@@ -130,7 +188,12 @@ const REGISTRY = Object.freeze({
       // one unconditionally would override a choice nobody made.
       if (model) argv.push('--model', model);
       argv.push(
-        '--output-format', 'json',
+        // stream-json prints one JSON event per line while the agent works
+        // (every tool call, every assistant message) and ends with the same
+        // `result` record `--output-format json` prints. `progress` below
+        // turns the events into the live progress lines; `parse` reads only
+        // the result record. -p requires --verbose for it.
+        '--output-format', 'stream-json', '--verbose',
         // Wiki generation must edit files without an interactive approval
         // dialog. acceptEdits grants that narrow class while the project deny
         // rules and PreToolUse guard remain active; this is not bypass mode.
@@ -141,10 +204,10 @@ const REGISTRY = Object.freeze({
       );
       return argv;
     },
+    progress: claudeStreamProgress,
     parse({ stdout, stderr, exitCode }) {
-      let payload = null;
       const trimmed = String(stdout || '').trim();
-      if (trimmed) { try { payload = JSON.parse(trimmed); } catch { payload = null; } }
+      const payload = claudeResultRecord(trimmed);
       if (exitCode !== 0 || (payload && payload.is_error)) {
         return {
           ok: false,
@@ -152,8 +215,8 @@ const REGISTRY = Object.freeze({
           costUsd: payload ? payload.total_cost_usd : undefined,
         };
       }
-      // `--output-format json` is a protocol contract. Treating arbitrary text
-      // as success is how an early shell failure can masquerade as a build.
+      // The result record is a protocol contract. Treating arbitrary text as
+      // success is how an early shell failure can masquerade as a build.
       if (!payload) {
         return { ok: false, reason: 'Claude Code exited 0 but did not return the requested JSON result', result: trimmed };
       }

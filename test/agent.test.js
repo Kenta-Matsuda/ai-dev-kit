@@ -16,6 +16,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { suite, test, ok, eq, throws } = require('./harness');
 const { makeRepo, write } = require('./fixtures');
@@ -33,7 +34,7 @@ const KIT_ROOT = path.resolve(__dirname, '..');
 /**
  * A stand-in for any tool binary. It records its argv, captures the prompt
  * (stdin, or the file the argv points at) and answers the way STUB_MODE says:
- * `json` like Claude Code's --output-format json, `text` like a plain CLI,
+ * `json` like Claude Code's --output-format stream-json, `text` like a plain CLI,
  * `fail` with a non-zero exit.
  */
 function writeToolStub(root, name = 'fake-tool.js') {
@@ -55,7 +56,12 @@ process.stdin.on('end', () => {
   const mode = process.env.STUB_MODE || 'json';
   if (mode === 'fail') { process.stderr.write('stub: refused\\n'); process.exit(2); }
   if (mode === 'text') { process.stdout.write('stub answer\\n'); process.exit(0); }
-  process.stdout.write(JSON.stringify({ result: 'stub answer', is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+    { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'tu0', message: { content: [
+    { type: 'tool_use', id: 'tu2', name: 'Glob', input: { pattern: 'stub/**' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', result: 'stub answer', is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
 });
 `, 'utf8');
   return p;
@@ -115,7 +121,7 @@ function run() {
 
   test('argv per tool: identifiers and fixed flags only, prompt on stdin or in a file', () => {
     eq(agentMod.buildArgv({ agent: 'kb', model: 'sonnet' }),
-      ['-p', '--input-format', 'text', '--agent', 'kb', '--model', 'sonnet', '--output-format', 'json',
+      ['-p', '--input-format', 'text', '--agent', 'kb', '--model', 'sonnet', '--output-format', 'stream-json', '--verbose',
         '--permission-mode', 'acceptEdits', '--permission-prompts', 'none']);
     eq(agentMod.buildArgv({ tool: 'copilot', agent: 'kb', model: null, promptArg: 'P' }),
       ['-p', 'P', '--allow-all-tools', '--agent', 'kb']);
@@ -125,6 +131,75 @@ function run() {
       ['chat', '--no-interactive', '--trust-all-tools', '--agent', 'kb', 'P']);
     eq(toolsMod.getTool('claude').prompt, 'stdin');
     for (const id of ['copilot', 'codex', 'kiro']) eq(toolsMod.getTool(id).prompt, 'file', id);
+  });
+
+  test('claude reads the result record from the stream, and refuses output without one', () => {
+    const claude = toolsMod.getTool('claude');
+    const line = (o) => JSON.stringify(o);
+    const stream = [
+      line({ type: 'system', subtype: 'init' }),
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: 'working' }] } }),
+      line({ type: 'result', subtype: 'success', is_error: false, result: 'done', total_cost_usd: 0.5, session_id: 'sid', permission_denials: [{}] }),
+    ].join('\n');
+    const good = claude.parse({ stdout: `${stream}\n`, stderr: '', exitCode: 0 });
+    eq([good.ok, good.result, good.costUsd, good.sessionId, good.permissionDenials], [true, 'done', 0.5, 'sid', 1]);
+    const failed = claude.parse({ stdout: line({ type: 'result', is_error: true, result: 'refused', total_cost_usd: 0.1 }), stderr: '', exitCode: 0 });
+    eq([failed.ok, failed.reason, failed.costUsd], [false, 'refused', 0.1]);
+    const none = claude.parse({ stdout: line({ type: 'system', subtype: 'init' }), stderr: '', exitCode: 0 });
+    eq(none.ok, false);
+    ok(/did not return the requested JSON result/.test(none.reason), none.reason);
+    const single = claude.parse({ stdout: line({ result: 'one object', is_error: false, total_cost_usd: 1 }), stderr: '', exitCode: 0 });
+    eq([single.ok, single.result], [true, 'one object'], 'a lone result object (--output-format json) still parses');
+    const crashed = claude.parse({ stdout: stream, stderr: 'boom', exitCode: 1 });
+    eq([crashed.ok, crashed.reason], [false, 'done'], 'a non-zero exit is a failure even with a result record');
+  });
+
+  test('claude progress events: tool calls, messages and failed tools, nested inside a subagent', () => {
+    const progress = toolsMod.getTool('claude').progress;
+    const line = (o) => JSON.stringify(o);
+    eq(progress('not json'), []);
+    eq(progress(line({ type: 'system', subtype: 'init' })), []);
+    eq(progress(line({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+      { type: 'thinking', thinking: 'hmm' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a.md' } },
+      { type: 'text', text: '  ' },
+      { type: 'text', text: 'plan' }] } })),
+    [{ kind: 'tool', id: 't1', name: 'Read', input: { file_path: 'a.md' }, nested: false }, { kind: 'text', text: 'plan', nested: false }]);
+    eq(progress(line({ type: 'user', parent_tool_use_id: 't9', message: { content: [
+      { type: 'tool_result', tool_use_id: 't1', content: 'fine' },
+      { type: 'tool_result', tool_use_id: 't2', is_error: true, content: [{ type: 'text', text: 'denied' }] }] } })),
+    [{ kind: 'error', toolUseId: 't2', text: 'denied', nested: true }]);
+  });
+
+  test('the progress reporter prints one clocked line per event, subagents indented, quiet lines only when idle', () => {
+    const ui = require('../cli/lib/ui');
+    const lines = [];
+    const original = ui.dim;
+    ui.dim = (s) => lines.push(s);
+    try {
+      const root = path.join(os.tmpdir(), 'pkg');
+      const report = agentMod.progressReporter({ repoRoot: root, status: () => '2/5 done' });
+      report({ elapsedMs: 4000, event: { kind: 'tool', id: 't1', name: 'Read', input: { file_path: path.join(root, 'src', 'a.ts') } } });
+      report({ elapsedMs: 65000, event: { kind: 'tool', id: 't2', name: 'Agent', input: { subagent_type: 'agents-creator', description: 'write it' } } });
+      report({ elapsedMs: 66000, event: { kind: 'tool', id: 't3', name: 'Glob', input: { pattern: '**/*.ts' }, nested: true } });
+      report({ elapsedMs: 70000, event: { kind: 'text', text: 'first line\nsecond \x1b[31mline\x1b[0m' } });
+      report({ elapsedMs: 80000, event: { kind: 'error', toolUseId: 't1', text: 'no such file' } });
+      report({ elapsedMs: 95000, event: null, quietMs: 15000 });
+      report({ elapsedMs: 3725000, event: null });
+    } finally { ui.dim = original; }
+    eq(lines, [
+      '     0:04  Read src/a.ts',
+      '     1:05  Agent agents-creator: write it',
+      '     1:06    Glob **/*.ts',
+      '     1:10  “first line second line”',
+      '     1:20  ✗ Read: no such file',
+      '     1:35  … still running, no output for 15s, 2/5 done',
+      `    1:02:05  … ${agentMod.formatDuration(3725000)} elapsed, 2/5 done`,
+    ]);
+    const long = agentMod.describeToolUse({ name: 'Bash', input: { command: 'x'.repeat(200) } });
+    ok(long.length > 92, 'describeToolUse does not truncate; the reporter does');
+    eq(agentMod.describeToolUse({ name: 'Custom', input: { n: 1, q: 'why' } }), 'Custom why');
+    eq(agentMod.describeToolUse({ name: 'Custom', input: {} }), 'Custom');
   });
 
   test('plain-text tools succeed on exit 0 and report stderr on failure', () => {

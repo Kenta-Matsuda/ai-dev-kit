@@ -50,7 +50,12 @@ process.stdin.on('data', (c) => { stdin += c; });
 process.stdin.on('end', () => {
   if (process.env.STUB_PROMPT_OUT) fs.appendFileSync(process.env.STUB_PROMPT_OUT, stdin + '\\n=====\\n');
   if (process.env.STUB_MODE === 'fail') { process.stderr.write('stub: refused\\n'); process.exit(2); }
-  process.stdout.write(JSON.stringify({ result: 'stub answer', is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+    { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'tu0', message: { content: [
+    { type: 'tool_use', id: 'tu2', name: 'Glob', input: { pattern: 'stub/**' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', result: 'stub answer', is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
 });
 `, 'utf8');
   return p;
@@ -328,6 +333,17 @@ function run() {
         const f = aidev(fx.root, ['run', 'workflow', 'plain', '--json'], { env: env({ STUB_MODE: 'fail' }) });
         eq(f.code, 1);
         ok(/step think: stub: refused/.test(lastJson(f.out).stopReason), f.out);
+      });
+
+      test('a human-mode run shows each tool call as it streams in, subagent calls indented', () => {
+        define('watched', { steps: ['  - id: a', '    agent: coder', '    prompt: hi'] });
+        reset();
+        const r = aidev(fx.root, ['run', 'workflow', 'watched'], { env: env() });
+        eq(r.code, 0, r.out);
+        ok(/^ {5}\d:\d\d  Read stub-read\.md$/m.test(r.out), `no progress line for the Read call:\n${r.out}`);
+        ok(/^ {5}\d:\d\d    Glob stub\/\*\*$/m.test(r.out), `the subagent call is not indented:\n${r.out}`);
+        const j = aidev(fx.root, ['run', 'workflow', 'watched', '--json'], { env: env() });
+        ok(!/Read stub-read/.test(j.out), '--json prints no progress lines');
       });
 
       test('a pull-request step needs a clean tree, commits only the scope on its own branch and pushes it', () => {

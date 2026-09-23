@@ -14,7 +14,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 
 `.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
 
-手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent の子プロセスに `AIDEV_WORKFLOW=<name>` を渡し、hook が `scope.writable` への書き込みを許可します。終わると記録を `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に書きます。実行中に起きることは xref:workflows-run[実行する] を見てください。
+手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent の子プロセスに `AIDEV_WORKFLOW=<name>` を渡し、hook が `scope.writable` への書き込みを許可します。終わると記録を `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に書きます。実行中に起きることは xref:workflows-run[実行する] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
 
 === オプション
 

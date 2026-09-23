@@ -100,14 +100,14 @@ async function describeAgent(ctx, name, rel) {
   const res = await agentMod.runAgent({
     repoRoot, installRoot, tool, agent: 'agents-creator', definition: creator.body, prompt,
     model: settings.model, timeoutMs: agentMod.DEFAULT_TIMEOUT_MS, label: `create-agent-${name}`,
-    onProgress: flags.json ? null : ({ elapsedMs }) => ui.dim(`    agents-creator: ${agentMod.formatDuration(elapsedMs)} elapsed…`),
+    onProgress: flags.json ? null : agentMod.progressReporter({ repoRoot }),
   });
   if (!res.ok) throw new AidevError(`agents-creator did not finish: ${res.reason}`);
   const written = wfMod.resolveAgent(repoRoot, installRoot, name);
   const problem = !written || written.source !== 'pkg' ? `${rel} was not written`
     : (toolsMod.parseFrontmatter(written.text).meta.name !== name ? `${rel}: frontmatter name must be ${name}` : null);
   if (problem) ui.warn(`the agent finished, but: ${problem}`);
-  else ui.ok(`wrote ${rel}`);
+  else ui.ok(`wrote ${rel}${agentMod.runSummary(res)}`);
   if (flags.json) ui.json({ ok: !problem, kind: 'agent', name, path: rel, problem, costUsd: res.costUsd ?? null });
   return problem ? EXIT.GENERAL : EXIT.OK;
 }

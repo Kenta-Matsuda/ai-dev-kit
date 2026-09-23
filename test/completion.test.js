@@ -164,8 +164,13 @@ process.stdin.on('end', () => {
   } else if (mode === 'partial') {
     if (targets.length > 0) finish(targets[0]);
   }
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+    { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'tu0', message: { content: [
+    { type: 'tool_use', id: 'tu2', name: 'Glob', input: { pattern: 'stub/**' } }] } }) + '\\n');
   process.stdout.write(JSON.stringify({
-    result: mode === 'no-progress' ? 'need more information' : 'wrote the pages',
+    type: 'result', result: mode === 'no-progress' ? 'need more information' : 'wrote the pages',
     is_error: false, total_cost_usd: 0.0123, session_id: 'stub-session',
   }) + '\\n');
 });
@@ -416,7 +421,8 @@ function run() {
     const pair = (name) => argv[argv.indexOf(name) + 1];
     ok(argv.includes('-p'), 'not one-shot');
     eq(pair('--agent'), 'knowledge-builder');
-    eq(pair('--output-format'), 'json');
+    eq(pair('--output-format'), 'stream-json');
+    ok(argv.includes('--verbose'), 'stream-json needs --verbose in -p mode');
     eq(pair('--permission-mode'), 'acceptEdits');
     eq(pair('--permission-prompts'), 'none');
     ok(agentMod.versionAtLeast('2.1.278'), 'current Claude Code version was rejected');
@@ -633,7 +639,7 @@ function run() {
     eq(argv[0], '-p');
     eq(pair('--input-format'), 'text');
     eq(pair('--agent'), 'knowledge-builder');
-    eq(pair('--output-format'), 'json');
+    eq(pair('--output-format'), 'stream-json');
     eq(pair('--permission-mode'), 'acceptEdits');
     eq(pair('--permission-prompts'), 'none');
     ok(!argv.some((arg) => /Generate the LLM Wiki/.test(arg)), 'prompt leaked into argv');

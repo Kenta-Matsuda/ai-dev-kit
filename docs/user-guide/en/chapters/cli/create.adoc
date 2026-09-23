@@ -56,6 +56,21 @@ Names are lowercase letters, digits and hyphens. The kit bundles only machinery 
 |Machine-readable output
 |===
 
+=== What you see while it runs
+
+While the agent behind `--describe` works, one line is printed per tool call (elapsed time, tool, target). Calls made by a subagent the agent started are indented. A "still running" line appears only when nothing has arrived for 15 seconds. `--json` prints none of this.
+
+----
+ℹ starting workflow-creator via claude (sonnet)…
+     0:04  Read aidev.yaml
+     0:05  Glob packages/**
+     1:07  Agent agents-creator: Create test-writer PKG agent
+     1:20    Read packages/backend/package.json
+     1:52    Write .aidev/agents/test-writer.md
+     2:30  Write .aidev/workflows/unit-tests/workflow.yaml
+✓ wrote .aidev/workflows/unit-tests/workflow.yaml (3 step(s); scope: packages/**/*.test.ts) in 2m 41s ($0.3120)
+----
+
 === Exit codes
 
 [%autowidth.stretch,options="header"]
