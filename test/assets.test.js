@@ -329,13 +329,13 @@ function run() {
 
   const SKILLS = [
     'repository-discovery', 'knowledge-usage', 'test-and-verify', 'secure-coding',
-    'azure-devops', 'change-planning', 'code-review', 'commit-and-pr',
+    'change-planning', 'code-review', 'commit-and-pr',
     'knowledge-update', 'failure-triage',
   ];
 
   const SKILL_DIR = path.join(ROOT, ...CLAUDE_TEMPLATES.split('/'), 'skills');
 
-  test('all ten documented skills ship', () => {
+  test('every documented skill ships', () => {
     const present = fs.existsSync(SKILL_DIR)
       ? fs.readdirSync(SKILL_DIR).filter((d) => fs.existsSync(path.join(SKILL_DIR, d, 'SKILL.md')))
       : [];

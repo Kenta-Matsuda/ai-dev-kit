@@ -94,4 +94,4 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 - [ ] ブランチ名が規約どおり
 - [ ] 自動マージを設定していない
 
-関連: [[test-and-verify]] / [[code-review]] / [[azure-devops]] / [[secure-coding]]
+関連: [[test-and-verify]] / [[code-review]] / [[secure-coding]]
