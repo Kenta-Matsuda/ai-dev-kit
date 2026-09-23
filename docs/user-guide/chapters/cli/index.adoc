@@ -43,7 +43,7 @@ aidev <verb> [<object>] [<name>] [options]
 |kit のバージョンを表示します。
 |===
 
-`hook`、`mcp`、`update`、`uninstall` 以外のコマンドは、1 日 1 回、新しい kit があるか確認し、あれば先に更新するか尋ねます。更新したら、そのコマンドを新しい CLI で実行し直します。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
+`hook` と `update` 以外のすべてのコマンド（`--help` と `--version` を含む）は、新しい kit があると通知します。確認は 1 時間に 1 回です。端末で実行したときは、先に更新するか尋ねます（`--json` と `uninstall` では尋ねません）。更新したら、そのコマンドを新しい CLI で実行し直します。通知は標準エラー出力に出るので、`--json` の出力は変わりません。`AIDEV_NO_UPDATE_CHECK=1` で無効にできます。
 
 [[cli-exit-codes]]
 === 終了コード
@@ -76,20 +76,20 @@ aidev <verb> [<object>] [<name>] [options]
 |===
 |コマンド |要約
 
-|xref:cli-run[`aidev run workflow <name>`]
-|承認済みの workflow を実行する（開発はここから）
-
 |xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
 |workflow・agent・skill を作る（書くだけで、実行はしない）。`policy` は書き込み権限 policy の候補を作り `--approve` で置く
-
-|xref:cli-submit[`aidev submit workflow <name>`]
-|workflow をブランチと PR にして提出する（マージ = 承認）
 
 |xref:cli-list[`aidev list workflows\|agents\|skills\|packages`]
 |workflow（承認状態）・agent・skill の一覧。`packages` はこの端末で {project-name} を導入した PKG の一覧
 
 |xref:cli-remove[`aidev remove workflow\|agent\|skill <name>`]
 |workflow・agent・skill を削除する（参照されている agent・skill は拒否）
+
+|xref:cli-run[`aidev run workflow <name>`]
+|承認済みの workflow を実行する（開発はここから）
+
+|xref:cli-submit[`aidev submit workflow <name>`]
+|workflow をブランチと PR にして提出する（マージ = 承認）
 |===
 
 .保守する（PKG の clone の中で）
@@ -97,11 +97,11 @@ aidev <verb> [<object>] [<name>] [options]
 |===
 |コマンド |要約
 
-|xref:cli-init[`aidev init`]
-|この PKG に {project-name} を導入する（初回は対話、2 人目以降は質問なし）
-
 |xref:cli-check[`aidev check`]
 |この PKG の状態を 1 画面で表示し、整合性を終了コードで返す（CI 用）
+
+|xref:cli-init[`aidev init`]
+|この PKG に {project-name} を導入する（初回は対話、2 人目以降は質問なし）
 
 |xref:cli-sync[`aidev sync tools\|wiki`]
 |`tools`: kit の最新テンプレートをこの PKG に取り込む（編集済みはマージ）。`wiki`: LLM Wiki を HEAD に追従させ、別コミットとして積む
@@ -112,14 +112,14 @@ aidev <verb> [<object>] [<name>] [options]
 |===
 |コマンド |要約
 
-|xref:cli-update[`aidev update`]
-|kit 本体（CLI とテンプレート）を更新する。PKG への取り込みは `aidev sync tools`
-
 |xref:cli-doctor[`aidev doctor`]
 |端末の実行環境（Node.js、git、kit、AI ツール）を診断する。`--package` を付けるとその PKG の状態も
 
 |xref:cli-uninstall[`aidev uninstall [--all]`]
 |この端末から `aidev` を消す。`--package` を付けるとその PKG を kit の管理から外す（旧 eject）
+
+|xref:cli-update[`aidev update`]
+|kit 本体（CLI とテンプレート）を更新する。PKG への取り込みは `aidev sync tools`
 |===
 
 
@@ -133,26 +133,26 @@ aidev <verb> [<object>] [<name>] [options]
 
 |===
 
-include::run.adoc[]
+include::check.adoc[]
 
 include::create.adoc[]
 
-include::submit.adoc[]
+include::doctor.adoc[]
+
+include::hook.adoc[]
+
+include::init.adoc[]
 
 include::list.adoc[]
 
 include::remove.adoc[]
 
-include::init.adoc[]
+include::run.adoc[]
 
-include::check.adoc[]
+include::submit.adoc[]
 
 include::sync.adoc[]
 
-include::update.adoc[]
-
-include::doctor.adoc[]
-
 include::uninstall.adoc[]
 
-include::hook.adoc[]
+include::update.adoc[]
