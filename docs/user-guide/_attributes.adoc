@@ -4,7 +4,7 @@
 :claude-min-version: 2.1.259
 :default-branch: main
 :default-pat-env: AZURE_DEVOPS_PAT
-:aidev-version: 0.9.0
+:aidev-version: 0.10.0
 :aidev-home-win: %LOCALAPPDATA%\ai-dev-kit
 :aidev-home-posix: ~/.local/share/ai-dev-kit
 :guide-source-dir: docs/user-guide
