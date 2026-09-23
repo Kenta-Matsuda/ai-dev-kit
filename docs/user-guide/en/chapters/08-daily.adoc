@@ -61,6 +61,8 @@ Start your AI tool at the PKG root.
 claude
 ----
 
+The model comes from the team's `.claude/settings.json`. To use a different one yourself, set it in `.claude/settings.local.json` or with `/model` during the session (xref:maintain-model[Changing the model]).
+
 The AI reads the LLM Wiki (`.aidev/knowledge/index.md`) first and investigates the source from there. Every statement in the Wiki links to the file it is based on, so the AI confirms it there.
 
 You never need to fix the Wiki by hand. If you find a mistake, fix the source (a comment or the structure) and let the next update pick it up. Hand edits are detected, and the next generation asks before overwriting them (xref:knowledge-handedit[Why hand edits are discouraged]).

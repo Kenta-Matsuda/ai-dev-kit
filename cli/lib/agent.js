@@ -425,8 +425,14 @@ function estimateRemaining(durationsMs, batchesLeft) {
  * one-line pointer at a prompt file instead (`promptArg`); only fixed flags and
  * already-validated identifiers reach argv otherwise.
  */
-function buildArgv({ tool = 'claude', agent, model = null, promptArg = null }) {
-  return toolsMod.getTool(tool).argv({ agent, model, promptArg });
+function buildArgv({ tool = 'claude', agent, model = null, promptArg = null, capabilities = null }) {
+  const adapter = toolsMod.getTool(tool);
+  // Limiting an agent to its granted tools is a launch-time promise; a tool
+  // that cannot keep it must not be started as if it could.
+  if (capabilities && !adapter.capabilities) {
+    throw new Error(`${adapter.label} cannot be limited to an agent's tools and MCP servers`);
+  }
+  return adapter.argv({ agent, model, promptArg, capabilities });
 }
 
 /**
@@ -503,6 +509,9 @@ function runAgent({
   definition = null,
   // Extra tool arguments appended verbatim (caller checks the tool supports them).
   extraArgv = [],
+  // { tools, mcp, mcpConfigFile }: start the tool with only these (workflow
+  // steps). Refused for a tool whose adapter cannot enforce it.
+  capabilities = null,
 }) {
   return new Promise((resolve) => {
     let adapter;
@@ -546,7 +555,12 @@ function runAgent({
       }
     }
 
-    const argv = [...resolved.argvPrefix, ...buildArgv({ tool, agent: namedAgent, model, promptArg }), ...extraArgv];
+    let toolArgv;
+    try { toolArgv = buildArgv({ tool, agent: namedAgent, model, promptArg, capabilities }); } catch (e) {
+      resolve({ ok: false, tool, reason: e.message });
+      return;
+    }
+    const argv = [...resolved.argvPrefix, ...toolArgv, ...extraArgv];
     const startedAt = Date.now();
     let child;
     try {

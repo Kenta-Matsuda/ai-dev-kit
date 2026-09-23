@@ -193,6 +193,8 @@ function run() {
         ok(new RegExp(`\\b${tool}\\b`).test(pre.matcher),
           `guard-write does not match ${tool}`);
       }
+      // A workflow step's agent may call only the MCP servers it was granted.
+      ok(new RegExp(`^(?:${pre.matcher})$`).test('mcp__tickets__get_item'), `guard-write does not match MCP tools: ${pre.matcher}`);
     });
 
     test('the deny list covers the protected floor', () => {

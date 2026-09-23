@@ -34,7 +34,9 @@ const FLAG_HELP = {
 const AGENT_TEMPLATE = (name) => `---
 name: ${name}
 description: <when this agent is started and what it does, in one or two sentences>
+skills: []
 tools: Read, Glob, Grep, Write, Edit, Bash
+mcp: []
 model: inherit
 ---
 
@@ -48,7 +50,7 @@ model: inherit
 | --- | --- |
 | 入力 | prompt の「Objective」と「Task for this run」、\`.aidev/knowledge/\` |
 | 出力 | 作業ツリー上の変更と final message の報告 |
-| 必要権限 | workflow の \`scope.writable\` だけ（hook が強制する） |
+| 必要権限 | 書けるのは workflow のステップの \`writable\` だけ（hook が強制する）。使えるのは frontmatter の \`tools\` と \`mcp\` だけ |
 | 前提 | 承認済み workflow から起動されている |
 
 ## 手順
@@ -86,7 +88,8 @@ async function describeAgent(ctx, name, rel) {
   const existing = toolsMod.listBundledAgents(installRoot).map((a) => `- ${a.name} (kit): ${a.description}`);
   const prompt = [
     `# Create the agent "${name}"`, '',
-    `Write ${rel}: frontmatter (name: ${name}, description, tools, model: inherit) and the body with 入出力契約, 手順 and 停止条件.`,
+    `Write ${rel}: frontmatter (name: ${name}, description, skills, tools, mcp, model: inherit) and the body with 入出力契約, 手順 and 停止条件.`,
+    'skills, tools and mcp are what the agent can use and nothing more: list only what its work needs (tools: the built-in tools it gets; mcp: servers from the PKG\'s .mcp.json, [] when none).',
     'Do not run it. Do not commit. Do not write anywhere else.', '',
     '## What the team wants', '', String(flags.describe).trim(), '',
     '## Agents that already exist (do not duplicate one)', '', ...existing, '',
@@ -105,7 +108,8 @@ async function describeAgent(ctx, name, rel) {
   if (!res.ok) throw new AidevError(`agents-creator did not finish: ${res.reason}`);
   const written = wfMod.resolveAgent(repoRoot, installRoot, name);
   const problem = !written || written.source !== 'pkg' ? `${rel} was not written`
-    : (toolsMod.parseFrontmatter(written.text).meta.name !== name ? `${rel}: frontmatter name must be ${name}` : null);
+    : toolsMod.parseFrontmatter(written.text).meta.name !== name ? `${rel}: frontmatter name must be ${name}`
+      : written.capabilityError ? `${rel}: ${written.capabilityError}` : null;
   if (problem) ui.warn(`the agent finished, but: ${problem}`);
   else ui.ok(`wrote ${rel}${agentMod.runSummary(res)}`);
   if (flags.json) ui.json({ ok: !problem, kind: 'agent', name, path: rel, problem, costUsd: res.costUsd ?? null });
@@ -126,7 +130,9 @@ async function createFile(ctx, kind, name) {
   if (flags['dry-run']) { ui.ok(`would write ${rel} from the template`); return EXIT.OK; }
   cfgMod.writeFileAtomic(full, kind === 'agent' ? AGENT_TEMPLATE(name) : SKILL_TEMPLATE(name));
   ui.ok(`wrote ${rel} from the template`);
-  ui.dim(`    edit it, reference it from a workflow (${kind}s: [${name}]), then "aidev submit workflow <workflow>"`);
+  ui.dim(kind === 'agent'
+    ? `    edit it, name it in a workflow step (agent: ${name}), then "aidev submit workflow <workflow>"`
+    : `    edit it, list it in an agent's frontmatter (skills: [${name}]), then "aidev submit workflow <workflow>"`);
   if (flags.json) ui.json({ ok: true, kind, name, path: rel });
   return EXIT.OK;
 }

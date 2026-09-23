@@ -59,7 +59,7 @@ cat .aidev/policy.candidate.yaml
 aidev create policy --approve
 ----
 +
-See xref:permissions[Permissions and safety] for what the policy contains. The range of source the AI may write is not in the policy; it goes in `scope.writable` of the workflows you create later.
+See xref:permissions[Permissions and safety] for what the policy contains. The range of source the AI may write is not in the policy; it goes in the `writable` of each step of the workflows you create later.
 
 . Build the Wiki. `--no-commit` leaves the result in the working tree so it is committed together with the setup in the next step. It takes time. If it stops part way, running the same command again resumes where it left off.
 +
@@ -150,7 +150,7 @@ With the above in place, work through these in order. The Engineering Manager do
 |→ xref:setup-member[Getting started]
 
 |Define the work handed to the AI
-|Describe what you want, create the processing workflow, check where it may write, and submit it. Once merged, Developers can run it. → xref:workflows[Delegating work to the AI]
+|Describe what you want, create the processing workflow, check for each step where it may write and which tools the agent can use, and submit it. Once merged, Developers can run it. → xref:workflows[Delegating work to the AI]
 
 |Write out the development conventions of this PKG
 |Create a processing workflow that writes this PKG's conventions, with evidence, from the Wiki and the source; submit it and run it after the merge. → xref:workflows-define[Defining a workflow]

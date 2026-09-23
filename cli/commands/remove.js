@@ -20,19 +20,25 @@ const KINDS = ['workflow', 'agent', 'skill'];
 const FLAGS = { json: 'boolean', 'dry-run': 'boolean' };
 const FLAG_HELP = { json: 'machine-readable output', 'dry-run': 'show what would be deleted; delete nothing' };
 
-/** Workflows in this PKG whose definition names the agent or skill. */
-function referencing(repoRoot, kind, name) {
+/** Workflows in this PKG whose steps name the agent, or whose agents list the skill. */
+function referencing(repoRoot, installRoot, kind, name) {
   const out = [];
   for (const wf of wfMod.listWorkflows(repoRoot)) {
     let def;
     try { def = wfMod.loadDefinition(repoRoot, wf); } catch { continue; }
-    if ((kind === 'agent' ? def.agents : def.skills).includes(name)) out.push(wf);
+    if (kind === 'agent') {
+      if (def.agents.includes(name)) out.push(wf);
+      continue;
+    }
+    const lists = def.agents.map((a) => wfMod.resolveAgent(repoRoot, installRoot, a))
+      .filter((a) => a && a.capabilities).map((a) => a.capabilities.skills);
+    if (lists.some((l) => l.includes(name))) out.push(wf);
   }
   return out;
 }
 
 function run(ctx) {
-  const { repoRoot, flags, positionals } = ctx;
+  const { repoRoot, installRoot, flags, positionals } = ctx;
   const kind = positionals[0];
   if (!KINDS.includes(kind)) throw new AidevError(`aidev remove needs what to remove: ${KINDS.join(', ')} (then a name)`);
   if (!positionals[1]) throw new AidevError(`aidev remove ${kind} needs a name`);
@@ -48,7 +54,7 @@ function run(ctx) {
     try { name = toolsMod.assertAgentName(positionals[1]); } catch (e) { throw new AidevError(`${kind} name: ${e.message}`); }
     rel = kind === 'agent' ? wfMod.agentRel(name) : `${layout.SKILLS_REL}/${name}`;
     target = layout.abs(repoRoot, rel);
-    const users = referencing(repoRoot, kind, name);
+    const users = referencing(repoRoot, installRoot, kind, name);
     if (users.length) {
       throw new AidevError(`${kind} ${name} is referenced by workflow(s) ${users.join(', ')}; remove the reference (and submit) first`);
     }

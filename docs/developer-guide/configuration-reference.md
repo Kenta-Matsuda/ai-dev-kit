@@ -191,7 +191,7 @@ topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapp
 | `read_only` | string[] | agentは書込不可（`writable`で個別に許可） |
 | `writable_during_sync` | string[] | 整合性ERRORかつ有効なpublish lease（`.aidev/sync.lock`）のときに書込可 |
 | `writable` | string[] | 通常時に書込可（`read_only`より先に評価）。全員・全session向け |
-| `agents` | — | **存在しない**。書くと`validatePolicy`がerror。PKG sourceへの書込は承認済みworkflowの`scope.writable`（`architecture.md` §9） |
+| `agents` | — | **存在しない**。書くと`validatePolicy`がerror。PKG sourceへの書込は承認済みworkflowの実行中stepの`writable`（`architecture.md` §9） |
 
 `config.DEFAULT_POLICY_SCOPES`（候補生成と`loadPolicy`のfallbackの既定）:
 
@@ -213,7 +213,22 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 
 ### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです（`name`、`description`、`objective`、`scope.writable`、`agents`、`skills`、`tool`、`model`、`steps[]`、`limits.max_minutes`、`cost.max_usd`）。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_minutes`のみ）、`cost`（`max_usd`のみ）だけで、他のkeyはerrorです。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`until`、`max_retries`、`timeout_ms`。command stepは`id`、`description`、`command`、`writable`（任意。commitする範囲を示すだけ）。pull-request stepは`id`、`description`、`kind`、`title`。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+
+### agentのfrontmatter（`.aidev/agents/<name>.md`、kit同梱agent）
+
+`workflow.agentCapabilities`が読みます。値は`[a, b]`か`a, b`。
+
+| key | 省略時 | 意味 |
+| --- | --- | --- |
+| `name` | — | file名と一致 |
+| `description` | — | 一覧・workflow-creatorへの説明 |
+| `skills` | `[]` | promptに本文を差し込むskill（`.aidev/skills/<name>/SKILL.md` → kit同梱） |
+| `tools` | toolの既定の全部 | 渡す組み込みtool（`Read`、`Grep`、`Bash`…）。claudeでは`--tools`、guard-writeが第2段 |
+| `mcp` | 無し | 使えるMCP server（PKGの`.mcp.json`の`mcpServers`のkey）。claudeでは一時`--mcp-config` + `--strict-mcp-config` + `--allowedTools mcp__<server>` |
+| `model` | — | `inherit`など |
+
+`tools`か`mcp`を持つagentは、adapterが`capabilities`を持つtool（claude）でしか起動しません。
 
 globの意味（`paths.js`）: `*`は1 segment内、`?`は1文字、`**`は0個以上のsegment、`a/**`は`a`自身も一致。`..`は照合前に字句的に解決し、Windowsの`\`は`/`へ畳みます。
 
@@ -240,7 +255,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
-| `AIDEV_WORKFLOW` | `policy.js`（`decide`の既定値） | `aidev run workflow`が子processの環境に入れるworkflow名。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）なら`scope.writable`を許可する。人が設定するものではない |
+| `AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` | `policy.js`（`decide` / `decideToolUse`の既定値）、`hook.js` | `aidev run workflow`がagent stepごとに子processの環境に入れるworkflow名とstep id。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）ならそのstepの`writable`への書込と、そのagentのfrontmatterが許すtool / MCP toolだけを許可する。人が設定するものではない |
 | `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
 | `AIDEV_DEBUG` | `aidev.js` | internal errorのstack traceを表示 |
 | `CLAUDE_PROJECT_DIR` | `aidev.js`（`hook`のみ） | repo root探索の起点 |

@@ -5,17 +5,23 @@
  * What these suites pin down:
  *
  *   - a definition is YAML only; the validator enforces the mandatory valves
- *     (time ceiling, bounded retries, a USD budget, shell-free commands, no
- *     protected path in scope) and rejects anything the runner cannot execute
+ *     (time ceiling, bounded retries, a USD budget, shell-free commands, a
+ *     writable on every agent step and no protected path in it) and rejects
+ *     any key the runner would ignore
+ *   - what an agent can use (skills, tools, MCP servers) is its frontmatter
  *   - "approved" means identical to origin/<tracking_branch>: a workflow that
  *     was never merged, or was edited since, is refused by `run`; `submit`
  *     puts it on a branch of its own, and a merge makes it approved
  *   - `run` executes the steps in order through the configured tool with the
- *     agent definition inlined, bounds the `until` loop, stops on a repeated
- *     failure and on the cost budget, records the run, and hands
- *     AIDEV_WORKFLOW to the tool so the write guard can apply scope.writable
- *   - a pull-request step commits only the scope, on its own branch, and
- *     pushes it (the PR itself needs Azure DevOps and is reported, not made)
+ *     agent definition and its skills inlined, starts the tool with only the
+ *     agent's tools and MCP servers, hands each agent step the reports of the
+ *     earlier ones, bounds the `until` loop, stops on a repeated failure and
+ *     on the cost budget, records the run, and hands AIDEV_WORKFLOW and
+ *     AIDEV_WORKFLOW_STEP to the tool so the write guard can apply the step's
+ *     writable
+ *   - a pull-request step commits only what the steps may write, on its own
+ *     branch, and pushes it (the PR itself needs Azure DevOps and is
+ *     reported, not made)
  *
  * The tool binary is a stub reached through AIDEV_CLAUDE_BIN; nothing here
  * starts a real AI tool, and nothing here talks to a network.
@@ -43,7 +49,9 @@ function writeToolStub(dir) {
 const fs = require('fs');
 const argv = process.argv.slice(2);
 if (process.env.STUB_ARGV_OUT) fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.stringify(argv, null, 2));
-if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null }));
+const mcpAt = argv.indexOf('--mcp-config');
+if (mcpAt >= 0 && process.env.STUB_MCP_OUT) fs.writeFileSync(process.env.STUB_MCP_OUT, fs.readFileSync(argv[mcpAt + 1]));
+if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null }));
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; });
@@ -62,14 +70,25 @@ process.stdin.on('end', () => {
 }
 
 const GOOD = {
-  name: 'wf', objective: 'do the thing', scope: { writable: ['src/**'] },
-  steps: [{ id: 'a', agent: 'issue-to-pr', prompt: 'go' }], cost: { max_usd: 1 },
+  name: 'wf', objective: 'do the thing',
+  steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }], cost: { max_usd: 1 },
 };
+const withStep = (patch) => ({ ...GOOD, steps: [{ ...GOOD.steps[0], ...patch }] });
 
-function yamlOf(name, { scope = 'src/**', steps, extra = [], cost = 1, minutes = 5 } = {}) {
+/** An agent step without its own writable gets `writable: [<writable>]` after its agent line. */
+function yamlOf(name, { writable = 'src/**', steps, extra = [], cost = 1, minutes = 5 } = {}) {
+  const lines = [];
+  steps.forEach((l, i) => {
+    lines.push(l);
+    if (!/^ {4}agent: /.test(l)) return;
+    let j = i + 1;
+    let has = false;
+    for (; j < steps.length && !/^ {2}- /.test(steps[j]); j++) if (/^ {4}writable:/.test(steps[j])) has = true;
+    if (!has) lines.push(`    writable: [${writable}]`);
+  });
   return [
     `name: ${name}`, 'description: "test workflow"', 'objective: |', '  Make the thing work.',
-    'scope:', `  writable: [${scope}]`, ...extra, 'steps:', ...steps,
+    ...extra, 'steps:', ...lines,
     'limits:', `  max_minutes: ${minutes}`, 'cost:', `  max_usd: ${cost}`, '',
   ].join('\n');
 }
@@ -85,42 +104,71 @@ function run() {
   // -------------------------------------------------------------- schema
   suite('workflow: definition schema');
 
-  test('a valid definition normalises steps, agents, limits and cost', () => {
-    const d = wfMod.validateDefinition({ ...GOOD, agents: ['test-writer'], skills: ['test-and-verify'], tool: 'claude', model: '' }, 'wf');
-    eq(d.agents, ['test-writer', 'issue-to-pr'], 'the step agent is added to agents');
-    eq(d.skills, ['test-and-verify']);
+  test('a valid definition normalises steps, agents, writable, limits and cost', () => {
+    const d = wfMod.validateDefinition({ ...GOOD, tool: 'claude', model: '' }, 'wf');
+    eq(d.agents, ['issue-to-pr'], 'the agents are the ones the steps name');
     eq([d.tool, d.model], ['claude', null]);
-    eq(d.steps[0], { id: 'a', kind: 'agent', agent: 'issue-to-pr', prompt: 'go', until: null, max_retries: 0, timeout_ms: null });
+    eq(d.steps[0], { id: 'a', kind: 'agent', description: '', agent: 'issue-to-pr', prompt: 'go', writable: ['src/**'], until: null, max_retries: 0, timeout_ms: null });
     eq(d.limits, { max_minutes: 60 });
     eq(d.cost, { max_usd: 1 });
-    const u = wfMod.validateDefinition({ ...GOOD, steps: [{ agent: 'x', prompt: 'p', until: 'npm test' }, { command: 'npm run lint' }, { kind: 'pull-request', title: 't' }] }, 'wf');
-    eq(u.steps.map((s) => s.id), ['step-1', 'step-2', 'step-3'], 'ids default from position');
-    eq(u.steps[0].until, { text: 'npm test', argv: ['npm', 'test'] });
-    eq(u.steps[0].max_retries, 3, 'an until step retries 3 times by default');
-    eq(u.steps[1].command.argv, ['npm', 'run', 'lint']);
-    eq(u.steps[2], { id: 'step-3', kind: 'pull-request', title: 't' });
+    const u = wfMod.validateDefinition({ ...GOOD, steps: [
+      { agent: 'x', writable: [], prompt: 'p', description: 'look first' },
+      { agent: 'x', writable: ['src/**'], prompt: 'p', until: 'npm test' },
+      { command: 'npm run gen', writable: ['gen/**'] },
+      { kind: 'pull-request', title: 't' },
+    ] }, 'wf');
+    eq(u.steps.map((s) => s.id), ['step-1', 'step-2', 'step-3', 'step-4'], 'ids default from position');
+    eq(u.steps[0].description, 'look first');
+    eq(u.steps[1].until, { text: 'npm test', argv: ['npm', 'test'] });
+    eq(u.steps[1].max_retries, 3, 'an until step retries 3 times by default');
+    eq(u.steps[2].command.argv, ['npm', 'run', 'gen']);
+    eq(u.steps[3], { id: 'step-4', kind: 'pull-request', description: '', title: 't' });
+    eq(u.writable, ['src/**', 'gen/**'], 'the pull-request step commits what any step may write');
   });
 
   test('the mandatory valves cannot be omitted or raised', () => {
     throws(() => wfMod.validateDefinition({ ...GOOD, objective: '' }, 'wf'), /objective is required/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, scope: undefined }, 'wf'), /scope is required/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, scope: {} }, 'wf'), /scope\.writable is required/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, scope: { writable: ['.aidev/policy.yaml'] } }, 'wf'), /protected path/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, scope: { writable: ['.claude/**'] } }, 'wf'), /protected path/);
+    throws(() => wfMod.validateDefinition(withStep({ writable: undefined }), 'wf'), /writable is required for an agent step/);
+    throws(() => wfMod.validateDefinition(withStep({ writable: ['.aidev/policy.yaml'] }), 'wf'), /protected path/);
+    throws(() => wfMod.validateDefinition(withStep({ writable: ['.claude/**'] }), 'wf'), /protected path/);
     throws(() => wfMod.validateDefinition({ ...GOOD, cost: {} }, 'wf'), /cost\.max_usd is required/);
     throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_minutes: 61 } }, 'wf'), /above the hard ceiling of 60/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ agent: 'x', prompt: 'p', until: 'npm test', max_retries: 11 }] }, 'wf'), /above the hard ceiling of 10/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ agent: 'x', prompt: 'p', max_retries: 2 }] }, 'wf'), /needs an until command/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ agent: 'x', prompt: 'p', until: 'npm test | tee log' }] }, 'wf'), /without a shell/);
+    throws(() => wfMod.validateDefinition(withStep({ until: 'npm test', max_retries: 11 }), 'wf'), /above the hard ceiling of 10/);
+    throws(() => wfMod.validateDefinition(withStep({ max_retries: 2 }), 'wf'), /needs an until command/);
+    throws(() => wfMod.validateDefinition(withStep({ until: 'npm test | tee log' }), 'wf'), /without a shell/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'echo "hi" > out' }] }, 'wf'), /without a shell/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ agent: 'x', prompt: 'p', command: 'npm test' }] }, 'wf'), /exactly one of agent, command or kind/);
+    throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command or kind/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'shell' }] }, 'wf'), /kind must be "pull-request"/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'a', agent: 'x', prompt: 'p' }, { id: 'a', command: 'npm test' }] }, 'wf'), /duplicate step id/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'a', agent: 'x', writable: [], prompt: 'p' }, { id: 'a', command: 'npm test' }] }, 'wf'), /duplicate step id/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request' }, { kind: 'pull-request' }] }, 'wf'), /at most one pull-request/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [] }, 'wf'), /steps must be a non-empty list/);
     throws(() => wfMod.validateDefinition({ ...GOOD, tool: 'cursor' }, 'wf'), /not a supported tool/);
     throws(() => wfMod.validateDefinition({ ...GOOD, model: '-p' }, 'wf'), /model/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ agent: '../x', prompt: 'p' }] }, 'wf'), /agent/);
+    throws(() => wfMod.validateDefinition(withStep({ agent: '../x' }), 'wf'), /agent/);
+  });
+
+  test('a key the runner would ignore is refused, and the removed ones say where they went', () => {
+    throws(() => wfMod.validateDefinition({ ...GOOD, scope: { writable: ['src/**'] } }, 'wf'), /scope is not a workflow key; writable is written on each step/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, skills: ['x'] }, 'wf'), /skills is not a workflow key; an agent lists its skills in its own frontmatter/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: ['x'] }, 'wf'), /agents is not a workflow key/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, retries: 3 }, 'wf'), /unknown key retries/);
+    throws(() => wfMod.validateDefinition(withStep({ mcp: ['x'] }), 'wf'), /mcp does not belong to an agent step/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request', writable: ['src/**'] }] }, 'wf'), /writable does not belong to a pull-request step/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, limits: { minutes: 5 } }, 'wf'), /limits: unknown key minutes/);
+  });
+
+  test('an agent\'s frontmatter says what it can use: skills, tools and MCP servers', () => {
+    eq(wfMod.agentCapabilities({}), { skills: [], tools: null, mcp: [] }, 'nothing listed: no skills, the default tools, no MCP');
+    eq(wfMod.agentCapabilities({ skills: '[a, b]', tools: 'Read, Grep', mcp: '[tickets]' }),
+      { skills: ['a', 'b'], tools: ['Read', 'Grep'], mcp: ['tickets'] });
+    eq(wfMod.agentCapabilities({ tools: '[]', mcp: '' }).tools, null, 'an empty tools list means the default set');
+    throws(() => wfMod.agentCapabilities({ tools: 'Read, rm -rf' }), /not a tool name/);
+    throws(() => wfMod.agentCapabilities({ mcp: '[a__b]' }), /not an MCP server name/);
+    throws(() => wfMod.agentCapabilities({ skills: '[../x]' }), /name/);
+    const access = { tools: ['Read', 'Task'], mcp: ['tickets'] };
+    eq(['Read', 'Agent', 'Task', 'Bash', 'mcp__tickets__get', 'mcp__billing__charge', 'mcp__odd']
+      .map((t) => wfMod.toolGranted(access, t)), [true, true, true, false, true, false, false], 'Task and Agent are one grant');
+    eq(wfMod.toolGranted({ tools: null, mcp: [] }, 'Bash'), true, 'no tools listed: the default set');
   });
 
   test('the kit ships machinery agents only; a development agent is neither bundled nor resolved', () => {
@@ -264,7 +312,7 @@ function run() {
     try {
       test('the steps run in order through the configured tool with the agent definition inlined', () => {
         define('plain', { steps: [
-          '  - id: think', '    agent: coder', '    prompt: think first',
+          '  - id: think', '    agent: coder', '    writable: []', '    prompt: think first',
           '  - id: check', '    command: node --version',
           '  - id: act', '    agent: coder', '    prompt: now act', '    until: node --version',
         ] });
@@ -276,16 +324,23 @@ function run() {
         eq(j.steps.map((s) => [s.id, s.ok, s.attempts]), [['think', true, 1], ['check', true, 1], ['act', true, 1]]);
         const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
         ok(!a.includes('--agent'), 'the definition is inlined, so no --agent flag: ' + a.join(' '));
+        ok(a.includes('--strict-mcp-config') && a.includes('--mcp-config'), 'an agent that names no MCP server gets none: ' + a.join(' '));
+        ok(!a.includes('--tools') && !a.includes('--allowedTools'), 'no tools listed: the tool\'s default set');
         const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
         eq(prompts.length, 2);
         ok(/# Agent: coder/.test(prompts[0]) && /You are the coder\./.test(prompts[0]), 'the PKG agent definition is inlined');
         ok(/## Objective\n\nMake the thing work\./.test(prompts[0]), prompts[0].slice(0, 400));
         ok(/## Task for this run[\s\S]*add a login link/.test(prompts[0]), 'the task is handed over as data');
         ok(/## Step think \(1\/3\)\n\nthink first/.test(prompts[0]));
-        ok(/Write only under: src\/\*\*/.test(prompts[0]), 'the scope is stated');
+        ok(/Write only under: \(nothing — this step writes no files\)/.test(prompts[0]), 'the step\'s own writable is stated');
+        ok(!/## Reports from the earlier steps/.test(prompts[0]), 'the first step has nothing to build on');
         ok(/Do not commit\. Leave the changes/.test(prompts[0]), 'no pull-request step: the tree is left for the person');
         ok(/## Step act \(3\/3\)/.test(prompts[1]) && /node --version` must exit 0/.test(prompts[1]));
-        eq(JSON.parse(fs.readFileSync(envOut, 'utf8')), { AIDEV_WORKFLOW: 'plain' }, 'the write guard learns the workflow from the environment');
+        ok(/Write only under: src\/\*\*/.test(prompts[1]), prompts[1]);
+        ok(/## Reports from the earlier steps[\s\S]*### Step think \(agent coder\)\n\nstub answer/.test(prompts[1]),
+          'the next agent step sees the report of the one before');
+        eq(JSON.parse(fs.readFileSync(envOut, 'utf8')), { AIDEV_WORKFLOW: 'plain', AIDEV_WORKFLOW_STEP: 'act' },
+          'the write guard learns the workflow and the step from the environment');
         const record = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs', runsOf('plain')[0], 'run.json'), 'utf8'));
         eq([record.name, record.done, record.approvedRef, record.branch], ['plain', true, 'origin/main', null]);
         ok(/^sha256:/.test(record.hash));
@@ -350,7 +405,7 @@ function run() {
         write(path.join(fx.root, 'tools', 'touch.js'),
           "require('fs').mkdirSync('src/gen', { recursive: true }); require('fs').writeFileSync('src/gen/out.txt', 'made\\n'); require('fs').writeFileSync('notes.txt', 'outside\\n');\n");
         define('pr', { steps: [
-          '  - id: make', '    command: node tools/touch.js',
+          '  - id: make', '    command: node tools/touch.js', '    writable: [src/**]',
           '  - id: pr', '    kind: pull-request', '    title: "aidev: generated"',
         ] });
         write(path.join(fx.root, 'dirty.txt'), 'x\n');
@@ -380,6 +435,56 @@ function run() {
         const q = lastJson(none.out);
         eq([q.done, q.pr, q.steps[1].skipped], [true, null, true]);
         ok(!git(['ls-remote', '--heads', 'origin', q.branch], fx.root).includes(q.branch), 'no push without a commit');
+        git(['checkout', '-q', 'main'], fx.root);
+      });
+
+      test('a step\'s tool is started with only its agent\'s skills, tools and MCP servers', () => {
+        const mcpOut = path.join(tmp, 'mcp.json');
+        fs.rmSync(mcpOut, { force: true });
+        write(path.join(fx.root, '.mcp.json'), JSON.stringify({ mcpServers: {
+          tickets: { command: 'node', args: ['tickets.js'] },
+          billing: { command: 'node', args: ['billing.js'] },
+        } }, null, 2));
+        write(path.join(fx.root, '.aidev', 'agents', 'limited.md'),
+          '---\nname: limited\ndescription: reads tickets\nskills: [test-and-verify]\ntools: Read, Grep\nmcp: [tickets]\n---\n\nYou read tickets.\n');
+        define('granted', { steps: ['  - id: look', '    agent: limited', '    writable: []', '    prompt: read the ticket'] });
+        reset();
+        const dry = aidev(fx.root, ['run', 'workflow', 'granted', '--dry-run'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/1\. look: agent limited\n\s+- writes: nothing\n\s+- skills: test-and-verify; tools: Read, Grep; mcp: tickets/.test(dry.out), dry.out);
+        const r = aidev(fx.root, ['run', 'workflow', 'granted', '--json'], { env: env({ STUB_MCP_OUT: mcpOut }) });
+        eq(r.code, 0, r.out);
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        const at = a.indexOf('--mcp-config');
+        ok(at >= 0 && a[at + 2] === '--strict-mcp-config', a.join(' '));
+        eq(a.slice(a.indexOf('--allowedTools'), a.indexOf('--allowedTools') + 2), ['--allowedTools', 'mcp__tickets'], 'the granted server is pre-approved');
+        eq(a.slice(a.indexOf('--tools')), ['--tools', 'Read', 'Grep'], 'only the listed built-in tools, last');
+        eq(Object.keys(JSON.parse(fs.readFileSync(mcpOut, 'utf8')).mcpServers), ['tickets'], 'billing is not handed over');
+        ok(!fs.existsSync(a[at + 1]), 'the MCP file is removed after the step');
+        ok(!a[at + 1].startsWith(fx.root), 'the MCP file never lands in the repository');
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(/## Skill: test-and-verify/.test(prompt), 'the agent\'s skill is inlined');
+
+        // An agent naming a server the PKG does not register is refused before anything starts.
+        write(path.join(fx.root, '.aidev', 'agents', 'lost.md'), '---\nname: lost\ndescription: x\nmcp: [nowhere]\n---\n\nLost.\n');
+        define('lost', { steps: ['  - id: a', '    agent: lost', '    prompt: hi'] });
+        reset();
+        const lostDry = aidev(fx.root, ['run', 'workflow', 'lost', '--dry-run'], { env: env() });
+        eq(lostDry.code, 1, lostDry.out);
+        ok(/MCP server nowhere, which \.mcp\.json does not register/.test(lostDry.out), lostDry.out);
+        const lost = aidev(fx.root, ['run', 'workflow', 'lost', '--json'], { env: env() });
+        eq(lost.code, 1);
+        ok(/does not register/.test(lost.out), lost.out);
+        ok(!fs.existsSync(argvOut), 'nothing was started');
+      });
+
+      test('a tool that cannot be limited is never started with limits, and submit shows each step\'s grants', () => {
+        const agentMod = require('../cli/lib/agent');
+        throws(() => agentMod.buildArgv({ tool: 'copilot', promptArg: 'P', capabilities: { tools: ['Read'], mcp: [], mcpConfigFile: 'x' } }),
+          /cannot be limited to an agent's tools and MCP servers/);
+        const def = wfMod.loadDefinition(fx.root, 'granted');
+        const text = require('../cli/commands/workflow').submitDescription(def, wfMod.resolveDependencies(fx.root, KIT_ROOT, def), []);
+        ok(/1\. `look`: agent `limited`\n {3}- writes: nothing\n {3}- skills: `test-and-verify`; tools: `Read`, `Grep`; mcp: `tickets`/.test(text), text);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

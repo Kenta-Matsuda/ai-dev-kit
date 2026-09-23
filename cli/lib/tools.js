@@ -178,7 +178,11 @@ const REGISTRY = Object.freeze({
   claude: Object.freeze({
     id: 'claude', label: 'Claude Code', bin: 'claude', envBin: 'AIDEV_CLAUDE_BIN',
     minVersion: '2.1.259', verified: true, prompt: 'stdin', namedAgents: true,
-    argv({ agent, model }) {
+    // Can be launched with only an agent's granted tools and MCP servers
+    // (verified against Claude Code 2.1.280: --tools hides the other built-in
+    // tools, --strict-mcp-config loads only --mcp-config's servers).
+    capabilities: true,
+    argv({ agent, model, capabilities = null }) {
       // No --agent when the definition is inlined into the prompt (agents the
       // kit runs outside a PKG, where no .claude/agents/ tree exists).
       const argv = ['-p', '--input-format', 'text'];
@@ -202,6 +206,15 @@ const REGISTRY = Object.freeze({
         // headless process waiting for a host that does not exist.
         '--permission-prompts', 'none',
       );
+      if (capabilities) {
+        // Only the agent's MCP servers are loaded (none when it names none);
+        // the PKG's .mcp.json and the person's own servers are ignored. Each
+        // granted server is pre-approved, since no one is there to approve a
+        // call. The variadic --tools goes last.
+        argv.push('--mcp-config', capabilities.mcpConfigFile, '--strict-mcp-config');
+        if (capabilities.mcp.length) argv.push('--allowedTools', capabilities.mcp.map((s) => `mcp__${s}`).join(','));
+        if (capabilities.tools) argv.push('--tools', ...capabilities.tools);
+      }
       return argv;
     },
     progress: claudeStreamProgress,

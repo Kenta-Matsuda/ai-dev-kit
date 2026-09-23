@@ -28,7 +28,7 @@ The AI tool starts it from the hook configuration the kit places. It reads the h
 
 |`guard-write`
 |Before a write
-|Checks the target path against the policy and returns `allow` / `deny` with a reason. Returns `deny` when it cannot decide
+|Checks the target path against the policy and returns `allow` / `deny` with a reason. Returns `deny` when it cannot decide. Inside a step of `aidev run workflow`, it checks against the `writable` of the step now running, and also denies calls to tools not in that agent's frontmatter (`tools`, `mcp`). In Claude Code it also runs for MCP tool calls. It returns nothing for MCP calls outside a workflow (the AI tool's own settings decide)
 
 |`quality-gate`
 |After a file edit
@@ -53,7 +53,7 @@ The AI tool starts it from the hook configuration the kit places. It reads the h
 
 |Claude Code
 |`.claude/settings.json`
-|Verified against the real binary. `after-bash` runs from the `PostToolUse` hook with the `Bash` matcher
+|Verified against the real binary. `guard-write` runs from `PreToolUse` before tools that write files, `Bash` and MCP tools (names starting with `mcp__`). `after-bash` runs from the `PostToolUse` hook with the `Bash` matcher
 
 |GitHub Copilot CLI
 |`.github/hooks/aidev.json`
@@ -90,7 +90,7 @@ aidev hook guard-write --input /tmp/hook.json
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the scope.writable of an approved workflow. …"
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the writable of an approved workflow step. …"
   }
 }
 ----

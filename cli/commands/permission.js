@@ -73,7 +73,7 @@ function renderCandidate(config, policy) {
     ...policy.writable_during_sync.map((p) => `  - "${p}"`),
     '',
     '# 通常時に書き込み可能（全員・全セッション）。PKG のソースを AI に書かせるのは',
-    '# ここではなく、承認済み workflow の scope.writable（.aidev/workflows/<name>/workflow.yaml）。',
+    '# ここではなく、承認済み workflow の各ステップの writable（.aidev/workflows/<name>/workflow.yaml）。',
     'writable:',
     ...policy.writable.map((p) => `  - "${p}"`),
     '',

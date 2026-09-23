@@ -54,25 +54,86 @@ PR は 4 種類あり、種類ごとに確認する観点が異なります。
 
 `aidev: workflow <name>` というコミットで届きます。**マージが承認です。** これを取り込むと、以後 Developer の誰でもこの workflow を実行できます。実行結果と同じ重さで見てください。
 
-* `objective` は、チームがその AI にさせてよい仕事か。
-* `scope.writable` は必要最小か。ソース全体（`**`）や設定・CI のパスが入っていないか。
-* `until` と `command` は、この PKG で安全に実行できるコマンドか（shell は通りませんが、コマンド自体は実行されます）。
-* `cost.max_usd` と `limits.max_minutes` は妥当か。
-* 参照する `.aidev/agents/`・`.aidev/skills/` のファイルが同じ PR に入っているか。その指示に、範囲外の作業や秘密情報の扱いが書かれていないか。
+==== 読む順番
 
-詳しくは xref:workflows-define[workflow の定義] を見てください。
+. **PR 本文の「Steps」** — ステップが上から実行順に並び、それぞれに agent、書ける場所（writes）、その agent の skill・ツール・MCP server が書かれています。まずここで全体をつかみます。
+. **`workflow.yaml`** — `objective`（何をさせるか）、各ステップの `prompt`（そのステップへの指示）、`until`（終わりの判定）、上限を読みます。
+. **agent の `.md`（`.aidev/agents/`）** — 先頭の frontmatter で、その agent が使えるもの（`skills`・`tools`・`mcp`）を確かめ、本文でどう振る舞うよう指示されているかを読みます。
+. **skill の `SKILL.md`（`.aidev/skills/`）** — agent に渡る手順書です。
+
+**YAML だけで終わらせないでください。** AI への実際の指示の大部分は、agent と skill の本文にあります。
+
+手元で同じ一覧を見たいときは、PR のブランチを取得して `--dry-run` を実行します。未承認なので最後に「refused」と出ますが、ステップごとの内容は表示されます。
+
+[source,bash]
+----
+git fetch origin
+git checkout aidev/workflow-write-tests
+aidev run workflow write-tests --dry-run
+----
+
+==== 確認すること
+
+[%autowidth.stretch,options="header"]
+|===
+|見る所 |問題がない状態 |危ないサイン
+
+|`objective`
+|チームが AI に任せてよい仕事で、「しないこと」も書いてある
+|範囲があいまい（「いい感じに直す」など）
+
+|各ステップの `writable`
+|そのステップに必要な場所だけ。調べるだけのステップは `[]`
+|`**`（全部）、設定・CI・デプロイのパス、調査ステップに書き込みがある
+
+|agent の `tools`
+|仕事に必要なツールだけが並んでいる
+|`tools` が書かれていない（すべての組み込みツールが使える）、書き込まない agent に `Write`・`Edit` がある
+
+|agent の `mcp`
+|仕事に必要な server だけ
+|読むだけの仕事に、更新もできる server が付いている
+
+|`tools` と `mcp` の組み合わせ
+|外部システムに触る agent には `Bash` が無い
+|`mcp` と `Bash` を両方持つ agent（`Bash` があれば MCP を通さずに外部へ出られます）
+
+|`until` と `command`
+|この PKG で安全に実行できるコマンド（テスト、lint など）
+|デプロイ、データの削除、外部への送信をするコマンド（shell は通りませんが、コマンド自体は実行されます）
+
+|`cost.max_usd`・`limits.max_minutes`
+|仕事の大きさに合っている
+|小さな仕事に大きな上限
+
+|agent・skill の本文
+|範囲内の作業だけを指示している
+|範囲外の作業、秘密情報の出力、検証の省略を指示している
+
+|同じ PR のファイル
+|参照する `.aidev/agents/`・`.aidev/skills/` のファイルが入っている
+|PR 本文の「Files under review」に、参照しているはずの agent・skill が無い
+|===
+
+agent・skill は、それを使うすべての workflow で共有されています。agent.md が変わっている PR では、**その agent を使う他の workflow にも影響すること** を踏まえて読みます。
+
+==== 直してほしいとき
+
+問題があれば、マージせずに PR にコメントを書きます。「どのステップの、何が、なぜ問題か」と、直し方の案（「`survey` の `writable` を `[]` に」など）を書くと、直す人が迷いません。直し方は xref:workflows-fix[workflow の修正] にあります。修正は同じ PR に積まれるので、もう一度同じ順番で読みます。
 
 [[review-workflow-result]]
 === workflow 成果物の PR
 
 `aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。
 
-* 差分が `scope.writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
+* 差分が各ステップの `writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
 * テストが通っているか。CI の `aidev check` が通っているか。
 * `objective` と `--task` の内容どおりか。余計な変更が無いか。
+
+期待と違う結果が続くときは、成果物を手で直して終わりにせず、定義を直します。次に実行したときも同じ結果になるからです（xref:workflows-fix[workflow の修正]）。
 
 === 関連情報
 
 * xref:workflows[AI への作業委譲] — 定義・承認・実行の全体
-* xref:permissions[権限と安全性] — policy と `scope.writable` の関係
+* xref:permissions[権限と安全性] — policy とステップの `writable` の関係
 * xref:maintain-branch-policy[branch policy の設定] — 必須レビュアーと必須チェック

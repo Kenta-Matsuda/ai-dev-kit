@@ -42,7 +42,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__.*",
         "hooks": [
           { "type": "command", "command": "aidev hook guard-write" }
         ]

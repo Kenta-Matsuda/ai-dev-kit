@@ -10,7 +10,7 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのscopeを含む）、workflow（YAML定義、origin一致による承認、runner、同梱workflow）、MCP、update、self-evolution |
+| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのstepの`writable`を含む）、agentの能力（frontmatterの`skills` / `tools` / `mcp`）、workflow（YAML定義、origin一致による承認、runner、同梱workflow）、MCP、update、self-evolution |
 | [cli-reference.md](cli-reference.md) | 全command・subcommand・option・終了code。`aidev <cmd> --help`と一致させる |
 | [configuration-reference.md](configuration-reference.md) | `aidev.yaml` schema v2（`validateConfig` / `DEFAULTS`）、`.aidev/policy.yaml`、`DEFAULT_POLICY_SCOPES`、workflow.yaml、model解決、環境変数、CLIが書く各fileの形 |
 | [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未実装の台帳、既知の不整合、保守時の完了条件 |

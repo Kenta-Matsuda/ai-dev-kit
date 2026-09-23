@@ -35,7 +35,7 @@ Wiki は**正本ではなく派生情報**です。記述には根拠ファイ�
 | --- | --- |
 | `aidev.yaml`, `.aidev/workflows/**`, `.aidev/agents/**`, `.aidev/skills/**`, `.aidev/conventions/**` | 書き込み可 |
 | `.aidev/knowledge/**` | knowledge-builder（`aidev sync wiki` が起動するか、hook に求められてサブエージェントとして起動）のみ。手編集しない |
-| PKG のソース・テスト・設定 | **既定は read-only**。`aidev run workflow` が起動した承認済み workflow の `scope.writable`、またはチームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
+| PKG のソース・テスト・設定 | **既定は read-only**。`aidev run workflow` が起動した承認済み workflow のステップの `writable`、またはチームが `.aidev/policy.yaml` の `writable` に足したパスだけ可 |
 | `.claude/**`, `CLAUDE.md` | **常に禁止**（ai-dev-kit 由来。`aidev sync tools` が更新する） |
 | `.mcp.json` | PKG の所有（kit は配布しない）。MCP server の追加は人が行う |
 | `.github/copilot-instructions.md`, `.github/agents/**`, `.github/skills/**`, `.github/hooks/**`, `AGENTS.md`, `.codex/**`, `.kiro/steering/**`, `.kiro/agents/**` | **常に禁止**（他の AI ツール用に ai-dev-kit が生成する設定） |

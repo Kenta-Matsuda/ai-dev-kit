@@ -23,7 +23,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |`.aidev/workflows/<name>/workflow.yaml`。既定は空の雛形。`--describe "<text>"` で workflow-creator agent（`aidev.yaml` の `tools.agent`）に YAML と必要な `.aidev/agents/`・`.aidev/skills/` を書かせる。書いたあと検証し、結果と次の手順を表示する
 
 |`agent <name>`
-|`.aidev/agents/<name>.md`。frontmatter（`name`、`description`、`tools`、`model: inherit`）と、入出力契約・手順・停止条件の見出しを持つ雛形。`--describe "<text>"` で agents-creator agent に書かせる。書いたあと frontmatter の `name` がファイル名と一致するか検証する
+|`.aidev/agents/<name>.md`。frontmatter（`name`、`description`、`skills: []`、`tools`、`mcp: []`、`model: inherit`）と、入出力契約・手順・停止条件の見出しを持つ雛形。`skills`・`tools`・`mcp` はその agent が使えるもの（xref:workflows-agents-skills[agent と skill]）。`--describe "<text>"` で agents-creator agent に書かせる。書いたあと frontmatter の `name` がファイル名と一致するか、`tools`・`mcp` の書き方が正しいかを検証する
 
 |`skill <name>`
 |`.aidev/skills/<name>/SKILL.md`。frontmatter（`name`、`description`）と手順の雛形。`--describe` は使えない（skill は人が書く手順書）
@@ -32,7 +32,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |`.aidev/policy.candidate.yaml`（書き込み権限 policy の候補）。`aidev.yaml` の `secrets_paths` と kit の既定から作る。`--approve` で `.aidev/policy.yaml` として置き、候補を消す（人間の判断）。policy が既にあっても同じ（`secrets_paths` を変えたときなど）。今の policy より保護が減る候補は `--force` が無いと終了コード 3。候補は手で編集しても反映されない。チームが足す `writable` は置いた後の `.aidev/policy.yaml` を直接編集して PR にする（`create policy --approve` で消える）。名前は取らない
 |===
 
-名前は小文字・数字・ハイフンです。kit が同梱する agent は仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent は PKG が作ります。同名なら PKG のものが優先されます。書いたあとは編集し、workflow から名前で参照し（`agents: [<name>]` / `skills: [<name>]`）、`aidev submit workflow <workflow>` で workflow と一緒に PR にします。
+名前は小文字・数字・ハイフンです。kit が同梱する agent は仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent は PKG が作ります。同名なら PKG のものが優先されます。書いたあとは編集し、名前で参照し（agent は workflow のステップの `agent: <name>`、skill は agent の frontmatter の `skills: [<name>]`）、`aidev submit workflow <workflow>` で workflow と一緒に PR にします。
 
 === オプション
 
@@ -68,7 +68,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
      1:20    Read packages/backend/package.json
      1:52    Write .aidev/agents/test-writer.md
      2:30  Write .aidev/workflows/unit-tests/workflow.yaml
-✓ wrote .aidev/workflows/unit-tests/workflow.yaml (3 step(s); scope: packages/**/*.test.ts) in 2m 41s ($0.3120)
+✓ wrote .aidev/workflows/unit-tests/workflow.yaml (3 step(s); writable: packages/**/*.test.ts) in 2m 41s ($0.3120)
 ----
 
 === 終了コード
@@ -107,7 +107,7 @@ aidev create skill deploy-checklist
 [source,text]
 ----
 ✓ wrote .aidev/skills/deploy-checklist/SKILL.md from the template
-    edit it, reference it from a workflow (skills: [deploy-checklist]), then "aidev submit workflow <workflow>"
+    edit it, list it in an agent's frontmatter (skills: [deploy-checklist]), then "aidev submit workflow <workflow>"
 ----
 
 policy の候補を作り、読んでから置く:

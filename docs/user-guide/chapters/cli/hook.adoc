@@ -28,7 +28,7 @@ kit が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 |`guard-write`
 |書き込みの前
-|書き込み先のパスを policy で判定し、`allow` / `deny` と理由を返す。判定できないときは `deny`
+|書き込み先のパスを policy で判定し、`allow` / `deny` と理由を返す。判定できないときは `deny`。`aidev run workflow` のステップの中では、いま動いているステップの `writable` で判定し、その agent の frontmatter（`tools`・`mcp`）に無いツールの呼び出しも `deny` にする。Claude Code では MCP ツールの呼び出しでも呼ばれる。workflow の外の MCP の呼び出しには何も返さない（許可するかは AI ツール自身の設定が決める）
 
 |`quality-gate`
 |ファイル編集の後
@@ -53,7 +53,7 @@ kit が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 |Claude Code
 |`.claude/settings.json`
-|実機で検証済み。`after-bash` は `PostToolUse` の `Bash` matcher から呼ばれる
+|実機で検証済み。`guard-write` は `PreToolUse` で、ファイルを書くツール・`Bash`・MCP ツール（`mcp__` で始まる名前）の前に呼ばれる。`after-bash` は `PostToolUse` の `Bash` matcher から呼ばれる
 
 |GitHub Copilot CLI
 |`.github/hooks/aidev.json`
@@ -90,7 +90,7 @@ aidev hook guard-write --input /tmp/hook.json
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the scope.writable of an approved workflow. …"
+    "permissionDecisionReason": "ai-dev-kit: \"src/api/auth.ts\" is read-only (**). this session was not started by \"aidev run workflow\"; PKG source is written only inside the writable of an approved workflow step. …"
   }
 }
 ----

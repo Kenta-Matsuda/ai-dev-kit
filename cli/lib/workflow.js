@@ -3,11 +3,14 @@
  * Workflow definitions: the one thing a PKG team writes to make AI do work.
  *
  * A workflow is a YAML file, `.aidev/workflows/<name>/workflow.yaml`. It names
- * an objective, the paths its agents may write (`scope.writable`), the agents
- * and skills it uses, and a list of steps. All executable logic — the retry
- * loop behind `until`, command execution, commit, push, PR — lives in the kit
- * (`commands/workflow.js`), so reviewing a workflow means reading YAML, and
- * the quality of what runs is the kit's responsibility.
+ * an objective and a list of steps; each agent step names its agent and the
+ * paths that step may write (`writable`). What an agent can do — its skills,
+ * its tools, its MCP servers — is the agent's own definition
+ * (`.aidev/agents/<name>.md` frontmatter), not the workflow's: capabilities
+ * belong to the agent, constraints to the step. All executable logic — the
+ * retry loop behind `until`, command execution, commit, push, PR — lives in
+ * the kit (`commands/workflow.js`), so reviewing a workflow means reading
+ * YAML, and the quality of what runs is the kit's responsibility.
  *
  * Approval is not a CLI record. A workflow is approved when its definition and
  * every PKG-local agent or skill it references are byte-identical to the copy
@@ -48,8 +51,26 @@ const SHELL_CHARS_RE = /[|&;<>`$"'\\]/;
 const KIT_AGENTS_DIR = 'templates/claude/.claude/agents';
 const KIT_SKILLS_DIR = 'templates/claude/.claude/skills';
 
-/** The environment variable the runner sets for its agents; the write guard reads it. */
+/** The environment variables the runner sets for its agents; the write guard reads them. */
 const ENV_WORKFLOW = 'AIDEV_WORKFLOW';
+const ENV_STEP = 'AIDEV_WORKFLOW_STEP';
+
+/** The only keys a definition may carry; anything else is a mistake worth naming. */
+const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits', 'cost'];
+const STEP_KEYS = {
+  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'until', 'max_retries', 'timeout_ms'],
+  command: ['id', 'description', 'command', 'writable'],
+  'pull-request': ['id', 'description', 'kind', 'title'],
+};
+
+/** A built-in tool name in an agent's `tools:` (Read, Grep, Bash, …). */
+const TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+/** An MCP server name in an agent's `mcp:`: a key of the PKG's .mcp.json. */
+const MCP_SERVER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]|_(?!_)){0,63}$/;
+/** Claude Code accepts the old name of the subagent tool; both mean the same grant. */
+const TOOL_ALIASES = Object.freeze({ Task: 'Agent', Agent: 'Task' });
+/** The file a PKG registers its MCP servers in (the PKG's own; the kit never writes it). */
+const MCP_CONFIG_REL = '.mcp.json';
 
 function sanitizeName(name) {
   const s = String(name == null ? '' : name).trim();
@@ -90,12 +111,24 @@ function assertGlobList(v, field, source) {
   });
 }
 
-function assertNameList(v, field, source) {
-  if (v == null) return [];
-  if (!Array.isArray(v)) throw new AidevError(`${source}: ${field} must be a list of names`);
-  return v.map((n) => {
-    try { return toolsMod.assertAgentName(n); } catch (e) { throw new AidevError(`${source}: ${field}: ${e.message}`); }
-  });
+/** A step's writable globs: repo-relative, and never the kit's own control surface. */
+function writableList(v, where) {
+  const list = assertGlobList(v, 'writable', where);
+  for (const g of list) {
+    if (cfgMod.ALWAYS_PROTECTED.includes(g)) {
+      throw new AidevError(`${where}: writable lists a protected path (${g}); the kit's control surface is never a workflow's to write`);
+    }
+  }
+  return list;
+}
+
+/** Refuse keys the runner would silently ignore; `moved` says where a removed key went. */
+function assertKnownKeys(obj, allowed, source, moved = {}) {
+  for (const k of Object.keys(obj)) {
+    if (allowed.includes(k)) continue;
+    if (moved[k]) throw new AidevError(`${source}: ${k} is not a workflow key; ${moved[k]}`);
+    throw new AidevError(`${source}: unknown key ${k} (allowed: ${allowed.join(', ')})`);
+  }
 }
 
 function positiveInt(v, field, source, { max, min = 1 }) {
@@ -120,22 +153,16 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   if (!name) throw new AidevError(`${source}: name is required`);
   sanitizeName(name);
 
+  assertKnownKeys(raw, TOP_KEYS, source, {
+    scope: 'writable is written on each step now (steps[].writable)',
+    agents: 'the agents are the ones the steps name',
+    skills: 'an agent lists its skills in its own frontmatter (.aidev/agents/<name>.md: skills: [...])',
+  });
+
   const objective = raw.objective == null ? '' : String(raw.objective).trim();
   if (!objective) throw new AidevError(`${source}: objective is required (what the agents are asked to achieve)`);
 
-  if (raw.scope == null || typeof raw.scope !== 'object' || Array.isArray(raw.scope)) {
-    throw new AidevError(`${source}: scope is required (scope.writable lists the paths this workflow may write; [] writes nothing)`);
-  }
-  if (raw.scope.writable === undefined) throw new AidevError(`${source}: scope.writable is required ([] writes nothing)`);
-  const writable = assertGlobList(raw.scope.writable, 'scope.writable', source);
-  for (const g of writable) {
-    if (cfgMod.ALWAYS_PROTECTED.includes(g)) {
-      throw new AidevError(`${source}: scope.writable lists a protected path (${g}); the kit's control surface is never a workflow's to write`);
-    }
-  }
-
-  const agents = assertNameList(raw.agents, 'agents', source);
-  const skills = assertNameList(raw.skills, 'skills', source);
+  const agents = [];
 
   let tool = null;
   if (raw.tool != null) {
@@ -145,8 +172,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
     }
   }
   const def = {
-    name, description: raw.description ? String(raw.description).trim() : '', objective,
-    scope: { writable }, agents, skills, tool,
+    name, description: raw.description ? String(raw.description).trim() : '', objective, agents, tool,
   };
   if (raw.model !== undefined) def.model = cfgMod.assertModel(raw.model, `${source}: model`);
 
@@ -168,34 +194,42 @@ function validateDefinition(raw, source = 'workflow.yaml') {
     if (s.kind === 'pull-request') kinds.push('pull-request');
     if (kinds.length !== 1) throw new AidevError(`${where}: exactly one of agent, command or kind: pull-request is required`);
     const kind = kinds[0];
-    const step = { id, kind };
-    const forbid = (keys) => {
-      for (const k of keys) if (s[k] != null) throw new AidevError(`${where}: ${k} does not belong to a ${kind} step`);
-    };
+    for (const k of Object.keys(s)) {
+      if (!STEP_KEYS[kind].includes(k)) throw new AidevError(`${where}: ${k} does not belong to ${kind === 'agent' ? 'an' : 'a'} ${kind} step (allowed: ${STEP_KEYS[kind].join(', ')})`);
+    }
+    const step = { id, kind, description: s.description == null ? '' : String(s.description).trim() };
     if (kind === 'agent') {
       try { step.agent = toolsMod.assertAgentName(s.agent); } catch (e) { throw new AidevError(`${where}: agent: ${e.message}`); }
       if (!agents.includes(step.agent)) agents.push(step.agent);
       step.prompt = s.prompt == null ? '' : String(s.prompt).trim();
       if (!step.prompt) throw new AidevError(`${where}: prompt is required for an agent step`);
+      if (s.writable === undefined) {
+        throw new AidevError(`${where}: writable is required for an agent step (the paths this step may write; [] writes nothing)`);
+      }
+      step.writable = writableList(s.writable, where);
       step.until = s.until == null ? null : splitCommand(s.until, 'until', where);
       if (s.max_retries == null) step.max_retries = step.until ? 3 : 0;
       else step.max_retries = positiveInt(s.max_retries, 'max_retries', where, { max: LIMITS.maxRetries, min: 0 });
       if (step.max_retries > 0 && !step.until) throw new AidevError(`${where}: max_retries needs an until command to decide when to retry`);
       step.timeout_ms = s.timeout_ms == null ? null : positiveInt(s.timeout_ms, 'timeout_ms', where, { max: 7200000, min: 10000 });
-      forbid(['title', 'command']);
     } else if (kind === 'command') {
       step.command = splitCommand(s.command, 'command', where);
-      forbid(['prompt', 'until', 'max_retries', 'title', 'timeout_ms']);
+      // A command is run by the kit, not an agent, so no hook stands between
+      // it and the tree; its writable only says which of its outputs the
+      // pull-request step commits.
+      step.writable = writableList(s.writable == null ? [] : s.writable, where);
     } else {
       step.title = s.title == null ? null : (String(s.title).trim() || null);
-      forbid(['prompt', 'until', 'max_retries', 'command', 'timeout_ms']);
     }
     return step;
   });
   if (def.steps.filter((s) => s.kind === 'pull-request').length > 1) throw new AidevError(`${source}: at most one pull-request step`);
+  // What the pull-request step commits: everything any step may write.
+  def.writable = [...new Set(def.steps.flatMap((s) => s.writable || []))];
 
   const limits = raw.limits == null ? {} : raw.limits;
   if (typeof limits !== 'object' || Array.isArray(limits)) throw new AidevError(`${source}: limits must be a mapping`);
+  assertKnownKeys(limits, ['max_minutes'], `${source}: limits`);
   def.limits = {
     max_minutes: limits.max_minutes == null
       ? LIMITS.maxMinutes
@@ -204,6 +238,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
 
   const cost = raw.cost == null ? {} : raw.cost;
   if (typeof cost !== 'object' || Array.isArray(cost)) throw new AidevError(`${source}: cost must be a mapping`);
+  assertKnownKeys(cost, ['max_usd'], `${source}: cost`);
   if (cost.max_usd == null) {
     throw new AidevError(`${source}: cost.max_usd is required — a workflow must state its budget before it may run unattended`);
   }
@@ -230,11 +265,43 @@ function loadDefinition(repoRoot, name) {
 
 // ------------------------------------------------------------ agents & skills
 
+/** A frontmatter list: `[a, b]` or `a, b`. Null when the key is absent or empty. */
+function frontmatterList(v) {
+  if (v == null) return null;
+  const s = String(v).trim().replace(/^\[(.*)\]$/, '$1').trim();
+  if (!s) return null;
+  return s.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+}
+
+/**
+ * What an agent can do, from its frontmatter:
+ *   skills  skills inlined into its prompt ([] when none)
+ *   tools   the built-in tools it may use (null: the tool's default set)
+ *   mcp     the MCP servers from the PKG's .mcp.json it may use ([] when none)
+ * Throws on a malformed entry; the caller names the file.
+ */
+function agentCapabilities(meta) {
+  const skills = frontmatterList(meta.skills) || [];
+  for (const n of skills) toolsMod.assertAgentName(n);
+  const tools = frontmatterList(meta.tools);
+  for (const t of tools || []) {
+    if (!TOOL_NAME_RE.test(t)) throw new Error(`tools: ${JSON.stringify(t)} is not a tool name (Read, Grep, Bash, …)`);
+  }
+  const mcp = frontmatterList(meta.mcp) || [];
+  for (const m of mcp) {
+    if (!MCP_SERVER_RE.test(m)) throw new Error(`mcp: ${JSON.stringify(m)} is not an MCP server name (a key of ${MCP_CONFIG_REL})`);
+  }
+  return { skills: [...new Set(skills)], tools: tools ? [...new Set(tools)] : null, mcp: [...new Set(mcp)] };
+}
+
 function readAgentFile(file, name, source, rel) {
   const text = cfgMod.readTextIfExists(file);
   if (text == null) return null;
   const { meta, body } = toolsMod.parseFrontmatter(text);
-  return { name, source, rel, file, description: meta.description || '', body: body.trim(), text };
+  let capabilities = null;
+  let capabilityError = null;
+  try { capabilities = agentCapabilities(meta); } catch (e) { capabilityError = e.message; }
+  return { name, source, rel, file, description: meta.description || '', body: body.trim(), text, capabilities, capabilityError };
 }
 
 /** The PKG's own copy first, then the kit's bundled definition. Null when neither exists. */
@@ -263,18 +330,76 @@ function resolveSkill(repoRoot, installRoot, name) {
  */
 function resolveDependencies(repoRoot, installRoot, def) {
   const agents = {};
+  const skills = {};
   for (const n of def.agents) {
     const a = resolveAgent(repoRoot, installRoot, n);
     if (!a) throw new AidevError(`agent ${n} is neither in ${layout.AGENTS_REL}/ nor bundled with the kit`);
+    const where = a.rel || `the kit's ${n}.md`;
+    if (a.capabilityError) throw new AidevError(`${where}: ${a.capabilityError}`);
     agents[n] = a;
-  }
-  const skills = {};
-  for (const n of def.skills) {
-    const s = resolveSkill(repoRoot, installRoot, n);
-    if (!s) throw new AidevError(`skill ${n} is neither in ${layout.SKILLS_REL}/ nor bundled with the kit`);
-    skills[n] = s;
+    for (const sn of a.capabilities.skills) {
+      if (skills[sn]) continue;
+      const s = resolveSkill(repoRoot, installRoot, sn);
+      if (!s) throw new AidevError(`${where}: skill ${sn} is neither in ${layout.SKILLS_REL}/ nor bundled with the kit`);
+      skills[sn] = s;
+    }
   }
   return { agents, skills };
+}
+
+/** The skills an agent brings, resolved (resolveDependencies has checked they exist). */
+function agentSkills(deps, agentName) {
+  return deps.agents[agentName].capabilities.skills.map((s) => deps.skills[s]);
+}
+
+/**
+ * What one step may do: the step's own writable, and its agent's tools and
+ * MCP servers. Null for an unknown step id (the guard treats that as nothing).
+ */
+function stepAccess(def, deps, stepId) {
+  const step = def.steps.find((s) => s.id === stepId);
+  if (!step) return null;
+  if (step.kind !== 'agent') return { step, writable: step.writable || [], tools: null, mcp: [] };
+  const cap = deps.agents[step.agent].capabilities;
+  return { step, writable: step.writable, tools: cap.tools, mcp: cap.mcp };
+}
+
+/**
+ * Whether a tool call's name falls inside what the step's agent was granted.
+ * `mcp__<server>__<tool>` needs the server in `mcp`; any other name needs to
+ * be in `tools` when the agent lists them (null tools = the default set).
+ */
+function toolGranted(access, toolName) {
+  const t = String(toolName || '');
+  const m = /^mcp__(.+?)__/.exec(t);
+  if (m) return access.mcp.includes(m[1]);
+  if (t.startsWith('mcp__')) return false;
+  if (access.tools == null) return true;
+  return access.tools.includes(t) || (TOOL_ALIASES[t] != null && access.tools.includes(TOOL_ALIASES[t]));
+}
+
+/**
+ * The server definitions an agent may use, taken from the PKG's .mcp.json.
+ * Throws when a named server is not registered there: an agent must not run
+ * believing it has a server it does not.
+ */
+function mcpServersFor(repoRoot, agent) {
+  if (agent.capabilities.mcp.length === 0) return {};
+  const text = cfgMod.readTextIfExists(layout.abs(repoRoot, MCP_CONFIG_REL));
+  if (text == null) {
+    throw new AidevError(`agent ${agent.name} uses MCP (${agent.capabilities.mcp.join(', ')}) but ${MCP_CONFIG_REL} does not exist in this PKG`);
+  }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { throw new AidevError(`${MCP_CONFIG_REL}: ${e.message}`); }
+  const all = (parsed && parsed.mcpServers) || {};
+  const out = {};
+  for (const n of agent.capabilities.mcp) {
+    if (!all[n] || typeof all[n] !== 'object') {
+      throw new AidevError(`agent ${agent.name} uses the MCP server ${n}, which ${MCP_CONFIG_REL} does not register`);
+    }
+    out[n] = all[n];
+  }
+  return out;
 }
 
 /** The PKG-local files whose content the approval covers (the YAML plus PKG agents/skills). */
@@ -371,9 +496,10 @@ function listWorkflows(repoRoot) {
 }
 
 module.exports = {
-  LIMITS, NAME_RE, ENV_WORKFLOW,
+  LIMITS, NAME_RE, ENV_WORKFLOW, ENV_STEP, MCP_CONFIG_REL,
   sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, agentRel, skillRel,
   splitCommand, validateDefinition, parseDefinitionText, loadDefinition,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
+  agentCapabilities, agentSkills, stepAccess, toolGranted, mcpServersFor,
   trackingRef, approvalStatus, inspect, contentHash, listWorkflows,
 };
