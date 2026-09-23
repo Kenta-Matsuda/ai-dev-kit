@@ -21,7 +21,7 @@
    ├─ policy.yaml                 承認済みpolicy（CLIだけが配置）
    ├─ policy.candidate.yaml       承認待ちの候補（一時）
    ├─ materialized.json           適用したtemplateとfileのhash record、未解消conflict（applyのmerge基準）
-   ├─ ejected.json                aidev uninstall <package> の marker（通常は存在しない）
+   ├─ ejected.json                aidev uninstall --package の marker（通常は存在しない）
    ├─ knowledge/                  LLM Wiki（manifest.json, inventory/, index.md, overview.md, pages）
    │  └─ .cache/                  plan.json（hook経路のbatch計画）、agent task、完了報告 done/（ignored）
    ├─ conventions/                開発規約（PKG の workflow が生成し、team が review して commit）
@@ -111,7 +111,7 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
 
 | 層 | 実体 | 位置付け |
 | --- | --- | --- |
-| 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev create policy`・`aidev uninstall <package>`・`aidev uninstall`をask |
+| 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev create policy`・`aidev uninstall`をask |
 | 実行時guard | `aidev hook guard-write` | path、policy、承認済みworkflowの実行中stepの`writable`（`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`）、整合性、leaseを評価して`permissionDecision`を返す。workflow step内ではagentのfrontmatterが許していないtool / MCP toolの呼び出しもdeny（`policy.decideToolUse`） |
 | 起動時の能力制限 | `aidev run workflow`のclaude argv | agent step毎に`--mcp-config <一時file> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--tools <list>`でagentのfrontmatter（`tools` / `mcp`）にあるものだけを渡す（§9） |
 | 制御面の検査 | `aidev check`（exit 2）+ branch policy | hooksを消した編集と未解消のconflict markerをmerge前に止める（teamの他の編集は止めない） |

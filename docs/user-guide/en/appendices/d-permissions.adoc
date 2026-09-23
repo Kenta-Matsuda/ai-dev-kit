@@ -155,7 +155,7 @@ The AI cannot create the policy. The Engineering Manager places it with the CLI.
 |`aidev create policy` → `aidev create policy --approve`
 |Rebuilds and places the candidate, for example after changing `secrets_paths`. A change that weakens protection also needs `--force`. The candidate is rebuilt from `aidev.yaml`, so any `writable` entries the team added to the policy by hand are lost. Add them again after placing it, and commit.
 
-|`aidev check` / `aidev doctor <package>`
+|`aidev check` / `aidev doctor --package <name>`
 |Show a summary of the policy in force (protected count, placed or not). For the full text, read `.aidev/policy.yaml`.
 |===
 

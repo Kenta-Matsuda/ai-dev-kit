@@ -1,7 +1,7 @@
 [[cli-uninstall]]
 == aidev uninstall
 
-Removes `aidev` from this machine. With `<package>` it takes that PKG out of kit management instead (the former eject). `--all` does that for every registered PKG and then removes `aidev` from the machine.
+Removes `aidev` from this machine. With `--package` it takes that PKG out of kit management instead (the former eject). `--all` does that for every registered PKG and then removes `aidev` from the machine.
 
 === Synopsis
 
@@ -9,7 +9,7 @@ Removes `aidev` from this machine. With `<package>` it takes that PKG out of kit
 ----
 aidev uninstall --dry-run
 aidev uninstall --yes [--json]
-aidev uninstall <package> --yes [--keep-assets] [--force] [--json]
+aidev uninstall --package <name|path> --yes [--keep-assets] [--force] [--json]
 aidev uninstall --all --yes [--json]
 ----
 
@@ -22,15 +22,15 @@ Removes what the installer placed: ① the launcher (Windows: `aidev.cmd` and `a
 It shows what it keeps, with the command to remove each item:
 
 * The kit clone. `aidev` runs from it, so run the `Remove-Item` / `rm -rf` shown afterwards, by hand.
-* The files the kit placed in each registered package. They are committed and shared with the team, so removing them is a team change that goes through a PR. Either run `aidev uninstall <package> --yes` first (keeps the Wiki and `aidev.yaml`), or run the `git rm` shown in that package clone (removes the Wiki too).
+* The files the kit placed in each registered package. They are committed and shared with the team, so removing them is a team change that goes through a PR. Either run `aidev uninstall --package <name> --yes` first (keeps the Wiki and `aidev.yaml`), or run the `git rm` shown in that package clone (removes the Wiki too).
 
 There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With nothing left to remove it still exits 0.
 
 To install again, run the installer from a kit clone (xref:install[Installing aidev]).
 
-==== `<package>` — take a PKG out of kit management (the former eject)
+==== `--package` — take a PKG out of kit management (the former eject)
 
-`<package>` is the name of a PKG registered on this machine (listed by `aidev doctor`) or a path to one (`.` inside the PKG).
+`--package` takes a name shown by xref:cli-list[`aidev list packages`] or a path to a PKG (`.` inside the PKG).
 
 In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
 
@@ -42,7 +42,7 @@ There is no interactive confirmation. Without `--yes` it lists what would happen
 
 ==== `--all` — every PKG, then this machine
 
-Does what `<package>` does for each registered PKG in turn, then removes `aidev` from the machine. If one PKG stops it, it stops there. Needs `--yes`.
+Does what `--package` does for each registered PKG in turn, then removes `aidev` from the machine. If one PKG stops it, it stops there. Needs `--yes`.
 
 === Options
 
@@ -63,10 +63,10 @@ Does what `<package>` does for each registered PKG in turn, then removes `aidev`
 |Take the kit out of every registered PKG, then remove the CLI from this machine
 
 |`--force`
-|`<package>`: run even if already ejected, a publish is in progress, or no trace of kit management is found
+|With `--package`: run even if already ejected, a publish is in progress, or no trace of kit management is found
 
 |`--keep-assets`
-|`<package>`: keep the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, …)
+|With `--package`: keep the tool configuration files the kit placed (`.claude/**`, `CLAUDE.md`, …)
 |===
 
 === Exit codes
@@ -79,7 +79,7 @@ Does what `<package>` does for each registered PKG in turn, then removes `aidev`
 |Removed. Nothing left to remove. `--dry-run`
 
 |1
-|`--yes` missing. `<package>` not found. `<package>` shows no trace of kit management, or a publish is in progress (without `--force`). `<package>` and `--all` given together
+|`--yes` missing. The `--package` PKG not found, shows no trace of kit management, or has a publish in progress (without `--force`). `--package` and `--all` given together
 |===
 
 === Examples

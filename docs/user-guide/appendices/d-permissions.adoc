@@ -155,7 +155,7 @@ policy は AI が作れません。 Engineering Manager が CLI で置きます�
 |`aidev create policy` → `aidev create policy --approve`
 |`secrets_paths` を変えたときなどに候補を作り直して置きます。保護を弱める変更には `--force` も必要です。候補は `aidev.yaml` から作り直されるので、チームが policy に手で足した `writable` は消えます。置いた後にもう一度足してコミットしてください。
 
-|`aidev check` / `aidev doctor <package>`
+|`aidev check` / `aidev doctor --package <name>`
 |有効な policy の要約（protected の数、置かれているか）を表示します。全文は `.aidev/policy.yaml` を読みます。
 |===
 

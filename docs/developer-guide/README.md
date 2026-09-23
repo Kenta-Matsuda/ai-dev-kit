@@ -50,7 +50,7 @@
 | hooks（after-bash / session-stopを含む）とtool adapter | `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json` |
 | workflow | `cli/commands/workflow.js` |
 | self-evolution（kit開発者向け。CLI外） | `scripts/evolve.js`（`npm run evolve`）、`cli/agents/evolution.md`、`cli/commands/hook.js`（`session-stop`） |
-| uninstall（端末 / `<package>`で旧eject / `--all`） | `cli/commands/uninstall.js`、`cli/lib/eject.js` |
+| uninstall（端末 / `--package`で旧eject / `--all`） | `cli/commands/uninstall.js`、`cli/lib/eject.js` |
 | uninstall | `cli/commands/uninstall.js` |
 | 同梱Agents / Skills | `templates/claude/.claude/agents/`、`templates/claude/.claude/skills/`（他toolの形式は`templates/copilot/`、`templates/codex/`、`templates/kiro/`に手で同期） |
 | installer | `scripts/install.ps1`、`scripts/install.sh` |

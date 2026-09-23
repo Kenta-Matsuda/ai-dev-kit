@@ -7,11 +7,11 @@ Brings this PKG in step with something that moved on: `tools` takes the kit temp
 
 [source,text]
 ----
-aidev sync tools [<package>] [--dry-run] [--force] [--json]
-aidev sync wiki [<package>] [options]
+aidev sync tools [--package <name|path>] [--dry-run] [--force] [--json]
+aidev sync wiki [--package <name|path>] [options]
 ----
 
-`<package>` is the name of a PKG registered on this machine (listed by `aidev doctor`) or a path to one. Without it, the current PKG. Use it after `aidev update` to bring several PKGs forward from one place.
+Without `--package`, the current PKG. `--package` takes a name shown by xref:cli-list[`aidev list packages`] or a path to a PKG. Use it after `aidev update` to bring several PKGs forward from one place.
 
 [[cli-sync-tools]]
 === aidev sync tools
@@ -84,6 +84,14 @@ The merge base is the template at the kit commit of the previous apply. When the
 ----
 aidev sync tools --dry-run
 aidev sync tools
+----
+
+Another PKG, from anywhere:
+
+[source,bash]
+----
+aidev list packages
+aidev sync tools --package demo-pkg
 ----
 
 [source,text]

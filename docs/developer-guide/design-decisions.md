@@ -140,7 +140,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D15: commandは動詞先行（`aidev <動詞> [<object>] [<名前>]`）とする
 
-**判断**: 利用者向けcommandは動詞で始めます。開発は`run` / `create` / `submit` / `list` / `remove`（objectは`workflow`、`create`は`agent` / `skill` / `policy`も、`remove`は`agent` / `skill`も、`list`は複数形）、保守は`init` / `check` / `sync tools|wiki [<package>]`、端末は`update`（objectなし。kit本体だけ）/ `doctor [<package>]` / `uninstall [<package>] [--all]`です。objectを1つしか取らない動詞（`run` / `submit`）でもobjectを省略しません。旧`aidev status` / `knowledge update` / `permission *` / `workflow *` / `apply` / `configure` / `show` / `eject` / `mcp` / `evolve` / `update kit|wiki`は「unknown command」または「takes no object」です（2026-09-23）。
+**判断**: 利用者向けcommandは動詞で始めます。開発は`run` / `create` / `submit` / `list` / `remove`（objectは`workflow`、`create`は`agent` / `skill` / `policy`も、`remove`は`agent` / `skill`も、`list`は複数形）、保守は`init` / `check` / `sync tools|wiki`、端末は`update`（objectなし。kit本体だけ）/ `doctor` / `uninstall [--all]`です（PKGの指定はD19）。objectを1つしか取らない動詞（`run` / `submit`）でもobjectを省略しません。旧`aidev status` / `knowledge update` / `permission *` / `workflow *` / `apply` / `configure` / `show` / `eject` / `mcp` / `evolve` / `update kit|wiki`は「unknown command」または「takes no object」です（2026-09-23）。
 
 **理由**: 「何をするか」で引けるcommand面のほうが、機能名（`workflow`、`knowledge`、`permission`）で引くより覚えやすく、help一覧が役割（開発 / 保守 / 端末）で読めるためです。動詞に対してobjectを必ず書かせるのは、`aidev run x`が何を実行するのか一覧から読めるようにするためと、将来objectを増やしても文法が変わらないためです。
 
@@ -148,7 +148,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D16: `init`はWikiを生成せず、`status`は`check`に統合し、`doctor`は端末（と名指ししたPKG）を見る
 
-**判断**: `init`は設定・template・policy・registryだけを行い、Wikiは状態を報告して`aidev sync wiki --no-commit`を案内します（`--wiki` / `--no-wiki`は無い）。`check`は旧`status`の一画面表示とCI exit codeを兼ね、`aidev.yaml`が解析できない・workflowがinvalidのときexit 1を足します。`doctor`はnode / git / kit / registry / 全AI tool / proxyを見て、`<package>`（registry名かpath）を渡したときだけそのPKGの状態も一覧します。CIのexit契約は`check`だけが持ちます。
+**判断**: `init`は設定・template・policy・registryだけを行い、Wikiは状態を報告して`aidev sync wiki --no-commit`を案内します（`--wiki` / `--no-wiki`は無い）。`check`は旧`status`の一画面表示とCI exit codeを兼ね、`aidev.yaml`が解析できない・workflowがinvalidのときexit 1を足します。`doctor`はnode / git / kit / registry / 全AI tool / proxyを見て、`--package`を付けたときだけそのPKGの状態も一覧します。CIのexit契約は`check`だけが持ちます。
 
 **理由**: `init`のexit 1が「設定できなかった」と「Wikiの本文が未完了」の両方を意味していて、CIや手順書で区別できませんでした。`status`と`check`は同じ検査の2つの出力で、人はexit codeを気にしないので1つで足ります。`doctor`がPKGも見ると`check`と重なり、どちらを見るかが毎回問題になります。
 
@@ -156,7 +156,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D17: kitはframeworkであり、開発用agent・workflow・MCP serverは配布しない
 
-**判断**: kitが同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装、テスト、規約）、workflow、MCP serverはPKGのもので、`aidev create workflow --describe`の中でworkflow-creatorが必要な要素をagents-creatorのsubagentに書かせ、MCPは提案としてfinal messageに出して人が`.mcp.json`（PKG所有。kit管理外）に足します。`aidev mcp`、`templates/claude/.mcp.json`、issue-to-pr / test-writer / convention-builder、同梱workflowは撤去しました。`aidev hook`はAI toolのhooksが呼ぶ内部入口として残し（権限強制の実体）、helpには出しません。self-evolutionは`scripts/evolve.js`（`npm run evolve`）に移し、CLI commandではなくなりました。`eject`は`uninstall <package>`に、`apply`は`sync tools`に畳みました。
+**判断**: kitが同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装、テスト、規約）、workflow、MCP serverはPKGのもので、`aidev create workflow --describe`の中でworkflow-creatorが必要な要素をagents-creatorのsubagentに書かせ、MCPは提案としてfinal messageに出して人が`.mcp.json`（PKG所有。kit管理外）に足します。`aidev mcp`、`templates/claude/.mcp.json`、issue-to-pr / test-writer / convention-builder、同梱workflowは撤去しました。`aidev hook`はAI toolのhooksが呼ぶ内部入口として残し（権限強制の実体）、helpには出しません。self-evolutionは`scripts/evolve.js`（`npm run evolve`）に移し、CLI commandではなくなりました。`eject`は`uninstall --package`に、`apply`は`sync tools`に畳みました。
 
 **理由**: kitの責務を「workflowを作る・提出する・承認する・実行する仕組み」と「initなどPKGに依らず有益な処理」に限るためです。PKGごとに違う開発作業の中身をkitが配ると、kit開発者がその品質責務を負い、PKGは自分の agent を書きにくくなります。MCPは接続先も認証もPKG固有で、kitが起動役を持つ理由がありません。hookは削除できません: guard-writeがstepの`writable`とagentの能力を強制する実体で、対話sessionでも動きます。
 
@@ -173,6 +173,14 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: `Bash`を持つagentはMCPを通さず外部へ出られるので、外部systemに触るagentに`Bash`を渡さないことはreview（templateのagents-creator / workflow-creatorの指示とuser guide）に頼っています。
 
+### D19: 対象PKGは共通option `--package <name|path>`で指定し、一覧は`aidev list packages`で見る
+
+**判断**: PKGに対して動くcommandはすべて`--package <name|path>`（短縮`-p`）を受け付け、cwdの代わりにそのPKGで動きます。解決はentry point（`aidev.js`）の1か所で、registryの名前を先に、無ければpathとして扱います。端末だけに作用する`update`と、toolが起点を渡す`hook`はerrorにします。一覧は`aidev list packages`で、名前・path・templateが最新かを出し、そのまま`--package`に渡せる名前を示します。`sync` / `doctor` / `uninstall`が個別に持っていた位置引数`<package>`は削除しました（2026-09-23）。
+
+**理由**: 複数のPKG cloneを持つ人が`aidev update`のあと`cd`せずに追従でき、同じ書き方がどのcommandでも通じるからです。位置引数は`run workflow <name>`・`create agent <name>`のobjectと名前に衝突し、commandごとに意味が変わります。受け付けないcommandで黙って無視すると、別のPKGに対して実行したつもりの誤操作に気づけません。
+
+**却下した代替案**: commandごとの位置引数`<package>`（上記）。gitと同じ`-C <path>`（pathしか受けず、`list packages`が出す名前を使えない）。machine向けcommandでも受け付けて無視する形（scriptで一律に付けられるが、誤操作を隠す）。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |
@@ -186,6 +194,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 | page単位のevidence依存 | supporting evidence変更時の全件再queueを減らす | D12 |
 | 追加tool / provider | 次に対応するtoolとhosting、強制水準の差の扱い | D7、D8 |
 | self-evolutionの運用 | 閾値、`--auto`の既定、PR作成の経路 | D13 |
+| 登録PKGへの一括実行 | `aidev sync tools --all` / `aidev check --all`でregistryの全PKGに順に実行するか。`--json`の形（PKGごとの配列か）、exitを最悪値にするか、`missing`のPKGを報告するか | D19 |
 
 ## wrapper方式から維持した判断
 

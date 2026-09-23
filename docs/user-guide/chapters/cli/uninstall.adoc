@@ -1,7 +1,7 @@
 [[cli-uninstall]]
 == aidev uninstall
 
-この端末から `aidev` を消します。`<package>` を渡すと、その PKG から kit の管理を外します（旧 eject）。`--all` は登録済みの全 PKG から外してから端末の `aidev` を消します。
+この端末から `aidev` を消します。`--package` を付けると、その PKG から kit の管理を外します（旧 eject）。`--all` は登録済みの全 PKG から外してから端末の `aidev` を消します。
 
 === 書式
 
@@ -9,7 +9,7 @@
 ----
 aidev uninstall --dry-run
 aidev uninstall --yes [--json]
-aidev uninstall <package> --yes [--keep-assets] [--force] [--json]
+aidev uninstall --package <name|path> --yes [--keep-assets] [--force] [--json]
 aidev uninstall --all --yes [--json]
 ----
 
@@ -22,15 +22,15 @@ installer が置いたものを消します。①起動スクリプト（Windows
 消さないものと、消したいときのコマンドを表示します。
 
 * kit の clone。`aidev` はこの中で動いているので、表示された `Remove-Item` / `rm -rf` を後で自分で実行します。
-* 登録済みの各 PKG に kit が置いたファイル。commit されてチームで共有しているので、消すならチームの変更として PR にします。先に xref:cli-uninstall[aidev uninstall <package>] を実行するか（Wiki と `aidev.yaml` は残ります）、表示された `git rm` を PKG の clone で実行します（Wiki も消えます）。
+* 登録済みの各 PKG に kit が置いたファイル。commit されてチームで共有しているので、消すならチームの変更として PR にします。先に `aidev uninstall --package <name> --yes` を実行するか（Wiki と `aidev.yaml` は残ります）、表示された `git rm` を PKG の clone で実行します（Wiki も消えます）。
 
 対話の確認はしません。`--yes` が無ければ一覧を表示して終了コード 1 で止まります。消すものが無くても 0 で終わります。
 
 再インストールは kit の clone で installer を実行します（xref:install[aidev のインストール]）。
 
-==== `<package>` — PKG から kit の管理を外す（旧 eject）
+==== `--package` — PKG から kit の管理を外す（旧 eject）
 
-`<package>` は端末に登録された PKG の名前（`aidev doctor` の一覧）か、PKG のパスです（PKG の中なら `.`）。
+`--package` には xref:cli-list[`aidev list packages`] に出る名前か、PKG のパスを渡します（PKG の中なら `.`）。
 
 順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md`、他のツールの分）を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
 
@@ -42,7 +42,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 
 ==== `--all` — 全 PKG から外し、端末からも消す
 
-登録済みの各 PKG に `<package>` と同じ処理を順に行い、最後に端末から `aidev` を消します。どの PKG かで止まるとそこで終わります。`--yes` が要ります。
+登録済みの各 PKG に `--package` と同じ処理を順に行い、最後に端末から `aidev` を消します。どの PKG かで止まるとそこで終わります。`--yes` が要ります。
 
 === オプション
 
@@ -63,10 +63,10 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |登録済みの全 PKG から kit を外し、端末からも消す
 
 |`--force`
-|`<package>`: eject 済みでも、publish が進行中でも、管理の痕跡が無くても実行する
+|`--package` と併用: eject 済みでも、publish が進行中でも、管理の痕跡が無くても実行する
 
 |`--keep-assets`
-|`<package>`: kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md` など）を残す
+|`--package` と併用: kit が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md` など）を残す
 |===
 
 === 終了コード
@@ -79,7 +79,7 @@ eject 後、`aidev check` は 0 を返します。CI から `aidev check` を外
 |消した。消すものが無かった。`--dry-run`
 
 |1
-|`--yes` が無い。`<package>` が見つからない。`<package>` に管理の痕跡が無い、publish が進行中（`--force` 無し）。`<package>` と `--all` を同時に指定した
+|`--yes` が無い。`--package` の PKG が見つからない、管理の痕跡が無い、publish が進行中（`--force` 無し）。`--package` と `--all` を同時に指定した
 |===
 
 === 例
