@@ -1,0 +1,125 @@
+[[daily]]
+== 日常の開発作業
+
+**本章は Developer 向けです。** 導入済みの PKG で、AI と一緒に開発する日々の流れを説明します。
+
+日常の作業は次の 3 つです。
+
+. 作業開始前に `aidev check` で状態を確認する
+. AI と開発してコミットし、コミットのたびに LLM Wiki を追従させる
+. 変更をレビューに提出する
+
+規模の大きい作業を AI に任せる場合は、承認済みの workflow を実行します（xref:daily-workflow[workflow の実行]）。
+
+[[daily-check]]
+=== 作業開始前の状態確認
+
+[source,bash]
+----
+aidev check
+----
+
+2 行目の記号と文が、次に行う作業を示します。
+
+[%autowidth.stretch,options="header"]
+|===
+|表示 |対処
+
+|`✅ the Wiki describes HEAD (…)`
+|何もしなくて構いません。そのまま開発を始めます。
+
+|`⚠️ the Wiki describes … but N file(s) differ at HEAD … — run "aidev sync wiki"`
+|コードが進んで Wiki が古くなっています。AI ツールの中なら次のコミット後に自動で更新が始まります。今すぐなら xref:daily-wiki[Wiki の追従]。作業は続けられます。
+
+|`⚠️ N page(s) still await prose regeneration`
+|本文が未生成のページがあります。`aidev sync wiki` を実行します（AI ツールから指示が出ていればそのとおりに）。
+
+|`⚠️ origin/main has moved ahead …`
+|`main` があなたの作業ブランチより先に進んでいます。区切りの良いところで merge か rebase をし、`aidev sync wiki` を実行します。
+
+|`⚠️ origin/main has new commits …`
+|`git fetch` してから `aidev check` をもう一度実行します。
+
+|`ℹ️ remote unverified …`
+|remote に届きませんでした（offline や proxy）。手元は整合しているので作業は続けられます。
+
+|`❌ LLM Wiki has not been generated yet …`
+|Wiki がありません。**この間、AI の書き込みはすべて止まります。** `git pull` で来るはずなら pull します。来ないなら Engineering Manager に確認してください。
+|===
+
+その他の表示は xref:troubleshooting-status[トラブルシューティング: aidev check の表示] を見てください。
+
+続く行では `tool config` と `policy` を確認します。`tool config` に `newer templates available` と出たら、チームがまだ新しい kit のテンプレートを取り込んでいません。 Engineering Manager に伝えてください（xref:maintain-sync-tools[テンプレートの取り込み]）。`policy` が `missing` なら、 Engineering Manager に `aidev create policy --approve` を依頼します。
+
+[[daily-code]]
+=== AI を用いた開発
+
+PKG のルートで AI ツールを起動します。
+
+[source,bash]
+----
+claude
+----
+
+AI は最初に LLM Wiki（`.aidev/knowledge/index.md`）を読み、そこからソースを調べます。Wiki の各記述は根拠ファイルへのリンクを持つので、AI はリンク先で裏を取ります。
+
+Wiki を手で直す必要はありません。間違いを見つけたら、ソース側（コメントや構造）を直して次の更新で反映させます。手編集は検出され、次の生成で上書きを求められます（xref:knowledge-handedit[手編集を避ける理由]）。
+
+AI が「書き込みを拒否された」と言うことがあります。回避策を探さず、表示された理由を読んでください（xref:permissions[権限と安全性]）。既定では PKG のソースは AI が書けません。AI にソースを書かせるには workflow を使います。
+
+[[daily-wiki]]
+=== Wiki の追従
+
+LLM Wiki は **今いるブランチの HEAD** を説明します。コードをコミットしたら、Wiki も同じブランチに **別のコミット** として積みます。ソースのコミットと Wiki のコミットを同じ PR に入れ、レビューする人は両方を見ます。
+
+AI ツールのセッションの中で `git commit` した場合は、セッションに更新の指示が出ます。**そのとおりに進めれば、Wiki は自動でコミットされます。** Wiki が遅れたままセッションを終えようとすると、1 回だけ止められます。
+
+手動で行うなら次を実行します。Wiki の生成対象に未コミットの変更があると止まるので、先にコミットしてください。
+
+[source,bash]
+----
+aidev sync wiki
+----
+
+[source,text]
+----
+✓ manifest and 1 shard(s) written for 9f8e7d6
+ℹ running the knowledge-builder agent: 7 generation target(s) in 1 batch(es) of up to 20
+✓ batch 1/1 complete: 7/7 in 4m 2s ($0.5533)
+✓ committed the Wiki as c0ffee1 (aidev: update Wiki for 9f8e7d6c5b4a)
+----
+
+* 途中で止まったら、**同じコマンド** をもう一度実行すると続きから再開します。
+* `main` の上で実行した場合は、別ブランチにコミットして PR を作ります。あなたの checkout は触りません（xref:knowledge-publish[tracking branch 上での更新]）。
+
+詳しくは xref:knowledge[LLM Wiki] を見てください。
+
+[[daily-workflow]]
+=== workflow の実行
+
+承認済みの workflow（Engineering Managerが定義し、レビューを経て `main` に入ったもの）は、Developer の誰でも実行できます。
+
+[source,bash]
+----
+git fetch origin
+aidev list workflows
+aidev run workflow implement --task "Work Item 1234 を実装する"
+----
+
+workflow は専用のブランチで動き、終わると PR を作ります。**できた PR をレビューに出すところまでがあなたの仕事です。** 中身の責任は、workflow を承認した人と PR をレビューする人にあります。
+
+`main` にない workflow、`main` の内容から変えた workflow は実行できません。新しい仕事をさせたいときは Engineering Manager に相談します。詳しくは xref:workflows-run[workflow の実行] を見てください。
+
+[[daily-pr]]
+=== レビュー依頼
+
+ソースの変更と Wiki の変更を同じ PR に入れて出します。PR には `aidev: update Wiki for <sha12>` というコミットが入っているはずです。
+
+CI が `aidev check` を実行し、整合していなければマージは止まります。レビューする人が何を見るかは xref:review[レビューとマージ] にあります。
+
+=== 関連情報
+
+* xref:knowledge[LLM Wiki] — 状態の読み方、更新の詳細、再開の仕方
+* xref:workflows[AI への作業委譲] — workflow の実行と、止まったときの対処
+* xref:permissions[権限と安全性] — 書き込みが拒否される理由
+* xref:cli-check[aidev check]、xref:cli-sync-wiki[aidev sync wiki]、xref:cli-run[aidev run workflow]

@@ -69,7 +69,7 @@ aidev list workflows
 
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:workflows-approval[AI に仕事をさせる: 承認とは] — 状態の意味と対処
 * xref:cli-create[aidev create]、xref:cli-remove[aidev remove]

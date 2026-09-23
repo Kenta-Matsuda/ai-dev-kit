@@ -1,0 +1,78 @@
+[[review]]
+== Review and merge
+
+A human decides what gets taken in. {project-name} opens PRs; it never merges them.
+
+**Responsibility for a result lies with the person who reviewed it and took it in, not with the person who ran it.** The Engineering Manager performs the review.
+
+There are four kinds of pull request, each with its own review criteria.
+
+[%autowidth.stretch,options="header"]
+|===
+|Pull request type |Created by |Reference
+
+|Adoption and setup
+|Engineering Manager
+|xref:review-setup[Adoption and setup PRs]
+
+|Source and Wiki
+|Developer
+|xref:review-source[Source and Wiki PRs]
+
+|Workflow definition
+|Engineering Manager
+|xref:review-workflow-def[Workflow definition pull requests]
+
+|Workflow result
+|Developer (the one who ran it)
+|xref:review-workflow-result[Workflow result pull requests]
+|===
+
+Whichever it is, first confirm that `aidev check` passed in CI (xref:maintain-ci[CI configuration]).
+
+[[review-setup]]
+=== Adoption and configuration pull requests
+
+PRs that change `aidev.yaml`, `.aidev/policy.yaml`, `.claude/**` and the like.
+
+* Is anything missing from `secrets_paths`? Are the places certificates and keys live covered?
+* Has `writable` in the policy (where the AI may always write) been widened carelessly?
+* Is a token or PAT written anywhere? Values are passed through environment variables only.
+* Does `aidev check` pass?
+
+[[review-source]]
+=== Source and Wiki pull requests
+
+The most common PR, from day-to-day development. The source changes and the LLM Wiki changes are in the same PR.
+
+* The source changes themselves. This part is ordinary code review.
+* Is the `aidev: update Wiki for <sha12>` commit included? Without it the Wiki is still behind.
+* Does the Wiki contradict the source anywhere? Every statement in the Wiki links to the file it is based on, so you can check anything that looks off.
+
+[[review-workflow-def]]
+=== Workflow definition pull requests
+
+It arrives as a commit named `aidev: workflow <name>`. **Merging is the approval.** Once you take it in, any Developer can run this workflow. Review it with the same weight as a result.
+
+* Is the `objective` a job the team may let that AI do?
+* Is `scope.writable` the minimum needed? Does it include the whole source (`**`) or configuration and CI paths?
+* Are `until` and `command` safe to run in this PKG? (They do not go through a shell, but the command itself does run.)
+* Are `cost.max_usd` and `limits.max_minutes` reasonable?
+* Are the referenced `.aidev/agents/` and `.aidev/skills/` files in the same PR? Do their instructions describe work outside the range, or handling of secrets?
+
+See xref:workflows-define[Defining a workflow] for details.
+
+[[review-workflow-result]]
+=== Workflow result pull requests
+
+It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the workflow name, the run id, the starting commit and the cost.
+
+* Does the diff stay inside `scope.writable`? (Writes are limited automatically, but check.)
+* Do the tests pass? Does `aidev check` in CI pass?
+* Does it match the `objective` and the `--task`? Are there no unrelated changes?
+
+=== Related information
+
+* xref:workflows[Delegating work to the AI] — defining, approving and running
+* xref:permissions[Permissions and safety] — how the policy relates to `scope.writable`
+* xref:maintain-branch-policy[Branch policy configuration] — required reviewers and required checks

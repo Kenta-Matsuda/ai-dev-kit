@@ -65,7 +65,7 @@ aidev remove skill deploy-checklist
 ✗ agent test-writer is referenced by workflow(s) write-tests; remove the reference (and submit) first
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:cli-create[aidev create]、xref:cli-list[aidev list]
 * xref:workflows-agents-skills[AI に仕事をさせる: agent と skill]

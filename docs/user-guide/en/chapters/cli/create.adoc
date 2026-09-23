@@ -89,7 +89,7 @@ While the agent behind `--describe` works, one line is printed per tool call (el
 
 === Examples
 
-Create one from plain language (package owner). workflow-creator writes the YAML and has agents-creator write the agents and skills it needs:
+Create one from plain language (Engineering Manager). workflow-creator writes the YAML and has agents-creator write the agents and skills it needs:
 
 [source,bash]
 ----

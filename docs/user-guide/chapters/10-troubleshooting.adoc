@@ -35,7 +35,7 @@
 |症状 |対処
 
 |`not an ai-dev-kit package (no aidev.yaml); nothing to check`
-|PKG の clone の中で実行します。未導入なら xref:setup-owner[導入担当者の手順]。
+|PKG の clone の中で実行します。未導入なら xref:setup-owner[PKG への導入]。
 
 |`[exit 1] workflow <name> is invalid: …`
 |`.aidev/workflows/<name>/workflow.yaml` が検証を通りません。表示された項目を直します（xref:troubleshooting-workflow[workflow]）。
@@ -198,7 +198,7 @@
 |正常です。対話中の AI は PKG のソースを書けません。AI にソースを書かせる仕事は workflow として定義し、`scope.writable` に範囲を書いて PR にします（xref:permissions-source[ソースを AI に書かせるには]）。
 
 |`aidev run workflow` 中に `… workflow <name> is approved but its scope.writable (…) does not cover this path`
-|そのパスは workflow の範囲外です。必要なら導入担当者が `scope.writable` を広げて提出し直します。
+|そのパスは workflow の範囲外です。必要なら Engineering Manager が `scope.writable` を広げて提出し直します。
 
 |`aidev run workflow` 中に `… workflow <name> is not approved: …`
 |実行中に定義が変わったか、`origin/main` が動きました。実行を止め、`git fetch origin` と `aidev list workflows` で状態を確かめます。
@@ -221,7 +221,7 @@
 |===
 
 [[troubleshooting-workflow]]
-=== workflow
+=== workflow の実行
 
 [%autowidth.stretch,options="header"]
 |===
@@ -231,7 +231,7 @@
 |定義の PR が未マージです。マージ済みなら `git fetch origin`。
 
 |`workflow <name> is not approved: … differs from origin/main`
-|手元で定義（または参照する agent・skill）を変えています。`git checkout origin/main -- .aidev/workflows/<name>/` で戻すか、導入担当者が提出し直します。
+|手元で定義（または参照する agent・skill）を変えています。`git checkout origin/main -- .aidev/workflows/<name>/` で戻すか、 Engineering Manager が提出し直します。
 
 |`workflow <name> is not approved: origin/main is not available in this clone`
 |`git fetch origin` を実行します。
@@ -247,11 +247,11 @@
 
 |`workflow stopped — step <id>: <until> still fails after N retries` +
 `… the same failure repeated`
-|agent がテストを通せませんでした。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。`--task` を具体的にするか、導入担当者に `prompt` や `max_retries` の見直しを相談します。
+|agent がテストを通せませんでした。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。`--task` を具体的にするか、 Engineering Manager に `prompt` や `max_retries` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
-|上限に達しました。`--task` を小さくするか、導入担当者に上限の見直し（定義の PR）を相談します。
+|上限に達しました。`--task` を小さくするか、 Engineering Manager に上限の見直し（定義の PR）を相談します。
 
 |`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
 |正常です。push 済みのブランチから手で PR を作ります。
@@ -264,7 +264,7 @@
 |===
 
 [[troubleshooting-update]]
-=== kit 更新後
+=== kit の更新後
 
 [%autowidth.stretch,options="header"]
 |===
@@ -288,7 +288,7 @@
 |===
 
 [[troubleshooting-windows]]
-=== Windows
+=== Windows 固有
 
 [%autowidth.stretch,options="header"]
 |===

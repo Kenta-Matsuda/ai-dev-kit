@@ -1,16 +1,19 @@
 [[knowledge]]
+[appendix]
 == The LLM Wiki
 
 The LLM Wiki is a set of Markdown pages that explain the structure of the PKG's code and the role of each file, written for the AI. It lives in `.aidev/knowledge/`, is committed, and is shared by the team.
 
+This chapter is the reference for the details. The day-to-day use is covered in xref:daily-wiki[Keeping the Wiki current].
+
 * The Wiki describes **the HEAD of the branch you are on**. When you commit code, the Wiki is committed on the same branch as **a separate commit**. The source commit and the Wiki commit travel in the same PR, and the reviewer reviews both.
-* The package owner builds it the first time with `aidev sync wiki --no-commit`. After that, a hook starts an update after every commit; by hand, run `aidev sync wiki`. In both cases the knowledge-builder agent writes the prose.
+* The Engineering Manager builds it the first time with `aidev sync wiki --no-commit`. After that, a hook starts an update after every commit; by hand, run `aidev sync wiki`. In both cases the knowledge-builder agent writes the prose.
 * The Wiki is not the source of truth. Every statement links to the file it came from, and the AI checks that file.
 * While there is no Wiki, every write by the AI is blocked.
 * Reviewing what `aidev` generates is your responsibility. The kit never merges a PR.
 
 [[knowledge-state]]
-=== Reading the state
+=== Checking the state
 
 At the start of a session, and on the second line of `aidev check`, the state is shown like this.
 
@@ -53,13 +56,13 @@ At the start of a session, and on the second line of `aidev check`, the state is
 |`❌ LLM Wiki has not been generated yet …` +
 `❌ … manifest.json does not record a valid knowledgeSha`
 |There is no Wiki, or it cannot be read. **Every write by the AI is blocked.** `aidev check` exits with 4.
-|If `git pull` should bring it, pull. If not, ask the package owner or run `aidev sync wiki --no-commit`.
+|If `git pull` should bring it, pull. If not, ask the Engineering Manager or run `aidev sync wiki --no-commit`.
 |===
 
 `aidev check` lets `⚠️` pass with 0. With `--strict` it becomes 2.
 
 [[knowledge-hook-flow]]
-=== What happens after a commit
+=== Processing after a commit
 
 When you run `git commit` inside an AI tool session, the hook (`aidev hook after-bash`) notices that HEAD changed and does the following. It touches neither the network nor an LLM, so it finishes in seconds.
 
@@ -100,7 +103,7 @@ If you try to end the session while the Wiki is behind HEAD (or its prose is unf
 Whether the hooks are available depends on the tool (xref:cli-hook[aidev hook]). Claude Code is the tool verified against the real binary.
 
 [[knowledge-manual]]
-=== Updating by hand
+=== Manual updates
 
 Without the hooks, in CI, or when you want the update right now, run:
 
@@ -188,10 +191,10 @@ You cannot commit directly to `main` (the tracking branch). When you run `aidev 
 
 * The PR is opened when `sync.auto_pr` in `aidev.yaml` is `true`, the hosting is Azure DevOps and the PAT environment variable is set. With `generic` hosting or without the PAT it pushes and you open the PR by hand. With `--no-push` it does not push either.
 * It publishes only when the prose is complete. If it stops part way, the lease (`.aidev/sync.lock`) and the worktree stay. The same command continues; `aidev sync wiki --abort` discards them.
-* To run this every night, use the pipeline in xref:automation-ci[Automation: CI].
+* To run this every night, use the pipeline in xref:maintain-ci[CI configuration].
 
 [[knowledge-files]]
-=== What is generated
+=== Generated files
 
 [%autowidth.stretch,options="header"]
 |===
@@ -222,7 +225,7 @@ You cannot commit directly to `main` (the tracking branch). When you run `aidev 
 Even if the targets are only `docs/**`, the agent still reads the code and tests to verify. When a file in the research scope changes, the next update regenerates every page.
 
 [[knowledge-handedit]]
-=== Why not to edit pages by hand
+=== Why hand edits are discouraged
 
 A hash is recorded per page, and `aidev check` / `aidev check` detect hand edits.
 
@@ -235,7 +238,7 @@ A hash is recorded per page, and `aidev check` / `aidev check` detect hand edits
 With hand edits present, `aidev sync wiki` stops and leaves the decision to overwrite to a human (`--force` overwrites). Hand edits are lost on the next generation. If the content is wrong, fix the source (comments or structure) instead.
 
 [[knowledge-scope-flag]]
-=== Updating only part of the Wiki
+=== Partial regeneration
 
 [source,bash]
 ----
@@ -244,7 +247,7 @@ aidev sync wiki --scope src/api
 
 Only pages under `src/api` are queued. Changes outside that path are carried over to the next run, and `aidev check` warns about pending prose until then.
 
-=== Related
+=== Related information
 
 * xref:cli-sync-wiki[aidev sync wiki] — options and exit codes
 * xref:cli-hook[aidev hook] — the hooks per tool

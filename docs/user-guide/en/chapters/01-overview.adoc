@@ -1,138 +1,133 @@
 [[overview]]
 == What {project-name} is
 
-{project-name} is a kit for using AI coding tools in each of your team's repositories (packages, or PKGs) with **the same setup, the same permissions and the same knowledge**, and for running the work you hand to the AI as **reviewed workflows**. You maintain it with the `aidev` command.
+{project-name} is a kit that lets your whole team use AI coding tools (Claude Code and others) with **the same setup, the same permissions and the same background knowledge**. You adopt and maintain it with the `aidev` command.
 
-After adopting it, you have four things:
+[[overview-change]]
+=== What adoption changes
 
-* **The same setup** — `.claude/` (agents, skills, hooks) and `CLAUDE.md` are shared by the whole team. They come from the kit's templates and the team may edit them. `aidev sync tools` takes in new templates, merging with edits.
-* **An LLM Wiki** — Markdown pages in `.aidev/knowledge/` that explain the structure and role of the code. The AI reads them before it reads the source. When you commit code, a hook brings the Wiki to HEAD and commits it on the same branch as a separate commit.
-* **Write limits** — `.aidev/policy.yaml` says where the AI may write, and a hook checks every write. The source is normally read-only.
-* **Workflows** — what the AI should do is written in `.aidev/workflows/<name>/workflow.yaml`, reviewed in a PR and merged into `main`. Only a definition that is byte for byte identical to the one on `main` can run, and the AI can write source only within the range that definition names.
-
-[[overview-flow]]
-=== How development flows
-
-Development with {project-name} is made of three flows. Every flow ends in a PR that a human reviews. The kit never merges a PR.
-
-.How development flows (1. adoption, 2. daily development, 3. handing work to the AI)
-[mermaid]
-----
-sequenceDiagram
-  participant O as Package owner
-  participant M as Member
-  participant R as Reviewer
-
-  rect rgb(232, 243, 250)
-    Note over O,R: 1. Adoption (once per PKG)
-    O->>O: aidev init (setup, policy) → aidev sync wiki (Wiki)
-    O->>R: PR
-    R->>R: check the setup and the Wiki, merge
-    M->>M: git pull → aidev init → claude
-  end
-
-  rect rgb(233, 247, 240)
-    Note over O,R: 2. Daily development
-    M->>M: develop with claude → git commit
-    M->>M: the hook brings the Wiki along (separate commit)
-    M->>R: PR (source + Wiki)
-    R->>R: look at both, merge
-  end
-
-  rect rgb(242, 237, 255)
-    Note over O,R: 3. Handing work to the AI
-    O->>O: aidev create workflow #60;name#62;
-    O->>R: aidev submit workflow → PR
-    R->>R: review the definition, merge (= approval)
-    M->>M: aidev run workflow #60;name#62;
-    M->>R: PR (result)
-    R->>R: review the result, merge
-  end
-----
-
-[[overview-roles]]
-=== Who does what
+You move from everyone using AI however they like, to **everyone using AI inside limits the team agreed on**.
 
 [%autowidth.stretch,options="header"]
 |===
-|Role |How many |What to do |Chapter
+|　 |Before |After
 
-|Everyone
-|Once per machine
-|Install `aidev` on your machine.
-|xref:install[Install aidev on your machine]
+|AI tool setup
+|Different for each person
+|Shared by the team. It lives in the repository and everyone gets the same thing.
 
-|Package owner
-|One per PKG
-|Adopt {project-name} in the PKG, approve the policy, generate the Wiki and open a PR. Afterwards, also turn these into PRs: generating the development conventions, defining and submitting workflows, taking in new kit templates (`aidev sync tools`). **This one person decides the PKG-specific settings**; members decide nothing.
-|xref:setup-owner[Package owner steps], xref:workflows[Putting the AI to work]
+|What the AI knows going in
+|You explain it from scratch every time
+|A description of the code lives in the repository, and the AI reads it first.
 
-|Member
-|Everyone
-|`git pull` → `aidev init` → `claude`. Bring the Wiki along at every commit. Run approved workflows with `aidev run workflow` and hand the resulting PR to a reviewer.
-|xref:setup-member[Member steps], xref:daily[Daily use]
+|What the AI may rewrite
+|Decided on the spot
+|Only the range the team agreed on. Writes outside it are stopped automatically.
 
-|Reviewer
-|The team decides
-|Review and merge three kinds of PR: adoption and setup PRs, source and Wiki PRs, workflow definition and result PRs. Make them required reviewers in the branch policy.
-|xref:daily-review[What reviewers do]
-
-|CI
-|—
-|Run `aidev check` on every PR and block the merge. Bring the Wiki of `main` along at night.
-|xref:automation[Automation]
+|Larger jobs handed to the AI
+|Described verbally, in the moment
+|The content and the range are decided and reviewed up front. Only approved jobs can run.
 |===
 
-{project-name} itself (the CLI and the machinery agents and skills it bundles) is maintained by the kit developers, who are outside the scope of this guide.
+One thing does not change: **a human decides what gets taken in.** Every change the AI makes goes through human review. {project-name} never takes one in on its own.
 
-=== How responsibility is split
+[[overview-roles]]
+=== Roles and responsibilities
 
-The person responsible for what the AI produced (the PR) is **the one who reviewed it, not the one who ran it**.
+Responsibilities differ substantially by role. Determine which one applies to you first.
 
-* The workflow definition (what to do, where it may write, how much it may spend) is written by the package owner and approved by a reviewer in a PR.
-* The result is checked by the person who reviews and merges the PR, not by the member who ran it.
-* The kit creates PRs but never merges them. A human always merges.
+[%autowidth.stretch,options="header"]
+|===
+|Role |How many |Responsibilities
 
-=== What it does not do
+|**Engineering Manager**
+|One per repository
+|**You decide.** You decide what the AI may do, prepare the shared setup and the description of the code, and hand them to the team. You define the jobs handed to the AI. You review what comes back and take it in.
 
-* It never merges a PR.
-* Claude Code is the AI tool verified against the real binary. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI can be started through adapters that follow each tool's non-interactive mode, but the kit maintainers have not checked them against the real tools. Hook configuration is placed for all four tools, but only Claude Code is verified against the real binary.
-* The only supported hostings are Azure DevOps and `generic` (git only; PRs by hand).
-* It is not a sandbox. The hook and the policy stop slips. The real protection is the token's permissions and the branch policy.
+|**Developer**
+|Everyone else
+|**You use it.** You take the shared setup into your own environment and develop with the AI day to day. You have the AI run already-defined jobs, and send the results for review. **You decide nothing.**
+|===
 
-=== Terms
+
+[[overview-flow]]
+=== Overall flow
+
+.What the Engineering Manager and the Developers each do
+[mermaid]
+----
+sequenceDiagram
+  participant L as Engineering Manager
+  participant M as Developer
+
+  rect rgb(232, 243, 250)
+    Note over L,M: 1. Preparation (once, at the start)
+    L->>L: prepare the shared setup
+    L->>L: prepare the description of the code for the AI
+    L->>M: review it, then hand it to the team
+    M->>M: take it in and set up their environment
+  end
+
+  rect rgb(233, 247, 240)
+    Note over L,M: 2. Day-to-day development
+    M->>M: develop with the AI and commit
+    M->>L: send the change for review
+    L->>L: check it and take it in
+  end
+
+  rect rgb(242, 237, 255)
+    Note over L,M: 3. Handing work to the AI
+    L->>L: decide the content and the range of a job
+    L->>L: review it, making it "approved"
+    M->>M: have the AI run an approved job
+    M->>L: send the result for review
+    L->>L: check it and take it in
+  end
+----
+
+3 runs alongside 2. You do not have to finish one before the other.
+
+[[overview-terms]]
+=== Terminology
+
+These terms recur throughout the guide. Others are explained where they first appear.
 
 [%autowidth.stretch,options="header"]
 |===
 |Term |Meaning
 
 |PKG
-|A clone of the repository that adopts {project-name}. `aidev` runs inside it.
+|The repository you adopt {project-name} in — the repository you develop in day to day.
 
 |kit
-|A clone of {project-name} itself. It is what the `aidev` command runs from. One per machine.
+|{project-name} itself. It is what the `aidev` command runs from, and each machine keeps one.
 
 |LLM Wiki
-|The explanation pages for the AI, generated into `.aidev/knowledge/`. They are derived from the code and are not the source of truth.
-
-|tracking branch
-|The branch the Wiki follows. It is also the reference for workflow approval. Usually `main`.
-
-|policy
-|`.aidev/policy.yaml`. It decides which paths the AI may write, which it may not, and which are always forbidden.
+|The description of the code, written for the AI. It is generated from the PKG's code and shared with the team through the repository.
 
 |workflow
-|`.aidev/workflows/<name>/workflow.yaml`. A YAML file with the objective of a job for the AI, the range it may write, the steps and the limits.
-
-|approved
-|The workflow definition (and the agents and skills in the PKG it references) is identical to what is on `origin/main`. Merging the PR is the approval.
-
-|agent / skill
-|An agent is a role definition handed to the AI tool (`.aidev/agents/<name>.md`); a skill is a set of instructions (`.aidev/skills/<name>/SKILL.md`). Both are also bundled with the kit and referenced by name from a workflow.
+|The definition of a job handed to the AI: what to do, how far it may rewrite, and how much it may spend.
 |===
 
-=== When something goes wrong
+[[overview-reading]]
+=== Structure of this guide
 
-* Look it up by symptom → xref:troubleshooting[Troubleshooting]
-* Command syntax and options → xref:cli-reference[Command Reference]
-* Configuration keys → xref:configuration[aidev.yaml reference]
+**Reading the part that corresponds to your role is sufficient.**
+
+[%autowidth.stretch,options="header"]
+|===
+|Role |Scope
+
+|Everyone
+|xref:install[Installing aidev] (once, at the start)
+
+|Engineering Manager
+|The four chapters of Part I: xref:setup-owner[Adopting aidev in a package] → xref:workflows[Delegating work to the AI] → xref:review[Review and merge] → xref:maintain[Maintenance]
+
+|Developer
+|The two chapters of Part II: xref:setup-member[Getting started] → xref:daily[Day-to-day development]
+|===
+
+The remaining chapters are for reference. When something goes wrong, see xref:troubleshooting[Troubleshooting]; for settings, the xref:configuration[aidev.yaml reference]; for command syntax, the xref:cli-reference[Command Reference]. The appendices cover the xref:knowledge[LLM Wiki] and xref:permissions[Permissions and safety] in detail.
+
+{project-name} itself is maintained by the kit's Developers, which is outside the scope of this guide.

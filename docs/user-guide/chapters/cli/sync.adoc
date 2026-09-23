@@ -42,7 +42,7 @@ kit の最新テンプレートを、この PKG の AI ツール設定に取り�
 
 衝突したファイルは PKG 開発チームが解消します。マーカーを消して内容を確定したら、もう一度 `aidev sync tools` を実行します。マーカーが消えたファイルは「解消済み」として記録され、`aidev check` が通るようになります。解消するまで `aidev sync tools` はそのファイルに触れず、`aidev check` は終了コード 2 を返します。
 
-適用結果は PKG の通常の差分です。`git diff` で確認し、コミットして PR にします。マージ後、他のメンバーは `git pull` だけで同じ状態になります。
+適用結果は PKG の通常の差分です。`git diff` で確認し、コミットして PR にします。マージ後、他の Developer は `git pull` だけで同じ状態になります。
 
 マージの基準になるのは、前回適用時の kit のコミットにあったテンプレートです。kit の clone にその履歴が無い場合（shallow clone など）はマージできず、そのファイルは衝突として報告され、手で直すか `--force` で kit 版にします。
 
@@ -202,7 +202,7 @@ aidev sync tools
 
 ==== 例
 
-初回の生成（導入担当者。コミットは PR と一緒に自分で行う）:
+初回の生成（Engineering Manager。コミットは PR と一緒に自分で行う）:
 
 [source,bash]
 ----
@@ -270,10 +270,10 @@ aidev sync wiki --branch
 aidev sync wiki --abort
 ----
 
-=== 関連
+=== 関連情報
 
 * xref:knowledge[LLM Wiki] — 状態の読み方、コミット後の流れ、再開
 * xref:cli-update[aidev update] — kit 本体の更新
-* xref:daily-update[日常の使い方: kit の更新と取り込み]
+* xref:maintain-update[kit の更新]
 * xref:cli-hook[aidev hook] — `after-bash` と `session-stop`
 * xref:configuration[aidev.yaml リファレンス] — `package.include`, `knowledge.*`, `sync.*`, `tools.agent_model`

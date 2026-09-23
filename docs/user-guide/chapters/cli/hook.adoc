@@ -95,8 +95,8 @@ aidev hook guard-write --input /tmp/hook.json
 }
 ----
 
-=== 関連
+=== 関連情報
 
-* xref:knowledge-hook-flow[LLM Wiki: コミット後に何が起きるか]
-* xref:permissions-hooks[権限と安全性: hook が何をするか]
+* xref:knowledge-hook-flow[コミット後の処理]
+* xref:permissions-hooks[hook の動作]
 * xref:configuration[aidev.yaml リファレンス] — `quality_gates`

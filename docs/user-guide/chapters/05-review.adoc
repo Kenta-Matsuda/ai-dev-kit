@@ -1,0 +1,78 @@
+[[review]]
+== レビューとマージ
+
+AI が作った変更を取り込むかどうかを決めるのは人間です。{project-name} は PR を作りますが、マージはしません。
+
+**成果物に責任を負うのは、実行した人ではなく、レビューして取り込んだ人です。** レビューは Engineering Manager が行います。
+
+PR は 4 種類あり、種類ごとに確認する観点が異なります。
+
+[%autowidth.stretch,options="header"]
+|===
+|PR の種類 |作成者 |参照先
+
+|導入・設定の PR
+|Engineering Manager
+|xref:review-setup[導入・設定の PR]
+
+|ソースと Wiki の PR
+|Developer
+|xref:review-source[ソースと Wiki の PR]
+
+|workflow の定義の PR
+|Engineering Manager
+|xref:review-workflow-def[workflow 定義の PR]
+
+|workflow の成果物の PR
+|Developer （実行した人）
+|xref:review-workflow-result[workflow 成果物の PR]
+|===
+
+どの PR でも、CI の `aidev check` が通っていることを最初に確認してください（xref:maintain-ci[CI の設定]）。
+
+[[review-setup]]
+=== 導入・設定の PR
+
+`aidev.yaml`、`.aidev/policy.yaml`、`.claude/**` などが変わる PR です。
+
+* `secrets_paths` に漏れが無いか。証明書や鍵の置き場が入っているか。
+* policy の `writable`（AI が常に書ける場所）を不用意に広げていないか。
+* token や PAT が書かれていないか。値は環境変数だけで渡します。
+* `aidev check` が通っているか。
+
+[[review-source]]
+=== ソースと Wiki の PR
+
+日々の開発で届く、いちばん多い PR です。ソースの変更と LLM Wiki の変更が同じ PR に入っています。
+
+* ソースの変更そのもの。ここは普段のコードレビューと同じです。
+* `aidev: update Wiki for <sha12>` のコミットが入っているか。入っていなければ Wiki が古いままです。
+* Wiki の記述がソースと食い違っていないか。Wiki の各記述は根拠ファイルへのリンクを持つので、気になる箇所はリンク先で確かめられます。
+
+[[review-workflow-def]]
+=== workflow 定義の PR
+
+`aidev: workflow <name>` というコミットで届きます。**マージが承認です。** これを取り込むと、以後 Developer の誰でもこの workflow を実行できます。実行結果と同じ重さで見てください。
+
+* `objective` は、チームがその AI にさせてよい仕事か。
+* `scope.writable` は必要最小か。ソース全体（`**`）や設定・CI のパスが入っていないか。
+* `until` と `command` は、この PKG で安全に実行できるコマンドか（shell は通りませんが、コマンド自体は実行されます）。
+* `cost.max_usd` と `limits.max_minutes` は妥当か。
+* 参照する `.aidev/agents/`・`.aidev/skills/` のファイルが同じ PR に入っているか。その指示に、範囲外の作業や秘密情報の扱いが書かれていないか。
+
+詳しくは xref:workflows-define[workflow の定義] を見てください。
+
+[[review-workflow-result]]
+=== workflow 成果物の PR
+
+`aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。
+
+* 差分が `scope.writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
+* テストが通っているか。CI の `aidev check` が通っているか。
+* `objective` と `--task` の内容どおりか。余計な変更が無いか。
+
+=== 関連情報
+
+* xref:workflows[AI への作業委譲] — 定義・承認・実行の全体
+* xref:permissions[権限と安全性] — policy と `scope.writable` の関係
+* xref:maintain-branch-policy[branch policy の設定] — 必須レビュアーと必須チェック

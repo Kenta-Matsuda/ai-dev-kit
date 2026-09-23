@@ -35,7 +35,7 @@ Look up the symptom to find what to do. The messages are the English text `aidev
 |Symptom |What to do
 
 |`not an ai-dev-kit package (no aidev.yaml); nothing to check`
-|Run it inside the PKG clone. If the PKG is not adopted yet, see xref:setup-owner[Package owner steps].
+|Run it inside the PKG clone. If the PKG is not adopted yet, see xref:setup-owner[Adopting aidev in a package].
 
 |`[exit 1] workflow <name> is invalid: …`
 |`.aidev/workflows/<name>/workflow.yaml` does not validate. Fix the items shown (xref:troubleshooting-workflow[workflow]).
@@ -198,7 +198,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Normal. The interactive AI cannot write PKG source. Define the job that should write source as a workflow, put the paths in its `scope.writable` and open a PR (xref:permissions-source[Letting the AI write source]).
 
 |During `aidev run workflow`: `… workflow <name> is approved but its scope.writable (…) does not cover this path`
-|That path is outside the workflow's scope. If it is needed, the package owner widens `scope.writable` and submits the workflow again.
+|That path is outside the workflow's scope. If it is needed, the Engineering Manager widens `scope.writable` and submits the workflow again.
 
 |During `aidev run workflow`: `… workflow <name> is not approved: …`
 |The definition changed during the run, or `origin/main` moved. Stop the run and check the state with `git fetch origin` and `aidev list workflows`.
@@ -221,7 +221,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |===
 
 [[troubleshooting-workflow]]
-=== workflow
+=== Running workflows
 
 [%autowidth.stretch,options="header"]
 |===
@@ -231,7 +231,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |The PR of the definition is not merged. If it is merged, run `git fetch origin`.
 
 |`workflow <name> is not approved: … differs from origin/main`
-|The definition (or an agent or skill it references) was changed locally. Restore it with `git checkout origin/main -- .aidev/workflows/<name>/`, or the package owner submits it again.
+|The definition (or an agent or skill it references) was changed locally. Restore it with `git checkout origin/main -- .aidev/workflows/<name>/`, or the Engineering Manager submits it again.
 
 |`workflow <name> is not approved: origin/main is not available in this clone`
 |Run `git fetch origin`.
@@ -247,11 +247,11 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 
 |`workflow stopped — step <id>: <until> still fails after N retries` +
 `… the same failure repeated`
-|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Make `--task` more specific, or ask the package owner to revise `prompt` or `max_retries`.
+|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Make `--task` more specific, or ask the Engineering Manager to revise `prompt` or `max_retries`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
-|A limit was reached. Make `--task` smaller, or ask the package owner to revise the limits (a PR to the definition).
+|A limit was reached. Make `--task` smaller, or ask the Engineering Manager to revise the limits (a PR to the definition).
 
 |`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
 |Normal. Open the PR by hand from the pushed branch.
@@ -288,7 +288,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |===
 
 [[troubleshooting-windows]]
-=== Windows
+=== Windows-specific
 
 [%autowidth.stretch,options="header"]
 |===

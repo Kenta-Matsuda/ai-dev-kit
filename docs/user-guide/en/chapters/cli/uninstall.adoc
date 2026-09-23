@@ -26,7 +26,7 @@ It shows what it keeps, with the command to remove each item:
 
 There is no interactive confirmation. Without `--yes` it lists what would happen and stops with exit code 1. With nothing left to remove it still exits 0.
 
-To install again, run the installer from a kit clone (xref:install[Install aidev on your machine]).
+To install again, run the installer from a kit clone (xref:install[Installing aidev]).
 
 ==== `<package>` — take a PKG out of kit management (the former eject)
 
@@ -98,4 +98,4 @@ rm -rf ~/ai-dev-kit            # the command shown for the kit clone
 === See also
 
 * xref:cli-init[aidev init] — re-adopting
-* xref:install[Install aidev on your machine]
+* xref:install[Installing aidev]

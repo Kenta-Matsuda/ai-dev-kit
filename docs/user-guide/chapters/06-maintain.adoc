@@ -1,0 +1,93 @@
+[[maintain]]
+== 環境の保守
+
+**本章は Engineering Manager 向けです。** 運用開始後、随時行う作業です。いずれも PR にしてレビューを通します。
+
+[%autowidth.stretch,options="header"]
+|===
+|作業 |実施時期
+
+|xref:maintain-update[kit の更新]
+|新しい kit があると通知されたとき
+
+|xref:maintain-sync-tools[テンプレートの取り込み]
+|kit を更新したあと
+
+|xref:maintain-settings[設定の変更]
+|必要が生じたとき
+|===
+
+[[maintain-update]]
+=== kit の更新
+
+新しい kit があると、PKG でコマンドを実行したときに次のように表示されます。これは Developer の端末にも出ます。
+
+[source,text]
+----
+⚠ a newer ai-dev-kit is available (9491efe → e0aa66c). Run "aidev update".
+  Update now, before running this command? (y/N):
+----
+
+`y` で kit（CLI とテンプレート）を更新します。**PKG のファイルはこの時点では変わりません。** 更新できたら、実行しようとしたコマンドを新しい CLI でそのまま実行し直します。
+
+[source,text]
+----
+✓ updated ai-dev-kit 0.3.0 → 0.4.0 (499f940 → 7c1d2e3)
+ℹ 1 package(s) on this machine still carry templates from an older kit:
+    C:\work\demo-pkg (applied 499f940)
+    Run "aidev sync tools <package>" for each when convenient; it merges the new templates with your edits.
+----
+
+[[maintain-sync-tools]]
+=== テンプレートの取り込み
+
+kit を更新したら、**Engineering Manager が** 都合のよいときに PKG のルートで実行し、PR にします。Developer はマージ後の `git pull` で同じ状態になります。チームが `.claude/` などのファイルを編集していても構いません。手を入れていないファイルは置き換わり、編集済みのファイルは kit 側の変更とマージされます。
+
+[source,bash]
+----
+aidev sync tools
+----
+
+[source,text]
+----
+✓ applied 3 change(s) for claude
+    ~ .claude/agents/knowledge-builder.md
+    ~ CLAUDE.md (merged with your edits)
+    - .claude/skills/old-skill/SKILL.md (no longer shipped)
+    Review with "git diff", then commit so your team receives the update.
+----
+
+同じ箇所をチームと kit の両方が変えていた場合は、git と同じ衝突マーカーがファイルに書かれ、終了コード 2 で止まります。
+
+[source,text]
+----
+✗ 1 file(s) need your attention:
+    ! .claude/settings.json — the kit and this package changed the same lines; conflict markers were written
+----
+
+マーカーを解消して内容を確定したら、もう一度 `aidev sync tools` を実行して記録を更新し、コミットします。解消するまで `aidev check` は終了コード 2 を返します。全ファイルを kit 版に戻したいときは `aidev sync tools --force` です。
+
+[[maintain-settings]]
+=== 設定の変更
+
+いずれも PR にしてレビューを通します。
+
+[%autowidth.stretch,options="header"]
+|===
+|変えたいこと |方法
+
+|Wiki の生成対象、秘密パス、使う AI ツール、AI 編集後に走らせる lint / test など
+|`aidev.yaml` を編集します。→ xref:configuration[aidev.yaml リファレンス]
+
+|AI が常に書いてよい場所・書けない場所
+|policy を作り直して置きます。→ xref:permissions-commands[policy の設置と変更]
+
+|AI に任せる仕事を増やす・変える
+|workflow を作って提出します。→ xref:workflows-define[workflow の定義]
+|===
+
+=== 関連情報
+
+* xref:review[レビューとマージ] — 届く PR の見方
+* xref:cli-update[aidev update]、xref:cli-sync-tools[aidev sync tools]、xref:cli-check[aidev check]
+* xref:troubleshooting-update[トラブルシューティング: kit 更新後]

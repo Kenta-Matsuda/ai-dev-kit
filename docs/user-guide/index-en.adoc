@@ -28,23 +28,27 @@ include::en/chapters/01-overview.adoc[]
 
 include::en/chapters/02-install.adoc[]
 
+= Part I. For the Engineering Manager
+
 include::en/chapters/03-setup-owner.adoc[]
 
-include::en/chapters/04-setup-member.adoc[]
+include::en/chapters/04-workflows.adoc[]
 
-include::en/chapters/05-daily.adoc[]
+include::en/chapters/05-review.adoc[]
 
-include::en/chapters/06-workflows.adoc[]
+include::en/chapters/06-maintain.adoc[]
 
-include::en/chapters/07-knowledge.adoc[]
+= Part II. For Developers
 
-include::en/chapters/08-configuration.adoc[]
+include::en/chapters/07-setup-member.adoc[]
 
-include::en/chapters/09-permissions.adoc[]
+include::en/chapters/08-daily.adoc[]
 
-include::en/chapters/10-automation.adoc[]
+= Part III. Reference
 
-include::en/chapters/11-troubleshooting.adoc[]
+include::en/chapters/09-configuration.adoc[]
+
+include::en/chapters/10-troubleshooting.adoc[]
 
 include::en/chapters/cli/index.adoc[]
 
@@ -54,4 +58,8 @@ include::en/appendices/a-environment.adoc[]
 
 include::en/appendices/b-files.adoc[]
 
-include::en/appendices/c-document-build.adoc[]
+include::en/appendices/c-knowledge.adoc[]
+
+include::en/appendices/d-permissions.adoc[]
+
+include::en/appendices/e-document-build.adoc[]

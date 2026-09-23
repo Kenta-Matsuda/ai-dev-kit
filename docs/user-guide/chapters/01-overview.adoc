@@ -1,129 +1,133 @@
 [[overview]]
 == {project-name} とは
 
-{project-name} は、 AI 駆動開発のベストプラクティスに基づき、チーム開発を支援する開発キットです。
+{project-name} は、チームの AI コーディングツール（Claude Code など）を **全員が同じ設定・同じ権限・同じ前提知識** で使えるようにするキットです。`aidev` コマンドで導入し、保守します。
 
-[[overview-flow]]
-=== {project-name} を用いた開発プロセス
+[[overview-change]]
+=== 導入による変化
 
-.開発の流れ（① 導入、② 日々の開発、③ AI に仕事を任せる）
-[mermaid]
-----
-sequenceDiagram
-  participant O as 導入担当者
-  participant M as メンバー
-  participant R as レビュアー
-
-  rect rgb(232, 243, 250)
-    Note over O,R: ① 導入（PKG につき 1 回）
-    O->>O: aidev init（設定・policy）→ aidev sync wiki（Wiki）
-    O->>R: PR
-    R->>R: 設定と Wiki を確認してマージ
-    M->>M: git pull → aidev init → claude
-  end
-
-  rect rgb(233, 247, 240)
-    Note over O,R: ② 日々の開発
-    M->>M: claude で開発 → git commit
-    M->>M: hook が Wiki を追従（別コミット）
-    M->>R: PR（ソース + Wiki）
-    R->>R: 両方を見てマージ
-  end
-
-  rect rgb(242, 237, 255)
-    Note over O,R: ③ AI に仕事を任せる
-    O->>O: aidev create workflow #60;name#62;
-    O->>R: aidev submit workflow → PR
-    R->>R: 定義をレビューしてマージ（= 承認）
-    M->>M: aidev run workflow #60;name#62;
-    M->>R: PR（成果物）
-    R->>R: 成果物をレビューしてマージ
-  end
-----
-
-[[overview-roles]]
-=== 誰が何をするか
+各自が好きなように AI を使う状態から、**チームで決めた枠の中で AI を使う** 状態になります。
 
 [%autowidth.stretch,options="header"]
 |===
-|役割 |人数 |すること |章
+|　 |導入前 |導入後
 
-|全員
-|各端末で 1 回
-|自分の端末に `aidev` を入れる。
-|xref:install[端末に aidev を入れる]
+|AI ツールの設定
+|人によって違う
+|チームで共通。リポジトリに入っていて、全員が同じものを使う
 
-|導入担当者
-|PKG につき 1 人
-|PKG に {project-name} を導入し、policy を承認し、Wiki を生成して PR にする。その後も、開発規約の生成、workflow の定義と提出、kit の新しいテンプレートの取り込み（`aidev sync tools`）を PR にする。**PKG 固有の設定を決めるのはこの 1 人**で、メンバーは何も決めません。
-|xref:setup-owner[導入担当者の手順]、xref:workflows[AI に仕事をさせる]
+|AI が前提にする知識
+|毎回ゼロから読ませる
+|コードの説明書がリポジトリにあり、AI が最初に読む
 
-|メンバー
-|全員
-|`git pull` → `aidev init` → `claude`。コミットのたびに Wiki を追従させる。承認済みの workflow を `aidev run workflow` で実行し、できた PR をレビュアーに渡す。
-|xref:setup-member[メンバーの手順]、xref:daily[日常の使い方]
+|AI が書き換えてよい範囲
+|その場の判断
+|チームで決めた範囲だけ。範囲外への書き込みは自動で止まる
 
-|レビュアー
-|チームが決める
-|3 種類の PR をレビューしてマージする: 導入・設定の PR、ソースと Wiki の PR、workflow の定義と成果物の PR。branch policy で必須レビュアーにしておく。
-|xref:daily-review[レビュアーがすること]
-
-|CI
-|—
-|PR ごとに `aidev check` を実行してマージを止める。夜間に `main` の Wiki を追従させる。
-|xref:automation[自動化]
+|AI に任せる大きめの仕事
+|その場で口頭指示する
+|内容と範囲を事前に決めてレビューし、承認したものだけ実行できる
 |===
 
-{project-name} 本体（CLI、同梱の workflow・agent・skill）を保守するのは kit の開発者で、このガイドの対象外です。
+変わらないことが 1 つあります。**成果物を取り込むかどうかを決めるのは人間です。** AI が作った変更は必ず人のレビューを通ります。{project-name} が勝手に取り込むことはありません。
 
-=== 責任の分け方
+[[overview-roles]]
+=== 役割と責任
 
-AI が作った成果物（PR）に責任を負うのは、**実行した人ではなく、レビューした人**です。
+作業内容は役割によって大きく異なります。まず自分がどちらに該当するかを確認してください。
 
-* workflow の定義（何をさせるか、どこを書いてよいか、いくらまで使うか）は、導入担当者が書き、レビュアーが PR で承認します。
-* 成果物は、実行したメンバーではなく、その PR をレビューしてマージする人が確認します。
-* kit は PR を作りますがマージしません。マージは常に人間が行います。
+[%autowidth.stretch,options="header"]
+|===
+|役割 |人数 |責務
 
-=== しないこと
+|**Engineering Manager**
+|リポジトリに 1 人
+|**決める人**です。AI に何をさせてよいかを決め、チーム共通の設定と AI 向けのコード説明書を用意して配ります。AI に任せる仕事を定義します。上がってきた変更をレビューして取り込みます。
 
-* PR をマージしません。
-* 実機で検証済みの AI ツールは Claude Code です。GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI は各ツールの非対話モードに沿ったアダプタで起動できますが、kit の保守者は実機で確認していません。hook の設定は 4 つのツールすべてに置きますが、実機で確認しているのは Claude Code だけです。
-* 対応する hosting は Azure DevOps と `generic`（git のみ。PR は手動）だけです。
-* サンドボックスではありません。hook と policy は「うっかり」を止める仕組みです。最終的な守りは token の権限と branch policy です。
+|**Developer**
+|そのほか全員
+|**使う人**です。配られた設定を自分の環境に取り込み、AI と一緒に日々の開発をします。定義済みの仕事を AI に実行させ、できた成果物をレビューに出します。**決めることは何もありません。**
+|===
 
+
+[[overview-flow]]
+=== 全体フロー
+
+.Engineering Manager と Developer が、それぞれ何をするか
+[mermaid]
+----
+sequenceDiagram
+  participant L as Engineering Manager
+  participant M as Developer
+
+  rect rgb(232, 243, 250)
+    Note over L,M: ① 準備（最初に 1 回）
+    L->>L: チーム共通の設定を用意する
+    L->>L: AI 向けのコード説明書を用意する
+    L->>M: レビューを経てチームに配る
+    M->>M: 受け取って自分の環境を整える
+  end
+
+  rect rgb(233, 247, 240)
+    Note over L,M: ② 日々の開発
+    M->>M: AI と一緒に開発してコミットする
+    M->>L: 変更をレビューへ提出
+    L->>L: 中身を確認して取り込む
+  end
+
+  rect rgb(242, 237, 255)
+    Note over L,M: ③ AI に仕事を任せる
+    L->>L: 任せる仕事の内容と範囲を決める
+    L->>L: レビューを経て「承認済み」にする
+    M->>M: 承認済みの仕事を AI に実行させる
+    M->>L: 成果物をレビューへ提出
+    L->>L: 中身を確認して取り込む
+  end
+----
+
+③ は ② と並行して進みます。順番に終わらせる必要はありません。
+
+[[overview-terms]]
 === 用語
+
+本ガイドで繰り返し使用する用語です。その他の用語は初出の章で説明します。
 
 [%autowidth.stretch,options="header"]
 |===
 |用語 |意味
 
 |PKG
-|{project-name} を導入する対象リポジトリの clone。`aidev` はその中で実行します。
+|{project-name} を導入する対象のリポジトリ。あなたが日々開発しているリポジトリのことです。
 
 |kit
-|{project-name} 本体の clone。`aidev` コマンドの実体です。端末に 1 つです。
+|{project-name} 本体。`aidev` コマンドの実体で、各自の端末に 1 つ置きます。
 
 |LLM Wiki
-|`.aidev/knowledge/` に生成される、AI 向けの説明ページ群。コードから作った派生情報で、正本ではありません。
-
-|tracking branch
-|Wiki が追いかけるブランチ。workflow の承認の基準にもなります。通常は `main` です。
-
-|policy
-|`.aidev/policy.yaml`。AI が書いてよいパス、書けないパス、常に禁止のパスを決めます。
+|AI 向けのコード説明書。PKG のコードから自動で作られ、リポジトリでチームと共有します。
 
 |workflow
-|`.aidev/workflows/<name>/workflow.yaml`。AI にさせる仕事の目的・書いてよい範囲・手順・上限を書いた YAML です。
-
-|承認済み
-|workflow の定義（と、それが参照する PKG 内の agent・skill）が `origin/main` にあるものと同じであること。PR のマージが承認です。
-
-|agent / skill
-|agent は AI ツールに渡す役割の定義（`.aidev/agents/<name>.md`）、skill は手順書（`.aidev/skills/<name>/SKILL.md`）。kit にも同梱され、workflow から名前で参照します。
+|AI に任せる仕事の定義。何をさせるか、どこまで書き換えてよいか、いくらまで使ってよいかを書いたものです。
 |===
 
-=== 困ったとき
+[[overview-reading]]
+=== 本ガイドの構成
 
-* 症状から引く → xref:troubleshooting[トラブルシューティング]
-* コマンドの書式とオプション → xref:cli-reference[コマンドリファレンス]
-* 設定項目 → xref:configuration[aidev.yaml リファレンス]
+**自分の役割に対応する部だけを読めば十分です。**
+
+[%autowidth.stretch,options="header"]
+|===
+|役割 |対象範囲
+
+|全員
+|xref:install[aidev のインストール]（最初に 1 回）
+
+|Engineering Manager
+|第 I 部の 4 章。xref:setup-owner[PKG への導入] → xref:workflows[AI への作業委譲] → xref:review[レビューとマージ] → xref:maintain[環境の保守]
+
+|Developer
+|第 II 部の 2 章。xref:setup-member[利用の開始] → xref:daily[日常の開発作業]
+|===
+
+残りは必要に応じて参照する章です。困ったら xref:troubleshooting[トラブルシューティング]、設定項目は xref:configuration[aidev.yaml リファレンス]、コマンドの書式は xref:cli-reference[コマンドリファレンス]。付録に xref:knowledge[LLM Wiki] と xref:permissions[権限と安全性] の詳細があります。
+
+{project-name} 本体を保守するのは kit の開発者で、このガイドの対象外です。

@@ -97,6 +97,6 @@ A failure (exit code 2):
 
 === See also
 
-* xref:daily-check[Reading aidev check] — what to do for each line
-* xref:automation-ci[Automation: CI]
+* xref:daily-check[Checking the state before you start] — what to do for each line
+* xref:maintain-ci[CI configuration]
 * xref:troubleshooting-exit[Troubleshooting: exit codes of aidev check]

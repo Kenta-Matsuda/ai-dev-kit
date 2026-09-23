@@ -25,7 +25,7 @@ build/docs/ai-dev-kit-user-guide.en.html   # 英語
 docs/user-guide/
 ├─ index.adoc                  日本語版のルート（include 順）
 ├─ _attributes.adoc            共通 attribute
-├─ chapters/01-… 11-…          ユーザーガイド
+├─ chapters/01-… 10-…          ユーザーガイド（役割別に第 I〜III 部へ分割）
 ├─ chapters/cli/               コマンドリファレンス（index.adoc + 1 コマンド 1 ファイル）
 ├─ appendices/                 付録
 ├─ index-en.adoc               英語版のルート（include 順）

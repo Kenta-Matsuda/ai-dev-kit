@@ -3,7 +3,7 @@
 
 `aidev.yaml` は PKG のルートに置く設定ファイルです。`aidev init` が作り、コミットして共有します。手で編集でき、各コマンドの起動時に検証されます。
 
-=== 例
+=== 記述例
 
 `aidev init` が作る内容に、任意の項目を足した例です。省略した項目は既定値になります。
 
@@ -58,7 +58,7 @@ references:                     # agent に読ませる既存の文書（テキ�
   testing: [docs/testing.md, CONTRIBUTING.md]
 ----
 
-=== よく変える項目
+=== 主要な設定項目
 
 [cols="2,2,3",options="header"]
 |===
@@ -125,7 +125,7 @@ references:                     # agent に読ませる既存の文書（テキ�
 |`aidev run workflow` が agent に「参照文書」として渡す、既存の文書のパス（ファイルかディレクトリ。PKG ルート基準）。`conventions` は `write-conventions` workflow の `convention-builder` が、`testing` は `write-tests` workflow の `test-writer` が先に読みます。agent は文書を重要な情報源として扱いますが、古い可能性があるものとしてコードで検証し、食い違いを報告します。**Excel・Word・PDF はそのまま渡せません。** AI ツールはテキストしか読めないため、Markdown か CSV に書き出してコミットし、そのファイルを書きます（`.xlsx` などを書くと `aidev` が設定エラーにします）。
 |===
 
-=== 通常は変えない項目
+=== 既定のままでよい項目
 
 [cols="2,2,3",options="header"]
 |===
@@ -170,11 +170,11 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 知らない項目は無視されます（エラーになりません）。項目名の打ち間違いは `aidev doctor` でも見つからないので、この表の名前を確かめてください。
 
-=== 書いてはいけない項目
+=== 記述禁止項目
 
 `hosting.pat`、`hosting.token`、`hosting.password`、`hosting.secret` は書けません。書くと起動を拒否します。token は `hosting.auth_env` が指す環境変数に入れます（xref:environment-reference[環境変数]）。
 
-=== 関連
+=== 関連情報
 
 * xref:cli-init[aidev init] — 生成時のフラグ
 * xref:permissions[権限と安全性] — `secrets_paths` と policy

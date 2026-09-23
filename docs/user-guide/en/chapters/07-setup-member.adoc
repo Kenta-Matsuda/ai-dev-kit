@@ -1,0 +1,68 @@
+[[setup-member]]
+== Getting started
+
+Start using your AI tool in a package that already has the kit. No questions, three commands. **You decide nothing** — you take the setup the Engineering Manager decided on as it is.
+
+=== Prerequisites
+
+* xref:install[Installing aidev] is done
+* The Engineering Manager's PR has been merged into `main`
+* For an Azure DevOps package, `AZURE_DEVOPS_PAT` is set
+
+=== Procedure
+
+. Clone the package, or pull the latest.
++
+[source,bash]
+----
+git clone <pkg-url>
+cd <pkg>
+# if you already have a clone
+git pull
+----
+
+. Run `aidev init`. The configuration already exists, so it asks nothing.
++
+[source,bash]
+----
+aidev init
+----
++
+[source,text]
+----
+✓ aidev.yaml is present (set up by your team); nothing to ask.
+✓ tool configuration is current (18 file(s) for claude)
+✓ AZURE_DEVOPS_PAT is set (value not read)
+✓ .aidev/policy.yaml is present
+✓ LLM Wiki is present (.aidev/knowledge/)
+
+ℹ ready. Run "aidev check" any time, then start your AI tool (e.g. "claude") in this directory.
+----
++
+* `⚠ AZURE_DEVOPS_PAT is not set` → xref:install[Installing aidev] and open a new terminal.
+* `newer templates available` on the `tool config` line → the team has not taken in the newer kit templates yet. The Engineering Manager runs `aidev sync tools` and opens a PR (xref:maintain-sync-tools[Applying new templates]).
+* `the LLM Wiki is not in this clone yet …` is shown → the Engineering Manager's PR is not merged yet. Run `git pull` after the merge. Do not build it yourself.
+
+. Check the state.
++
+[source,bash]
+----
+aidev check
+----
++
+You are ready when the second line is `✅ the Wiki describes the code this work is based on.` For `⚠️` and `❌`, see xref:daily-check[Checking the state before you start].
+
+. Start Claude Code at the package root.
++
+[source,bash]
+----
+claude
+----
++
+At the start of the session, one line about the Wiki state is added to the context. Claude begins its research from `.aidev/knowledge/index.md`.
+
+=== Related information
+
+* How a day of development goes → xref:daily[Day-to-day development]
+* Run an approved workflow → xref:daily-workflow[Running a workflow]
+* When the AI says a write was refused → xref:permissions[Permissions and safety]

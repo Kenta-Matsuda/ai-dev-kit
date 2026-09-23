@@ -28,23 +28,27 @@ include::chapters/01-overview.adoc[]
 
 include::chapters/02-install.adoc[]
 
+= 第 I 部　Engineering Manager 向け
+
 include::chapters/03-setup-owner.adoc[]
 
-include::chapters/04-setup-member.adoc[]
+include::chapters/04-workflows.adoc[]
 
-include::chapters/05-daily.adoc[]
+include::chapters/05-review.adoc[]
 
-include::chapters/06-workflows.adoc[]
+include::chapters/06-maintain.adoc[]
 
-include::chapters/07-knowledge.adoc[]
+= 第 II 部　Developer 向け
 
-include::chapters/08-configuration.adoc[]
+include::chapters/07-setup-member.adoc[]
 
-include::chapters/09-permissions.adoc[]
+include::chapters/08-daily.adoc[]
 
-include::chapters/10-automation.adoc[]
+= 第 III 部　リファレンス
 
-include::chapters/11-troubleshooting.adoc[]
+include::chapters/09-configuration.adoc[]
+
+include::chapters/10-troubleshooting.adoc[]
 
 include::chapters/cli/index.adoc[]
 
@@ -54,4 +58,8 @@ include::appendices/a-environment.adoc[]
 
 include::appendices/b-files.adoc[]
 
-include::appendices/c-document-build.adoc[]
+include::appendices/c-knowledge.adoc[]
+
+include::appendices/d-permissions.adoc[]
+
+include::appendices/e-document-build.adoc[]

@@ -1,17 +1,13 @@
 [[setup-owner]]
-== 導入担当者の手順
+== PKG への導入
 
-PKG に {project-name} を初めて導入し、設定・policy・Wiki を PR にしてチームへ配ります。PKG につき 1 人が行います。**この PKG で AI に何を許し、何をさせるかを決めるのはこの人です。** メンバーは決めません。
+PKG に {project-name} を初めて導入し、チーム共通の設定・AI の書き込み権限・AI 向けのコード説明書を用意して配ります。PKG につき 1 人が行います。**この PKG で AI に何を許し、何をさせるかを決めるのはこの人です。** Developer は決めません。
 
-導入のあとも、次のことは導入担当者が PR にします。
+この章は導入の 1 回だけの手順です。導入後に継続して行うことは xref:maintain[環境の保守] にあります。
 
-* 開発規約の生成と、AI に任せる仕事（workflow）の定義 → xref:setup-owner-after[導入のあとにすること]
-* kit の新しいテンプレートの取り込み（`aidev sync tools`）→ xref:daily-apply[aidev sync tools]
-* `aidev.yaml` と policy の変更 → xref:configuration[aidev.yaml リファレンス]、xref:permissions[権限と安全性]
+=== 事前準備
 
-=== 必要なもの
-
-* xref:install[端末に aidev を入れる] が終わっていて、`aidev doctor` で `claude` が `✓`
+* xref:install[aidev のインストール] が終わっていて、`aidev doctor` で `claude` が `✓`
 * PKG の clone。コミットが 1 つ以上あり、`origin` が設定されている
 * Azure DevOps なら `AZURE_DEVOPS_PAT` を設定済み
 * Wiki の生成には時間がかかります。目安は生成対象 20 ファイルごとに数分〜十数分です
@@ -101,34 +97,70 @@ git push -u origin feature/ai-dev-kit
 +
 `aidev check` が `✓ environment is consistent.` であることを確認してから push します。`.aidev/.gitignore` が一時ファイルを除外するので、`git add .aidev` で余計なものは入りません。`copilot` / `codex` / `kiro` も選んだ場合は、そのツールの設定ファイル（`.github/`、`AGENTS.md`、`.kiro/`）も `git add` します（xref:files-and-state[PKG 内のファイル]）。
 
-. PR をレビューしてもらい、`main` にマージします。レビュアーは設定（`aidev.yaml`、policy）と Wiki の内容を見ます。マージ後、メンバーは xref:setup-member[メンバーの手順] で参加できます。
+. PR をレビューしてもらい、`main` にマージします。レビュアーは設定（`aidev.yaml`、policy）と Wiki の内容を見ます。マージ後、 Developer は xref:setup-member[利用の開始] で参加できます。
 
-[[setup-owner-after]]
-=== 導入のあとにすること
+[[setup-owner-guardrails]]
+=== 必須設定
 
-いずれも導入担当者が行い、PR にします。順番は任意です。
+次の 2 つは導入と同時に必ず設定します。これが無いと、AI が書ける範囲を広げる変更がレビューを通らずに入ります。
+
+[[maintain-branch-policy]]
+==== branch policy の設定
+
+workflow の承認は「`main` にマージされたこと」です。つまり **`main` の branch policy が承認の実体** です。次を設定してください。
+
+* `aidev check` の pipeline を必須の build validation にする
+* `.aidev/workflows/**`、`.aidev/agents/**`、`.aidev/skills/**`、`.aidev/policy.yaml`、`aidev.yaml` に必須レビュアーを付ける
+* `main` への直接 push を禁止する
+
+これが無いと、AI が書ける範囲を広げる変更や、書き込みの制限を外す変更が、レビューを通らずに入ってしまいます。
+
+[[maintain-ci]]
+==== CI の設定
+
+CI が行うのは 2 つです。PR ごとに `aidev check` でマージを止めることと、夜間に `main` の Wiki を追従させることです。いずれもマージは人間が行います。
+
+kit の `pipelines/` にある Azure Pipelines の例を PKG にコピーし、`AIDEV_KIT_URL` を中央 kit の URL に変えて使います。CI は kit を clone して `node cli/bin/aidev.js` を直接実行するので、`aidev` のインストールは不要です。
 
 [%autowidth.stretch,options="header"]
 |===
-|すること |方法
+|ファイル |用途
 
-|branch policy を設定する
-|`main` に PR ごとの `aidev check` を必須の build validation にし、`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`・`.aidev/policy.yaml` に必須レビュアーを付けます。workflow の承認は「`main` にマージされたこと」なので、この設定が承認の実体です。→ xref:automation-ci[自動化: CI]
+|`pipelines/azure-pipelines-check.yml`
+|PR ごとに `aidev check` を実行します。`main` の branch policy で **必須の build validation** にしてください。これが無いと、書き込みの制限を外す編集がマージできてしまいます。
 
-|この PKG の開発規約を書き出す
-|`aidev create workflow conventions --describe "Wiki と根拠ソースからこの PKG の開発規約を .aidev/conventions/ に根拠付きで書き、PR にする"` で workflow を作って提出し、マージ後に実行します。→ xref:workflows-bundled[kit が同梱するもの、しないもの]
+|`pipelines/azure-pipelines-wiki.yml`
+|毎日 18:00 UTC に `main` で `aidev sync wiki --branch` を実行します。Wiki 無しでマージされた分を拾い、`aidev/wiki-<sha12>` ブランチにコミットして PR を作ります。本文が完成したときだけ publish するので、pipeline に agent のツール（`tools.agent`。既定は Claude Code）とその認証情報が必要です。変数 `AZURE_DEVOPS_PAT`、`ANTHROPIC_API_KEY`、`AIDEV_BOT_NAME`、`AIDEV_BOT_EMAIL` を設定します。Wiki が既に `main` の HEAD を説明していれば何もしません。
+|===
+
+Developer がコミットのたびに Wiki を追従させていれば、夜間の pipeline は保険です。
+
+`aidev check` の終了コードが CI との契約です。意味は xref:cli-exit-codes[コマンドリファレンス: 終了コード] を参照してください。
+
+[[setup-owner-after]]
+=== 導入後の作業
+
+上記が済んだら、次を順に進めます。いずれも Engineering Manager が行い、PR にします。
+
+[%autowidth.stretch,options="header"]
+|===
+|作業 |手段
+
+|Developer に案内する
+|→ xref:setup-member[利用の開始]
 
 |AI に任せる仕事を定義する
-|`aidev create workflow <name> --describe "<やりたいこと>"` で workflow（と必要な agent・skill）を作り、`scope.writable` を確認して `aidev submit workflow` します。マージされるとメンバーが実行できます。→ xref:workflows[AI に仕事をさせる]
+|やりたいことを伝えて処理ワークフローを作り、書いてよい範囲を確認して提出します。マージされると Developer が実行できます。→ xref:workflows[AI への作業委譲]
 
-|夜間に Wiki を追従させる
-|`pipelines/azure-pipelines-wiki.yml` を PKG に置きます。→ xref:automation-ci[自動化: CI]
+|この PKG の開発規約を書き出す
+|「Wiki と根拠ソースからこの PKG の開発規約を根拠付きで書く」処理ワークフローを作って提出し、マージ後に実行します。→ xref:workflows-define[workflow の定義]
 
 |AI の編集後に lint / test を走らせる
 |`aidev.yaml` の `quality_gates` に書きます。→ xref:configuration[aidev.yaml リファレンス]
 |===
 
-=== 次のステップ
+=== 関連情報
 
-* メンバーに案内する → xref:setup-member[メンバーの手順]
-* AI に仕事をさせる → xref:workflows[AI に仕事をさせる]
+* 継続して行うこと → xref:maintain[環境の保守]
+* AI に仕事をさせる → xref:workflows[AI への作業委譲]
+* 上がってきた変更を取り込む → xref:review[レビューとマージ]

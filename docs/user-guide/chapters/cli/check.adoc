@@ -95,8 +95,8 @@ aidev check — demo-pkg
     conflict: .claude/settings.json
 ----
 
-=== 関連
+=== 関連情報
 
-* xref:daily-check[aidev check の読み方] — 表示ごとの対処
-* xref:automation-ci[自動化: CI]
+* xref:daily-check[作業開始前の状態確認] — 表示ごとの対処
+* xref:maintain-ci[CI の設定]
 * xref:troubleshooting-exit[トラブルシューティング: aidev check の終了コード]

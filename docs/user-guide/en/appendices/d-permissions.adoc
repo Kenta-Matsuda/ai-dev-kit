@@ -1,4 +1,5 @@
 [[permissions]]
+[appendix]
 == Permissions and safety
 
 {project-name} decides **where the AI may write** inside the PKG in two layers.
@@ -59,7 +60,7 @@ flowchart TD
 ----
 
 [[permissions-hooks]]
-=== What the hooks do
+=== Hook behaviour
 
 The distributed hook configuration (`.claude/settings.json` for Claude Code, `.github/hooks/aidev.json` for GitHub Copilot CLI, `.codex/hooks.json` for OpenAI Codex CLI, `.kiro/agents/aidev.json` for Kiro CLI) registers five hooks. Claude Code is the tool verified against the real binary.
 
@@ -81,7 +82,7 @@ The distributed hook configuration (`.claude/settings.json` for Claude Code, `.g
 
 |PostToolUse (Bash)
 |`aidev hook after-bash`
-|When a commit moved HEAD and the Wiki fell behind, updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent (xref:knowledge-hook-flow[What happens after a commit]).
+|When a commit moved HEAD and the Wiki fell behind, updates the structure and, if prose is needed, tells the session to start the knowledge-builder as a subagent (xref:knowledge-hook-flow[Processing after a commit]).
 
 |Stop
 |`aidev hook session-stop`
@@ -101,9 +102,9 @@ ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync
 An edit that removes a hook is caught by `aidev check` with exit code 2, and CI stops the merge (the file checked is `.claude/settings.json`).
 
 [[permissions-source]]
-=== Letting the AI write source
+=== Allowing the AI to write source
 
-By default the PKG source is `read_only`. Neither the interactive Claude nor the subagents it calls can write it. To let the AI write source, **define that job as a workflow, put the allowed paths in its `scope.writable`, review it in a PR and merge it into `main`** (xref:workflows[Putting the AI to work]).
+By default the PKG source is `read_only`. Neither the interactive Claude nor the subagents it calls can write it. To let the AI write source, **define that job as a workflow, put the allowed paths in its `scope.writable`, review it in a PR and merge it into `main`** (xref:workflows[Delegating work to the AI]).
 
 [source,yaml]
 ----
@@ -116,9 +117,9 @@ This scope applies only to the agent started by `aidev run workflow <name>`. At 
 Add paths to the policy's `writable` only when every agent and every interactive session should be able to write them at any time. `protected` paths and `secrets_paths` cannot be opened either way. Review policy changes in a PR and widen them only for as long as needed.
 
 [[permissions-commands]]
-=== Placing, changing and viewing the policy
+=== Placing and changing the policy
 
-The AI cannot create the policy. The package owner places it with the CLI.
+The AI cannot create the policy. The Engineering Manager places it with the CLI.
 
 [%autowidth.stretch,options="header"]
 |===
@@ -142,7 +143,7 @@ The AI cannot create the policy. The package owner places it with the CLI.
 * `aidev doctor` and `aidev init` report only whether the token is set. They never read the value.
 * Workflow run records (`.aidev/workflows/*/runs/`) contain command output, so they are gitignored and never committed.
 
-=== What not to do
+=== Prohibited practices
 
 * Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole kit as a PR to the kit).
 * Only humans edit `.aidev/policy.yaml`, and every change is reviewed in a PR (never let the AI edit it).
@@ -150,9 +151,9 @@ The AI cannot create the policy. The package owner places it with the CLI.
 * When the AI reports a denied write, read the reason instead of looking for a workaround.
 * Do not put tokens in commits, logs or PR descriptions.
 
-=== Related
+=== Related information
 
-* xref:workflows[Putting the AI to work] — `scope.writable` and approval
+* xref:workflows[Delegating work to the AI] — `scope.writable` and approval
 * xref:cli-create[aidev create policy]
 * xref:cli-hook[aidev hook]
 * xref:configuration[aidev.yaml reference] — `secrets_paths`, `hosting.auth_env`

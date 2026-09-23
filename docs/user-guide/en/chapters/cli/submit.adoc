@@ -65,5 +65,5 @@ aidev submit workflow write-tests
 
 === See also
 
-* xref:workflows-submit[Putting the AI to work: Submit], xref:workflows-review[Reviewing workflow pull requests]
+* xref:workflows-submit[Submitting a workflow], xref:review-workflow-def[Workflow definition pull requests]
 * xref:cli-create[aidev create], xref:cli-run[aidev run]
