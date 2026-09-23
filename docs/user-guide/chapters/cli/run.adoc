@@ -14,7 +14,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 
 `.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
 
-手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent の子プロセスに `AIDEV_WORKFLOW=<name>` を渡し、hook が `scope.writable` への書き込みを許可します。終わると記録を `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に書きます。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
+手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。終わると記録を `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に書きます。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
 
 === オプション
 
@@ -32,7 +32,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 |時間の上限をこの実行だけ下げる（60 より上にはできない）
 
 |`--dry-run`
-|承認の状態、範囲、agent とツール、手順、上限を表示し、何も始めない
+|承認の状態、関係するファイル、agent と AI ツール、上限、今回の指示と、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
 
 |`--json`
 |JSON で出力する
@@ -45,10 +45,10 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 |コード |条件
 
 |0
-|すべての step を終えた。`--dry-run` で承認済みだった
+|すべての step を終えた。`--dry-run` で承認済みで、起動前に止まる問題が無かった
 
 |1
-|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも kit にも無い。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも kit にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）
 |===
 
 === 例
@@ -63,12 +63,47 @@ aidev run workflow write-tests --dry-run --task "src/services/order.ts"
 aidev run workflow write-tests --task "src/services/order.ts"
 ----
 
+`--dry-run` の表示:
+
+[source,text]
+----
+aidev run workflow write-tests (dry run)
+  approved  yes (matches origin/main 3f2a9c81d0e4)
+  files     .aidev/workflows/write-tests/workflow.yaml: approved
+.aidev/agents/test-investigator.md: approved
+.aidev/agents/test-writer.md: approved
+  agents    test-investigator via claude [pkg]
+test-writer via claude [pkg]
+  limits    45 min, $5
+  task      src/services/order.ts
+
+    1. survey: agent test-investigator — 既存テストの書き方を調べ、足りないテストを洗い出す
+       - writes: nothing
+       - skills: repository-discovery; tools: Read, Grep, Glob; mcp: (none)
+    2. write: agent test-writer — 洗い出したテストを書き、通るまで直す
+       - writes: tests/**
+       - skills: test-and-verify; tools: Read, Grep, Glob, Edit, Write; mcp: (none)
+       - repeats until npm test exits 0 (max 4 retries)
+    3. pr: commit, push and open a pull request
+
+✓ dry run: the workflow is approved and would run.
+----
+
 [source,text]
 ----
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
     record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+`--dry-run` で、起動前に止まる問題が見つかったとき（`--dry-run` なしで実行しても、同じ理由で何も始めずに止まります）:
+
+[source,text]
+----
+✗ agent ticket-reader uses the MCP server ado, which .mcp.json does not register
+✗ agent test-writer lists tools in its frontmatter, and GitHub Copilot CLI cannot be limited to them; run it with claude
+✗ dry run: the workflow is approved but would be refused (see above).
 ----
 
 未承認のとき:

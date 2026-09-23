@@ -14,7 +14,7 @@ aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes 
 
 Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
 
-Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. The agent's child process receives `AIDEV_WORKFLOW=<name>`, and the hook allows writes to `scope.writable`. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
+Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>` and `AIDEV_WORKFLOW_STEP=<id>`. The hook allows writes only inside that step's `writable`. Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. The final report of each earlier agent step goes into the instructions of the later agent steps. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
 
 === Options
 
@@ -32,7 +32,7 @@ Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a
 |Lower the time limit for this run only (cannot go above 60)
 
 |`--dry-run`
-|Show the approval state, the scope, the agents and tools, the steps and the limits; start nothing
+|Show the approval state, the files involved, the agents and AI tools, the limits, the task, and what each step does (where it may write; the agent's skills, tools and MCP servers; `until`); start nothing. Problems that would stop the run before it starts are shown, with exit code 1
 
 |`--json`
 |Machine-readable output
@@ -45,10 +45,10 @@ Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a
 |Code |Condition
 
 |0
-|Finished every step. `--dry-run` when approved
+|Finished every step. `--dry-run` when approved and no problem would stop the run before it starts
 
 |1
-|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the kit. A `pull-request` step with a dirty working tree. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, the time or cost limit)
+|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the kit. A server in an agent's `mcp` that `.mcp.json` does not register. An agent with `tools` or `mcp` started on an AI tool other than Claude Code. A `pull-request` step with a dirty working tree. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, the time or cost limit)
 |===
 
 === Examples
@@ -63,12 +63,47 @@ aidev run workflow write-tests --dry-run --task "src/services/order.ts"
 aidev run workflow write-tests --task "src/services/order.ts"
 ----
 
+What `--dry-run` shows:
+
+[source,text]
+----
+aidev run workflow write-tests (dry run)
+  approved  yes (matches origin/main 3f2a9c81d0e4)
+  files     .aidev/workflows/write-tests/workflow.yaml: approved
+.aidev/agents/test-investigator.md: approved
+.aidev/agents/test-writer.md: approved
+  agents    test-investigator via claude [pkg]
+test-writer via claude [pkg]
+  limits    45 min, $5
+  task      src/services/order.ts
+
+    1. survey: agent test-investigator — Survey how tests are written and find the missing ones
+       - writes: nothing
+       - skills: repository-discovery; tools: Read, Grep, Glob; mcp: (none)
+    2. write: agent test-writer — Write the tests found and fix them until they pass
+       - writes: tests/**
+       - skills: test-and-verify; tools: Read, Grep, Glob, Edit, Write; mcp: (none)
+       - repeats until npm test exits 0 (max 4 retries)
+    3. pr: commit, push and open a pull request
+
+✓ dry run: the workflow is approved and would run.
+----
+
 [source,text]
 ----
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
     record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+----
+
+When `--dry-run` finds a problem that would stop the run before it starts (without `--dry-run`, the run stops for the same reason without starting anything):
+
+[source,text]
+----
+✗ agent ticket-reader uses the MCP server ado, which .mcp.json does not register
+✗ agent test-writer lists tools in its frontmatter, and GitHub Copilot CLI cannot be limited to them; run it with claude
+✗ dry run: the workflow is approved but would be refused (see above).
 ----
 
 When it is not approved:

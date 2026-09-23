@@ -15,6 +15,9 @@
 
 |xref:maintain-settings[設定の変更]
 |必要が生じたとき
+
+|xref:maintain-model[モデルの変更]
+|使うモデルを変えたいとき
 |===
 
 [[maintain-update]]
@@ -84,7 +87,42 @@ aidev sync tools
 
 |AI に任せる仕事を増やす・変える
 |workflow を作って提出します。→ xref:workflows-define[workflow の定義]
+
+|AI が使うモデル
+|指定先が 2 つあります。→ xref:maintain-model[モデルの変更]
 |===
+
+[[maintain-model]]
+=== モデルの変更
+
+モデルの指定先は 2 つあります。`aidev` が自分で起動する agent（Wiki 更新、workflow、`aidev create`）のモデルと、Developer が対話で使う AI ツール自身のモデルです。
+
+==== aidev が起動する agent
+
+`aidev.yaml` の `tools.agent_model` を変えて PR にします。特定の agent だけ変えるときは `tools.agents.<name>.model` を足します。
+
+[source,yaml]
+----
+tools:
+  agent: claude
+  agent_model: "sonnet"           # 既定。"" にするとモデルを渡さずツールに任せる
+  agents:
+    knowledge-builder: { model: opus }
+----
+
+値は `sonnet` や `opus` のような別名でも、`claude-opus-5` のような正式な ID でも構いません。`aidev` は文字の形式だけを確かめ、そのまま各ツールの `--model` に渡します。存在しないモデルは agent の起動時にツール側のエラーになります。
+
+同じ agent に複数の指定があるときは、次の順で優先します。
+
+. その 1 回だけの指定。`aidev sync wiki` では `--agent-model <model>` フラグ（`""` で設定済みのモデルを外す）、`aidev run workflow` では workflow.yaml の `model`
+. `tools.agents.<name>.model`
+. `tools.agent_model`
+
+今どのモデルで動くかは `aidev doctor <package>` の `agent tool` 行で確認できます。
+
+==== 対話セッション
+
+`aidev.yaml` は対話セッションに影響しません。Claude Code のモデルは PKG の `.claude/settings.json` の `"model"`（kit の初期値は `sonnet`）で決まります。チーム全体で変えるならこのファイルを編集して PR にします。編集した内容は `aidev sync tools` でも保持されます。Developer が自分だけ変えるときは `.claude/settings.local.json`（kit の管理外）か、セッション中の `/model` を使います。Copilot などほかのツールのモデルは、そのツール自身の設定で変えます。
 
 === 関連情報
 

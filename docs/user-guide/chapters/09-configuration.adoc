@@ -177,5 +177,6 @@ references:                     # agent に読ませる既存の文書（テキ�
 === 関連情報
 
 * xref:cli-init[aidev init] — 生成時のフラグ
+* xref:maintain-model[モデルの変更] — `tools.agent_model` の変え方と優先順位
 * xref:permissions[権限と安全性] — `secrets_paths` と policy
 * xref:knowledge[LLM Wiki] — 生成対象と調査範囲

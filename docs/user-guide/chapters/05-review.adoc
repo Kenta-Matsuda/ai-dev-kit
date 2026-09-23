@@ -54,11 +54,14 @@ PR は 4 種類あり、種類ごとに確認する観点が異なります。
 
 `aidev: workflow <name>` というコミットで届きます。**マージが承認です。** これを取り込むと、以後 Developer の誰でもこの workflow を実行できます。実行結果と同じ重さで見てください。
 
+PR 本文の「Steps」に、ステップごとの agent、書ける場所、その agent の skill・ツール・MCP server が並んでいます。まずそこを読み、次の順で確認します。
+
 * `objective` は、チームがその AI にさせてよい仕事か。
-* `scope.writable` は必要最小か。ソース全体（`**`）や設定・CI のパスが入っていないか。
+* 各ステップの `writable` は必要最小か。調査だけのステップが `[]` になっているか。ソース全体（`**`）や設定・CI のパスが入っていないか。
+* 各 agent の `tools` と `mcp` は、その仕事に必要な分だけか。外部システムに触る agent に `Bash` が入っていないか（`Bash` があれば MCP を通さずに外部へ出られます）。`tools` が書かれていない agent は、すべての組み込みツールを使えます。
 * `until` と `command` は、この PKG で安全に実行できるコマンドか（shell は通りませんが、コマンド自体は実行されます）。
 * `cost.max_usd` と `limits.max_minutes` は妥当か。
-* 参照する `.aidev/agents/`・`.aidev/skills/` のファイルが同じ PR に入っているか。その指示に、範囲外の作業や秘密情報の扱いが書かれていないか。
+* 参照する `.aidev/agents/`・`.aidev/skills/` のファイルが同じ PR に入っているか。**YAML だけで終わらせず、agent と skill の本文も読みます。** AI への実際の指示の大部分はそちらにあります。範囲外の作業や秘密情報の扱いが書かれていないか。
 
 詳しくは xref:workflows-define[workflow の定義] を見てください。
 
@@ -67,12 +70,12 @@ PR は 4 種類あり、種類ごとに確認する観点が異なります。
 
 `aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。
 
-* 差分が `scope.writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
+* 差分が各ステップの `writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
 * テストが通っているか。CI の `aidev check` が通っているか。
 * `objective` と `--task` の内容どおりか。余計な変更が無いか。
 
 === 関連情報
 
 * xref:workflows[AI への作業委譲] — 定義・承認・実行の全体
-* xref:permissions[権限と安全性] — policy と `scope.writable` の関係
+* xref:permissions[権限と安全性] — policy とステップの `writable` の関係
 * xref:maintain-branch-policy[branch policy の設定] — 必須レビュアーと必須チェック

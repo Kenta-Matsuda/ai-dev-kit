@@ -37,7 +37,7 @@ aidev list skills [--json]
 |オプション |説明
 
 |`--json`
-|JSON で出力する
+|JSON で出力する。`workflows` の各行は `name`・`description`・`status`・`steps`（ステップの数）・`writable`（全ステップの `writable` を合わせたもの）を持つ
 |===
 
 === 終了コード

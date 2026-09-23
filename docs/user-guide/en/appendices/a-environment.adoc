@@ -24,8 +24,8 @@ Never write values into files. Set them in your shell profile, as user environme
 `AIDEV_KIRO_BIN`
 |Likewise for the GitHub Copilot CLI (`copilot`), OpenAI Codex CLI (`codex`) and Kiro CLI (`kiro-cli`) executables.
 
-|`AIDEV_WORKFLOW`
-|The workflow name that `aidev run workflow` sets, for the child process only, when it starts an agent. The hook uses it to check that the workflow is approved and to allow its `scope.writable`. Do not set it yourself.
+|`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`
+|The workflow name and the `id` of the step now running, which `aidev run workflow` sets, for the child process only, when it starts an agent. The hook uses them to check that the workflow is approved, and allows only writes inside that step's `writable` and only the tools and MCP servers that agent was given. Do not set them yourself.
 
 |`AIDEV_DEBUG`
 |When set, internal errors show a stack trace.

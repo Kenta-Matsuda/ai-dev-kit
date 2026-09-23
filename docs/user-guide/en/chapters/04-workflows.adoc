@@ -72,9 +72,26 @@ aidev create workflow e2e-tests                            # empty template
 aidev create workflow e2e-tests --describe "Write Playwright tests for the main screens under tests/e2e/ and open a PR"
 ----
 
-`--describe` starts the workflow-creator agent with `tools.agent` of `aidev.yaml` and has it write the YAML and, if needed, `.aidev/agents/` and `.aidev/skills/`. Afterwards the CLI validates it and shows the result and the next steps.
+`--describe` starts the workflow-creator agent and has it write the YAML. If agents or skills are missing, workflow-creator starts agents-creator as a subagent and has it write them in `.aidev/agents/` and `.aidev/skills/`. When an external system (Work Items, tickets, a database) is needed, it puts a proposed MCP server definition for the PKG's `.mcp.json` in its report (a person adds it). Afterwards the CLI validates it and shows the result and the next steps.
 
-Edit the template to fit the PKG. Most of the time you change `scope.writable` (where this job may write in this PKG) and `until` (this PKG's test command).
+The definition lives in two places.
+
+[%autowidth.stretch,options="header"]
+|===
+|Where |What it decides |Example
+
+|`workflow.yaml` (**constraints**)
+|The order of the steps, the agent of each step, where that step may write, when it is done, the limits
+|The survey step writes nothing. The implementation step writes only `tests/**`
+
+|The agent's frontmatter (**capabilities**)
+|The skills, tools and MCP servers that agent can use
+|test-writer has the test-and-verify instructions and uses only Read, Edit and Write
+|===
+
+When you want the same agent to have different permissions for different jobs, split it into separate agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance). No key in a workflow overrides an agent's capabilities.
+
+Edit the template to fit the PKG. Most of the time you change each step's `writable` (where that step may write) and `until` (this PKG's test command).
 
 [source,yaml]
 ----
@@ -85,26 +102,24 @@ objective: |                       # the objective handed to every agent step (r
   Add tests for the target named in --task. Follow the way existing tests are
   written and run. Do not change the code under test.
 
-scope:
-  writable: [tests/**]             # paths the agents of this workflow may write (required; [] means nothing)
-
-agents: [test-writer]              # referenced by name; .aidev/agents/<name>.md first, then the kit's bundled ones
-skills: [test-and-verify, repository-discovery]   # their text is inserted into every agent step's instructions
-
 # tool: claude                     # optional; one of tools.default in aidev.yaml. Default is tools.agent
 # model: sonnet                    # optional; "" leaves it to the tool's default
 
-steps:
+steps:                             # run top to bottom
   - id: survey
-    agent: test-writer
-    prompt: Find out how tests are written and run, and list the behaviours not yet covered. Do not write files.
+    description: Survey how tests are written and find the missing ones   # optional; for the reviewer
+    agent: test-investigator       # .aidev/agents/<name>.md (this PKG's agent) first, then the kit's bundled ones
+    writable: []                   # required; this step writes nothing
+    prompt: Find out how tests are written and run, and list the behaviours not yet covered in your final report.
   - id: write
+    description: Write the tests found and fix them until they pass
     agent: test-writer
-    prompt: Write the listed tests in the existing style and run them.
+    writable: [tests/**]           # this step may write only inside tests/
+    prompt: Write the tests the previous step listed, in the existing style, and run them.
     until: npm test                # repeat the agent until this exits 0 (no shell)
     max_retries: 4                 # retries for until (ceiling 10)
   - id: pr
-    kind: pull-request             # commit the changes in scope.writable → push → PR
+    kind: pull-request             # commit the changes in each step's writable → push → PR
 
 limits:
   max_minutes: 45                  # ceiling 60. You can lower it, not raise it
@@ -120,20 +135,23 @@ cost:
 |`objective`
 |The objective placed at the top of every agent step's instructions. Required.
 
-|`scope.writable`
-|Paths (globs) the agents may write while this workflow runs. **The only place the AI can write PKG source is this range of an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only workflow).
-
-|`agents` / `skills`
-|Referenced by name. The PKG's `.aidev/agents/<name>.md` and `.aidev/skills/<name>/SKILL.md` are looked up first; if absent, the kit's bundled ones are used. The agent definition and the skill text are inserted into the instructions, so a tool that cannot pick agents by name still works under the same contract.
-
 |`tool` / `model`
 |If omitted, `tools.agent` / `tools.agent_model` of `aidev.yaml` apply (or the per-agent `tools.agents.<name>` if present). `tool` must be one of `tools.default`.
 
 |`steps`
-|Run in order. Each step is exactly one of three kinds.
-`agent` (`prompt` required; with `until`, the agent is repeated up to `max_retries` times until it exits 0; `timeout_ms` optional),
-`command` (`command` is split on whitespace and run without a shell; any exit other than 0 fails the workflow),
-`kind: pull-request` (commit and push the changes in `scope.writable` and open a PR; `title` optional; at most one).
+|Run from top to bottom. Each step is exactly one of three kinds. Every kind may have a `description` (optional) for the reviewer.
+
+|agent step
+|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until it exits 0. `timeout_ms` is optional.
+
+|`writable`
+|Paths (globs) the agent of that step may write. **The only place the AI can write PKG source is this range of the step now running in an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only step).
+
+|command step
+|`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. To include files the command makes in the PR, list where they are in `writable` (the kit runs the command itself, so the write guard does not apply).
+
+|`kind: pull-request`
+|Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` optional. At most one.
 
 |`limits.max_minutes`
 |Time limit for the whole workflow. Cannot exceed 60.
@@ -142,7 +160,11 @@ cost:
 |Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
 |===
 
+Any key not in the table above is refused by validation.
+
 `until` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written.
+
+Each agent step starts as a new process. The conversation of an earlier step is gone. Instead, **the kit puts the final report of each earlier agent step into the instructions of the later agent steps**. In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
 
 The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the output of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
 
@@ -168,7 +190,7 @@ aidev submit workflow write-tests
 ----
 
 * It validates the definition, commits `workflow.yaml` and the agents and skills in the PKG it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes and opens a PR (Azure DevOps). With `generic` hosting it pushes, and you open the PR by hand. With `--no-push` it does not push either.
-* The PR body gives the objective, the writable range, the agents and skills, the steps and the limits, and says that merging approves this workflow.
+* The PR body gives the objective, what each step does (order, agent, where it may write, that agent's skills, tools and MCP servers), the files involved and the limits, and says that merging approves this workflow.
 * If it already matches `main`, it prints `already matches origin/main; nothing to submit.` and stops.
 
 Add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**` and `.aidev/skills/**` in the branch policy. Who approved is recorded by the PR's reviewers and git's author.
@@ -222,9 +244,9 @@ aidev run workflow write-tests --dry-run --task "src/services/order.ts"
 aidev run workflow write-tests --task "src/services/order.ts"
 ----
 
-`--dry-run` shows the approval state, the writable range, the agents and tools used, the steps and the limits, and starts nothing. Check with this first.
+`--dry-run` shows the approval state, the agents and AI tools used, the limits and what each step does (where it may write; skills, tools and MCP servers), and starts nothing. Check with this first.
 
-`--task` is the instruction for this run (a Work Item number, a target path, and so on). It is handed to every agent step as data and cannot change the `objective` or the `scope`. Pass a long instruction with `--task-file <path>`.
+`--task` is the instruction for this run (a Work Item number, a target path, and so on). It is handed to every agent step as data and cannot change the `objective` or any step's `writable`. Pass a long instruction with `--task-file <path>`.
 
 [source,text]
 ----
@@ -250,9 +272,11 @@ aidev run workflow write-tests
 This is what happens during a run.
 
 * A workflow with a `pull-request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
-* The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside `scope.writable`; the hook refuses writes anywhere else. The agents themselves never commit or push.
+* The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
+* Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
+* The final report of each earlier agent step goes into the instructions of the later agent steps.
 * If `until` exits with anything other than 0, the same agent is started again with that output attached. If the same output appears twice in a row, the run stops.
-* The `pull-request` step commits and pushes only the changes in `scope.writable` and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts and the cost. If there are no changes in the range, neither a commit nor a PR is created.
+* The `pull-request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts and the cost. If there are no changes in the range, neither a commit nor a PR is created.
 * The record is kept in `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). It is gitignored and never committed.
 
 Messages when it stops, and what to do. The exit code is 1. There is no resume; fix the cause and run again.
@@ -281,6 +305,12 @@ Messages when it stops, and what to do. The exit code is 1. There is no resume; 
 |`workflow stopped — step <id>: <command> exited N`
 |A `command` step failed. Read the output and fix the cause.
 
+|`agent <name> uses the MCP server <server>, which .mcp.json does not register`
+|A server in the agent's `mcp` is not in the PKG's `.mcp.json`. Register the server in `.mcp.json` (a person does this). Nothing has started.
+
+|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|An agent with `tools` or `mcp` does not start on an AI tool that cannot be limited (Copilot CLI and so on). Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
+
 |`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
 |Normal. Open the PR by hand from the pushed branch.
 |===
@@ -288,7 +318,7 @@ Messages when it stops, and what to do. The exit code is 1. There is no resume; 
 [[workflows-agents-skills]]
 === Agents and skills
 
-An agent is a role definition handed to the AI tool (Markdown); a skill is a set of instructions. A workflow references them by name.
+An agent is a role definition handed to the AI tool (Markdown); a skill is a set of instructions. A workflow's steps reference agents by name, and an agent references the skills it uses by name.
 
 The kit ships **machinery** only: the workflow runner and its validation, the approval check, the write limits, and four agents — workflow-creator (writes workflows), agents-creator (writes agents), knowledge-builder (writes the Wiki) and permission-setting (drafts the policy candidate).
 
@@ -300,11 +330,43 @@ PKG-specific agents and skills go in `.aidev/agents/<name>.md` and `.aidev/skill
 * `aidev create workflow --describe`, where workflow-creator has agents-creator write the agents and skills the workflow needs
 * Have the AI write them in an interactive session (`.aidev/agents/**` and `.aidev/skills/**` are writable under the default policy)
 
+An agent's frontmatter says what that agent can use (its capabilities).
+
+[source,markdown]
+----
+---
+name: test-writer
+description: Writes tests in the existing style. Started by the write-tests workflow
+skills: [test-and-verify]            # skills whose text goes into its instructions; [] when none
+tools: Read, Grep, Glob, Edit, Write # the built-in tools it can use; omitted = the tool's default (all)
+mcp: []                              # MCP servers it can use (keys of the PKG's .mcp.json); omitted = none
+model: inherit
+---
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|Key |Meaning
+
+|`skills`
+|Skills whose text goes into that agent's instructions. The PKG's `.aidev/skills/<name>/SKILL.md` is looked up first; if absent, the kit's bundled one is used.
+
+|`tools`
+|The built-in tools it can use in Claude Code (`Read`, `Edit`, `Bash` and so on). Tools not listed are not given. If omitted, it gets all of the tool's defaults.
+
+|`mcp`
+|The MCP servers it can use. Write names registered in the PKG's `.mcp.json`. Servers not listed are not given. A name not in `.mcp.json` stops the workflow before it starts.
+|===
+
+* An agent with `tools` or `mcp` runs only on Claude Code, because Copilot CLI and the others cannot limit the tools they are given.
+* Do not give `Bash` to an agent that touches an external system. With `Bash` it can reach outside without going through MCP, and limiting `mcp` means nothing. Tests are run by the kit through `until`, not by the agent.
+* Give work with different permissions to different agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance).
+
 List them with `aidev list agents` / `aidev list skills`, and remove them with `aidev remove agent|skill <name>` (one referenced by a workflow is refused). All of them go into the PR together with the workflow through `aidev submit workflow`, are reviewed there, and only what is on `main` is used by a workflow.
 
 === Related information
 
 * xref:review-workflow-def[Workflow definition pull requests], xref:review-workflow-result[Workflow result pull requests]
 * xref:cli-run[aidev run workflow] — options, exit codes
-* xref:permissions[Permissions and safety] — how `scope.writable` relates to the policy
+* xref:permissions[Permissions and safety] — how a step's `writable` relates to the policy
 * xref:configuration[aidev.yaml reference] — `tools.agent`, `tools.agents`, `references`

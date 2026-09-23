@@ -61,6 +61,8 @@ PKG のルートで AI ツールを起動します。
 claude
 ----
 
+使うモデルはチームの `.claude/settings.json` で決まっています。自分だけ変えるときは `.claude/settings.local.json` かセッション中の `/model` を使います（xref:maintain-model[モデルの変更]）。
+
 AI は最初に LLM Wiki（`.aidev/knowledge/index.md`）を読み、そこからソースを調べます。Wiki の各記述は根拠ファイルへのリンクを持つので、AI はリンク先で裏を取ります。
 
 Wiki を手で直す必要はありません。間違いを見つけたら、ソース側（コメントや構造）を直して次の更新で反映させます。手編集は検出され、次の生成で上書きを求められます（xref:knowledge-handedit[手編集を避ける理由]）。

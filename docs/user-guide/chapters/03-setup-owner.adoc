@@ -59,7 +59,7 @@ cat .aidev/policy.candidate.yaml
 aidev create policy --approve
 ----
 +
-policy の中身は xref:permissions[権限と安全性] を見てください。ソースを AI に書かせる範囲は policy ではなく、あとで作る workflow の `scope.writable` に書きます。
+policy の中身は xref:permissions[権限と安全性] を見てください。ソースを AI に書かせる範囲は policy ではなく、あとで作る workflow の各ステップの `writable` に書きます。
 
 . Wiki を生成します。`--no-commit` で結果を作業ツリーに残し、次の手順で設定と一緒にコミットします。時間がかかります。途中で止まっても、同じコマンドをもう一度実行すると続きから再開します。
 +
@@ -150,7 +150,7 @@ Developer がコミットのたびに Wiki を追従させていれば、夜間�
 |→ xref:setup-member[利用の開始]
 
 |AI に任せる仕事を定義する
-|やりたいことを伝えて処理ワークフローを作り、書いてよい範囲を確認して提出します。マージされると Developer が実行できます。→ xref:workflows[AI への作業委譲]
+|やりたいことを伝えて処理ワークフローを作り、ステップごとに書ける場所と agent が使えるツールを確認して提出します。マージされると Developer が実行できます。→ xref:workflows[AI への作業委譲]
 
 |この PKG の開発規約を書き出す
 |「Wiki と根拠ソースからこの PKG の開発規約を根拠付きで書く」処理ワークフローを作って提出し、マージ後に実行します。→ xref:workflows-define[workflow の定義]

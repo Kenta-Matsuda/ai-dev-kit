@@ -195,10 +195,14 @@
 |症状 |対処
 
 |Claude が `… is read-only (**). this session was not started by "aidev run workflow"` と報告
-|正常です。対話中の AI は PKG のソースを書けません。AI にソースを書かせる仕事は workflow として定義し、`scope.writable` に範囲を書いて PR にします（xref:permissions-source[ソースを AI に書かせるには]）。
+|正常です。対話中の AI は PKG のソースを書けません。AI にソースを書かせる仕事は workflow として定義し、ステップの `writable` に範囲を書いて PR にします（xref:permissions-source[ソースを AI に書かせるには]）。
 
-|`aidev run workflow` 中に `… workflow <name> is approved but its scope.writable (…) does not cover this path`
-|そのパスは workflow の範囲外です。必要なら Engineering Manager が `scope.writable` を広げて提出し直します。
+|`aidev run workflow` 中に `… workflow <name> is approved but the writable of step <id> (…) does not cover this path`
+|そのパスは、いま動いているステップの範囲外です。必要なら Engineering Manager がそのステップの `writable` を広げて提出し直します。
+
+|`aidev run workflow` 中に `… is not among the tools of agent <name> (…)` +
+`… is not among the MCP servers of agent <name> (…)`
+|agent の frontmatter の `tools`・`mcp` に無いツールを使おうとしました。必要なら Engineering Manager が agent の定義を直して提出し直します。権限の違う仕事なら、別の agent にします。
 
 |`aidev run workflow` 中に `… workflow <name> is not approved: …`
 |実行中に定義が変わったか、`origin/main` が動きました。実行を止め、`git fetch origin` と `aidev list workflows` で状態を確かめます。
@@ -217,7 +221,7 @@
 |`git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml` で差分を確認し、意図どおりなら `--force` を付けます。
 
 |`.aidev/policy.yaml: agents.<name> grants no longer exist`
-|古い policy に `agents` 節が残っています。削除してコミットします。ソースを書く範囲は workflow の `scope.writable` に書きます。
+|古い policy に `agents` 節が残っています。削除してコミットします。ソースを書く範囲は workflow の各ステップの `writable` に書きます。
 |===
 
 [[troubleshooting-workflow]]
@@ -237,10 +241,17 @@
 |`git fetch origin` を実行します。
 
 |`aidev list workflows` が `invalid: …`
-|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、`scope.writable` が無い、`cost.max_usd` が無い、上限超過、`until` に引用符やパイプ、`protected` のパスなど）を直します。
+|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`cost.max_usd` が無い、知らない項目がある、上限超過、`until` に引用符やパイプ、`protected` のパスなど）を直します。
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
 |agent 名の誤りか、PKG 固有の agent が未コミットです。名前を直すか、`.aidev/agents/<name>.md` を同じ PR に入れます。
+
+|`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
+`agent <name> uses MCP (…) but .mcp.json does not exist in this PKG`
+|agent の `mcp` にある server が、PKG の `.mcp.json` にありません（または `.mcp.json` がありません）。`.mcp.json` に server を登録するか、agent の `mcp` を直します。
+
+|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|`tools` や `mcp` を書いた agent は Claude Code でしか起動しません。`aidev.yaml` の `tools.agent`（または workflow の `tool`）を `claude` にします。
 
 |`the working tree has uncommitted changes; commit or stash them first`
 |`pull-request` step のある workflow は、きれいな作業ツリーで実行します。

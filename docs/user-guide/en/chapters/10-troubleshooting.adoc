@@ -195,10 +195,14 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Symptom |What to do
 
 |Claude reports `… is read-only (**). this session was not started by "aidev run workflow"`
-|Normal. The interactive AI cannot write PKG source. Define the job that should write source as a workflow, put the paths in its `scope.writable` and open a PR (xref:permissions-source[Letting the AI write source]).
+|Normal. The interactive AI cannot write PKG source. Define the job that should write source as a workflow, put the paths in a step's `writable` and open a PR (xref:permissions-source[Letting the AI write source]).
 
-|During `aidev run workflow`: `… workflow <name> is approved but its scope.writable (…) does not cover this path`
-|That path is outside the workflow's scope. If it is needed, the Engineering Manager widens `scope.writable` and submits the workflow again.
+|During `aidev run workflow`: `… workflow <name> is approved but the writable of step <id> (…) does not cover this path`
+|That path is outside the range of the step now running. If it is needed, the Engineering Manager widens that step's `writable` and submits the workflow again.
+
+|During `aidev run workflow`: `… is not among the tools of agent <name> (…)` +
+`… is not among the MCP servers of agent <name> (…)`
+|The agent tried to use a tool not in the `tools` or `mcp` of its frontmatter. If it is needed, the Engineering Manager fixes the agent definition and submits again. If the work needs different permissions, use a different agent.
 
 |During `aidev run workflow`: `… workflow <name> is not approved: …`
 |The definition changed during the run, or `origin/main` moved. Stop the run and check the state with `git fetch origin` and `aidev list workflows`.
@@ -217,7 +221,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Compare with `git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml`. If the change is intended, add `--force`.
 
 |`.aidev/policy.yaml: agents.<name> grants no longer exist`
-|An old policy still has an `agents` section. Delete it and commit. The paths the AI may write go into the `scope.writable` of a workflow.
+|An old policy still has an `agents` section. Delete it and commit. The paths the AI may write go into the `writable` of each workflow step.
 |===
 
 [[troubleshooting-workflow]]
@@ -237,10 +241,17 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Run `git fetch origin`.
 
 |`aidev list workflows` shows `invalid: …`
-|`workflow.yaml` does not validate. Fix the items shown (no `objective`, no `scope.writable`, no `cost.max_usd`, a limit exceeded, quotes or pipes in `until`, a `protected` path, and so on).
+|`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `cost.max_usd`, an unknown key, a limit exceeded, quotes or pipes in `until`, a `protected` path, and so on).
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
 |The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.
+
+|`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
+`agent <name> uses MCP (…) but .mcp.json does not exist in this PKG`
+|A server in the agent's `mcp` is not in the PKG's `.mcp.json` (or there is no `.mcp.json`). Register the server in `.mcp.json`, or fix the agent's `mcp`.
+
+|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|An agent with `tools` or `mcp` starts only on Claude Code. Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
 
 |`the working tree has uncommitted changes; commit or stash them first`
 |A workflow with a `pull-request` step runs on a clean working tree.

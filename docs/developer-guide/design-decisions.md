@@ -58,15 +58,15 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: 「WikiがHEADより遅れている」をWARNのままにするか、`--strict`でexit 2にするか（現状は後者）。
 
-### D6: PKG fileは既定でread-onlyとし、書けるのは承認済みworkflowの`scope.writable`とpolicyの`writable`だけ
+### D6: PKG fileは既定でread-onlyとし、書けるのは承認済みworkflowの実行中stepの`writable`とpolicyの`writable`だけ
 
-**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・agents・skills・conventions・`aidev.yaml`のみ。PKG source（`src/**`など）への書込は、`aidev run workflow`が起動したsessionで、そのworkflowが`origin/<tracking_branch>`と同一（承認済み）のとき、`scope.writable`の範囲でだけ許します（`policy.decide`の第6段）。全員・全sessionに開くなら`.aidev/policy.yaml`の`writable`です。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
+**判断**: 既定policyは`read_only: ["**"]`、`writable`はWiki・workflows・agents・skills・conventions・`aidev.yaml`のみ。PKG source（`src/**`など）への書込は、`aidev run workflow`が起動したsessionで、そのworkflowが`origin/<tracking_branch>`と同一（承認済み）のとき、実行中のstep（`AIDEV_WORKFLOW_STEP`）の`writable`の範囲でだけ許します（`policy.decide`の第6段）。全員・全sessionに開くなら`.aidev/policy.yaml`の`writable`です。policy fileは`ALWAYS_PROTECTED`で、agentは書き換えられません。
 
-**理由**: 「何を書いてよいか」を「何をさせるか」（workflow）と同じfileに置き、同じPR reviewで決めるためです。scopeはsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。判定は書込のたびに行うので、agentが実行中にYAMLを書き換えても、originと食い違った瞬間にscopeを失います。
+**理由**: 「何を書いてよいか」を「何をさせるか」（workflow）と同じfileに置き、同じPR reviewで決めるためです。scopeはsecrets / protectedより下に評価されるので、広げても制御面へは到達できません。判定は書込のたびに行うので、agentが実行中にYAMLを書き換えても、originと食い違った瞬間に書込の許可を失います。範囲をworkflow全体でなくstepごとに持つのは、調査だけのstepを`[]`にし、書くstepだけに最小の範囲を与えるためです（D18）。
 
-**却下した代替案**: policyのagent単位の許可（`agents.<name>.writable` + `branch`、`AIDEV_AGENT`。0.6.0〜0.7.0）。許可の置き場がworkflowと別で、teamがpolicyを手で編集する必要があり、対話sessionのsub-agentには効かず、workflowごとに範囲を変えられませんでした。承認済みworkflowのscopeに一本化し、撤去しました。
+**却下した代替案**: policyのagent単位の許可（`agents.<name>.writable` + `branch`、`AIDEV_AGENT`。0.6.0〜0.7.0）。許可の置き場がworkflowと別で、teamがpolicyを手で編集する必要があり、対話sessionのsub-agentには効かず、workflowごとに範囲を変えられませんでした。承認済みworkflowの範囲に一本化し、撤去しました。workflow全体で1つの`scope.writable`（2026-09-23）。全stepが同じ範囲を持ち、調査stepも書けました。stepごとの`writable`に置き換えました（D18）。
 
-**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可を足し、workflow-first化（D9）でworkflowのscopeに置き換えました。
+**経緯**: 0.4.0までは「issue-to-prがCLI発行のwork lease（branch・path・TTL）の範囲でだけ書ける」設計でしたが、leaseを発行する経路も、それを前提にしたtask状態機械もwrapper repository時代のもので完結しておらず、0.5.0で撤去しました。0.6.0でagent単位の許可を足し、workflow-first化（D9）でworkflowの`scope.writable`に、さらにstepごとの`writable`に置き換えました。
 
 ### D7: AI toolはadapter registryで扱い、実機検証済みはClaude Codeだけとする
 
@@ -86,7 +86,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D9: 開発はworkflowだけから行い、workflowはYAMLのみ、承認は`origin/<tracking_branch>`との一致で判定する
 
-**判断**: 利用者が開発に使うcommandは`aidev create workflow|submit|run|list`だけです（`aidev agent`は撤去）。workflowは`.aidev/workflows/<name>/workflow.yaml`の1 fileで、`objective`・`scope.writable`・`agents` / `skills`・`steps`（`agent` / `command` / `pull-request`）・`limits`・`cost`を書きます。実行logic（`until`の再試行loop、command実行、commit、push、PR）はkitのrunnerが持ちます。agentとskillは`.aidev/agents/`・`.aidev/skills/`（PKG）かkit同梱を名前で参照し、複数のworkflowで再利用します。`approve` commandと`approval.json`は無く、「承認済み」= `workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`にあるものとbyte一致、です。
+**判断**: 利用者が開発に使うcommandは`aidev create workflow|submit|run|list`だけです（`aidev agent`は撤去）。workflowは`.aidev/workflows/<name>/workflow.yaml`の1 fileで、`objective`・`steps`（`agent` / `command` / `pull-request`。agent stepはstepごとの`writable`を持つ）・`limits`・`cost`を書きます（agentの能力はagentのfrontmatter。D18）。実行logic（`until`の再試行loop、command実行、commit、push、PR）はkitのrunnerが持ちます。agentはstepから、skillはagentのfrontmatterから、`.aidev/agents/`・`.aidev/skills/`（PKG）かkit同梱を名前で参照し、複数のworkflowで再利用します。`approve` commandと`approval.json`は無く、「承認済み」= `workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`にあるものとbyte一致、です。
 
 **理由**: 3つの役割を分けるためです。kit開発者は実行するもの（runner、step種別、同梱workflow / agent / skill）の品質を持ち、PKGの責任者は「AIに何をさせるか」をYAMLに書いてPRでreviewし、実作業者は`aidev run workflow`を実行して生成されたPRをreviewerに渡すだけで、成果物に責任を持ちません。YAMLで書けないことはkitへの変更（新しいstep種別）であり、実行codeの品質責務がkit開発者に閉じます。承認をhostingに任せるのは、誰が承認したかをPR reviewerとbranch policyが記録し、CLIの記録（環境変数由来）を認証に使わないためです。
 
@@ -158,10 +158,20 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **判断**: kitが同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装、テスト、規約）、workflow、MCP serverはPKGのもので、`aidev create workflow --describe`の中でworkflow-creatorが必要な要素をagents-creatorのsubagentに書かせ、MCPは提案としてfinal messageに出して人が`.mcp.json`（PKG所有。kit管理外）に足します。`aidev mcp`、`templates/claude/.mcp.json`、issue-to-pr / test-writer / convention-builder、同梱workflowは撤去しました。`aidev hook`はAI toolのhooksが呼ぶ内部入口として残し（権限強制の実体）、helpには出しません。self-evolutionは`scripts/evolve.js`（`npm run evolve`）に移し、CLI commandではなくなりました。`eject`は`uninstall <package>`に、`apply`は`sync tools`に畳みました。
 
-**理由**: kitの責務を「workflowを作る・提出する・承認する・実行する仕組み」と「initなどPKGに依らず有益な処理」に限るためです。PKGごとに違う開発作業の中身をkitが配ると、kit開発者がその品質責務を負い、PKGは自分の agent を書きにくくなります。MCPは接続先も認証もPKG固有で、kitが起動役を持つ理由がありません。hookは削除できません: guard-writeがscope.writableを強制する実体で、対話sessionでも動きます。
+**理由**: kitの責務を「workflowを作る・提出する・承認する・実行する仕組み」と「initなどPKGに依らず有益な処理」に限るためです。PKGごとに違う開発作業の中身をkitが配ると、kit開発者がその品質責務を負い、PKGは自分の agent を書きにくくなります。MCPは接続先も認証もPKG固有で、kitが起動役を持つ理由がありません。hookは削除できません: guard-writeがstepの`writable`とagentの能力を強制する実体で、対話sessionでも動きます。
 
 **却下した代替案**: `aidev create mcp` / `create hook`（hookはkit管理の権限強制で、PKGが作るものではない。MCPは設定形式がtoolごとに違い、追加は人が行うほうが安全）。同梱workflowを「例」として残す（kitが開発作業の中身に責務を持つことになる）。
 
+
+### D18: 能力はagentのfrontmatter、制約はworkflowのstepに置き、Claude Codeでは起動flagとhookの2段で強制する
+
+**判断**: agentが使えるもの（`skills`・`tools`・`mcp`）は`.aidev/agents/<name>.md`のfrontmatterに書き、workflowにはstepごとの制約（`agent`・`writable`・`until`など）だけを書きます。workflowのtop-levelの`scope` / `agents` / `skills`は削除し、表にないkeyはerrorにしました。workflowがagentの能力を上書き・拡張するkeyはありません。権限が違う仕事は別のagentにします（読むだけの`ticket-reader`と更新する`ticket-updater`など）。強制はClaude Codeで2段です: runnerがagent stepごとに`--mcp-config <agentのserverだけの一時file（repo外、step後に削除）> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--tools <list>`で起動し（`mcp`の無いagentにはserverを渡さない）、guard-write（matcherに`mcp__.*`を追加）がworkflow step内で許されていないtool / MCP toolをdenyします。能力を絞れないtool（Copilot CLI、Codex、Kiro。adapterに`capabilities`が無い）では、`tools`か`mcp`を持つagentを起動前に拒否します。stepは毎回新しいprocessなので、先に完了したagent stepの最終報告を後のstepのpromptに入れます。
+
+**理由**: 能力はagentの性質で、同じagentをどのworkflowで使っても同じ権限であるべきだからです。workflowで上書きできると、reviewerはagentのfileを読んでも実際の権限が分からず、workflowごとに組み合わせを確かめる必要が出ます。制約（どこに書くか、いつ終わるか）は仕事ごとに違うのでstepに置きます。起動flagだけではtool側の挙動変更に弱く、hookだけでは存在するtoolをAIが試す余地が残るので、2段にします（flagは`claude` 2.1.280で確認）。hookはworkflow外のMCP呼び出しには答えず、利用者に代わって承認しません。強制できないtoolで黙って起動すると、frontmatterに書いた制限が守られていると誤解させるので拒否します。
+
+**却下した代替案**: workflowのtop-levelに`agents` / `skills`を並べ、skillを全stepに差し込む形（2026-09-23まで。stepごとに必要なskillが違っても全agentが同じものを受け取り、権限をworkflowとagentのどちらで読むべきかが曖昧）。workflow側でagentごとに`tools` / `mcp`を上書きする形（上記の理由）。制限できないtoolではfrontmatterの`tools` / `mcp`を無視して起動する形（見かけの制限になる）。
+
+**論点**: `Bash`を持つagentはMCPを通さず外部へ出られるので、外部systemに触るagentに`Bash`を渡さないことはreview（templateのagents-creator / workflow-creatorの指示とuser guide）に頼っています。
 
 ## 未決の論点
 

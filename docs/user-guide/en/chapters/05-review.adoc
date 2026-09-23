@@ -54,11 +54,14 @@ The most common PR, from day-to-day development. The source changes and the LLM 
 
 It arrives as a commit named `aidev: workflow <name>`. **Merging is the approval.** Once you take it in, any Developer can run this workflow. Review it with the same weight as a result.
 
+The "Steps" section of the PR body lists, for each step, the agent, where it may write, and that agent's skills, tools and MCP servers. Read that first, then check in this order.
+
 * Is the `objective` a job the team may let that AI do?
-* Is `scope.writable` the minimum needed? Does it include the whole source (`**`) or configuration and CI paths?
+* Is each step's `writable` the minimum needed? Is a survey-only step `[]`? Does any include the whole source (`**`) or configuration and CI paths?
+* Are each agent's `tools` and `mcp` only what its job needs? Does an agent that touches an external system have `Bash`? (With `Bash` it can reach outside without going through MCP.) An agent without `tools` can use every built-in tool.
 * Are `until` and `command` safe to run in this PKG? (They do not go through a shell, but the command itself does run.)
 * Are `cost.max_usd` and `limits.max_minutes` reasonable?
-* Are the referenced `.aidev/agents/` and `.aidev/skills/` files in the same PR? Do their instructions describe work outside the range, or handling of secrets?
+* Are the referenced `.aidev/agents/` and `.aidev/skills/` files in the same PR? **Do not stop at the YAML; read the agent and skill text too.** Most of the actual instructions to the AI are there. Do they describe work outside the range, or handling of secrets?
 
 See xref:workflows-define[Defining a workflow] for details.
 
@@ -67,12 +70,12 @@ See xref:workflows-define[Defining a workflow] for details.
 
 It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the workflow name, the run id, the starting commit and the cost.
 
-* Does the diff stay inside `scope.writable`? (Writes are limited automatically, but check.)
+* Does the diff stay inside the steps' `writable`? (Writes are limited automatically, but check.)
 * Do the tests pass? Does `aidev check` in CI pass?
 * Does it match the `objective` and the `--task`? Are there no unrelated changes?
 
 === Related information
 
 * xref:workflows[Delegating work to the AI] — defining, approving and running
-* xref:permissions[Permissions and safety] — how the policy relates to `scope.writable`
+* xref:permissions[Permissions and safety] — how the policy relates to a step's `writable`
 * xref:maintain-branch-policy[Branch policy configuration] — required reviewers and required checks

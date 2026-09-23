@@ -5,7 +5,9 @@
 {project-name} decides **where the AI may write** inside the PKG in two layers.
 
 * **The policy** (`.aidev/policy.yaml`) — the places every agent and every interactive session can always write, and the places nobody can ever write. Humans place it with the CLI and review it in a PR.
-* **A workflow's `scope.writable`** — the extra places one agent may write, only while `aidev run workflow` runs an approved workflow. This is the only way the AI writes PKG source.
+* **The `writable` of a workflow step** — the extra places the agent of the step now running may write, only while `aidev run workflow` runs an approved workflow. This is the only way the AI writes PKG source.
+
+Besides where it may write, the agent of a workflow step is also limited in **the tools and MCP servers it can use** (xref:permissions-agent-tools[Tools a workflow step can use]).
 
 A hook of the AI tool checks every write. Tokens are never written to files; they are passed only through environment variables.
 
@@ -18,11 +20,11 @@ A hook of the AI tool checks every write. Tokens are never written to files; the
 
 |`protected`
 |Kit files such as `.claude/**`, `CLAUDE.md`, `.aidev/policy.yaml`, `.aidev/materialized.json`, plus `secrets_paths`
-|Never writable. If removed from the policy, the CLI adds them back. A workflow's `scope.writable` cannot open them either.
+|Never writable. If removed from the policy, the CLI adds them back. The `writable` of a workflow step cannot open them either.
 
 |`read_only`
 |`**` (the whole PKG)
-|Neither agents nor interactive sessions can write here. The only exception is the `scope.writable` of an approved workflow (xref:permissions-source[Letting the AI write source]).
+|Neither agents nor interactive sessions can write here. The only exception is the `writable` of the step now running in an approved workflow (xref:permissions-source[Letting the AI write source]).
 
 |`writable_during_sync`
 |`.aidev/knowledge/**`
@@ -38,7 +40,7 @@ Rules are checked top to bottom.
 . Paths outside the repository, `secrets_paths` and `protected` are always denied.
 . While the Wiki is missing or unreadable, everything is denied, except `.aidev/knowledge/**` written by `aidev sync wiki`.
 . A path that matches `writable` is allowed.
-. In a session started by `aidev run workflow`, a path is allowed when that workflow is approved (identical to `origin/main`) and the path matches its `scope.writable`. This is checked on every write, so changing the definition during a run turns the answer into a denial.
+. In a session started by `aidev run workflow`, a path is allowed when that workflow is approved (identical to `origin/main`) and the path matches the `writable` of the step now running. This is checked on every write, so changing the definition during a run turns the answer into a denial.
 . A path that matches `read_only` is denied.
 . Anything else is allowed.
 
@@ -52,7 +54,7 @@ flowchart TD
   q2 -- "yes (except .aidev/knowledge/**)" --> deny2["deny"]
   q2 -- "no" --> q3{"matches writable?"}
   q3 -- "yes" --> allow1["allow"]
-  q3 -- "no" --> q4{"session started by aidev run workflow and<br/>path in the approved workflow's scope.writable?"}
+  q3 -- "no" --> q4{"session started by aidev run workflow and<br/>path in the writable of the step now<br/>running in the approved workflow?"}
   q4 -- "yes" --> allow2["allow"]
   q4 -- "no" --> q5{"matches read_only?"}
   q5 -- "yes" --> deny3["deny"]
@@ -74,7 +76,7 @@ The distributed hook configuration (`.claude/settings.json` for Claude Code, `.g
 
 |PreToolUse (Write / Edit / Bash, …)
 |`aidev hook guard-write`
-|Checks the target path against the policy and the workflow scope, and returns the reason when it denies. Also denies when the policy cannot be read.
+|Checks the target path against the policy and the `writable` of the workflow step now running, and returns the reason when it denies. Also denies when the policy cannot be read. Inside a workflow step it also denies calls to tools that agent was not given. In Claude Code, MCP tool calls go through it too.
 
 |PostToolUse (Write / Edit)
 |`aidev hook quality-gate`
@@ -93,8 +95,9 @@ When a write is denied, the AI receives a reason like these.
 
 [source,text]
 ----
-ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the scope.writable of an approved workflow. …
-ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but its scope.writable (tests/**) does not cover this path. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the writable of an approved workflow step. …
+ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but the writable of step write (tests/**) does not cover this path. …
+ai-dev-kit: mcp__ado__update_work_item is not among the MCP servers of agent ticket-reader (none); the agent's frontmatter grants them
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync wiki" …
 ----
@@ -104,17 +107,38 @@ An edit that removes a hook is caught by `aidev check` with exit code 2, and CI 
 [[permissions-source]]
 === Allowing the AI to write source
 
-By default the PKG source is `read_only`. Neither the interactive Claude nor the subagents it calls can write it. To let the AI write source, **define that job as a workflow, put the allowed paths in its `scope.writable`, review it in a PR and merge it into `main`** (xref:workflows[Delegating work to the AI]).
+By default the PKG source is `read_only`. Neither the interactive Claude nor the subagents it calls can write it. To let the AI write source, **define that job as a workflow, put the paths each step may write in that step's `writable`, review it in a PR and merge it into `main`** (xref:workflows[Delegating work to the AI]).
 
 [source,yaml]
 ----
-scope:
-  writable: [src/**, tests/**]
+steps:
+  - id: survey
+    agent: test-investigator
+    writable: []                   # only looks; writes nothing
+    prompt: …
+  - id: write
+    agent: test-writer
+    writable: [src/**, tests/**]   # only this step may write
+    prompt: …
 ----
 
-This scope applies only to the agent started by `aidev run workflow <name>`. At start, `aidev` puts the workflow name into the environment variable `AIDEV_WORKFLOW` of the child process. The hook reads it and checks that the workflow is still identical to `origin/main` and that the path is inside the scope. When a human calls the same agent from an interactive `claude` session, the scope does not apply.
+This range applies only to the agent started by `aidev run workflow <name>`. At start, `aidev` puts the workflow name and the step's `id` into the environment variables `AIDEV_WORKFLOW` and `AIDEV_WORKFLOW_STEP` of the child process. The hook reads them and checks that the workflow is still identical to `origin/main` and that the path is inside that step's range. When a human calls the same agent from an interactive `claude` session, the range does not apply.
 
 Add paths to the policy's `writable` only when every agent and every interactive session should be able to write them at any time. `protected` paths and `secrets_paths` cannot be opened either way. Review policy changes in a PR and widen them only for as long as needed.
+
+[[permissions-agent-tools]]
+=== Tools a workflow step can use
+
+The tools the agent of a workflow step can use are set by `tools` (built-in tools) and `mcp` (MCP servers) in that agent's frontmatter (xref:workflows-agents-skills[Agents and skills]). A workflow cannot widen them. Give work with different permissions to a different agent.
+
+In Claude Code this is enforced in two layers.
+
+. `aidev run workflow` starts Claude Code with only the tools in the agent's `tools` and the servers in its `mcp`. An agent without `mcp` gets no MCP server at all. Other servers in the PKG's `.mcp.json` or in personal settings are not loaded.
+. The `guard-write` hook denies, inside a workflow step, calls to tools and MCP tools that agent was not given. It gives no answer for MCP calls outside a workflow, and leaves the decision to Claude Code's own settings.
+
+An agent with `tools` or `mcp` starts only on Claude Code. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI cannot limit the tools they are given, so the workflow stops without starting anything.
+
+An agent given `Bash` can reach external systems without going through MCP. Do not give `Bash` to an agent that touches an external system. Tests are run by the kit through `until`.
 
 [[permissions-commands]]
 === Placing and changing the policy
@@ -147,13 +171,14 @@ The AI cannot create the policy. The Engineering Manager places it with the CLI.
 
 * Do not silently rewrite the kit-derived parts of `.claude/**`, `CLAUDE.md` or `.mcp.json` (review team changes in a PR; send improvements for the whole kit as a PR to the kit).
 * Only humans edit `.aidev/policy.yaml`, and every change is reviewed in a PR (never let the AI edit it).
-* Do not put `**`, or the paths of settings and CI, in a workflow's `scope.writable`. Keep it to what the job needs.
+* Do not put `**`, or the paths of settings and CI, in the `writable` of a workflow step. Keep it to what that step's job needs.
+* Keep an agent's `tools` and `mcp` to what its job needs.
 * When the AI reports a denied write, read the reason instead of looking for a workaround.
 * Do not put tokens in commits, logs or PR descriptions.
 
 === Related information
 
-* xref:workflows[Delegating work to the AI] — `scope.writable` and approval
+* xref:workflows[Delegating work to the AI] — a step's `writable` and approval
 * xref:cli-create[aidev create policy]
 * xref:cli-hook[aidev hook]
 * xref:configuration[aidev.yaml reference] — `secrets_paths`, `hosting.auth_env`

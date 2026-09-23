@@ -112,7 +112,8 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
 | 層 | 実体 | 位置付け |
 | --- | --- | --- |
 | 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev create policy`・`aidev uninstall <package>`・`aidev uninstall`をask |
-| 実行時guard | `aidev hook guard-write` | path、policy、承認済みworkflowのscope（`AIDEV_WORKFLOW`）、整合性、leaseを評価して`permissionDecision`を返す |
+| 実行時guard | `aidev hook guard-write` | path、policy、承認済みworkflowの実行中stepの`writable`（`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`）、整合性、leaseを評価して`permissionDecision`を返す。workflow step内ではagentのfrontmatterが許していないtool / MCP toolの呼び出しもdeny（`policy.decideToolUse`） |
+| 起動時の能力制限 | `aidev run workflow`のclaude argv | agent step毎に`--mcp-config <一時file> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--tools <list>`でagentのfrontmatter（`tools` / `mcp`）にあるものだけを渡す（§9） |
 | 制御面の検査 | `aidev check`（exit 2）+ branch policy | hooksを消した編集と未解消のconflict markerをmerge前に止める（teamの他の編集は止めない） |
 | 行動指示 | `CLAUDE.md`、Agents / Skills | 補助。強制境界ではない |
 | 認証scope | tokenの権限 | server側で最も強い強制力 |
@@ -129,7 +130,7 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
    - あり、かつ`writable_during_sync`一致 → allow `sync-lease`
    - あり、かつ不一致 → deny `sync-lease-scope`
 5. `writable`一致 → allow `writable`（Wiki・workflows・agents・skills・conventions・`aidev.yaml`は`read_only: ["**"]`の内側にあるため、read_onlyより先に評価する）
-6. 承認済みworkflowのscope: `AIDEV_WORKFLOW`（`aidev run workflow`が子processの環境に入れる。hookはそれを継承する）が指すworkflowを`workflow.inspect`で読み、`workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`と同一（`approvalStatus`）で、pathが`scope.writable`に一致 → allow `workflow-writable`。未承認や範囲外は理由を持ち越して次へ。判定は書込のたびに行うので、agentが実行中に`workflow.yaml`を書き換えてscopeを広げても、その時点でoriginと食い違って拒否される
+6. 承認済みworkflowの実行中step: `AIDEV_WORKFLOW`と`AIDEV_WORKFLOW_STEP`（`aidev run workflow`がagent stepごとに子processの環境に入れる。hookはそれを継承する）が指すworkflowを`workflow.inspect`で読み、`workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`と同一（`approvalStatus`）で、pathがそのstepの`writable`（`workflow.stepAccess`）に一致 → allow `workflow-writable`。未承認、stepが無い、範囲外は理由を持ち越して次へ。判定は書込のたびに行うので、agentが実行中に`workflow.yaml`を書き換えて範囲を広げても、その時点でoriginと食い違って拒否される
 7. `read_only`一致 → deny `read-only`（理由にworkflowの承認状態と範囲を含める）
 8. どれにも当たらない → allow `default`（既定policyは`read_only: ["**"]`なので、通常この分岐に到達するpathはない）
 
@@ -160,7 +161,7 @@ writable:
   - "aidev.yaml"
 ```
 
-`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`が既定で`writable`なのは、workflow-creator / agents-creatorの出力先だからです。`.aidev/conventions/**`はPKGのworkflowが書く開発規約の置き場です。PKG source（`src/**`など）を書けるのは承認済みworkflowの`scope.writable`だけで、policyにagent単位の許可（旧`agents.<name>`）はありません。`validatePolicy`は`agents`キーをerrorにします。
+`.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**`が既定で`writable`なのは、workflow-creator / agents-creatorの出力先だからです。`.aidev/conventions/**`はPKGのworkflowが書く開発規約の置き場です。PKG source（`src/**`など）を書けるのは承認済みworkflowの実行中stepの`writable`だけで、policyにagent単位の許可（旧`agents.<name>`）はありません。`validatePolicy`は`agents`キーをerrorにします。
 
 候補は`permission.buildCandidate(config)`が`aidev.yaml`から機械生成します。agentは使いません。`--approve`は候補fileを読まず生成し直すので、teamの追加（`writable`）は`.aidev/policy.yaml`を直接編集してPRでreviewします。policy fileが無い場合、`loadPolicy`は上記と同じ内容の`_fallback: true`を返します（未初期化repoが無防備にならない）。
 
@@ -222,7 +223,7 @@ file名と`kind`は歴史的にsyncのままです。保持者は`aidev sync wik
 
 sync leaseがguardで効くのは、状態がERRORのときだけです（§3の第4段）。
 
-PKG sourceへのagentの書き込みは、承認済みworkflowの`scope.writable`（§9）か、teamが`.aidev/policy.yaml`の`writable`（全員）に書いたpathだけです。一時的な許可（TTL付きのwork lease）も、agent単位の許可（旧`agents.<name>`）もありません。
+PKG sourceへのagentの書き込みは、承認済みworkflowの実行中stepの`writable`（§9）か、teamが`.aidev/policy.yaml`の`writable`（全員）に書いたpathだけです。一時的な許可（TTL付きのwork lease）も、agent単位の許可（旧`agents.<name>`）もありません。
 
 ## 6. Wiki: manifest、inventory、evidence、agent
 
@@ -328,8 +329,8 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 - tool固有の事項は`cli/lib/tools.js`の`REGISTRY`（`claude` / `copilot` / `codex` / `kiro`）に集約する。各recordは`bin`、`envBin`、`minVersion`、`verified`、`prompt`（`stdin` | `file`）、`namedAgents`、`argv()`、`parse()`、`configGlobs`、`configDirs`を持つ。`agent.js`はtool idを見ずadapterに委譲する
 - `tools.resolveBinary(tool)`: `AIDEV_<TOOL>_BIN`（`.js`ならnodeで実行しversion検査を省く。testはこれでstubを差す）→ Windowsは`where.exe <bin>`で絶対pathへ解決（`.cmd`/`.bat`は`cmd.exe /d /s /c`経由）→ それ以外はPATHの`<bin>`
 - `tools.checkVersion`: `<bin> --version`。`minVersion`があるtool（claude: 2.1.259）はそれ未満で起動しない。無いtoolは起動できれば通す
-- claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
-- `runAgent`は`env`をそのまま子processに渡す。workflow runnerは`AIDEV_WORKFLOW=<name>`を足して起動し、toolが起動するhookがそれを継承してguard-writeが承認済みscopeを適用する
+- claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`。`runAgent({ capabilities: {tools, mcp, mcpConfigFile} })`のときは`--mcp-config <mcpConfigFile> --strict-mcp-config`、`mcp`があれば`--allowedTools mcp__<server>,…`、`tools`があれば最後に`--tools <list…>`を足す（Claude Code 2.1.280で確認: `--tools`は他の組み込みtoolを隠し、`--strict-mcp-config`は`--mcp-config`のserverだけを読む）。adapterの`capabilities: true`はclaudeだけで、それ以外のadapterに`capabilities`を渡すと`buildArgv`が例外を投げ、`runAgent`は`ok: false`を返す。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
+- `runAgent`は`env`をそのまま子processに渡す。workflow runnerは`AIDEV_WORKFLOW=<name>`と`AIDEV_WORKFLOW_STEP=<step id>`を足して起動し、toolが起動するhookがそれを継承してguard-writeがそのstepの`writable`とagentの能力を適用する
 - `prompt: 'file'`のtool（copilot / codex / kiro）はpromptを`.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md`へ書き、argvには`filePointerPrompt(rel)`の1文だけを載せる。`namedAgents: false`のtool（codex）はそのfileの先頭に同梱agent定義の本文を置く。argv: copilot `-p <pointer> --allow-all-tools [--agent <name>] [--model <m>]`、codex `exec --sandbox workspace-write [--model <m>] <pointer>`、kiro `chat --no-interactive --trust-all-tools [--agent <name>] [--model <m>] <pointer>`。claude以外は実機未検証（`verified: false`）で、`aidev run workflow --dry-run`がcommand lineを表示する
 - 結果はadapterの`parse()`が`{ok, result, costUsd, sessionId, permissionDenials, reason}`へ正規化する。claudeはstream-jsonの最後の`type: "result"` record（`--output-format json`と同じ形）を契約とし、無ければ失敗。他はexit codeとstdout本文
 - 進捗: adapterに`progress(line)`があるtool（claude）はstdoutを行ごとに読み、`{kind: tool|text|error, nested}`のeventを`onProgress({elapsedMs, event})`へ流す。`nested`はsubagent内（`parent_tool_use_id`あり）。15秒eventが無いときだけ`{event: null, quietMs}`を送る。`progress`が無いtoolは従来どおり15秒ごとの`{event: null}`。人向けの描画は`agent.progressReporter({repoRoot, status})`（1 eventにつき`m:ss`付き1行、subagentは字下げ）で、`create --describe`・`run workflow`・Wiki buildが共用する
@@ -412,7 +413,7 @@ protected branchには直接commitできないので、`update()`はcheckoutのb
 | event（claudeの名前） | matcher | 責務 |
 | --- | --- | --- |
 | SessionStart | — | `formatSummary`とpublish leaseの状態、Wikiが遅れていれば追従の予告を`additionalContext`で返す。HEADを`.aidev/cache/last-head.json`に記録 |
-| PreToolUse | `Write|Edit|MultiEdit|NotebookEdit|Bash` | `targetsFrom`でpathを集め`policy.decideMany`。deny理由を`permissionDecisionReason`へ |
+| PreToolUse | `Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__.*` | `AIDEV_WORKFLOW`があれば先に`policy.decideToolUse`（stepのagentに許されていないtool / MCP toolをdeny）。MCP toolはそこで終わり、workflow外では何も返さない（利用者に代わってMCP呼び出しを承認しない）。それ以外は`targetsFrom`でpathを集め`policy.decideMany`。deny理由を`permissionDecisionReason`へ |
 | PostToolUse | `Write|Edit|MultiEdit` | `quality_gates`のcommandをrepo rootで実行。編集対象がkit管理pathだけなら`skipped` |
 | PostToolUse | `Bash` | **after-bash**。HEADが`last-head.json`と違い、`needsFollowUp`（Wiki behind または prose pending）なら`followUp`（下記） |
 | Stop | — | **session-stop**。`needsFollowUp`かつcleanなら1回だけ`decision: block`で`followUp`の指示を返す。2回目（claude / copilot / codexは`stop_hook_active`、kiroはkitの`.aidev/cache/wiki-stop.json`で判定）は警告付きで通す。dirtyなら止めない。その後、kit開発者端末（`home.readDeveloper`）でだけtranscriptを集計し、閾値超えの未振り返りsessionに`decision: block`で振り返りを書かせる（§13） |
@@ -444,22 +445,33 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 
 ### 定義（`cli/lib/workflow.js`）
 
-`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。`validateDefinition`が検証する項目:
+`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。原則は「能力はagent、制約はstep」です（D18）。workflowにはstepの順番・agent・stepごとの`writable`・終了判定・上限だけを書き、agentが使えるskill / tool / MCP serverはagentのfrontmatterに書きます。`validateDefinition`が検証する項目（表にないkeyは、top level・step・`limits`・`cost`のどこでもerror。旧`scope` / `agents` / `skills`には移動先をmessageで示す）:
 
 | 項目 | 内容 |
 | --- | --- |
 | `name` | directory名と一致。`^[a-z0-9][a-z0-9-]{0,63}$` |
 | `objective` | 必須。全agent stepのpromptに入る |
-| `scope.writable` | 必須（`[]`可）。この workflow のagentが書けるglob。`ALWAYS_PROTECTED`は列挙できない |
-| `agents` / `skills` | 名前のlist（任意）。stepで使うagentは自動で補完 |
+| `description` | 任意 |
 | `tool` / `model` | 任意。`tool`はregistry、`model`は`assertModel` |
-| `steps[]` | `agent`（`prompt`必須、`until`・`max_retries`（≤10、`until`があれば既定3）・`timeout_ms`任意）、`command`、`kind: pull-request`（`title`任意、最大1つ）のどれか1つ。`id`は`^[a-z0-9][a-z0-9-]{0,31}$` |
-| `limits.max_minutes` | ≤60（既定60） |
-| `cost.max_usd` | 必須 |
+| `steps[]` | agent step（`id`・`description`・`agent`・`prompt`・`writable`・`until`・`max_retries`・`timeout_ms`。`agent` / `prompt` / `writable`必須。`max_retries`は≤10、`until`があれば既定3）、command step（`id`・`description`・`command`・`writable`）、pull-request step（`id`・`description`・`kind: pull-request`・`title`。最大1つ）のどれか1つ。`id`は`^[a-z0-9][a-z0-9-]{0,31}$` |
+| `steps[].writable` | agent stepは必須（`[]`可）。そのstepのagentが書けるglob。`ALWAYS_PROTECTED`は列挙できない。command stepは任意で、hookは関与しない（kitが自分で実行するため）。pull-request stepがcommitする範囲を示すだけ。`def.writable`は全stepの和集合 |
+| `steps[].description` | 任意。reviewer向け。`--dry-run`とsubmitのPR本文に出し、agentには渡さない |
+| `limits.max_minutes` | ≤60（既定60）。`limits`の他のkeyはerror |
+| `cost.max_usd` | 必須。`cost`の他のkeyはerror |
+
+`def.agents`はstepが名指すagentの一覧（重複なし）で、YAMLには書きません。
 
 `until`と`command`は空白で分割してshellなしで実行します（`|&;<>`$"'\`を含むと拒否）。実行fileの解決は`tools.resolveCommand`（Windowsでは`where.exe`で`.cmd` shimを`cmd.exe /d /s /c`経由にする。`npm test`が動く理由）。
 
-agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `.aidev/agents/<name>.md`・`.aidev/skills/<name>/SKILL.md`（PKG）→ `templates/claude/.claude/agents/`・`.claude/skills/`（kit checkout）。runnerはagent本文とskill本文を`definitionForPrompt`で1つにし、`runAgent({ definition })`でpromptの先頭に置きます（`--agent`は付けない）。名前でagentを選べないtoolでも同じ契約になります。
+agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `.aidev/agents/<name>.md`・`.aidev/skills/<name>/SKILL.md`（PKG）→ `templates/claude/.claude/agents/`・`.claude/skills/`（kit checkout）。agentのfrontmatterが能力を持ちます（`agentCapabilities`）:
+
+| key | 形式 | 意味 |
+| --- | --- | --- |
+| `skills` | `[a, b]`または`a, b` | promptに本文を差し込むskill。`resolveDependencies`がPKG → kitの順に解決し、無ければerror |
+| `tools` | 同上 | 渡す組み込みtool。省略・空は`null`（toolの既定の全部） |
+| `mcp` | 同上 | 使えるMCP server（PKGの`.mcp.json`の`mcpServers`のkey）。省略は`[]`（無し） |
+
+書式が壊れていれば`capabilityError`を持ち、`resolveDependencies`がerrorにします。runnerはagent本文とそのagentのskill本文（`agentSkills`）を`definitionForPrompt`で1つにし、`runAgent({ definition })`でpromptの先頭に置きます（`--agent`は付けない）。名前でagentを選べないtoolでも同じ契約になります。workflow側でagentの能力を上書き・拡張するkeyはありません。権限が違うなら別agentにします。
 
 ### 承認 = `origin/<hosting.tracking_branch>`との一致
 
@@ -469,20 +481,22 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 
 利用者向けcommandは`aidev <動詞> [<object>] [<名前>]`です（D15）。開発の動詞は`run` / `create` / `submit` / `list` / `remove`、objectは`workflow`（`list`は`workflows` / `agents` / `skills`、`create` / `remove`は`agent` / `skill`も）。`bin/aidev.js`の`SUBCOMMANDS`がobjectを検査し、無い・違うobjectはmoduleに入る前にexit 1です。動詞modul（`create.js`等）は薄く、workflowの実装は`cli/commands/workflow.js`が持ちます。
 
-- `create agent <name>` / `create skill <name>`: `.aidev/agents/<name>.md` / `.aidev/skills/<name>/SKILL.md`のtemplateを書く。agentの`--describe`は`agents-creator`を起動し、書いたあとfrontmatterの`name`を検証する
+- `create agent <name>` / `create skill <name>`: `.aidev/agents/<name>.md` / `.aidev/skills/<name>/SKILL.md`のtemplateを書く。agentのtemplateのfrontmatterは`name`・`description`・`skills: []`・`tools`・`mcp: []`・`model: inherit`。agentの`--describe`は`agents-creator`を起動し、書いたあとfrontmatterの`name`と`capabilityError`を検証する
 - `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧（同名はPKG優先）
-- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。参照しているworkflowが残るagent / skillは拒否する
+- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。stepが名指すagent、およびそのagentがfrontmatterの`skills`に挙げるskillは拒否する
 
 - `create workflow <name>`: template YAMLを書く（agentは`my-agent`のplaceholder）。`--describe "<text>"`は`workflow-creator` agent（`tools.agent`）に、参照できるagent / skillの一覧とschemaのtemplateを添えてYAMLを書かせる。足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書く。MCPが要るときはworkflow-creatorが`.mcp.json`（PKG所有）への追加案をfinal messageに書き、人が足す。終了後に`loadDefinition` + `resolveDependencies`で検証して結果を表示する。`create policy [--approve] [--force]`は`permission.configure`（policy候補の生成と配置）
 - `submit workflow <name>`: 検証 → `aidev/workflow-<name>`へ`checkout -B` → `reviewedFiles`だけを`aidev: workflow <name>`でcommit → `push --set-upstream` → `azure-devops`ならPR作成（同じsource branchのactive PRがあれば本文更新）。`generic`は手動。`--no-push`
-- `run workflow <name>`: 承認判定に失敗すればexit 1。`pull-request` stepがあればclean treeを要求し`aidev/<name>-<yyyymmddHHMM>`を`checkout -b`。stepを順に実行し、`runs/<id>/run.json`と`log.txt`（gitignore）に記録する。`--task` / `--task-file`は全agent stepのpromptに「Task for this run」として入る（外部入力。Work Item本文と同じdata）。`--max-minutes`は下げる方向にだけ効く。`--dry-run`は承認状態・file別の状態・scope・agentとtool・stepsを表示し、承認済みならexit 0
-- `list workflows`: 各workflowの`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`と、同梱workflowの一覧
+- `run workflow <name>`: 承認判定に失敗すればexit 1。`pull-request` stepがあればclean treeを要求し`aidev/<name>-<yyyymmddHHMM>`を`checkout -b`。stepを順に実行し、`runs/<id>/run.json`と`log.txt`（gitignore）に記録する。`--task` / `--task-file`は全agent stepのpromptに「Task for this run」として入る（外部入力。Work Item本文と同じdata）。`--max-minutes`は下げる方向にだけ効く。`--dry-run`は承認状態・file別の状態・agentとtool・上限・taskと、`describeSteps`によるstepごとの内容（agent、`writes`、`skills; tools; mcp`、`until`）を表示する。起動前に拒否される問題（claude以外のtoolで`tools` / `mcp`を持つagent、`.mcp.json`に無いserver・`.mcp.json`が無い）も表示し、承認済みかつ問題なしのときだけexit 0。submitのPR本文も同じ`describeSteps`の「Steps」節を持つ
+- `list workflows`: 各workflowの`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`と、同梱workflowの一覧。`--json`の行は`writable`（全stepの和集合）を持つ
 
 ### runnerの動作
 
-agent step: `stepPrompt`（workflow名・`objective`・task・step prompt・前回の`until`失敗の出力（末尾4000文字）・Rules（scope、commit禁止、報告））+ 参照文書 → `runAgent`（tool / modelは`workflow.yaml` > `tools.agents.<name>` > `tools.agent`。`env`に`AIDEV_WORKFLOW=<name>`。時間予算は`min(timeout_ms || DEFAULT_TIMEOUT_MS, 残り時間)`）。agentが失敗すれば停止。`until`があればcommandを実行し、exit 0で完了。失敗ならagentを再起動（`max_retries`回まで）、exit codeと出力（末尾2000文字）が前回と同じなら「同一失敗」で即停止。`command` step: 1回実行、exit 0以外で停止。`pull-request` step: `git add -A -- :(glob)<scope>…`でscopeだけをstage、変更が無ければskip、あれば run記録（workflow hash・run id・base SHA・承認ref・task）を本文にしてcommit → push → `azure-devops`ならPR作成（本文にagent runs・費用・step一覧）。`generic`は理由を残して手動。
+起動前: agentごとにtool / modelを決め（`workflow.yaml` > `tools.agents.<name>` > `tools.agent`）、toolのadapterが`capabilities`を持たない（claude以外）のに`tools`か`mcp`を持つagentは`agent <name> lists tools in its frontmatter, and <tool label> cannot be limited to them; run it with claude`、`mcp`のserverが`.mcp.json`に無ければ`mcpServersFor`のerrorを集め、何も始めずにexit 1。
 
-安全弁: `limits.max_minutes`（≤60）、`max_retries`（≤10）、`cost.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0）、同一失敗検知、shellなしcommand、`scope.writable`のみ書込可（hookが強制）。tokenは計測しません。
+agent step: `stepPrompt`（workflow名・`objective`・task・先に完了したagent stepの最終報告（「## Reports from the earlier steps」、stepごとに末尾6000文字）・step prompt・前回の`until`失敗の出力（末尾4000文字）・Rules（そのstepの`writable`、commit禁止、報告））+ 参照文書 → `runAgent`（`env`に`AIDEV_WORKFLOW=<name>`と`AIDEV_WORKFLOW_STEP=<id>`。claudeならagentの`mcp`のserver定義だけを`os.tmpdir()`の一時dir（repo外、mode 0600）の`mcp.json`に書いて`capabilities`で渡し、step後に削除。時間予算は`min(timeout_ms || DEFAULT_TIMEOUT_MS, 残り時間)`）。stepごとにtoolは新しいprocessで、会話は引き継がない。agentが失敗すれば停止。`until`があればcommandを実行し、exit 0で完了。失敗ならagentを再起動（`max_retries`回まで）、exit codeと出力（末尾2000文字）が前回と同じなら「同一失敗」で即停止。`command` step: 1回実行、exit 0以外で停止。`pull-request` step: `git add -A -- :(glob)<writable>…`で全stepの`writable`の和集合（`def.writable`）だけをstage、変更が無ければskip、あれば run記録（workflow hash・run id・base SHA・承認ref・task）を本文にしてcommit → push → `azure-devops`ならPR作成（本文にagent runs・費用・step一覧）。`generic`は理由を残して手動。
+
+安全弁: `limits.max_minutes`（≤60）、`max_retries`（≤10）、`cost.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0）、同一失敗検知、shellなしcommand、実行中stepの`writable`のみ書込可（hookが強制）、agentのfrontmatterにあるtool / MCP serverだけ（claudeは起動flagとhookの2段）。tokenは計測しません。
 
 ### 同梱しないもの
 
@@ -491,6 +505,8 @@ kitはworkflow・開発用agent・MCP serverを配布しません（framework-on
 ## 10. MCP
 
 kitはMCP serverを起動しません（旧`aidev mcp azure-devops`と`templates/claude/.mcp.json`は2026-09-23に撤去）。`.mcp.json`はPKGの所有で、PKGが必要なserver（Azure DevOpsなど）を書き、認証情報は環境変数で渡します。kitのhostingとの通信（Wiki publishのPR、workflowのPR）は`cli/lib/ado.js`が直接REST APIで行い、MCPに依存しません。
+
+workflowのagent stepが使えるMCP serverは、agentのfrontmatterの`mcp`に挙げた`.mcp.json`のserverだけです（§9）。runnerはそのserverの定義だけを一時fileに写してclaudeに`--strict-mcp-config`で渡すので、`.mcp.json`の他のserverや利用者個人の設定のserverは読まれません。`mcp`の無いagentにはserverを1つも渡しません。guard-writeは`mcp__.*`にもmatchし、workflow step内で許されていないMCP toolをdenyします。`Bash`を持つagentはMCPを通さずに外部へ出られるため、外部systemに触るagentには`Bash`を渡さない方針です（testは`until`でkitが実行する）。
 
 ## 11. update と version通知
 

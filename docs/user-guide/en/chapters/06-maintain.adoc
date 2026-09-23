@@ -15,6 +15,9 @@
 
 |xref:maintain-settings[Changing configuration]
 |As the need arises
+
+|xref:maintain-model[Changing the model]
+|When you want a different model
 |===
 
 [[maintain-update]]
@@ -84,7 +87,42 @@ Turn each of these into a PR and have it reviewed.
 
 |Adding or changing the jobs handed to the AI
 |Create a workflow and submit it. → xref:workflows-define[Defining a workflow]
+
+|The model the AI uses
+|There are two places to set it. → xref:maintain-model[Changing the model]
 |===
+
+[[maintain-model]]
+=== Changing the model
+
+The model is set in two places: the model for the agents `aidev` starts itself (Wiki updates, workflows, `aidev create`), and the model of the AI tool a Developer uses interactively.
+
+==== Agents started by aidev
+
+Change `tools.agent_model` in `aidev.yaml` and open a PR. To change one agent only, add `tools.agents.<name>.model`.
+
+[source,yaml]
+----
+tools:
+  agent: claude
+  agent_model: "sonnet"           # default; "" passes no model and leaves it to the tool
+  agents:
+    knowledge-builder: { model: opus }
+----
+
+The value can be an alias such as `sonnet` or `opus`, or a full ID such as `claude-opus-5`. `aidev` checks only the shape of the string and passes it to the tool's `--model` as it is. A model that does not exist fails on the tool's side when the agent starts.
+
+When one agent has several settings, they take precedence in this order.
+
+. The setting for that one run: the `--agent-model <model>` flag of `aidev sync wiki` (`""` drops the configured model), or `model` in workflow.yaml for `aidev run workflow`
+. `tools.agents.<name>.model`
+. `tools.agent_model`
+
+The `agent tool` row of `aidev doctor <package>` shows the model currently in effect.
+
+==== Interactive sessions
+
+`aidev.yaml` has no effect on interactive sessions. Claude Code takes its model from `"model"` in the PKG's `.claude/settings.json` (the kit ships `sonnet`). To change it for the whole team, edit that file and open a PR. Your edit survives `aidev sync tools`. A Developer who wants a different model for themselves uses `.claude/settings.local.json` (not managed by the kit) or `/model` during the session. The model of Copilot and the other tools is set in that tool's own configuration.
 
 === Related information
 

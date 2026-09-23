@@ -177,6 +177,7 @@ Unknown keys are ignored (they are not an error). A misspelled key name is not c
 === Related information
 
 * xref:cli-init[aidev init] — flags used when generating the file
+* xref:maintain-model[Changing the model] — how to change `tools.agent_model` and the order of precedence
 * xref:permissions[Permissions and safety] — `secrets_paths` and the policy
 * xref:knowledge[LLM Wiki] — generation targets and research scope
 

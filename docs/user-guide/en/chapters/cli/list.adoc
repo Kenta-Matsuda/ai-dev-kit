@@ -37,7 +37,7 @@ With the same name, the PKG's one takes precedence over the bundled one.
 |Option |Description
 
 |`--json`
-|Machine-readable output
+|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together)
 |===
 
 === Exit codes
