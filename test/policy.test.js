@@ -259,12 +259,14 @@ function run() {
 
   suite('policy: approved workflow step');
 
-  // Step a may write the given globs; step b writes nothing. The agent dev
-  // lists Read and Edit and the MCP server tickets.
+  // Step a may write the given globs, and dev checks it as its until agent;
+  // step b writes nothing. The agent dev lists Read and Edit and the MCP
+  // server tickets.
   const WF = (writable) => [
     'name: wf', 'objective: do it',
     'steps:',
     '  - id: a', '    agent: dev', `    writable: [${writable}]`, '    prompt: go',
+    '    until:', '      agent: dev', '      prompt: check',
     '  - id: b', '    agent: dev', '    writable: []', '    prompt: look',
     'cost:', '  max_usd: 1', '',
   ].join('\n');
@@ -290,6 +292,10 @@ function run() {
       const survey = decide(fx, 'src/api/auth.ts', { workflow: 'wf', step: 'b' });
       eq(survey.rule, 'read-only', 'the survey step writes nothing, even inside another step\'s writable');
       ok(/writable of step b \(empty\)/.test(survey.reason), survey.reason);
+      const judge = decide(fx, 'src/api/auth.ts', { workflow: 'wf', step: 'a:until' });
+      eq(judge.rule, 'read-only', 'the until agent of step a writes nothing, even inside step a\'s writable');
+      ok(/writable of step a:until \(empty\)/.test(judge.reason), judge.reason);
+      eq(decide(fx, 'src/api/auth.ts', { workflow: 'wf', step: 'b:until' }).rule, 'read-only', 'step b has no until agent');
       const anon = decide(fx, 'src/api/auth.ts', { workflow: null, step: null });
       eq(anon.rule, 'read-only', 'an interactive session');
       ok(/not started by "aidev run workflow"/.test(anon.reason), anon.reason);
@@ -356,6 +362,9 @@ function run() {
       ok(/MCP servers of agent dev \(tickets\)/.test(other.reason), other.reason);
       eq(use('Bash', { workflow: null, step: null }), null, 'outside a workflow run the hook has no opinion');
       eq(use('Read', { workflow: 'wf', step: 'zzz' }).decision, 'deny', 'an unknown step may call nothing');
+      eq(use('Read', { workflow: 'wf', step: 'a:until' }), null, 'the until agent gets its own grants');
+      ok(/Bash is not among the tools of agent dev/.test(use('Bash', { workflow: 'wf', step: 'a:until' }).reason));
+      eq(use('Read', { workflow: 'wf', step: 'b:until' }).decision, 'deny', 'a step without an until agent has no :until');
       fs.appendFileSync(path.join(fx.root, '.aidev', 'agents', 'dev.md'), 'widened\n', 'utf8');
       eq(use('Read').decision, 'deny', 'an agent edited since approval may call nothing');
     } finally { fx.cleanup(); }

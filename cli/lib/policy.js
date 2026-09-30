@@ -244,8 +244,8 @@ function decideToolUse(repoRoot, toolName, {
   }
   if (wfMod.toolGranted(access, toolName)) return null;
   const what = String(toolName).startsWith('mcp__')
-    ? `the MCP servers of agent ${access.step.agent} (${access.mcp.join(', ') || 'none'})`
-    : `the tools of agent ${access.step.agent} (${(access.tools || []).join(', ')})`;
+    ? `the MCP servers of agent ${access.agent} (${access.mcp.join(', ') || 'none'})`
+    : `the tools of agent ${access.agent} (${(access.tools || []).join(', ')})`;
   return deny(`${toolName} is not among ${what}; the agent's frontmatter grants them`,
     { rule: 'workflow-tool', workflow, step, tool: toolName });
 }

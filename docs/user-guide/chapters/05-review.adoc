@@ -98,9 +98,13 @@ aidev run workflow write-tests --dry-run
 |外部システムに触る agent には `Bash` が無い
 |`mcp` と `Bash` を両方持つ agent（`Bash` があれば MCP を通さずに外部へ出られます）
 
-|`until` と `command`
+|`until.command` と `command`
 |この PKG で安全に実行できるコマンド（テスト、lint など）
 |デプロイ、データの削除、外部への送信をするコマンド（shell は通りませんが、コマンド自体は実行されます）
+
+|`until.agent` と `until.prompt`
+|確認役の agent は読むだけのツールで、確認の観点が具体的
+|確認役の agent に `Edit`・`Write`・`Bash` がある（書き込みは hook が拒否しますが、要らない権限です）。「良ければ合格」のような観点の無い `until.prompt`
 
 |`cost.max_usd`・`limits.max_minutes`
 |仕事の大きさに合っている

@@ -91,7 +91,7 @@ aidev create workflow write-tests --describe "指定した対象のテストを�
 
 同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。workflow 側で agent の能力を上書きする項目はありません。
 
-雛形を PKG に合わせて編集します。多くの場合、変えるのは各ステップの `writable`（そのステップが書いてよい場所）と `until`（この PKG のテストコマンド）です。
+雛形を PKG に合わせて編集します。多くの場合、変えるのは各ステップの `writable`（そのステップが書いてよい場所）と `until.command`（この PKG のテストコマンド）です。
 
 [source,yaml]
 ----
@@ -116,7 +116,8 @@ steps:                             # 上から順に実行する
     agent: test-writer
     writable: [tests/**]           # このステップが書けるのは tests/ の中だけ
     prompt: 前のステップが列挙したテストを既存の書き方で書き、実行する。
-    until: npm test                # exit 0 になるまで agent を繰り返す（shell を通さない）
+    until:                         # 終わりの判定。満たすまで agent を繰り返す
+      command: npm test            # exit 0 になること（shell を通さない）
     max_retries: 4                 # until の再試行回数（上限 10）
   - id: pr
     kind: pull-request             # 各ステップの writable の変更を commit → push → PR
@@ -142,7 +143,10 @@ cost:
 |上から順に実行します。1 つの step は次の 3 種類のどれか 1 つです。どの種類にも、レビューする人向けの `description`（任意）を書けます。
 
 |agent step
-|`agent`・`writable`・`prompt` が必須です。`until` を書くと exit 0 になるまで `max_retries` 回まで agent を繰り返します。`timeout_ms` は任意です。
+|`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで `max_retries` 回まで agent を繰り返します。`timeout_ms` は任意です。
+
+|`until`
+|そのステップの終わりの判定です。`command`（exit 0 になること）と `agent` + `prompt`（その agent が合格と判定すること）のどちらか、または両方を書きます。両方あるときはコマンドが通ってから agent が確認します。xref:workflows-until-agent[agent のレビューで終わりを判定する] を参照してください。
 
 |`writable`
 |そのステップの agent が書けるパス（glob）。**PKG のソースを AI が書けるのは、承認済み workflow の、いま動いているステップのこの範囲だけです。** `protected`（`.claude/**`、`.aidev/policy.yaml` など）と `secrets_paths` は書けません。`[]` なら何も書けません（調査だけのステップ）。
@@ -162,11 +166,48 @@ cost:
 
 上の表にない項目を書くと、検証で拒否されます。
 
-`until` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。
+`until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。
 
 各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。代わりに、**前の agent step の最終報告を、ADK が後の agent step の指示に入れます**。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
 
-安全弁は省略できず、上げられません。時間の上限（60 分）、step ごとの再試行回数（10 回）、費用の上限（必須）、同じ失敗の検知（`until` の出力が 2 回続けて同じなら停止）、agent 1 回の起動は `timeout_ms` と残り時間の短い方で打ち切りです。
+安全弁は省略できず、上げられません。時間の上限（60 分）、step ごとの再試行回数（10 回）、費用の上限（必須）、同じ失敗の検知（`until` の結果が 2 回続けて同じなら停止）、agent 1 回の起動は `timeout_ms` と残り時間の短い方で打ち切りです。
+
+[[workflows-until-agent]]
+==== agent のレビューで終わりを判定する
+
+「テストが全部通る」はコマンドで判定できますが、「テストの中身が妥当か」はコマンドでは判定できません。そういう条件は、`until` に確認役の agent を書きます。
+
+[source,yaml]
+----
+  - id: write
+    description: テストを書き、通してからレビューで合格をもらう
+    agent: test-writer
+    writable: [tests/**]
+    prompt: 前のステップが列挙したテストを既存の書き方で書き、実行する。
+    until:
+      command: npm test            # 先にこれが exit 0 になること
+      agent: test-reviewer         # 次にこの agent が合格と判定すること
+      prompt: |                    # test-reviewer に確認させる観点
+        前のステップが列挙した振る舞いがすべてテストされているか。
+        実装の内部ではなく、外から見える振る舞いを検証しているか。
+    max_retries: 4
+----
+
+1 回の試行は次の順で進みます。
+
+. `test-writer` がテストを書く
+. `npm test` を実行する。失敗したら、その出力を添えて `test-writer` をやり直させる（`test-reviewer` は起動しない）
+. `test-reviewer` を起動する。`test-writer` の報告、`writable` の範囲で変わったファイルの一覧、`until.prompt` を渡す
+. `test-reviewer` が最終メッセージを `VERDICT: PASS` の行で終えればステップは完了です。`VERDICT: FAIL`、またはその行が無ければ不合格で、`test-reviewer` の報告を添えて `test-writer` をやり直させる
+
+確認役の agent について:
+
+* **何も書けません。** ステップの `writable` は確認役には効きません。確認役が使える skill・ツール・MCP server は、その agent の frontmatter で決まります（`tools: Read, Grep, Glob` など、読むだけのものにします）。
+* 合格・不合格の書き方（`VERDICT:` の行）は ADK が指示に入れます。agent の本文や `until.prompt` に書く必要はありません。
+* `until.prompt` には、何を確認するかを具体的に書きます。観点が曖昧だと、同じ指摘が繰り返されて止まるか、`max_retries` を使い切ります。
+* 確認役の起動も `max_retries`、費用の上限、時間の上限に数えます。1 回の試行で agent が 2 回起動するので、`cost.max_usd` はその分を見込みます。
+* 合格したときの確認役の報告は、後の agent step の指示にも入ります。
+* 確認役の agent も workflow と一緒に PR でレビューされ、`origin/main` と同じでなければ実行できません。
 
 [[workflows-submit]]
 === workflow の提出（Engineering Manager）
@@ -275,7 +316,7 @@ aidev run workflow write-tests
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
 * Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。
-* `until` が exit 0 以外なら、その出力を添えて同じ agent をもう一度起動します。同じ出力が 2 回続いたら止まります。
+* `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * `pull-request` step は、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用が書かれます。範囲内に変更が無ければ commit も PR も作りません。
 * 記録は `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に残ります。gitignore 済みで、コミットされません。
 
@@ -294,9 +335,9 @@ aidev run workflow write-tests
 |`the working tree has uncommitted changes; commit or stash them first`
 |`pull-request` step のある workflow は、きれいな作業ツリーで実行します。
 
-|`workflow stopped — step <id>: <until> still fails after N retries` +
+|`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent がテストを通せませんでした。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身を見て、`--task` を具体的にするか、 Engineering Manager に `max_retries` や `prompt` の見直しを相談します。
+|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と `run.json` の `review`（確認役の最後の報告）を見て、`--task` を具体的にするか、 Engineering Manager に `max_retries` や `prompt`、`until.prompt` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -355,6 +396,10 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 |`until` がずっと失敗して止まる
 |`until`、`max_retries`、ステップの分け方
 |`until` のコマンドがこの PKG で本当に通るかを手で確かめます。仕事が大きすぎるなら、ステップを分けます。
+
+|確認役の agent が何度も不合格にする
+|`until.prompt`、ステップの `prompt`
+|`run.json` の `review` で指摘を読みます。確認の観点を具体的にし、同じ観点をステップの `prompt` にも書いて、作る側に最初から伝えます。
 
 |費用や時間の上限で止まる
 |`cost.max_usd`、`limits.max_minutes`

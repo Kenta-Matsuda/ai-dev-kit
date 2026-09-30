@@ -48,7 +48,10 @@ steps:                                 # 上から順に実行する
     agent: my-agent
     writable: [tests/e2e/**]
     prompt: ...
-    until: npx playwright test         # 終了条件。exit 0 になるまで agent を繰り返す
+    until:                             # 終了条件。満たすまで agent を繰り返す（command と agent のどちらか、または両方）
+      command: npx playwright test     #   exit 0 になること
+      agent: e2e-reviewer              #   この agent が VERDICT: PASS と答えること（何も書けない。command が通ってから起動）
+      prompt: 追加したテストが要件の各項目を検証しているかを確認する   # agent に確認させる観点（agent を書くなら必須）
     max_retries: 5                     # until の再試行回数。上限 10
     timeout_ms: 1800000                # 任意。1 回の起動の時間予算
   - id: verify
@@ -65,7 +68,8 @@ cost:
 
 - step は `agent` / `command` / `kind: pull-request` のどれか 1 つだけを持ちます
 - 各 agent step は新しいプロセスとして起動されます。前のステップの会話は残りません。**前の agent step の最終報告は、kit が後の agent step の指示に入れます**。調査ステップは、次のステップが使う結果を最終報告に書くよう `prompt` で指示します
-- `until` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません
+- `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません
+- `until.agent` はレビューで判定する終了条件です。確認の観点を `until.prompt` に具体的に書きます。不合格ならその報告を添えてステップの agent がやり直します。コマンドで判定できることは `until.command` に書き、agent には判断が要ることだけを確認させます
 - 実行ロジック（ループ、再試行、commit、PR）は runner が持ちます。YAML に手順書やスクリプトを書かないでください
 
 ## agent の frontmatter（能力）
@@ -87,7 +91,7 @@ model: inherit
 
 ## 手順
 
-1. **要望を読む** — 何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until`）を決める。判定できない終了条件（「良くなるまで」）は作らない。決められないときは最も狭い `writable` と `max_retries: 0` にして、final message で選択肢を示す
+1. **要望を読む** — 何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until` のコマンドか、確認の観点を決めたレビュー agent）を決める。判定できない終了条件（観点の無い「良くなるまで」）は作らない。決められないときは最も狭い `writable` と `max_retries: 0` にして、final message で選択肢を示す
 2. **agent を選ぶ** — prompt に添付された一覧から名前で参照する。kit が同梱するのは仕組みの agent（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent（実装する、テストを書く、規約を書き出す…）は PKG のもの。足りないときは **`agents-creator` を Agent tool（サブエージェント）で起動**し、役割・想定タスク・必要な skill / tools / MCP・書き先（`.aidev/agents/<name>.md`、必要なら `.aidev/skills/<name>/SKILL.md`）を渡して書かせる。自分で agent 本文を書かない。既存の同梱 agent を書き換えない
 3. **外部システムを確認する** — Work Item・チケット・DB・API など、agent が MCP で触る必要があるものがあれば、その agent の `mcp` に server 名を書かせる。`.mcp.json` にまだ無い server は、PKG の `.mcp.json`（PKG が所有。kit は配布しない）に足す定義を **final message に提案**する。自分では書かない（MCP の追加は人が行う。認証情報は環境変数で渡し、file に書かない）
 4. **書く** — `.aidev/workflows/<name>/workflow.yaml`。添付された template に構成を合わせる。各ステップに、レビュアーが読む `description` を付ける
