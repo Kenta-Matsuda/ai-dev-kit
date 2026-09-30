@@ -213,7 +213,7 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 
 ### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_minutes`のみ）、`cost`（`max_usd`のみ）だけで、他のkeyはerrorです。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`until`、`max_retries`、`timeout_ms`。command stepは`id`、`description`、`command`、`writable`（任意。commitする範囲を示すだけ）。pull-request stepは`id`、`description`、`kind`、`title`。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_minutes`のみ）、`cost`（`max_usd`のみ）だけで、他のkeyはerrorです。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`until`（mapping: `command`、`agent`、`prompt`）、`max_retries`、`timeout_ms`。command stepは`id`、`description`、`command`、`writable`（任意。commitする範囲を示すだけ）。pull-request stepは`id`、`description`、`kind`、`title`。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
 
 ### agentのfrontmatter（`.aidev/agents/<name>.md`、kit同梱agent）
 

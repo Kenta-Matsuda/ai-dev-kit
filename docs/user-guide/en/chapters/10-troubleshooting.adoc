@@ -241,7 +241,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Run `git fetch origin`.
 
 |`aidev list workflows` shows `invalid: …`
-|`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `cost.max_usd`, an unknown key, a limit exceeded, quotes or pipes in `until`, a `protected` path, and so on).
+|`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `cost.max_usd`, an unknown key, a limit exceeded, `until` written as a string (put `command:` under `until:`), quotes or pipes in `until.command`, a `protected` path, and so on).
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.
@@ -256,9 +256,9 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |`the working tree has uncommitted changes; commit or stash them first`
 |A workflow with a `pull-request` step runs on a clean working tree.
 
-|`workflow stopped — step <id>: <until> still fails after N retries` +
+|`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Make `--task` more specific, or ask the Engineering Manager to revise `prompt` or `max_retries`.
+|The agent could not meet `until` (the tests do not pass, or the checking agent does not pass the work). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Make `--task` more specific, or ask the Engineering Manager to revise `prompt`, `until.prompt` or `max_retries`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`

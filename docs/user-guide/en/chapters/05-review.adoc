@@ -98,9 +98,13 @@ aidev run workflow write-tests --dry-run
 |An agent that touches external systems has no `Bash`
 |An agent with both `mcp` and `Bash` (with `Bash` it can reach outside without going through MCP)
 
-|`until` and `command`
+|`until.command` and `command`
 |Commands that are safe to run in this PKG (tests, lint and so on)
 |Commands that deploy, delete data or send things outside (no shell is involved, but the command itself does run)
+
+|`until.agent` and `until.prompt`
+|The checking agent has read-only tools, and the check is specific
+|A checking agent with `Edit`, `Write` or `Bash` (the hook refuses its writes, but it does not need them). An `until.prompt` with no points to check, such as "pass it if it is good"
 
 |`cost.max_usd`, `limits.max_minutes`
 |They fit the size of the job

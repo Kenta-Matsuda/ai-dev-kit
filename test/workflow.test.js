@@ -52,6 +52,16 @@ if (process.env.STUB_ARGV_OUT) fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.
 const mcpAt = argv.indexOf('--mcp-config');
 if (mcpAt >= 0 && process.env.STUB_MCP_OUT) fs.writeFileSync(process.env.STUB_MCP_OUT, fs.readFileSync(argv[mcpAt + 1]));
 if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null }));
+if (process.env.STUB_STEPS_OUT) fs.appendFileSync(process.env.STUB_STEPS_OUT, (process.env.AIDEV_WORKFLOW_STEP || '') + '\\n');
+// An until agent (step "<id>:until") answers the next verdict from STUB_VERDICTS (a JSON list).
+let answer = 'stub answer';
+const step = process.env.AIDEV_WORKFLOW_STEP || '';
+if (step.endsWith(':until') && process.env.STUB_VERDICTS && fs.existsSync(process.env.STUB_VERDICTS)) {
+  const queue = JSON.parse(fs.readFileSync(process.env.STUB_VERDICTS, 'utf8'));
+  const v = queue.shift();
+  fs.writeFileSync(process.env.STUB_VERDICTS, JSON.stringify(queue));
+  if (v) answer = 'review ' + queue.length + ': ' + (v === 'FAIL' ? 'test for empty input is missing' : 'good') + '\\nVERDICT: ' + v;
+}
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; });
@@ -63,7 +73,7 @@ process.stdin.on('end', () => {
     { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'tu0', message: { content: [
     { type: 'tool_use', id: 'tu2', name: 'Glob', input: { pattern: 'stub/**' } }] } }) + '\\n');
-  process.stdout.write(JSON.stringify({ type: 'result', result: 'stub answer', is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', result: answer, is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
 });
 `, 'utf8');
   return p;
@@ -113,14 +123,17 @@ function run() {
     eq(d.cost, { max_usd: 1 });
     const u = wfMod.validateDefinition({ ...GOOD, steps: [
       { agent: 'x', writable: [], prompt: 'p', description: 'look first' },
-      { agent: 'x', writable: ['src/**'], prompt: 'p', until: 'npm test' },
+      { agent: 'x', writable: ['src/**'], prompt: 'p', until: { command: 'npm test' } },
       { command: 'npm run gen', writable: ['gen/**'] },
       { kind: 'pull-request', title: 't' },
     ] }, 'wf');
     eq(u.steps.map((s) => s.id), ['step-1', 'step-2', 'step-3', 'step-4'], 'ids default from position');
     eq(u.steps[0].description, 'look first');
-    eq(u.steps[1].until, { text: 'npm test', argv: ['npm', 'test'] });
+    eq(u.steps[1].until, { command: { text: 'npm test', argv: ['npm', 'test'] }, agent: null, prompt: null });
     eq(u.steps[1].max_retries, 3, 'an until step retries 3 times by default');
+    const r = wfMod.validateDefinition(withStep({ until: { command: 'npm test', agent: 'reviewer', prompt: 'check it' } }), 'wf');
+    eq(r.steps[0].until.agent, 'reviewer');
+    eq(r.agents, ['issue-to-pr', 'reviewer'], 'an until agent is one of the workflow\'s agents (resolved, approved, launched)');
     eq(u.steps[2].command.argv, ['npm', 'run', 'gen']);
     eq(u.steps[3], { id: 'step-4', kind: 'pull-request', description: '', title: 't' });
     eq(u.writable, ['src/**', 'gen/**'], 'the pull-request step commits what any step may write');
@@ -133,9 +146,15 @@ function run() {
     throws(() => wfMod.validateDefinition(withStep({ writable: ['.claude/**'] }), 'wf'), /protected path/);
     throws(() => wfMod.validateDefinition({ ...GOOD, cost: {} }, 'wf'), /cost\.max_usd is required/);
     throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_minutes: 61 } }, 'wf'), /above the hard ceiling of 60/);
-    throws(() => wfMod.validateDefinition(withStep({ until: 'npm test', max_retries: 11 }), 'wf'), /above the hard ceiling of 10/);
-    throws(() => wfMod.validateDefinition(withStep({ max_retries: 2 }), 'wf'), /needs an until command/);
-    throws(() => wfMod.validateDefinition(withStep({ until: 'npm test | tee log' }), 'wf'), /without a shell/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test' }, max_retries: 11 }), 'wf'), /above the hard ceiling of 10/);
+    throws(() => wfMod.validateDefinition(withStep({ max_retries: 2 }), 'wf'), /needs an until/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test | tee log' } }), 'wf'), /without a shell/);
+    throws(() => wfMod.validateDefinition(withStep({ until: 'npm test' }), 'wf'), /until must be a mapping/);
+    throws(() => wfMod.validateDefinition(withStep({ until: {} }), 'wf'), /until needs a command, an agent, or both/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { agent: 'reviewer' } }), 'wf'), /until\.prompt is required/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', prompt: 'x' } }), 'wf'), /until\.prompt needs until\.agent/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { agent: '../x', prompt: 'x' } }), 'wf'), /until\.agent/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', retries: 2 } }), 'wf'), /until: unknown key retries/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'echo "hi" > out' }] }, 'wf'), /without a shell/);
     throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command or kind/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'shell' }] }, 'wf'), /kind must be "pull-request"/);
@@ -169,6 +188,23 @@ function run() {
     eq(['Read', 'Agent', 'Task', 'Bash', 'mcp__tickets__get', 'mcp__billing__charge', 'mcp__odd']
       .map((t) => wfMod.toolGranted(access, t)), [true, true, true, false, true, false, false], 'Task and Agent are one grant');
     eq(wfMod.toolGranted({ tools: null, mcp: [] }, 'Bash'), true, 'no tools listed: the default set');
+  });
+
+  test('an until agent writes nothing and uses its own grants; its verdict is the last VERDICT line', () => {
+    const def = wfMod.validateDefinition(withStep({ until: { agent: 'reviewer', prompt: 'check' } }), 'wf');
+    const deps = { agents: {
+      'issue-to-pr': { capabilities: { skills: [], tools: ['Read', 'Edit'], mcp: [] } },
+      reviewer: { capabilities: { skills: [], tools: ['Read', 'Grep'], mcp: ['tickets'] } },
+    } };
+    const own = wfMod.stepAccess(def, deps, 'a');
+    eq([own.agent, own.writable, own.tools], ['issue-to-pr', ['src/**'], ['Read', 'Edit']]);
+    const judge = wfMod.stepAccess(def, deps, wfMod.untilStepId('a'));
+    eq([judge.agent, judge.writable, judge.tools, judge.mcp], ['reviewer', [], ['Read', 'Grep'], ['tickets']]);
+    eq(wfMod.stepAccess(wfMod.validateDefinition(GOOD, 'wf'), deps, 'a:until'), null, 'a step without an until agent has no :until');
+    eq(wfMod.parseVerdict('looks fine\nVERDICT: PASS'), 'PASS');
+    eq(wfMod.parseVerdict('VERDICT: PASS\nno, wait\n  verdict: fail  \n'), 'FAIL', 'the last one counts');
+    eq(wfMod.parseVerdict('I would say VERDICT: PASS here'), null, 'only a line of its own');
+    eq(wfMod.parseVerdict(''), null);
   });
 
   test('the kit ships machinery agents only; a development agent is neither bundled nor resolved', () => {
@@ -314,7 +350,7 @@ function run() {
         define('plain', { steps: [
           '  - id: think', '    agent: coder', '    writable: []', '    prompt: think first',
           '  - id: check', '    command: node --version',
-          '  - id: act', '    agent: coder', '    prompt: now act', '    until: node --version',
+          '  - id: act', '    agent: coder', '    prompt: now act', '    until:', '      command: node --version',
         ] });
         reset();
         const r = aidev(fx.root, ['run', 'workflow', 'plain', '--task', 'add a login link', '--json'], { env: env() });
@@ -348,7 +384,7 @@ function run() {
 
       test('an until command that keeps failing with the same output stops the step early', () => {
         define('loop', { steps: [
-          '  - id: fix', '    agent: coder', '    prompt: fix it', '    until: node -e process.exit(3)', '    max_retries: 5',
+          '  - id: fix', '    agent: coder', '    prompt: fix it', '    until:', '      command: node -e process.exit(3)', '    max_retries: 5',
         ] });
         reset();
         const r = aidev(fx.root, ['run', 'workflow', 'loop', '--json'], { env: env() });
@@ -359,6 +395,69 @@ function run() {
         eq(j.agentRuns, 2, 'two identical failures, not six');
         const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
         ok(/## Previous attempt 1 of 6 failed/.test(prompts[1]) && /exited 3/.test(prompts[1]), 'the second attempt sees the failure');
+      });
+
+      test('an until agent checks the work after the command passes; FAIL sends its report back to the step', () => {
+        write(path.join(fx.root, '.aidev', 'agents', 'reviewer.md'),
+          '---\nname: reviewer\ndescription: reviews tests\ntools: Read, Grep\n---\n\nYou review tests.\n');
+        define('reviewed', { steps: [
+          '  - id: write', '    agent: coder', '    prompt: write the tests',
+          '    until:', '      command: node --version', '      agent: reviewer', '      prompt: Check that the tests cover the edge cases.',
+          '    max_retries: 3',
+        ] });
+        const stepsOut = path.join(tmp, 'steps.txt');
+        const verdicts = path.join(tmp, 'verdicts.json');
+        reset();
+        fs.rmSync(stepsOut, { force: true });
+        fs.writeFileSync(verdicts, JSON.stringify(['FAIL', 'PASS']));
+        const dry = aidev(fx.root, ['run', 'workflow', 'reviewed', '--dry-run'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/repeats until node --version exits 0 and agent reviewer answers PASS \(max 3 retries\)/.test(dry.out), dry.out);
+        ok(/checked by agent reviewer \(writes nothing; skills: \(none\); tools: Read, Grep; mcp: \(none\)\): Check that the tests/.test(dry.out), dry.out);
+        const r = aidev(fx.root, ['run', 'workflow', 'reviewed', '--json'], { env: env({ STUB_STEPS_OUT: stepsOut, STUB_VERDICTS: verdicts }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq([j.done, j.agentRuns], [true, 4], 'coder, reviewer (FAIL), coder, reviewer (PASS)');
+        eq([j.steps[0].ok, j.steps[0].attempts], [true, 2]);
+        ok(/VERDICT: PASS/.test(j.steps[0].review), JSON.stringify(j.steps[0]));
+        eq(fs.readFileSync(stepsOut, 'utf8').trim().split('\n'), ['write', 'write:until', 'write', 'write:until'],
+          'the reviewer runs as <step>:until, which the guard gives nothing to write');
+        const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
+        eq(prompts.length, 4);
+        ok(/`node --version` must exit 0, and the reviewer agent must pass the work against this check: Check that the tests cover/.test(prompts[0]),
+          'the step\'s agent knows both checks up front');
+        ok(/# Agent: reviewer/.test(prompts[1]) && /You review tests\./.test(prompts[1]), 'the reviewer runs with its own definition');
+        ok(/### What it reported[\s\S]*stub answer/.test(prompts[1]), 'the reviewer sees what the step\'s agent reported');
+        ok(/`node --version` has already exited 0/.test(prompts[1]));
+        ok(/## Your check\n\nCheck that the tests cover the edge cases\./.test(prompts[1]));
+        ok(/`VERDICT: PASS` or `VERDICT: FAIL`/.test(prompts[1]));
+        ok(/## Previous attempt 1 of 4 failed[\s\S]*reviewer agent checked the work and did not pass it[\s\S]*test for empty input is missing/.test(prompts[2]),
+          'the step\'s next attempt gets the reviewer\'s report');
+      });
+
+      test('the until agent is not started while the command fails, and a missing verdict counts as FAIL', () => {
+        define('gated', { steps: [
+          '  - id: write', '    agent: coder', '    prompt: write',
+          '    until:', '      command: node -e process.exit(3)', '      agent: reviewer', '      prompt: check',
+        ] });
+        const stepsOut = path.join(tmp, 'steps.txt');
+        reset();
+        fs.rmSync(stepsOut, { force: true });
+        const g = aidev(fx.root, ['run', 'workflow', 'gated', '--json'], { env: env({ STUB_STEPS_OUT: stepsOut }) });
+        eq(g.code, 1, g.out);
+        eq(fs.readFileSync(stepsOut, 'utf8').trim().split('\n'), ['write', 'write'], 'no reviewer run');
+        ok(/same failure repeated \(node -e process\.exit\(3\) exited 3/.test(lastJson(g.out).stopReason), lastJson(g.out).stopReason);
+
+        define('silent', { steps: [
+          '  - id: write', '    agent: coder', '    prompt: write',
+          '    until:', '      agent: reviewer', '      prompt: check',
+        ] });
+        reset();
+        const s = aidev(fx.root, ['run', 'workflow', 'silent', '--json'], { env: env() });
+        eq(s.code, 1, s.out);
+        const j = lastJson(s.out);
+        eq(j.agentRuns, 4, 'the reviewer gave no verdict twice with the same report');
+        ok(/same failure repeated \(reviewer answered no verdict/.test(j.stopReason), j.stopReason);
       });
 
       test('the cost budget stops the workflow before another agent starts', () => {
