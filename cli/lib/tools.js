@@ -404,10 +404,51 @@ function assertAgentName(name) {
 /** Every kit-owned config glob across all tools (for protection and kit-managed checks). */
 const ALL_CONFIG_GLOBS = layout.ALL_TOOL_CONFIG_GLOBS;
 
-/** Build a shell-free cmd.exe invocation for a legacy .cmd/.bat shim. */
+/**
+ * A legacy .cmd/.bat shim, run through cmd.exe. `cmdScript` marks the spec:
+ * `spawnSpec` composes the command line itself, because cmd.exe does not read
+ * the quoting Node applies to an ordinary argv.
+ */
 function windowsScriptSpec(script, source, env) {
   const comspec = env.ComSpec || env.COMSPEC || process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
-  return { ok: true, bin: comspec, argvPrefix: ['/d', '/s', '/c', script], shell: false, killTree: true, source };
+  return { ok: true, bin: comspec, argvPrefix: [], cmdScript: script, shell: false, killTree: true, source };
+}
+
+/** Characters cmd.exe acts on, inside double quotes or not. */
+const CMD_META_RE = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * One argument for a .cmd/.bat shim: wrapped in double quotes (a trailing
+ * backslash doubled so it does not swallow the closing quote), then every
+ * cmd.exe metacharacter caret-escaped so the outer cmd.exe passes it through.
+ * The shim then sees a quoted argument, which both `%*` forwarding and a
+ * `"%~1"==...` test handle. Escaping twice (as for npm's own shims) would
+ * survive a second expansion, but breaks a shim that inspects its arguments.
+ *
+ * A double quote or a line break cannot be carried through a shim unchanged,
+ * so they are refused here instead of arriving altered.
+ */
+function quoteCmdArg(arg) {
+  const raw = String(arg);
+  if (/[\r\n"]/.test(raw)) {
+    throw new Error('an argument for a .cmd/.bat launcher cannot contain a double quote or a line break');
+  }
+  return `"${raw.replace(/(\\*)$/, '$1$1')}"`.replace(CMD_META_RE, '^$1');
+}
+
+/**
+ * What to hand `spawn` / `spawnSync` / `execFileSync` for a resolved binary:
+ * `{ bin, args, options }`. Spread `options` into the call's own options.
+ *
+ * A .cmd/.bat shim needs the whole command as one verbatim string in an outer
+ * pair of quotes. Passed as a plain argv, a script path with a space (npm under
+ * `C:\Program Files\nodejs`) is quoted by Node, `/s` strips that quote, and
+ * cmd.exe tries to run `C:\Program`.
+ */
+function spawnSpec(resolved, argv = []) {
+  if (!resolved.cmdScript) return { bin: resolved.bin, args: [...resolved.argvPrefix, ...argv], options: {} };
+  const line = [`"${resolved.cmdScript}"`.replace(CMD_META_RE, '^$1'), ...argv.map(quoteCmdArg)].join(' ');
+  return { bin: resolved.bin, args: ['/d', '/s', '/c', `"${line}"`], options: { windowsVerbatimArguments: true } };
 }
 
 /**
@@ -446,15 +487,23 @@ function resolveBinary(tool = 'claude', env = process.env) {
   return { ok: true, tool: t.id, bin: t.bin, argvPrefix: [], shell: false, killTree: false, source: 'PATH' };
 }
 
-/** `where.exe` lookup: the native executable, or a cmd.exe argv for a .cmd/.bat shim. Null when not found. */
+/**
+ * The first `where.exe` result Windows can start: a native executable or a
+ * .cmd/.bat shim. `where npm` lists the extensionless POSIX shell script that
+ * ships next to `npm.cmd` first; taking that line ends in ENOENT.
+ */
+function pickWindowsCandidate(whereOutput) {
+  return String(whereOutput || '').split(/\r?\n/).map((s) => s.trim())
+    .find((candidate) => /\.(exe|com|cmd|bat)$/i.test(candidate)) || null;
+}
+
+/** `where.exe` lookup: the native executable, or a cmd.exe spec for a .cmd/.bat shim. Null when not found. */
 function locateOnWindows(bin, env) {
   try {
     const found = spawnSync('where.exe', [bin], {
       encoding: 'utf8', env: { ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const candidate = found.status === 0
-      ? String(found.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean)
-      : null;
+    const candidate = found.status === 0 ? pickWindowsCandidate(found.stdout) : null;
     if (!candidate) return null;
     if (/\.(cmd|bat)$/i.test(candidate)) return windowsScriptSpec(candidate, `PATH (${candidate})`, env);
     return { ok: true, bin: candidate, argvPrefix: [], shell: false, killTree: true, source: `PATH (${candidate})` };
@@ -490,8 +539,10 @@ function checkVersion(resolved, env = process.env) {
   if (resolved.skipVersionCheck) return { ok: true, skipped: true };
   const t = getTool(resolved.tool);
   try {
-    const checked = spawnSync(resolved.bin, [...resolved.argvPrefix, '--version'], {
+    const launch = spawnSpec(resolved, ['--version']);
+    const checked = spawnSync(launch.bin, launch.args, {
       encoding: 'utf8', env: { ...env }, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'],
+      ...launch.options,
     });
     const text = stripControl(`${checked.stdout || ''}\n${checked.stderr || ''}`).trim();
     if (checked.error && checked.error.code === 'ENOENT') {
@@ -519,4 +570,5 @@ module.exports = {
   TEMPLATE_AGENTS_DIR, TEMPLATE_SKILLS_DIR, TEMPLATE_INSTRUCTIONS,
   getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents, resolveCommand,
   filePointerPrompt, resolveBinary, checkVersion, versionAtLeast, stripControl,
+  spawnSpec, pickWindowsCandidate, quoteCmdArg,
 };

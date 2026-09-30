@@ -328,6 +328,9 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
 
 - tool固有の事項は`cli/lib/tools.js`の`REGISTRY`（`claude` / `copilot` / `codex` / `kiro`）に集約する。各recordは`bin`、`envBin`、`minVersion`、`verified`、`prompt`（`stdin` | `file`）、`namedAgents`、`argv()`、`parse()`、`configGlobs`、`configDirs`を持つ。`agent.js`はtool idを見ずadapterに委譲する
 - `tools.resolveBinary(tool)`: `AIDEV_<TOOL>_BIN`（`.js`ならnodeで実行しversion検査を省く。testはこれでstubを差す）→ Windowsは`where.exe <bin>`で絶対pathへ解決（`.cmd`/`.bat`は`cmd.exe /d /s /c`経由）→ それ以外はPATHの`<bin>`
+  - `where.exe`の結果は先頭行ではなく、拡張子が`.exe` / `.com` / `.cmd` / `.bat`の最初の行を採る（`pickWindowsCandidate`）。`where npm`は`npm.cmd`より先に拡張子なしのPOSIX shell scriptを返し、それは起動できない
+  - 起動は`tools.spawnSpec(resolved, argv)`が返す`{bin, args, options}`で行う（`runAgent`・`checkVersion`・workflowの`runCommand`が共用）。`.cmd`/`.bat`はcommand全体を1本の文字列に組み立てて`windowsVerbatimArguments`で渡す。通常のargvで渡すと、空白を含むscript path（`C:\Program Files\nodejs\npm.cmd`）にNodeが付けた引用符を`/s`が剥がし、`C:\Program`を実行しようとして失敗する
+  - `.cmd`/`.bat`へ渡す引数は`quoteCmdArg`が二重引用符で囲み、cmd.exeのmeta文字を`^`でescapeする。escapeは1重（2重にすると`%*`をそのまま転送するshimでは動くが、`"%~1"==...`のように引数を調べるshimが構文errorになる）。二重引用符か改行を含む引数はshimを変化なしに通せないので例外にする。kitが組み立てる引数には含まれず、promptはstdinかfileで渡す
 - `tools.checkVersion`: `<bin> --version`。`minVersion`があるtool（claude: 2.1.259）はそれ未満で起動しない。無いtoolは起動できれば通す
 - claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`。`runAgent({ capabilities: {tools, mcp, mcpConfigFile} })`のときは`--mcp-config <mcpConfigFile> --strict-mcp-config`、`mcp`があれば`--allowedTools mcp__<server>,…`、`tools`があれば最後に`--tools <list…>`を足す（Claude Code 2.1.280で確認: `--tools`は他の組み込みtoolを隠し、`--strict-mcp-config`は`--mcp-config`のserverだけを読む）。adapterの`capabilities: true`はclaudeだけで、それ以外のadapterに`capabilities`を渡すと`buildArgv`が例外を投げ、`runAgent`は`ok: false`を返す。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
 - `runAgent`は`env`をそのまま子processに渡す。workflow runnerは`AIDEV_WORKFLOW=<name>`と`AIDEV_WORKFLOW_STEP=<step id>`を足して起動し、toolが起動するhookがそれを継承してguard-writeがそのstepの`writable`とagentの能力を適用する
@@ -461,7 +464,7 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 
 `def.agents`はstepが名指すagentの一覧（重複なし）で、YAMLには書きません。
 
-`until`と`command`は空白で分割してshellなしで実行します（`|&;<>`$"'\`を含むと拒否）。実行fileの解決は`tools.resolveCommand`（Windowsでは`where.exe`で`.cmd` shimを`cmd.exe /d /s /c`経由にする。`npm test`が動く理由）。
+`until`と`command`は空白で分割してshellなしで実行します（`|&;<>`$"'\`を含むと拒否）。実行fileの解決は`tools.resolveCommand`、起動は`tools.spawnSpec`（Windowsでは`where.exe`で見つけた`.cmd` shimを`cmd.exe /d /s /c`経由にする。`npm test`が動く理由。詳細は「Claude launcher」の`resolveBinary`の項）。見つかったのに起動できなかったときは`<command> could not be started (<解決したpath>)`、PATHに無いときは`<command> was not found on PATH`と報告する。
 
 agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `.aidev/agents/<name>.md`・`.aidev/skills/<name>/SKILL.md`（PKG）→ `templates/claude/.claude/agents/`・`.claude/skills/`（kit checkout）。agentのfrontmatterが能力を持ちます（`agentCapabilities`）:
 

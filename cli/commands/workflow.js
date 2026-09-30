@@ -366,14 +366,20 @@ function runCommand(repoRoot, argv, deadline) {
   const timeout = Math.max(1000, deadline - Date.now());
   const resolved = toolsMod.resolveCommand(argv[0]);
   try {
-    const out = execFileSync(resolved.bin, [...resolved.argvPrefix, ...argv.slice(1)], {
+    const launch = toolsMod.spawnSpec(resolved, argv.slice(1));
+    const out = execFileSync(launch.bin, launch.args, {
       cwd: repoRoot, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-      maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024, ...launch.options,
     });
     return { code: 0, stdout: out, stderr: '' };
   } catch (e) {
     const code = e.status == null ? (e.code === 'ENOENT' ? 127 : 1) : e.status;
-    const stderr = e.code === 'ENOENT' ? `${argv[0]} was not found on PATH` : (e.stderr || '');
+    // Found by where.exe yet ENOENT means the file could not be started, which
+    // is a different fix for the reader than a command missing from PATH.
+    const missing = resolved.source === 'PATH'
+      ? `${argv[0]} was not found on PATH`
+      : `${argv[0]} could not be started (${resolved.source})`;
+    const stderr = e.code === 'ENOENT' ? missing : (e.stderr || '');
     return { code, stdout: e.stdout || '', stderr: String(stderr) + (e.signal ? ` (stopped by ${e.signal})` : '') };
   }
 }
