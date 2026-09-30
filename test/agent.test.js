@@ -209,6 +209,84 @@ function run() {
     eq(bad.ok, false); eq(bad.reason, 'boom');
   });
 
+  // ------------------------------------------- Windows command resolution
+  suite('tools: Windows command resolution');
+
+  test('where.exe output: the first result Windows can start is taken, not the first line', () => {
+    const pick = toolsMod.pickWindowsCandidate;
+    // `where npm` on a stock Node install: the POSIX shell script comes first.
+    eq(pick('C:\\Program Files\\nodejs\\npm\r\nC:\\Program Files\\nodejs\\npm.cmd\r\n'), 'C:\\Program Files\\nodejs\\npm.cmd');
+    eq(pick('C:\\tools\\claude.exe\r\nC:\\tools\\claude.cmd\r\n'), 'C:\\tools\\claude.exe', 'order among startable results is kept');
+    eq(pick('C:\\x\\legacy.BAT\n'), 'C:\\x\\legacy.BAT', 'the extension match ignores case');
+    eq(pick('C:\\x\\npm\r\nC:\\x\\npm.ps1\r\n'), null, 'nothing startable');
+    eq(pick(''), null);
+    eq(pick(undefined), null);
+  });
+
+  test('spawnSpec: a native binary keeps its argv; a .cmd shim becomes one verbatim cmd.exe line', () => {
+    const native = toolsMod.spawnSpec({ bin: 'C:\\x\\node.exe', argvPrefix: ['stub.js'] }, ['--version']);
+    eq(native, { bin: 'C:\\x\\node.exe', args: ['stub.js', '--version'], options: {} });
+
+    const shim = toolsMod.spawnSpec(
+      { bin: 'cmd.exe', argvPrefix: [], cmdScript: 'C:\\Program Files\\nodejs\\npm.cmd' }, ['test', 'a b']);
+    eq(shim.bin, 'cmd.exe');
+    eq(shim.options, { windowsVerbatimArguments: true });
+    eq(shim.args.slice(0, 3), ['/d', '/s', '/c']);
+    eq(shim.args.length, 4, 'the whole command is one argument');
+    ok(shim.args[3].startsWith('"') && shim.args[3].endsWith('"'), 'wrapped in the quotes /s strips');
+    ok(shim.args[3].includes('^"C:\\Program^ Files\\nodejs\\npm.cmd^"'), `the script path is quoted for cmd.exe: ${shim.args[3]}`);
+    eq(toolsMod.quoteCmdArg('a&b'), '^"a^&b^"', 'metacharacters are escaped once: a shim that tests "%~1" still parses');
+    eq(toolsMod.quoteCmdArg('C:\\dir\\'), '^"C:\\dir\\\\^"', 'a trailing backslash must not swallow the closing quote');
+    throws(() => toolsMod.quoteCmdArg('two\nlines'), /line break/);
+    throws(() => toolsMod.quoteCmdArg('say "hi"'), /double quote/, 'a quote cannot pass through a shim unchanged');
+  });
+
+  test('a .cmd shim in a directory with spaces receives every argument, stdin and returns its exit code', () => {
+    if (process.platform !== 'win32') return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev shim (x86) '));
+    try {
+      const out = path.join(dir, 'seen.json');
+      const stub = path.join(dir, 'echo args.js');
+      fs.writeFileSync(stub, [
+        "const fs = require('fs');",
+        "let input = '';",
+        "process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
+        '  fs.writeFileSync(process.env.SEEN_OUT, JSON.stringify({ argv: process.argv.slice(2), input }));',
+        '  process.exit(Number(process.env.SEEN_EXIT || 0));',
+        '});',
+      ].join('\n'));
+      // An extensionless sibling sorts first in `where.exe`, as `npm` does beside `npm.cmd`.
+      fs.writeFileSync(path.join(dir, 'faketool'), '#!/bin/sh\nexit 1\n');
+      fs.writeFileSync(path.join(dir, 'faketool.cmd'), ['@echo off', `"${process.execPath}" "${stub}" %*`, ''].join('\r\n'));
+
+      const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+      const env = { ...process.env, [pathKey]: `${dir};${process.env[pathKey]}`, SEEN_OUT: out };
+      const resolved = toolsMod.resolveCommand('faketool', env);
+      eq(resolved.cmdScript, path.join(dir, 'faketool.cmd'), `resolved to ${resolved.source}`);
+
+      const argv = [
+        '--workspace=packages/backend', 'with space', 'C:\\Program Files\\x\\', 'a&b|c<d>e', '100%', '%PATH%',
+        'caret^here', 'paren(s)', 'bang!', '日本語 の引数', '',
+      ];
+      const launch = toolsMod.spawnSpec(resolved, argv);
+      const { spawnSync } = require('child_process');
+      const r = spawnSync(launch.bin, launch.args, {
+        encoding: 'utf8', env, input: '標準入力\nsecond line', windowsHide: true, ...launch.options,
+      });
+      eq(r.status, 0, `the shim did not start: ${r.stderr}`);
+      const seen = JSON.parse(fs.readFileSync(out, 'utf8'));
+      eq(seen.argv, argv, 'an argument changed on the way through cmd.exe');
+      eq(seen.input, '標準入力\nsecond line');
+
+      const failing = spawnSync(launch.bin, launch.args, {
+        encoding: 'utf8', env: { ...env, SEEN_EXIT: '7' }, input: '', windowsHide: true, ...launch.options,
+      });
+      eq(failing.status, 7, 'the exit code of the program behind the shim is lost');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // -------------------------------------------------------------- config
   suite('config: several tools and per-agent overrides');
 

@@ -477,7 +477,9 @@ function previewCommand({ tool, agent, model }) {
   const promptArg = adapter.prompt === 'file' ? `<${PROMPT_DIR_REL}/${tool}-run-<pid>-<time>.md>` : null;
   const argv = buildArgv({ tool, agent, model, promptArg });
   return {
-    bin: resolved.ok ? resolved.bin : adapter.bin,
+    // A .cmd/.bat shim is shown as the script and its argv; the cmd.exe
+    // command line `spawnSpec` composes for it is not something to read.
+    bin: resolved.ok ? (resolved.cmdScript || resolved.bin) : adapter.bin,
     argv: resolved.ok ? [...resolved.argvPrefix, ...argv] : argv,
     source: resolved.ok ? resolved.source : resolved.reason,
     promptVia: adapter.prompt,
@@ -560,11 +562,11 @@ function runAgent({
       resolve({ ok: false, tool, reason: e.message });
       return;
     }
-    const argv = [...resolved.argvPrefix, ...toolArgv, ...extraArgv];
     const startedAt = Date.now();
     let child;
     try {
-      child = spawn(resolved.bin, argv, {
+      const launch = toolsMod.spawnSpec(resolved, [...toolArgv, ...extraArgv]);
+      child = spawn(launch.bin, launch.args, {
         cwd: repoRoot,
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: !!resolved.shell,
@@ -573,6 +575,7 @@ function runAgent({
         // runner passes AIDEV_WORKFLOW through `env`, which is how the write
         // guard learns which approved scope applies.
         env,
+        ...launch.options,
       });
     } catch (e) {
       resolve({ ok: false, skipped: true, tool, reason: `could not start ${resolved.bin}: ${e.message}` });

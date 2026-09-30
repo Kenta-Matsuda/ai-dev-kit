@@ -443,8 +443,10 @@ function runCommand(repoRoot, command, { deadline, cwd = null, env = {}, timeout
     const startedAt = Date.now();
     let child;
     try {
-      child = spawn(resolved.bin, [...resolved.argvPrefix, ...command.argv.slice(1)], {
+      const launch = toolsMod.spawnSpec(resolved, command.argv.slice(1));
+      child = spawn(launch.bin, launch.args, {
         cwd: dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], shell: !!resolved.shell, windowsHide: true,
+        ...launch.options,
       });
     } catch (e) { keep(`${command.argv[0]} could not be started: ${e.message}\n`); finish(127); return; }
 
@@ -476,7 +478,12 @@ function runCommand(repoRoot, command, { deadline, cwd = null, env = {}, timeout
     };
     child.on('error', (e) => {
       cleanup();
-      keep(e && e.code === 'ENOENT' ? `${command.argv[0]} was not found on PATH\n` : `${command.argv[0]} could not be started: ${e.message}\n`);
+      // Found by where.exe yet ENOENT means the file could not be started, which
+      // is a different fix for the reader than a command missing from PATH.
+      const missing = resolved.source === 'PATH'
+        ? `${command.argv[0]} was not found on PATH`
+        : `${command.argv[0]} could not be started (${resolved.source})`;
+      keep(e && e.code === 'ENOENT' ? `${missing}\n` : `${command.argv[0]} could not be started: ${e.message}\n`);
       finish(127);
     });
     child.on('close', (code, signal) => {

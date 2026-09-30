@@ -676,6 +676,25 @@ function run() {
       ok(fs.readFileSync(promptOut, 'utf8').includes('Generate the LLM Wiki prose'),
         'legacy .cmd launcher truncated stdin prompt');
     });
+    // The same launcher under a directory with a space, as a tool installed
+    // in `C:\Program Files` or a user profile with a space in its name is.
+    withRepo(({ root, stub, argvOut, promptOut }) => {
+      const spaced = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev tool dir '));
+      try {
+        const r = aidev(root, ['sync', 'wiki', '--no-commit'], { env: {
+          AIDEV_CLAUDE_BIN: writeCmd(spaced, stub),
+          STUB_ARGV_OUT: argvOut,
+          STUB_PROMPT_OUT: promptOut,
+        } });
+        eq(r.code, 0, `.cmd launcher in a directory with a space failed: ${r.out}`);
+        const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        eq(argv[argv.indexOf('--agent') + 1], 'knowledge-builder');
+        ok(fs.readFileSync(promptOut, 'utf8').includes('Generate the LLM Wiki prose'),
+          '.cmd launcher in a directory with a space truncated the stdin prompt');
+      } finally {
+        fs.rmSync(spaced, { recursive: true, force: true });
+      }
+    });
     withRepo(({ root, stub, argvOut }) => {
       const started = Date.now();
       const r = aidev(root, ['sync', 'wiki', '--no-commit', '--agent-timeout', '10000', '--json'], { env: {

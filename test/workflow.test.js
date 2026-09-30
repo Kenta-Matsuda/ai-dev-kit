@@ -528,6 +528,26 @@ function run() {
         ok(/step think: stub: refused/.test(lastJson(f.out).stopReason), f.out);
       });
 
+      test('a command step reaches a .cmd shim on PATH whose directory has a space (npm on Windows)', () => {
+        if (process.platform !== 'win32') return;
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev shim dir '));
+        try {
+          const seen = path.join(dir, 'seen.txt');
+          // Beside the shim sits an extensionless file, as `npm` sits beside `npm.cmd`.
+          fs.writeFileSync(path.join(dir, 'faketool'), '#!/bin/sh\nexit 1\n');
+          fs.writeFileSync(path.join(dir, 'faketool.cmd'), ['@echo off', `echo %*> "${seen}"`, ''].join('\r\n'));
+          const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+          define('shim', { steps: ['  - id: c', '    command: faketool run --workspace=packages/backend'] });
+          const r = aidev(fx.root, ['run', 'workflow', 'shim', '--json'],
+            { env: env({ [pathKey]: `${dir};${process.env[pathKey]}` }) });
+          eq(r.code, 0, r.out);
+          ok(/run/.test(fs.readFileSync(seen, 'utf8')) && /--workspace=packages\/backend/.test(fs.readFileSync(seen, 'utf8')),
+            `the shim did not receive its arguments: ${fs.readFileSync(seen, 'utf8')}`);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
       test('a human-mode run shows each tool call as it streams in, subagent calls indented', () => {
         define('watched', { steps: ['  - id: a', '    agent: coder', '    prompt: hi'] });
         reset();
