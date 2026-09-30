@@ -100,7 +100,15 @@ aidev run workflow write-tests --dry-run
 
 |`until.command` and `command`
 |Commands that are safe to run in this PKG (tests, lint and so on)
-|Commands that deploy, delete data or send things outside (no shell is involved, but the command itself does run)
+|Commands that deploy, delete data or send things outside (no shell is involved, but the command itself does run). Secrets (a token, a password) written in `env`
+
+|`unchanged`
+|It lists the paths that would let `until` pass if weakened, such as the existing tests or the test runner's configuration
+|Tests and `package.json` are both in `writable` and there is no `unchanged`. `until.command` calls a script that can be rewritten, such as `npm test`
+
+|`for_each`
+|`max_items` fits the size of the job. `until` uses `{item}` and checks only that target
+|The `until` of each target runs the whole test suite (it takes that long once per target)
 
 |`until.agent` and `until.prompt`
 |The checking agent has read-only tools, and the check is specific
@@ -128,10 +136,11 @@ If something is wrong, do not merge; write a comment on the PR. Say which step, 
 [[review-workflow-result]]
 === Workflow result pull requests
 
-It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the workflow name, the run id, the starting commit and the cost.
+It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the workflow name, the run id, the starting commit and the cost, and the final report of each agent step (the plan, what was verified, what is left open).
 
 * Does the diff stay inside the steps' `writable`? (Writes are limited automatically, but check.)
 * Do the tests pass? Does `aidev check` in CI pass?
+* Were tests or settings weakened (a deleted test, a `skip`, a rewritten expectation, a loosened setting)? `unchanged` protects only the paths the definition lists.
 * Does it match the `objective` and the `--task`? Are there no unrelated changes?
 
 If results keep missing the mark, do not just fix the result by hand; fix the definition. The next run would give the same result otherwise (xref:workflows-fix[Fixing a workflow]).

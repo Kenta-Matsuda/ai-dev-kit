@@ -8,13 +8,14 @@ Runs an approved workflow (the definition that is on `origin/main`). Development
 [source,text]
 ----
 aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--dry-run] [--json]
+aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--dry-run] [--json]
 ----
 
 === Description
 
 Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
 
-Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>` and `AIDEV_WORKFLOW_STEP=<id>`. The hook allows writes only inside that step's `writable`. Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. The final report of each earlier agent step goes into the instructions of the later agent steps. When it finishes, the record is written to `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
+Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>` and `AIDEV_WORKFLOW_STEP=<id>`. The hook allows writes only inside that step's `writable`. Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. The final report of each earlier agent step goes into the instructions of the later agent steps. The record is written to `.aidev/workflows/<name>/runs/<id>/` as the run goes (`run.json`, `log.txt`, the reports, the command output). A run that stopped continues from the step it stopped at with `--resume` (xref:workflows-resume[Continuing a stopped run]). See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
 
 === Options
 
@@ -30,6 +31,9 @@ Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a
 
 |`--max-minutes <n>`
 |Lower the time limit for this run only (cannot go above 60)
+
+|`--resume <run id \| last>`
+|Continue a stopped run from the step it stopped at. `last` is the most recent run. Finished steps are not run again. Cannot be combined with `--task` or `--task-file` (the task is the one the run started with)
 
 |`--dry-run`
 |Show the approval state, the files involved, the agents and AI tools, the limits, the task, and what each step does (where it may write; the agent's skills, tools and MCP servers; `until`); start nothing. Problems that would stop the run before it starts are shown, with exit code 1
@@ -48,7 +52,7 @@ Runs the steps (`steps`) in order. A workflow with a `pull-request` step needs a
 |Finished every step. `--dry-run` when approved and no problem would stop the run before it starts
 
 |1
-|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the ADK. A server in an agent's `mcp` that `.mcp.json` does not register. An agent with `tools` or `mcp` started on an AI tool other than Claude Code. A `pull-request` step with a dirty working tree. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, the time or cost limit)
+|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the ADK. A server in an agent's `mcp` that `.mcp.json` does not register. An agent with `tools` or `mcp` started on an AI tool other than Claude Code. A `pull-request` step with a dirty working tree. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, the time or cost limit). `--resume` for a run that does not exist, has finished, whose definition changed since it started, or whose branch is not checked out
 |===
 
 === Examples

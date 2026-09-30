@@ -146,13 +146,19 @@ cost:
 |`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで `max_retries` 回まで agent を繰り返します。`timeout_ms` は任意です。
 
 |`until`
-|そのステップの終わりの判定です。`command`（exit 0 になること）と `agent` + `prompt`（その agent が合格と判定すること）のどちらか、または両方を書きます。両方あるときはコマンドが通ってから agent が確認します。xref:workflows-until-agent[agent のレビューで終わりを判定する] を参照してください。
+|そのステップの終わりの判定です。`command`（exit 0 になること）と `agent` + `prompt`（その agent が合格と判定すること）のどちらか、または両方を書きます。両方あるときはコマンドが通ってから agent が確認します。`command` は list にすると上から順に実行します。コマンドの実行の仕方は `cwd`・`env`・`timeout_ms` で決めます（xref:workflows-commands[コマンドの書き方]）。agent での判定は xref:workflows-until-agent[agent のレビューで終わりを判定する] を参照してください。
 
 |`writable`
 |そのステップの agent が書けるパス（glob）。**PKG のソースを AI が書けるのは、承認済み workflow の、いま動いているステップのこの範囲だけです。** `protected`（`.claude/**`、`.aidev/policy.yaml` など）と `secrets_paths` は書けません。`[]` なら何も書けません（調査だけのステップ）。
 
+|`unchanged`
+|任意。そのステップが変えてはいけないパス（glob）。`writable` の中にあっても書けず、ステップの前後で内容が変わっていれば不合格です（xref:workflows-unchanged[変えてはいけない場所を決める]）。
+
+|`for_each`
+|任意。対象の一覧（`from`）の 1 件ごとに、agent を新しく起動して繰り返します。`max_items` は必須です（xref:workflows-for-each[対象ごとに繰り返す]）。
+
 |command step
-|`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
+|`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。`cwd`・`env`・`timeout_ms` は任意です。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
 
 |`kind: pull-request`
 |各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` 任意。1 つまでです。
@@ -166,11 +172,127 @@ cost:
 
 上の表にない項目を書くと、検証で拒否されます。
 
-`until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。
-
-各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。代わりに、**前の agent step の最終報告を、ADK が後の agent step の指示に入れます**。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
-
 安全弁は省略できず、上げられません。時間の上限（60 分）、step ごとの再試行回数（10 回）、費用の上限（必須）、同じ失敗の検知（`until` の結果が 2 回続けて同じなら停止）、agent 1 回の起動は `timeout_ms` と残り時間の短い方で打ち切りです。
+
+[[workflows-commands]]
+==== コマンドの書き方
+
+`until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は書けません。代わりに次の項目を使います。
+
+[source,yaml]
+----
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    prompt: 前のステップが挙げた画面の IT テストを書く。
+    until:
+      command:                     # list は上から順に実行する。最初に失敗したところで止まる
+        - npm ci
+        - npx playwright test
+      cwd: e2e                     # 実行するディレクトリ（PKG の中）。省略すると PKG のルート
+      env:                         # コマンドに渡す環境変数（固定の値）
+        CI: 1
+        BASE_URL: http://localhost:3000
+      timeout_ms: 900000           # コマンド 1 つの時間の上限（最大 3600000）
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|項目 |意味
+
+|`command` の list
+|`until` だけで書けます。`&&` の代わりです。command step で順に実行したいときは、command step を並べます。
+
+|`cwd`
+|コマンドを実行するディレクトリです。PKG の外（`..` や絶対パス）は書けません。
+
+|`env`
+|コマンドに渡す環境変数です。値は定義に書いた固定の文字列で、PR でレビューされます。**秘密情報は書きません。** `AIDEV_` で始まる名前は書けません。
+
+|`timeout_ms`
+|コマンド 1 つの時間の上限です。省略すると workflow の残り時間まで待ちます。
+|===
+
+コマンドの出力は全文を実行記録の `logs/` に残します。`until` のコマンドが失敗すると、出力の末尾と、その file の場所を agent に渡します。
+
+[[workflows-handoff]]
+==== ステップの間で結果を渡す
+
+各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。結果を渡す方法は 2 つあります。
+
+* **最終報告** — 前の agent step の最終報告を、ADK が後の agent step の指示に入れます（長い報告は末尾 6000 文字）。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
+* **notes ディレクトリ** — 計画や対象ファイルの一覧のように、長いものや正確に渡したいものは file に書かせます。場所は実行ごとの `.aidev/workflows/<name>/runs/<id>/notes/` で、ADK が各 agent step の指示に入れます。`writable: []` のステップも書けます。確認役の agent は読むだけです。コミットはされません。
+
+[source,yaml]
+----
+  - id: plan
+    agent: upgrade-planner
+    writable: []
+    prompt: 変更が要る箇所を調べ、対象の一覧を notes ディレクトリの targets.md に書く。
+  - id: migrate
+    agent: upgrader
+    writable: [src/**, package.json, package-lock.json]
+    prompt: notes ディレクトリの targets.md を読み、上から順に移行する。
+----
+
+[[workflows-for-each]]
+==== 対象ごとに繰り返す
+
+画面ごとにテストを書く、module ごとに移行する、のように対象が多い仕事は、1 件ずつに分けます。1 回の起動で全部をやらせると、後の対象ほど質が落ち、1 件の失敗でステップ全体をやり直すことになります。
+
+[source,yaml]
+----
+  - id: plan
+    agent: e2e-planner
+    writable: []
+    prompt: IT テストが要る画面を調べ、notes ディレクトリの targets.txt に 1 行 1 件で書く。
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    for_each:
+      from: targets.txt            # notes ディレクトリの file。前のステップが書く
+      max_items: 20                # 必須。1 回の実行で扱う件数の上限（最大 100）
+    prompt: 画面 {item} の IT テストを e2e/tests/{item}.spec.ts に書く。
+    until:
+      command: npx playwright test tests/{item}.spec.ts   # この件だけを判定する
+      cwd: e2e
+    max_retries: 3
+----
+
+* 一覧は ADK が読みます。1 行が 1 件で、空行と `#` で始まる行は飛ばします。同じ行が 2 回あれば 1 件です。
+* `{item}` は `prompt`、`until.command`、`until.prompt` に書けます。`prompt` には必須です。
+* 1 件ごとに agent を新しく起動します。`until` と `max_retries` も 1 件ごとです。時間と費用の上限は実行全体で数えます。
+* 1 件が失敗すると、そこで止まります。通った件はそのまま残り、`--resume` は止まった件から続けます（xref:workflows-resume[止まった実行を続ける]）。
+* 後のステップには、件ごとの結果をまとめた報告が 1 つ渡ります。
+
+1 件に書けるのは、英数字と `. _ / @ -` だけの 1 語です（200 文字まで）。空白、先頭の `-`、`..` を含む行があると、ADK は agent を起動する前に止まります。件はコマンドの引数になるので、オプションや別の場所を指す文字列を受け付けないためです。一覧を書くステップの `prompt` に、この書き方を書いておきます。
+
+[[workflows-unchanged]]
+==== 変えてはいけない場所を決める
+
+`until` は「コマンドが成功すること」しか見ません。agent は、コードを直す代わりに判定のほうを弱めても、`until` を通せます。落ちるテストを消す、期待値を書き換える、test runner の設定を緩める、などです。弱められては困るパスを `unchanged` に書きます。
+
+[source,yaml]
+----
+  - id: migrate
+    agent: upgrader
+    writable: [src/**, tests/**, package.json, package-lock.json]
+    unchanged: [tests/**]          # 既存のテストは変えさせない
+    prompt: notes ディレクトリの targets.md を読み、上から順に移行する。
+    until:
+      command: npx vitest run      # package.json の script ではなく、test runner を直接呼ぶ
+----
+
+* `unchanged` のパスは、`writable` の中にあっても agent は書けません（hook が拒否します）。
+* ADK はステップを始めたときの状態を覚えておき、試行のたびに比べます。変わっていれば不合格で、変わったパスを添えて agent をやり直させます。コマンドや `Bash` が変えた場合も検出します。
+* 同じパスが 2 回続けて変わっていれば止まります。元に戻してから `--resume` します。
+* 前のステップが変えた内容は、そのステップの「始めたときの状態」に含まれます。テストを書くステップの後に、`unchanged: [tests/**]` の実装ステップを置けます。
+* gitignore されたファイルは比べません。
+
+検出できるのはファイル単位です。`writable` に残したファイルの中の変更（新しく書いたテストの `test.skip`、`package.json` の `scripts` の書き換え）は検出できません。次の 2 つで補います。
+
+* `until.command` は `npm test` ではなく、test runner を直接呼びます（`package.json` が `writable` だと、`scripts.test` を書き換えられるためです）。
+* `until` に確認役の agent を足し、`until.prompt` に「skip したテストや空のテストが無いこと」と書きます（xref:workflows-until-agent[agent のレビューで終わりを判定する]）。
 
 [[workflows-until-agent]]
 ==== agent のレビューで終わりを判定する
@@ -197,7 +319,7 @@ cost:
 
 . `test-writer` がテストを書く
 . `npm test` を実行する。失敗したら、その出力を添えて `test-writer` をやり直させる（`test-reviewer` は起動しない）
-. `test-reviewer` を起動する。`test-writer` の報告、`writable` の範囲で変わったファイルの一覧、`until.prompt` を渡す
+. `test-reviewer` を起動する。`test-writer` の報告、`writable` の範囲で変わったファイルの一覧、差分を書いた file の場所、`until.prompt` を渡す
 . `test-reviewer` が最終メッセージを `VERDICT: PASS` の行で終えればステップは完了です。`VERDICT: FAIL`、またはその行が無ければ不合格で、`test-reviewer` の報告を添えて `test-writer` をやり直させる
 
 確認役の agent について:
@@ -315,12 +437,63 @@ aidev run workflow write-tests
 * `pull-request` step がある workflow は、作業ツリーがきれいであることを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。無い workflow は今のブランチで動き、変更は作業ツリーに残ります。
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
 * Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
-* 前の agent step の最終報告は、後の agent step の指示に入ります。
+* 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
-* `pull-request` step は、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用が書かれます。範囲内に変更が無ければ commit も PR も作りません。
-* 記録は `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`）に残ります。gitignore 済みで、コミットされません。
+* コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
+* `pull-request` step は、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。範囲内に変更が無ければ commit も PR も作りません。
+* 記録は `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。
 
-止まったときの表示と対処です。終了コードは 1 です。再開の仕組みはなく、直してもう一度実行します。
+[%autowidth.stretch,options="header"]
+|===
+|file |内容
+
+|`run.json`
+|ステップごとの結果、止まった理由、費用。ステップが終わるたびに更新します。
+
+|`log.txt`
+|画面に出た経過の行
+
+|`reports/<step>.md`
+|終わった agent step の最終報告の全文（確認役は `<step>.until.md`）。`for_each` のステップは件ごとのまとめで、件ごとの全文は `<step>.t<件の番号>.md`
+
+|`logs/<step>.<試行>.<番号>.log`
+|コマンドの出力の全文（`for_each` の件は `<step>.t<件の番号>.<試行>.<番号>.log`）
+
+|`diffs/<step>.<試行>.diff`
+|確認役の agent に見せた差分
+
+|`unchanged/<step>.json`
+|`unchanged` のパスの、ステップを始めたときの状態
+
+|`notes/`
+|ステップが次のステップのために書いた file
+
+|`pull-request.md`
+|PR 本文の全文。`generic` hosting で PR を手で作るときに使います。
+|===
+
+[[workflows-resume]]
+==== 止まった実行を続ける
+
+止まった実行は、止まったステップから続けられます。終わったステップはやり直しません。
+
+[source,bash]
+----
+aidev run workflow write-tests --resume last          # 最後の実行を続ける
+aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
+----
+
+* 同じブランチ、同じ `--task`、同じ notes で続きます。`--task` は付けられません。
+* 終わったステップの最終報告は記録から読み、後のステップの指示に入れます。
+* `for_each` のステップは、終わった件を飛ばして、止まった件から続けます。一覧はもう一度読むので、どうしても通らない件は、一覧の file（notes ディレクトリ）からその行を消してから続けられます。その件の途中の変更は作業ツリーに残るので、要らなければ先に戻します。
+* 止まったステップは最初からやり直します。作業ツリーには前回の変更が残っていて、agent には前回止まった理由を伝えます。
+* 時間と費用の上限は、続きの実行で新しく数えます。`run.json` の費用と起動回数は合計です。
+* 実行を始めたあとに定義（`workflow.yaml`）が変わっていると続けられません。新しく実行します。
+* `pull-request` step のある workflow は、その実行のブランチ（`aidev/<name>-<yyyymmddHHMM>`）に居る必要があります。
+
+原因が定義にあるとき（`until` のコマンドがこの PKG で通らない、`writable` が足りないなど）は、続けても同じところで止まります。 Engineering Manager に定義を直してもらい、新しく実行します。
+
+止まったときの表示と対処です。終了コードは 1 です。
 
 [%autowidth.stretch,options="header"]
 |===
@@ -337,14 +510,30 @@ aidev run workflow write-tests
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と `run.json` の `review`（確認役の最後の報告）を見て、`--task` を具体的にするか、 Engineering Manager に `max_retries` や `prompt`、`until.prompt` の見直しを相談します。
+|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と、コマンドの出力（`run.json` の `log` が指す file）か `run.json` の `review`（確認役の最後の報告）を見ます。手で直せる原因なら直して `--resume last` で続けます。そうでなければ `--task` を具体的にするか、 Engineering Manager に `max_retries` や `prompt`、`until.prompt` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
-|上限に達しました。`--task` を小さくするか、 Engineering Manager に上限の見直しを相談します（60 分・上限額は定義の変更 = PR です）。
+|上限に達しました。`--resume last` で続きから実行できます（上限は新しく数えます）。何度も達するなら、`--task` を小さくするか、 Engineering Manager に上限の見直しを相談します（60 分・上限額は定義の変更 = PR です）。
 
 |`workflow stopped — step <id>: <command> exited N`
-|`command` step が失敗しました。出力を見て原因を直します。
+|`command` step が失敗しました。出力（`run.json` の `log` が指す file）を見て原因を直し、`--resume last` で続けます。
+
+|`workflow stopped — step <id>: … N path(s) that must stay unchanged were changed`
+|ステップが `unchanged` のパスを変えました。変わったパスは `log.txt` にあります。元に戻してから（`git checkout -- <path>` など）`--resume last` で続けます。変えないと進められない仕事なら、 Engineering Manager に定義の見直しを相談します。
+
+|`workflow stopped — step <id>: target <件>: …`
+|`for_each` のステップが、その件で止まりました。続きの理由は上の行と同じです。直して `--resume last` で、その件から続けます。
+
+|`workflow stopped — step <id>: <file> line N: "…" is not a target` +
+`… lists N targets, above for_each.max_items`
+|一覧の書き方が合っていないか、件数が上限を超えています。一覧の file（実行記録の `notes/`）を直して `--resume last` で続けます。繰り返すなら、 Engineering Manager に一覧を書くステップの `prompt` を直してもらいます。
+
+|`workflow <name> has changed since run <id> started`
+|実行を始めたあとに定義が変わっています。`--resume` なしで新しく実行します。
+
+|`run <id> was working on aidev/…; check it out first`
+|その実行のブランチに移ってから（`git checkout aidev/…`）、もう一度 `--resume` します。
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |agent の `mcp` にある server が、PKG の `.mcp.json` にありません。`.mcp.json` に server を登録します（人が行います）。何も始まっていません。
@@ -371,7 +560,7 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 
 |調査したステップの結果が、次のステップで使われない
 |調査ステップの `prompt`
-|「結果を最終報告に列挙する」と書きます。次のステップに渡るのは最終報告だけです。
+|「結果を最終報告に列挙する」と書きます。長い一覧や計画は「notes ディレクトリの file に書く」と書き、次のステップの `prompt` に「その file を読む」と書きます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 
 |書き込みが拒否されて止まる（`is read-only`）
 |そのステップの `writable`
@@ -380,6 +569,14 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 |頼んでいないファイルまで変えている
 |そのステップの `writable` と `prompt`
 |`writable` を狭め、`prompt` に「〜は変えない」と書きます。
+
+|テストや設定を弱めて `until` を通している
+|そのステップの `unchanged`、`until`
+|弱められては困るパスを `unchanged` に書きます。`until.command` は test runner を直接呼びます（xref:workflows-unchanged[変えてはいけない場所を決める]）。
+
+|対象が多く、後半の質が落ちる。1 件の失敗で全部やり直しになる
+|ステップの分け方
+|一覧を書くステップと、`for_each` で 1 件ずつ処理するステップに分けます（xref:workflows-for-each[対象ごとに繰り返す]）。
 
 |手順を知らずに、やり方がばらばらになる
 |agent の `skills`
@@ -395,7 +592,7 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 
 |`until` がずっと失敗して止まる
 |`until`、`max_retries`、ステップの分け方
-|`until` のコマンドがこの PKG で本当に通るかを手で確かめます。仕事が大きすぎるなら、ステップを分けます。
+|`until` のコマンドがこの PKG で本当に通るかを手で確かめます（実行するディレクトリは `cwd`、環境変数は `env`）。仕事が大きすぎるなら、ステップを分けます。
 
 |確認役の agent が何度も不合格にする
 |`until.prompt`、ステップの `prompt`

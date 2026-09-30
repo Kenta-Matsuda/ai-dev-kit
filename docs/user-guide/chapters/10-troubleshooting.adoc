@@ -258,7 +258,7 @@
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。`--task` を具体的にするか、 Engineering Manager に `prompt`、`until.prompt`、`max_retries` の見直しを相談します。
+|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。手で直せる原因なら直して `aidev run workflow <name> --resume last` で続けます（xref:workflows-resume[止まった実行を続ける]）。そうでなければ `--task` を具体的にするか、 Engineering Manager に `prompt`、`until.prompt`、`max_retries` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`

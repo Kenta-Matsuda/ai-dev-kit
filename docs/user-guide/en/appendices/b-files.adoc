@@ -83,7 +83,7 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |`plan.json` (the batches the hook hands to the session) and the agent's completion reports
 
 |`.aidev/workflows/*/runs/`
-|Workflow run records (`run.json`, `log.txt`). They contain command output, so they are never committed
+|Workflow run records (`run.json`, `log.txt`, `reports/`, `logs/`, `diffs/`, `notes/`, `pull-request.md`). They contain command output, so they are never committed (xref:workflows-run[Running a workflow])
 |===
 
 Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aidev/ejected.json` (written by `aidev uninstall --package`, removed by `aidev init`).
