@@ -8,7 +8,8 @@
  * its tools, its MCP servers — is the agent's own definition
  * (`.aidev/agents/<name>.md` frontmatter), not the workflow's: capabilities
  * belong to the agent, constraints to the step. All executable logic — the
- * retry loop behind `until`, command execution, commit, push, PR — lives in
+ * retry loop behind `until` (a command that must exit 0 and/or an agent that
+ * must answer VERDICT: PASS), command execution, commit, push, PR — lives in
  * the kit (`commands/workflow.js`), so reviewing a workflow means reading
  * YAML, and the quality of what runs is the kit's responsibility.
  *
@@ -62,6 +63,21 @@ const STEP_KEYS = {
   command: ['id', 'description', 'command', 'writable'],
   'pull-request': ['id', 'description', 'kind', 'title'],
 };
+const UNTIL_KEYS = ['command', 'agent', 'prompt'];
+
+/**
+ * The step id the runner hands the guard while an `until` agent checks a
+ * step's work. A step id cannot contain ':', so this never names a real step.
+ */
+const UNTIL_STEP_SUFFIX = ':until';
+function untilStepId(stepId) { return `${stepId}${UNTIL_STEP_SUFFIX}`; }
+
+/** The line an `until` agent ends its final message with; anything else counts as FAIL. */
+const VERDICT_RE = /^[ \t]*VERDICT:[ \t]*(PASS|FAIL)[ \t]*$/gim;
+function parseVerdict(text) {
+  const all = [...String(text == null ? '' : text).matchAll(VERDICT_RE)];
+  return all.length ? all[all.length - 1][1].toUpperCase() : null;
+}
 
 /** A built-in tool name in an agent's `tools:` (Read, Grep, Bash, …). */
 const TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -129,6 +145,30 @@ function assertKnownKeys(obj, allowed, source, moved = {}) {
     if (moved[k]) throw new AidevError(`${source}: ${k} is not a workflow key; ${moved[k]}`);
     throw new AidevError(`${source}: unknown key ${k} (allowed: ${allowed.join(', ')})`);
   }
+}
+
+/**
+ * A step's `until`: when the step's work is done. `command` must exit 0, and
+ * `agent` (with `prompt`, what to check) must answer VERDICT: PASS; with both,
+ * the command runs first and the agent only after it passes.
+ */
+function untilSpec(v, where) {
+  if (v == null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new AidevError(`${where}: until must be a mapping with command, agent (and prompt), or both (e.g. until: { command: npm test })`);
+  }
+  assertKnownKeys(v, UNTIL_KEYS, `${where}: until`);
+  const out = { command: null, agent: null, prompt: null };
+  if (v.command != null) out.command = splitCommand(v.command, 'until.command', where);
+  if (v.agent != null) {
+    try { out.agent = toolsMod.assertAgentName(v.agent); } catch (e) { throw new AidevError(`${where}: until.agent: ${e.message}`); }
+    out.prompt = v.prompt == null ? '' : String(v.prompt).trim();
+    if (!out.prompt) throw new AidevError(`${where}: until.prompt is required with until.agent (what the agent checks)`);
+  } else if (v.prompt != null) {
+    throw new AidevError(`${where}: until.prompt needs until.agent (the agent that checks)`);
+  }
+  if (!out.command && !out.agent) throw new AidevError(`${where}: until needs a command, an agent, or both`);
+  return out;
 }
 
 function positiveInt(v, field, source, { max, min = 1 }) {
@@ -207,10 +247,11 @@ function validateDefinition(raw, source = 'workflow.yaml') {
         throw new AidevError(`${where}: writable is required for an agent step (the paths this step may write; [] writes nothing)`);
       }
       step.writable = writableList(s.writable, where);
-      step.until = s.until == null ? null : splitCommand(s.until, 'until', where);
+      step.until = untilSpec(s.until, where);
+      if (step.until && step.until.agent && !agents.includes(step.until.agent)) agents.push(step.until.agent);
       if (s.max_retries == null) step.max_retries = step.until ? 3 : 0;
       else step.max_retries = positiveInt(s.max_retries, 'max_retries', where, { max: LIMITS.maxRetries, min: 0 });
-      if (step.max_retries > 0 && !step.until) throw new AidevError(`${where}: max_retries needs an until command to decide when to retry`);
+      if (step.max_retries > 0 && !step.until) throw new AidevError(`${where}: max_retries needs an until to decide when to retry`);
       step.timeout_ms = s.timeout_ms == null ? null : positiveInt(s.timeout_ms, 'timeout_ms', where, { max: 7200000, min: 10000 });
     } else if (kind === 'command') {
       step.command = splitCommand(s.command, 'command', where);
@@ -354,14 +395,23 @@ function agentSkills(deps, agentName) {
 
 /**
  * What one step may do: the step's own writable, and its agent's tools and
- * MCP servers. Null for an unknown step id (the guard treats that as nothing).
+ * MCP servers. `<id>:until` is the step's `until` agent: its own tools and
+ * MCP servers, and nothing writable (it judges the work, it does not do it).
+ * Null for an unknown step id (the guard treats that as nothing).
  */
 function stepAccess(def, deps, stepId) {
-  const step = def.steps.find((s) => s.id === stepId);
+  const id = String(stepId || '');
+  const judging = id.endsWith(UNTIL_STEP_SUFFIX);
+  const step = def.steps.find((s) => s.id === (judging ? id.slice(0, -UNTIL_STEP_SUFFIX.length) : id));
   if (!step) return null;
-  if (step.kind !== 'agent') return { step, writable: step.writable || [], tools: null, mcp: [] };
+  if (judging) {
+    if (step.kind !== 'agent' || !step.until || !step.until.agent) return null;
+    const cap = deps.agents[step.until.agent].capabilities;
+    return { step, agent: step.until.agent, writable: [], tools: cap.tools, mcp: cap.mcp };
+  }
+  if (step.kind !== 'agent') return { step, agent: null, writable: step.writable || [], tools: null, mcp: [] };
   const cap = deps.agents[step.agent].capabilities;
-  return { step, writable: step.writable, tools: cap.tools, mcp: cap.mcp };
+  return { step, agent: step.agent, writable: step.writable, tools: cap.tools, mcp: cap.mcp };
 }
 
 /**
@@ -496,7 +546,7 @@ function listWorkflows(repoRoot) {
 }
 
 module.exports = {
-  LIMITS, NAME_RE, ENV_WORKFLOW, ENV_STEP, MCP_CONFIG_REL,
+  LIMITS, NAME_RE, ENV_WORKFLOW, ENV_STEP, MCP_CONFIG_REL, untilStepId, parseVerdict,
   sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, agentRel, skillRel,
   splitCommand, validateDefinition, parseDefinitionText, loadDefinition,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,

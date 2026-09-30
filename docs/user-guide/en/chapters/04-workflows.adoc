@@ -91,7 +91,7 @@ The definition lives in two places.
 
 When you want the same agent to have different permissions for different jobs, split it into separate agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance). No key in a workflow overrides an agent's capabilities.
 
-Edit the template to fit the PKG. Most of the time you change each step's `writable` (where that step may write) and `until` (this PKG's test command).
+Edit the template to fit the PKG. Most of the time you change each step's `writable` (where that step may write) and `until.command` (this PKG's test command).
 
 [source,yaml]
 ----
@@ -116,7 +116,8 @@ steps:                             # run top to bottom
     agent: test-writer
     writable: [tests/**]           # this step may write only inside tests/
     prompt: Write the tests the previous step listed, in the existing style, and run them.
-    until: npm test                # repeat the agent until this exits 0 (no shell)
+    until:                         # when the step is done; the agent is repeated until it is
+      command: npm test            # this exits 0 (no shell)
     max_retries: 4                 # retries for until (ceiling 10)
   - id: pr
     kind: pull-request             # commit the changes in each step's writable → push → PR
@@ -142,7 +143,10 @@ cost:
 |Run from top to bottom. Each step is exactly one of three kinds. Every kind may have a `description` (optional) for the reviewer.
 
 |agent step
-|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until it exits 0. `timeout_ms` is optional.
+|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until `until` is met. `timeout_ms` is optional.
+
+|`until`
+|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. See xref:workflows-until-agent[Letting an agent's review decide when a step is done].
 
 |`writable`
 |Paths (globs) the agent of that step may write. **The only place the AI can write PKG source is this range of the step now running in an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only step).
@@ -162,11 +166,48 @@ cost:
 
 Any key not in the table above is refused by validation.
 
-`until` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written.
+`until.command` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written.
 
 Each agent step starts as a new process. The conversation of an earlier step is gone. Instead, **the ADK puts the final report of each earlier agent step into the instructions of the later agent steps**. In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
 
-The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the output of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
+The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the result of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
+
+[[workflows-until-agent]]
+==== Letting an agent's review decide when a step is done
+
+"All tests pass" can be judged by a command; "the tests are sound" cannot. For a condition like that, name a checking agent in `until`.
+
+[source,yaml]
+----
+  - id: write
+    description: Write the tests, make them pass, then get them passed by review
+    agent: test-writer
+    writable: [tests/**]
+    prompt: Write the tests the previous step listed, in the existing style, and run them.
+    until:
+      command: npm test            # first, this exits 0
+      agent: test-reviewer         # then this agent passes the work
+      prompt: |                    # what test-reviewer checks
+        Every behaviour the previous step listed is tested.
+        The tests check behaviour seen from outside, not the implementation's internals.
+    max_retries: 4
+----
+
+One attempt goes in this order:
+
+. `test-writer` writes the tests
+. `npm test` runs. If it fails, `test-writer` is started again with its output (`test-reviewer` is not started)
+. `test-reviewer` starts, with `test-writer`'s report, the list of files changed inside `writable`, and `until.prompt`
+. If `test-reviewer` ends its final message with the line `VERDICT: PASS`, the step is done. `VERDICT: FAIL`, or no such line, fails the check, and `test-writer` is started again with `test-reviewer`'s report
+
+About the checking agent:
+
+* **It writes nothing.** The step's `writable` does not apply to it. What it can use (skills, tools, MCP servers) is its own frontmatter; give it read-only tools such as `tools: Read, Grep, Glob`.
+* The ADK puts the pass/fail format (the `VERDICT:` line) into its instructions. You do not need to write it in the agent's body or in `until.prompt`.
+* Write in `until.prompt` exactly what to check. A vague check makes the same remark repeat and stop the run, or uses up `max_retries`.
+* Its starts count toward `max_retries`, the cost limit and the time limit. An attempt starts two agents, so allow for that in `cost.max_usd`.
+* When it passes the work, its report also goes into the instructions of the later agent steps.
+* The checking agent is reviewed in the pull request together with the workflow, and the workflow runs only while it matches `origin/main`.
 
 [[workflows-submit]]
 === Submitting a workflow (Engineering Manager)
@@ -275,7 +316,7 @@ This is what happens during a run.
 * The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
 * Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
 * The final report of each earlier agent step goes into the instructions of the later agent steps.
-* If `until` exits with anything other than 0, the same agent is started again with that output attached. If the same output appears twice in a row, the run stops.
+* If `until` is not met, the same agent is started again with the result attached (the command's output, or the checking agent's report). If the same result appears twice in a row, the run stops.
 * The `pull-request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts and the cost. If there are no changes in the range, neither a commit nor a PR is created.
 * The record is kept in `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). It is gitignored and never committed.
 
@@ -294,9 +335,9 @@ Messages when it stops, and what to do. The exit code is 1. There is no resume; 
 |`the working tree has uncommitted changes; commit or stash them first`
 |A workflow with a `pull-request` step runs from a clean working tree.
 
-|`workflow stopped — step <id>: <until> still fails after N retries` +
+|`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not make the tests pass. The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, then make `--task` more specific or ask the Engineering Manager to revisit `max_retries` or the `prompt`.
+|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them and at `review` in `run.json` (the checking agent's last report), then make `--task` more specific or ask the Engineering Manager to revisit `max_retries`, the `prompt` or `until.prompt`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -355,6 +396,10 @@ Start from the problem you see.
 |`until` keeps failing and the run stops
 |`until`, `max_retries`, how the steps are split
 |Check by hand that the `until` command really passes in this PKG. If the job is too big, split the step.
+
+|The checking agent keeps failing the work
+|`until.prompt`, the step's `prompt`
+|Read its remarks in `review` in `run.json`. Make the check specific, and write the same points in the step's `prompt` so the working agent knows them from the start.
 
 |It stops at the cost or time limit
 |`cost.max_usd`, `limits.max_minutes`

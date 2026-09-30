@@ -241,7 +241,7 @@
 |`git fetch origin` を実行します。
 
 |`aidev list workflows` が `invalid: …`
-|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`cost.max_usd` が無い、知らない項目がある、上限超過、`until` に引用符やパイプ、`protected` のパスなど）を直します。
+|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`cost.max_usd` が無い、知らない項目がある、上限超過、`until` が文字列（`until:` の下に `command:` を書く）、`until.command` に引用符やパイプ、`protected` のパスなど）を直します。
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |agent 名の誤りか、PKG 固有の agent が未コミットです。名前を直すか、`.aidev/agents/<name>.md` を同じ PR に入れます。
@@ -256,9 +256,9 @@
 |`the working tree has uncommitted changes; commit or stash them first`
 |`pull-request` step のある workflow は、きれいな作業ツリーで実行します。
 
-|`workflow stopped — step <id>: <until> still fails after N retries` +
+|`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent がテストを通せませんでした。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。`--task` を具体的にするか、 Engineering Manager に `prompt` や `max_retries` の見直しを相談します。
+|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。`--task` を具体的にするか、 Engineering Manager に `prompt`、`until.prompt`、`max_retries` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
