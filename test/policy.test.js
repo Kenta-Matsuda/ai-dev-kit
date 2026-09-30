@@ -328,6 +328,46 @@ function run() {
     } finally { fx.cleanup(); }
   });
 
+  test('a step\'s agent may write the notes of its own run, even where the policy closes .aidev/workflows', () => {
+    const fx = makeRepo();
+    try {
+      putOnMain(fx, 'src/**');
+      const base = cfg.loadPolicy(fx.root);
+      const closed = { ...base, writable: base.writable.filter((g) => g !== '.aidev/workflows/**') };
+      const run = '2026-10-01T01-08-32-123Z';
+      const note = `.aidev/workflows/wf/runs/${run}/notes/plan.md`;
+      const o = { policy: closed, workflow: 'wf', run };
+      eq(decide(fx, note, { ...o, step: 'b' }).rule, 'workflow-notes', 'even a step that writes no PKG file');
+      eq(decide(fx, note, { ...o, step: 'a:until' }).rule, 'read-only', 'the until agent writes nothing');
+      eq(decide(fx, `.aidev/workflows/wf/runs/${run}/run.json`, { ...o, step: 'a' }).rule, 'read-only', 'only the notes directory');
+      eq(decide(fx, '.aidev/workflows/wf/runs/2026-10-01T00-00-00-000Z/notes/plan.md', { ...o, step: 'a' }).rule, 'read-only', 'another run');
+      eq(decide(fx, '.aidev/workflows/wf/workflow.yaml', { ...o, run: '..', step: 'a' }).rule, 'read-only', 'a run id that is not one names nothing');
+    } finally { fx.cleanup(); }
+  });
+
+  test('a step\'s unchanged takes a path back out of its writable', () => {
+    const fx = makeRepo();
+    try {
+      fs.mkdirSync(path.join(fx.root, '.aidev', 'agents'), { recursive: true });
+      fs.writeFileSync(path.join(fx.root, '.aidev', 'agents', 'dev.md'), DEV, 'utf8');
+      fs.mkdirSync(path.join(fx.root, '.aidev', 'workflows', 'wf'), { recursive: true });
+      fs.writeFileSync(path.join(fx.root, '.aidev', 'workflows', 'wf', 'workflow.yaml'), [
+        'name: wf', 'objective: do it', 'steps:',
+        '  - id: a', '    agent: dev', '    writable: [e2e/**]', '    unchanged: [e2e/playwright.config.ts]', '    prompt: go',
+        '  - id: b', '    agent: dev', '    writable: [e2e/**]', '    prompt: go',
+        'cost:', '  max_usd: 1', '',
+      ].join('\n'), 'utf8');
+      git(['add', '-A'], fx.root);
+      git(['commit', '-q', '-m', 'workflow'], fx.root);
+      git(['push', '-q', 'origin', 'main'], fx.root);
+      const locked = decide(fx, 'e2e/playwright.config.ts', { workflow: 'wf', step: 'a' });
+      eq([locked.decision, locked.rule], ['deny', 'workflow-unchanged'], locked.reason);
+      ok(/must leave "e2e\/playwright\.config\.ts" unchanged/.test(locked.reason), locked.reason);
+      eq(decide(fx, 'e2e/tests/login.spec.ts', { workflow: 'wf', step: 'a' }).rule, 'workflow-writable');
+      eq(decide(fx, 'e2e/playwright.config.ts', { workflow: 'wf', step: 'b' }).rule, 'workflow-writable', 'another step is not bound by it');
+    } finally { fx.cleanup(); }
+  });
+
   test('the workflow and step come from the environment the runner sets, and old agent grants are refused', () => {
     const fx = makeRepo();
     try {

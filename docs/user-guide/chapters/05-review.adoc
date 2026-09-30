@@ -100,7 +100,15 @@ aidev run workflow write-tests --dry-run
 
 |`until.command` と `command`
 |この PKG で安全に実行できるコマンド（テスト、lint など）
-|デプロイ、データの削除、外部への送信をするコマンド（shell は通りませんが、コマンド自体は実行されます）
+|デプロイ、データの削除、外部への送信をするコマンド（shell は通りませんが、コマンド自体は実行されます）。`env` に書かれた秘密情報（token、password）
+
+|`unchanged`
+|既存のテストや test runner の設定など、弱めると `until` を通せてしまうパスが入っている
+|テストと `package.json` が両方 `writable` にあり、`unchanged` が無い。`until.command` が `npm test` のような、書き換えられる script を呼んでいる
+
+|`for_each`
+|`max_items` が仕事の大きさに合っている。`until` が `{item}` を使い、その件だけを判定している
+|1 件ごとの `until` が全体のテストを実行している（件数分の時間がかかります）
 
 |`until.agent` と `until.prompt`
 |確認役の agent は読むだけのツールで、確認の観点が具体的
@@ -128,10 +136,11 @@ agent・skill は、それを使うすべての workflow で共有されてい�
 [[review-workflow-result]]
 === workflow 成果物の PR
 
-`aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用が書かれています。
+`aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用と、各 agent step の最終報告（計画、確認したこと、残した課題）が書かれています。
 
 * 差分が各ステップの `writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
 * テストが通っているか。CI の `aidev check` が通っているか。
+* テストや設定が弱められていないか（消したテスト、`skip`、書き換えた期待値、緩めた設定）。`unchanged` が守るのは、定義に書いたパスだけです。
 * `objective` と `--task` の内容どおりか。余計な変更が無いか。
 
 期待と違う結果が続くときは、成果物を手で直して終わりにせず、定義を直します。次に実行したときも同じ結果になるからです（xref:workflows-fix[workflow の修正]）。

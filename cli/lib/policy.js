@@ -15,6 +15,8 @@
  *                                            and AIDEV_WORKFLOW_STEP), the workflow
  *                                            is identical to origin/<tracking_branch>,
  *                                            and that step's writable covers the path
+ *                                            (or the path is in the notes directory
+ *                                            of the run, AIDEV_WORKFLOW_RUN)
  *   7. read_only paths                     → deny
  *   8. otherwise                           → allow
  *
@@ -54,6 +56,7 @@ function decide(repoRoot, targetPath, {
   config = null, policy = null, state = null, now = Date.now(),
   workflow = process.env.AIDEV_WORKFLOW || null,
   step = process.env.AIDEV_WORKFLOW_STEP || null,
+  run = process.env.AIDEV_WORKFLOW_RUN || null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
@@ -136,10 +139,26 @@ function decide(repoRoot, targetPath, {
       scopeHint = `workflow ${workflow} has no step ${step || '(none named)'}, so nothing is writable`;
     } else {
       const sHit = pathsMod.firstMatch(access.writable, rel);
+      // `unchanged` takes a path back out of the step's writable: the step
+      // may work around it, never in it. (The runner also compares these
+      // paths after each attempt, for changes that do not pass this guard.)
+      const uHit = sHit ? pathsMod.firstMatch(access.unchanged || [], rel) : null;
+      if (uHit) {
+        return deny(
+          `workflow ${workflow} step ${step} must leave "${rel}" unchanged (unchanged: ${uHit}); do the work without editing it`,
+          { rule: 'workflow-unchanged', path: rel, pattern: uHit, workflow, step });
+      }
       if (sHit) {
         return allow(
           `workflow ${workflow} step ${step} may write "${rel}" (writable: ${sHit}; approved on ${wf.approval.ref})`,
           { rule: 'workflow-writable', path: rel, pattern: sHit, workflow, step });
+      }
+      // The run's notes directory: where the agent steps of one run leave
+      // files for each other. Gitignored, so nothing written there is committed.
+      const notes = access.notes ? wfMod.notesRel(workflow, run) : null;
+      if (notes && rel.startsWith(`${notes}/`)) {
+        return allow(`workflow ${workflow} step ${step} may write its run notes ("${rel}")`,
+          { rule: 'workflow-notes', path: rel, workflow, step });
       }
       scopeHint = `workflow ${workflow} is approved but the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
     }

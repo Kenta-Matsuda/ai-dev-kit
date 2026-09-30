@@ -40,7 +40,7 @@ AI ツールの hook が毎回の書き込みを検査します。token はフ�
 . リポジトリ外、`secrets_paths`、`protected` は常に拒否。
 . Wiki が無い・読めない間は、`aidev sync wiki` が書く `.aidev/knowledge/**` を除き、すべて拒否。
 . `writable` に当たれば許可。
-. `aidev run workflow` が起動したセッションで、その workflow が承認済み（`origin/main` と同じ）で、パスがいま動いているステップの `writable` に当たれば許可。判定は書き込みのたびに行うので、実行中に定義を変えると拒否に変わります。
+. `aidev run workflow` が起動したセッションで、その workflow が承認済み（`origin/main` と同じ）で、パスがいま動いているステップの `writable` に当たれば許可。ただし、そのステップの `unchanged` にも当たるパスは拒否。判定は書き込みのたびに行うので、実行中に定義を変えると拒否に変わります。
 . `read_only` に当たれば拒否。
 . どれにも当たらなければ許可。
 

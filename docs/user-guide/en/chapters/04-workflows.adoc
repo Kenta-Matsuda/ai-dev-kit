@@ -146,13 +146,19 @@ cost:
 |`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until `until` is met. `timeout_ms` is optional.
 
 |`until`
-|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. See xref:workflows-until-agent[Letting an agent's review decide when a step is done].
+|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. A list under `command` runs from top to bottom. `cwd`, `env` and `timeout_ms` say how the commands run (xref:workflows-commands[Writing commands]). For the agent check, see xref:workflows-until-agent[Letting an agent's review decide when a step is done].
 
 |`writable`
 |Paths (globs) the agent of that step may write. **The only place the AI can write PKG source is this range of the step now running in an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only step).
 
+|`unchanged`
+|Optional. Paths (globs) the step must not change. They cannot be written even inside `writable`, and the step fails if their contents differ after it (xref:workflows-unchanged[Naming what must not change]).
+
+|`for_each`
+|Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]).
+
 |command step
-|`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
+|`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_ms` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
 
 |`kind: pull-request`
 |Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` optional. At most one.
@@ -166,11 +172,127 @@ cost:
 
 Any key not in the table above is refused by validation.
 
-`until.command` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written.
-
-Each agent step starts as a new process. The conversation of an earlier step is gone. Instead, **the ADK puts the final report of each earlier agent step into the instructions of the later agent steps**. In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
-
 The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the result of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
+
+[[workflows-commands]]
+==== Writing commands
+
+`until.command` and `command` do not go through a shell. Quotes, pipes, redirects and variables cannot be written. Use these keys instead.
+
+[source,yaml]
+----
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    prompt: Write the IT tests for the screens the previous step listed.
+    until:
+      command:                     # a list runs from top to bottom and stops at the first failure
+        - npm ci
+        - npx playwright test
+      cwd: e2e                     # the directory to run in (inside the PKG). Default: the PKG root
+      env:                         # environment variables for the commands (fixed values)
+        CI: 1
+        BASE_URL: http://localhost:3000
+      timeout_ms: 900000           # time limit for one command (at most 3600000)
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|Key |Meaning
+
+|a list under `command`
+|Only in `until`. It replaces `&&`. To run commands in order as command steps, write one command step after another.
+
+|`cwd`
+|The directory the command runs in. It cannot be outside the PKG (`..` or an absolute path).
+
+|`env`
+|Environment variables for the command. The values are fixed text in the definition and are reviewed in the PR. **Do not write secrets.** A name starting with `AIDEV_` is refused.
+
+|`timeout_ms`
+|Time limit for one command. If omitted, the command may use the time the workflow has left.
+|===
+
+The whole output of every command is kept under `logs/` in the run record. When an `until` command fails, the agent gets the end of the output and the location of that file.
+
+[[workflows-handoff]]
+==== Passing results between steps
+
+Each agent step starts as a new process. The conversation of an earlier step is gone. There are two ways to pass results on.
+
+* **The final report** — the ADK puts the final report of each earlier agent step into the instructions of the later agent steps (the last 6000 characters of a long report). In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
+* **The notes directory** — have a long or exact result, such as a plan or a list of target files, written to a file. The place is `.aidev/workflows/<name>/runs/<id>/notes/`, one per run; the ADK puts it into the instructions of every agent step. A step with `writable: []` can write there too. A checking agent only reads it. Nothing in it is committed.
+
+[source,yaml]
+----
+  - id: plan
+    agent: upgrade-planner
+    writable: []
+    prompt: Find what has to change and write the list of targets to targets.md in the notes directory.
+  - id: migrate
+    agent: upgrader
+    writable: [src/**, package.json, package-lock.json]
+    prompt: Read targets.md in the notes directory and migrate the targets from the top.
+----
+
+[[workflows-for-each]]
+==== Repeating a step per target
+
+Split a job with many targets, such as writing tests screen by screen or migrating module by module, into one target at a time. When one start handles them all, the later targets get worse work, and one failure redoes the whole step.
+
+[source,yaml]
+----
+  - id: plan
+    agent: e2e-planner
+    writable: []
+    prompt: Find the screens that need IT tests and write them to targets.txt in the notes directory, one per line.
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    for_each:
+      from: targets.txt            # a file in the notes directory; an earlier step writes it
+      max_items: 20                # required. How many targets one run may take on (at most 100)
+    prompt: Write the IT test for the screen {item} in e2e/tests/{item}.spec.ts.
+    until:
+      command: npx playwright test tests/{item}.spec.ts   # checks this target only
+      cwd: e2e
+    max_retries: 3
+----
+
+* The ADK reads the list. One line is one target; blank lines and lines starting with `#` are skipped. A line that appears twice is one target.
+* `{item}` can be written in `prompt`, `until.command` and `until.prompt`. It is required in `prompt`.
+* The agent is started anew for each target. `until` and `max_retries` apply per target. The time and cost limits count for the whole run.
+* When one target fails, the run stops there. The targets that passed stay as they are, and `--resume` continues from the target that stopped (xref:workflows-resume[Continuing a stopped run]).
+* The later steps get one report that sums up the result of each target.
+
+A target is one word made of letters, digits and `. _ / @ -` (up to 200 characters). If a line contains a space, starts with `-` or contains `..`, the ADK stops before it starts an agent. A target becomes an argument of a command, so text that could be an option or point somewhere else is refused. Write this format in the `prompt` of the step that writes the list.
+
+[[workflows-unchanged]]
+==== Naming what must not change
+
+`until` only sees whether a command succeeds. An agent can pass `until` by weakening the check instead of fixing the code: deleting a failing test, rewriting an expectation, loosening the test runner's configuration. List the paths that must not be weakened in `unchanged`.
+
+[source,yaml]
+----
+  - id: migrate
+    agent: upgrader
+    writable: [src/**, tests/**, package.json, package-lock.json]
+    unchanged: [tests/**]          # the existing tests must stay as they are
+    prompt: Read targets.md in the notes directory and migrate the targets from the top.
+    until:
+      command: npx vitest run      # call the test runner itself, not a script in package.json
+----
+
+* The agent cannot write a path in `unchanged`, even inside `writable` (the hook refuses it).
+* The ADK remembers the state when the step started and compares after every attempt. If something changed, the attempt fails and the agent is started again with the changed paths. Changes made by a command or through `Bash` are detected too.
+* If the same paths are changed twice in a row, the run stops. Put them back, then `--resume`.
+* What an earlier step changed is part of the state "when the step started". An implementation step with `unchanged: [tests/**]` can follow a step that writes the tests.
+* Gitignored files are not compared.
+
+Detection is per file. A change inside a file that stays in `writable` (a `test.skip` in a newly written test, a rewritten `scripts` entry in `package.json`) is not detected. Two things cover that.
+
+* Have `until.command` call the test runner itself, not `npm test` (when `package.json` is in `writable`, `scripts.test` can be rewritten).
+* Add a checking agent to `until` and write "no skipped or empty tests" in `until.prompt` (xref:workflows-until-agent[Letting an agent's review decide when a step is done]).
 
 [[workflows-until-agent]]
 ==== Letting an agent's review decide when a step is done
@@ -197,7 +319,7 @@ One attempt goes in this order:
 
 . `test-writer` writes the tests
 . `npm test` runs. If it fails, `test-writer` is started again with its output (`test-reviewer` is not started)
-. `test-reviewer` starts, with `test-writer`'s report, the list of files changed inside `writable`, and `until.prompt`
+. `test-reviewer` starts, with `test-writer`'s report, the list of files changed inside `writable`, the location of a file with the diff, and `until.prompt`
 . If `test-reviewer` ends its final message with the line `VERDICT: PASS`, the step is done. `VERDICT: FAIL`, or no such line, fails the check, and `test-writer` is started again with `test-reviewer`'s report
 
 About the checking agent:
@@ -315,12 +437,63 @@ This is what happens during a run.
 * A workflow with a `pull-request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
 * The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
 * Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
-* The final report of each earlier agent step goes into the instructions of the later agent steps.
+* The final report of each earlier agent step goes into the instructions of the later agent steps. The files in the notes directory can be read too (xref:workflows-handoff[Passing results between steps]).
 * If `until` is not met, the same agent is started again with the result attached (the command's output, or the checking agent's report). If the same result appears twice in a row, the run stops.
-* The `pull-request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts and the cost. If there are no changes in the range, neither a commit nor a PR is created.
-* The record is kept in `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`). It is gitignored and never committed.
+* When a command takes longer than 15 seconds, one line with the elapsed time is shown every 15 seconds.
+* The `pull-request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts, the cost, and the final report of each agent step (shortened to fit the 4000 characters Azure DevOps accepts). The full text is in `pull-request.md` in the run record. If there are no changes in the range, neither a commit nor a PR is created.
+* The record is written to `.aidev/workflows/<name>/runs/<id>/` as the run goes. It is gitignored and never committed.
 
-Messages when it stops, and what to do. The exit code is 1. There is no resume; fix the cause and run again.
+[%autowidth.stretch,options="header"]
+|===
+|File |Contents
+
+|`run.json`
+|The result of each step, why the run stopped, the cost. Updated each time a step ends.
+
+|`log.txt`
+|The progress lines shown on screen
+
+|`reports/<step>.md`
+|The whole final report of each finished agent step (the checking agent's is `<step>.until.md`). For a `for_each` step it is the summary per target; each target's whole report is `<step>.t<target number>.md`
+
+|`logs/<step>.<attempt>.<number>.log`
+|The whole output of a command (for a `for_each` target, `<step>.t<target number>.<attempt>.<number>.log`)
+
+|`diffs/<step>.<attempt>.diff`
+|The diff shown to the checking agent
+
+|`unchanged/<step>.json`
+|The state of the `unchanged` paths when the step started
+
+|`notes/`
+|Files the steps wrote for the steps after them
+
+|`pull-request.md`
+|The full PR text. Use it when you open the PR by hand with `generic` hosting.
+|===
+
+[[workflows-resume]]
+==== Continuing a stopped run
+
+A stopped run can continue from the step it stopped at. Finished steps are not run again.
+
+[source,bash]
+----
+aidev run workflow write-tests --resume last          # continue the last run
+aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
+----
+
+* It continues on the same branch, with the same `--task` and the same notes. `--task` cannot be passed.
+* The final reports of the finished steps are read from the record and put into the instructions of the later steps.
+* A `for_each` step skips the targets that finished and continues from the one that stopped. The list is read again, so when a target cannot be made to pass, you can delete its line from the list file (in the notes directory) and continue. That target's partial changes stay in the working tree; revert them first if you do not want them.
+* The step that stopped starts over. The working tree still holds the earlier changes, and the agent is told why the run stopped.
+* The time and cost limits are counted anew for the continued run. The cost and the agent starts in `run.json` are totals.
+* If the definition (`workflow.yaml`) changed after the run started, the run cannot continue. Start a new run.
+* A workflow with a `pull-request` step must be on the run's branch (`aidev/<name>-<yyyymmddHHMM>`).
+
+When the cause is in the definition (the `until` command does not pass in this PKG, `writable` is too narrow, and so on), the run stops at the same place again. Ask the Engineering Manager to fix the definition, then start a new run.
+
+Messages when it stops, and what to do. The exit code is 1.
 
 [%autowidth.stretch,options="header"]
 |===
@@ -337,14 +510,30 @@ Messages when it stops, and what to do. The exit code is 1. There is no resume; 
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them and at `review` in `run.json` (the checking agent's last report), then make `--task` more specific or ask the Engineering Manager to revisit `max_retries`, the `prompt` or `until.prompt`.
+|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, and at the command's output (the file `log` in `run.json` points to) or `review` in `run.json` (the checking agent's last report). If you can fix the cause by hand, fix it and continue with `--resume last`. Otherwise make `--task` more specific or ask the Engineering Manager to revisit `max_retries`, the `prompt` or `until.prompt`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
-|A limit was reached. Make `--task` smaller, or ask the Engineering Manager to revisit the limits (60 minutes and the cost ceiling are part of the definition, so changing them is a PR).
+|A limit was reached. Continue with `--resume last` (the limits are counted anew). If it keeps happening, make `--task` smaller, or ask the Engineering Manager to revisit the limits (60 minutes and the cost ceiling are part of the definition, so changing them is a PR).
 
 |`workflow stopped — step <id>: <command> exited N`
-|A `command` step failed. Read the output and fix the cause.
+|A `command` step failed. Read the output (the file `log` in `run.json` points to), fix the cause and continue with `--resume last`.
+
+|`workflow stopped — step <id>: … N path(s) that must stay unchanged were changed`
+|The step changed a path in `unchanged`. The changed paths are in `log.txt`. Put them back (`git checkout -- <path>` and so on), then continue with `--resume last`. If the job cannot be done without changing them, ask the Engineering Manager to revisit the definition.
+
+|`workflow stopped — step <id>: target <target>: …`
+|A `for_each` step stopped at that target. The rest of the reason reads like the rows above. Fix the cause and continue from that target with `--resume last`.
+
+|`workflow stopped — step <id>: <file> line N: "…" is not a target` +
+`… lists N targets, above for_each.max_items`
+|The list is not written in the expected format, or it has more targets than the limit. Fix the list file (`notes/` in the run record) and continue with `--resume last`. If it keeps happening, ask the Engineering Manager to fix the `prompt` of the step that writes the list.
+
+|`workflow <name> has changed since run <id> started`
+|The definition changed after the run started. Start a new run without `--resume`.
+
+|`run <id> was working on aidev/…; check it out first`
+|Switch to the run's branch (`git checkout aidev/…`) and `--resume` again.
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |A server in the agent's `mcp` is not in the PKG's `.mcp.json`. Register the server in `.mcp.json` (a person does this). Nothing has started.
@@ -371,7 +560,7 @@ Start from the problem you see.
 
 |The survey step's findings are not used by the next step
 |The survey step's `prompt`
-|Write "list the results in your final report". Only the final report reaches the next step.
+|Write "list the results in your final report". For a long list or a plan, write "write it to a file in the notes directory", and write "read that file" in the next step's `prompt` (xref:workflows-handoff[Passing results between steps]).
 
 |A write is denied and the run stops (`is read-only`)
 |That step's `writable`
@@ -380,6 +569,14 @@ Start from the problem you see.
 |It changes files you did not ask for
 |That step's `writable` and `prompt`
 |Narrow `writable`, and write "do not change …" in the `prompt`.
+
+|It passes `until` by weakening tests or settings
+|That step's `unchanged`, `until`
+|List the paths that must not be weakened in `unchanged`. Have `until.command` call the test runner itself (xref:workflows-unchanged[Naming what must not change]).
+
+|Many targets: the later ones get worse work, and one failure redoes everything
+|How the steps are split
+|Split it into a step that writes the list and a step that handles one target at a time with `for_each` (xref:workflows-for-each[Repeating a step per target]).
 
 |It does not know the procedure, so the way of working varies
 |The agent's `skills`
@@ -395,7 +592,7 @@ Start from the problem you see.
 
 |`until` keeps failing and the run stops
 |`until`, `max_retries`, how the steps are split
-|Check by hand that the `until` command really passes in this PKG. If the job is too big, split the step.
+|Check by hand that the `until` command really passes in this PKG (`cwd` is the directory it runs in, `env` its environment variables). If the job is too big, split the step.
 
 |The checking agent keeps failing the work
 |`until.prompt`, the step's `prompt`

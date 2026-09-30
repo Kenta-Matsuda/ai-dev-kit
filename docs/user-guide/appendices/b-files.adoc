@@ -83,7 +83,7 @@
 |`plan.json`（hook がセッションに渡す batch の計画）と agent の完了報告
 
 |`.aidev/workflows/*/runs/`
-|workflow の実行記録（`run.json`、`log.txt`）。コマンドの出力を含むのでコミットしない
+|workflow の実行記録（`run.json`、`log.txt`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`）。コマンドの出力を含むのでコミットしない（xref:workflows-run[workflow の実行]）
 |===
 
 一時的に現れるもの: `.aidev/policy.candidate.yaml`（承認すると消えます）、`.aidev/ejected.json`（`aidev uninstall --package` が書き、`aidev init` が消します）。

@@ -40,7 +40,7 @@ Rules are checked top to bottom.
 . Paths outside the repository, `secrets_paths` and `protected` are always denied.
 . While the Wiki is missing or unreadable, everything is denied, except `.aidev/knowledge/**` written by `aidev sync wiki`.
 . A path that matches `writable` is allowed.
-. In a session started by `aidev run workflow`, a path is allowed when that workflow is approved (identical to `origin/main`) and the path matches the `writable` of the step now running. This is checked on every write, so changing the definition during a run turns the answer into a denial.
+. In a session started by `aidev run workflow`, a path is allowed when that workflow is approved (identical to `origin/main`) and the path matches the `writable` of the step now running. A path that also matches that step's `unchanged` is denied. This is checked on every write, so changing the definition during a run turns the answer into a denial.
 . A path that matches `read_only` is denied.
 . Anything else is allowed.
 

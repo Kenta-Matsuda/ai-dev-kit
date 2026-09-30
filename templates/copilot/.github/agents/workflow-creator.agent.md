@@ -45,15 +45,23 @@ steps:                                 # 上から順に実行する
   - id: generate
     agent: my-agent
     writable: [tests/e2e/**]
-    prompt: ...
+    unchanged: [tests/e2e/playwright.config.ts]   # 任意。writable の中でも、このステップが変えてはいけないパス（試行のたびに kit が検査）
+    for_each:                          # 任意。対象ごとに agent を新しく起動して繰り返す
+      from: targets.txt                #   前のステップが notes ディレクトリに書いた一覧（1 行 1 件）
+      max_items: 20                    #   必須。上限 100
+    prompt: 画面 {item} の IT テストを書く。   # for_each のステップは {item} が必須（until にも書ける）
     until:                             # 終了条件。満たすまで agent を繰り返す（command と agent のどちらか、または両方）
-      command: npx playwright test     #   exit 0 になること
+      command: npx playwright test     #   exit 0 になること。順に実行するなら list: [npm ci, npx playwright test]
+      cwd: e2e                         #   任意。command を実行するディレクトリ（PKG 内）
+      env: { CI: 1 }                   #   任意。command に渡す固定の環境変数（秘密情報は書かない）
+      timeout_ms: 900000               #   任意。command 1 つの時間予算（上限 3600000）
       agent: e2e-reviewer              #   この agent が VERDICT: PASS と答えること（何も書けない。command が通ってから起動）
       prompt: 追加したテストが要件の各項目を検証しているかを確認する   # agent に確認させる観点（agent を書くなら必須）
     max_retries: 5                     # until の再試行回数。上限 10
     timeout_ms: 1800000                # 任意。1 回の起動の時間予算
   - id: verify
     command: npm run lint              # command step: 1 回実行。exit 0 以外で workflow 失敗
+    # cwd / env / timeout_ms           # 任意。until と同じ意味
     # writable: [gen/**]               # 任意。コマンドが作るファイルのうち PR に入れるもの
   - id: pr
     kind: pull-request                 # 各ステップの writable の変更を commit → push → PR。最大 1 つ
@@ -66,7 +74,12 @@ cost:
 
 - step は `agent` / `command` / `kind: pull-request` のどれか 1 つだけを持ちます
 - 各 agent step は新しいプロセスとして起動されます。前のステップの会話は残りません。**前の agent step の最終報告は、kit が後の agent step の指示に入れます**。調査ステップは、次のステップが使う結果を最終報告に書くよう `prompt` で指示します
-- `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません
+- 最終報告に収まらないもの（計画、対象ファイルの一覧）は、**その実行の notes ディレクトリ**に file として書かせます。場所は kit が各 agent step の指示に入れます。どのステップの agent も書けて（`writable: []` でも）、後のステップが読めます。コミットはされません
+- `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません。複数のコマンドは `until.command` の list か、command step を並べて書きます。環境変数は `env`、実行場所は `cwd` で渡します
+- `until.command` が失敗すると、出力の末尾と、全文を書いた log file の場所が agent に渡ります
+- **対象が多い仕事は `for_each` で 1 件ずつにします**（画面ごとのテスト、module ごとの移行）。一覧は前のステップに notes ディレクトリの file へ 1 行 1 件で書かせます。1 件は英数字と `. _ / @ -` だけの 1 語です（空白、先頭の `-`、`..` があると kit が止めます）。`until` は 1 件ごとに判定するので、その件だけを確かめるコマンドにします（`npx playwright test {item}` など）
+- **通すために判定を弱められる file は `unchanged` に書きます**。バージョンアップなら既存のテスト（`tests/**`）、テストを書くステップなら test runner の設定（`playwright.config.ts`）です。`until.command` は `package.json` の script ではなく、test runner を直接呼びます（`package.json` が `writable` だと script を書き換えられるため）。file の一部だけの変更（`test.skip` の追加など）は検査できないので、`until.agent` の `until.prompt` に「skip や空のテストが無いこと」と書きます
+- 途中で止まった実行は `aidev run workflow <name> --resume last` で、止まったステップから続けられます。終わったステップはやり直さないので、ステップは「終わったら結果が作業ツリーか notes に残る」単位に分けます
 - `until.agent` はレビューで判定する終了条件です。確認の観点を `until.prompt` に具体的に書きます。不合格ならその報告を添えてステップの agent がやり直します。コマンドで判定できることは `until.command` に書き、agent には判断が要ることだけを確認させます
 - 実行ロジック（ループ、再試行、commit、PR）は runner が持ちます。YAML に手順書やスクリプトを書かないでください
 

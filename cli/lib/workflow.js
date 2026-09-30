@@ -55,15 +55,36 @@ const KIT_SKILLS_DIR = 'templates/claude/.claude/skills';
 /** The environment variables the runner sets for its agents; the write guard reads them. */
 const ENV_WORKFLOW = 'AIDEV_WORKFLOW';
 const ENV_STEP = 'AIDEV_WORKFLOW_STEP';
+const ENV_RUN = 'AIDEV_WORKFLOW_RUN';
+
+/** A run id is the start time (`2026-10-01T01-08-32-123Z`); it names a directory under runs/. */
+const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
 const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits', 'cost'];
 const STEP_KEYS = {
-  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'until', 'max_retries', 'timeout_ms'],
-  command: ['id', 'description', 'command', 'writable'],
+  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'max_retries', 'timeout_ms'],
+  command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_ms', 'writable'],
   'pull-request': ['id', 'description', 'kind', 'title'],
 };
-const UNTIL_KEYS = ['command', 'agent', 'prompt'];
+const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_ms', 'agent', 'prompt'];
+
+/**
+ * `for_each`: an agent step run once per target. The targets are the lines of
+ * a file in the run's notes directory (an earlier step writes it; the kit
+ * reads it), and `{item}` in the step's prompt and `until` stands for the
+ * target. A target reaches a command's argv, so it is one plain token: no
+ * whitespace, nothing a command would read as an option, no way up the tree.
+ */
+const FOR_EACH_KEYS = ['from', 'max_items'];
+const FOR_EACH_MAX_ITEMS = 100;
+const ITEM_TOKEN = '{item}';
+const ITEM_RE = /^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$/;
+const NOTE_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** A command may run at most this long on its own (the run's time ceiling still applies). */
+const COMMAND_TIMEOUT_MAX_MS = 3600000;
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
 /**
  * The step id the runner hands the guard while an `until` agent checks a
@@ -102,6 +123,15 @@ function defRel(name) { return `${workflowRel(name)}/workflow.yaml`; }
 function workflowDir(repoRoot, name) { return layout.abs(repoRoot, workflowRel(name)); }
 function defPath(repoRoot, name) { return layout.abs(repoRoot, defRel(name)); }
 function runsDir(repoRoot, name) { return path.join(workflowDir(repoRoot, name), 'runs'); }
+function runRel(name, runId) { return `${workflowRel(name)}/runs/${runId}`; }
+/**
+ * Where the agent steps of one run leave files for each other (gitignored with
+ * the rest of runs/). Null for anything that is not a run id, so a forged
+ * AIDEV_WORKFLOW_RUN cannot name another directory.
+ */
+function notesRel(name, runId) {
+  return RUN_ID_RE.test(String(runId || '')) ? `${runRel(name, runId)}/notes` : null;
+}
 function agentRel(name) { return `${layout.AGENTS_REL}/${name}.md`; }
 function skillRel(name) { return `${layout.SKILLS_REL}/${name}/SKILL.md`; }
 
@@ -147,10 +177,46 @@ function assertKnownKeys(obj, allowed, source, moved = {}) {
   }
 }
 
+/** Where a command runs: a directory inside the repository (null: the repository root). */
+function cwdRel(v, field, where) {
+  if (v == null) return null;
+  const s = String(v).trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!s || s === '.') return null;
+  if (s.startsWith('/') || /^[A-Za-z]:/.test(s) || s.split('/').includes('..')) {
+    throw new AidevError(`${where}: ${field} is a directory inside the repository (${s})`);
+  }
+  return s;
+}
+
 /**
- * A step's `until`: when the step's work is done. `command` must exit 0, and
- * `agent` (with `prompt`, what to check) must answer VERDICT: PASS; with both,
- * the command runs first and the agent only after it passes.
+ * Fixed environment variables for a command. The values are part of the
+ * reviewed YAML, so they are settings (CI=1, a local URL), never secrets; the
+ * runner's own AIDEV_* variables cannot be set from here.
+ */
+function envMap(v, field, where) {
+  if (v == null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) throw new AidevError(`${where}: ${field} must be a mapping of NAME: value`);
+  const out = {};
+  for (const [k, raw] of Object.entries(v)) {
+    if (!ENV_NAME_RE.test(k)) throw new AidevError(`${where}: ${field}: ${JSON.stringify(k)} is not an environment variable name`);
+    if (/^AIDEV_/i.test(k)) throw new AidevError(`${where}: ${field}: ${k} is the kit's own; a workflow cannot set AIDEV_* variables`);
+    if (raw == null || typeof raw === 'object') throw new AidevError(`${where}: ${field}: ${k} must be a plain value`);
+    const s = String(raw);
+    if (/[\r\n\0]/.test(s)) throw new AidevError(`${where}: ${field}: ${k} must be a single line`);
+    out[k] = s;
+  }
+  return out;
+}
+
+function commandTimeout(v, field, where) {
+  return v == null ? null : positiveInt(v, field, where, { max: COMMAND_TIMEOUT_MAX_MS, min: 1000 });
+}
+
+/**
+ * A step's `until`: when the step's work is done. Every `command` (one line,
+ * or a list run in order) must exit 0, and `agent` (with `prompt`, what to
+ * check) must answer VERDICT: PASS; with both, the commands run first and the
+ * agent only after they pass. `cwd`, `env` and `timeout_ms` apply to the commands.
  */
 function untilSpec(v, where) {
   if (v == null) return null;
@@ -158,8 +224,19 @@ function untilSpec(v, where) {
     throw new AidevError(`${where}: until must be a mapping with command, agent (and prompt), or both (e.g. until: { command: npm test })`);
   }
   assertKnownKeys(v, UNTIL_KEYS, `${where}: until`);
-  const out = { command: null, agent: null, prompt: null };
-  if (v.command != null) out.command = splitCommand(v.command, 'until.command', where);
+  const out = { commands: [], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null };
+  if (v.command != null) {
+    const list = Array.isArray(v.command) ? v.command : [v.command];
+    if (list.length === 0) throw new AidevError(`${where}: until.command must not be an empty list`);
+    out.commands = list.map((c) => splitCommand(c, 'until.command', where));
+    out.cwd = cwdRel(v.cwd, 'until.cwd', where);
+    out.env = envMap(v.env, 'until.env', where);
+    out.timeout_ms = commandTimeout(v.timeout_ms, 'until.timeout_ms', where);
+  } else {
+    for (const k of ['cwd', 'env', 'timeout_ms']) {
+      if (v[k] != null) throw new AidevError(`${where}: until.${k} needs until.command (it says how the command runs)`);
+    }
+  }
   if (v.agent != null) {
     try { out.agent = toolsMod.assertAgentName(v.agent); } catch (e) { throw new AidevError(`${where}: until.agent: ${e.message}`); }
     out.prompt = v.prompt == null ? '' : String(v.prompt).trim();
@@ -167,8 +244,55 @@ function untilSpec(v, where) {
   } else if (v.prompt != null) {
     throw new AidevError(`${where}: until.prompt needs until.agent (the agent that checks)`);
   }
-  if (!out.command && !out.agent) throw new AidevError(`${where}: until needs a command, an agent, or both`);
+  if (!out.commands.length && !out.agent) throw new AidevError(`${where}: until needs a command, an agent, or both`);
   return out;
+}
+
+function forEachSpec(v, where) {
+  if (v == null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new AidevError(`${where}: for_each must be a mapping with from and max_items (e.g. for_each: { from: targets.txt, max_items: 20 })`);
+  }
+  assertKnownKeys(v, FOR_EACH_KEYS, `${where}: for_each`);
+  const from = v.from == null ? '' : String(v.from).trim();
+  if (!NOTE_FILE_RE.test(from)) {
+    throw new AidevError(`${where}: for_each.from is the name of a file in the run's notes directory, one target per line (${from || 'missing'})`);
+  }
+  if (v.max_items == null) throw new AidevError(`${where}: for_each.max_items is required (how many targets one run may take on)`);
+  return { from, max_items: positiveInt(v.max_items, 'for_each.max_items', where, { max: FOR_EACH_MAX_ITEMS }) };
+}
+
+/**
+ * The targets of a `for_each` step, from the text of its list file: one per
+ * line, blank lines and `#` lines skipped, duplicates dropped. Throws on a
+ * line that is not a plain token and on more targets than `max_items`; a list
+ * the runner cannot take as written is a reason to stop, not to guess.
+ */
+function parseItems(text, spec) {
+  const items = [];
+  String(text == null ? '' : text).split(/\r?\n/).forEach((raw, n) => {
+    const s = raw.trim().replace(/^[-*]\s+/, '');
+    if (!s || s.startsWith('#')) return;
+    if (!ITEM_RE.test(s) || s.split('/').includes('..')) {
+      throw new AidevError(`${spec.from} line ${n + 1}: ${JSON.stringify(s.slice(0, 80))} is not a target (letters, digits and . _ / @ - only; no spaces, no leading dash, no "..")`);
+    }
+    if (!items.includes(s)) items.push(s);
+  });
+  if (items.length > spec.max_items) {
+    throw new AidevError(`${spec.from} lists ${items.length} targets, above for_each.max_items (${spec.max_items}); shorten the list or run the rest in another run`);
+  }
+  return items;
+}
+
+/** The step as one target sees it: `{item}` replaced in the prompt and in `until`. */
+function forItem(step, item) {
+  const put = (s) => String(s).split(ITEM_TOKEN).join(item);
+  const until = step.until && {
+    ...step.until,
+    commands: step.until.commands.map((c) => ({ text: put(c.text), argv: c.argv.map(put) })),
+    prompt: step.until.prompt == null ? null : put(step.until.prompt),
+  };
+  return { ...step, prompt: put(step.prompt), until };
 }
 
 function positiveInt(v, field, source, { max, min = 1 }) {
@@ -247,14 +371,30 @@ function validateDefinition(raw, source = 'workflow.yaml') {
         throw new AidevError(`${where}: writable is required for an agent step (the paths this step may write; [] writes nothing)`);
       }
       step.writable = writableList(s.writable, where);
+      // Paths the step must leave as it found them, even inside its writable:
+      // the tests an upgrade must not weaken, the config a test writer must not loosen.
+      step.unchanged = assertGlobList(s.unchanged, 'unchanged', where);
+      step.for_each = forEachSpec(s.for_each, where);
       step.until = untilSpec(s.until, where);
       if (step.until && step.until.agent && !agents.includes(step.until.agent)) agents.push(step.until.agent);
+      const usesItem = [step.prompt, ...(step.until ? [...step.until.commands.map((c) => c.text), step.until.prompt || ''] : [])]
+        .some((t) => t.includes(ITEM_TOKEN));
+      if (step.for_each && !step.prompt.includes(ITEM_TOKEN)) {
+        throw new AidevError(`${where}: a for_each step's prompt must name its target as ${ITEM_TOKEN}`);
+      }
+      if (!step.for_each && usesItem) throw new AidevError(`${where}: ${ITEM_TOKEN} needs for_each (the list the targets come from)`);
       if (s.max_retries == null) step.max_retries = step.until ? 3 : 0;
       else step.max_retries = positiveInt(s.max_retries, 'max_retries', where, { max: LIMITS.maxRetries, min: 0 });
-      if (step.max_retries > 0 && !step.until) throw new AidevError(`${where}: max_retries needs an until to decide when to retry`);
+      if (step.max_retries > 0 && !step.until && !step.unchanged.length) {
+        throw new AidevError(`${where}: max_retries needs an until to decide when to retry`);
+      }
       step.timeout_ms = s.timeout_ms == null ? null : positiveInt(s.timeout_ms, 'timeout_ms', where, { max: 7200000, min: 10000 });
     } else if (kind === 'command') {
       step.command = splitCommand(s.command, 'command', where);
+      if (step.command.text.includes(ITEM_TOKEN)) throw new AidevError(`${where}: ${ITEM_TOKEN} belongs to an agent step with for_each`);
+      step.cwd = cwdRel(s.cwd, 'cwd', where);
+      step.env = envMap(s.env, 'env', where);
+      step.timeout_ms = commandTimeout(s.timeout_ms, 'timeout_ms', where);
       // A command is run by the kit, not an agent, so no hook stands between
       // it and the tree; its writable only says which of its outputs the
       // pull-request step commits.
@@ -407,11 +547,13 @@ function stepAccess(def, deps, stepId) {
   if (judging) {
     if (step.kind !== 'agent' || !step.until || !step.until.agent) return null;
     const cap = deps.agents[step.until.agent].capabilities;
-    return { step, agent: step.until.agent, writable: [], tools: cap.tools, mcp: cap.mcp };
+    return { step, agent: step.until.agent, writable: [], unchanged: [], notes: false, tools: cap.tools, mcp: cap.mcp };
   }
-  if (step.kind !== 'agent') return { step, agent: null, writable: step.writable || [], tools: null, mcp: [] };
+  if (step.kind !== 'agent') return { step, agent: null, writable: step.writable || [], unchanged: [], notes: false, tools: null, mcp: [] };
   const cap = deps.agents[step.agent].capabilities;
-  return { step, agent: step.agent, writable: step.writable, tools: cap.tools, mcp: cap.mcp };
+  // `notes`: the step's agent may also write the run's notes directory (notesRel).
+  // `unchanged`: paths it must not write even where `writable` covers them.
+  return { step, agent: step.agent, writable: step.writable, unchanged: step.unchanged, notes: true, tools: cap.tools, mcp: cap.mcp };
 }
 
 /**
@@ -546,9 +688,9 @@ function listWorkflows(repoRoot) {
 }
 
 module.exports = {
-  LIMITS, NAME_RE, ENV_WORKFLOW, ENV_STEP, MCP_CONFIG_REL, untilStepId, parseVerdict,
-  sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, agentRel, skillRel,
-  splitCommand, validateDefinition, parseDefinitionText, loadDefinition,
+  LIMITS, NAME_RE, RUN_ID_RE, ENV_WORKFLOW, ENV_STEP, ENV_RUN, MCP_CONFIG_REL, untilStepId, parseVerdict,
+  sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, runRel, notesRel, agentRel, skillRel,
+  splitCommand, parseItems, forItem, ITEM_TOKEN, validateDefinition, parseDefinitionText, loadDefinition,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
   agentCapabilities, agentSkills, stepAccess, toolGranted, mcpServersFor,
   trackingRef, approvalStatus, inspect, contentHash, listWorkflows,
