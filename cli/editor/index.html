@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aidev workflow editor</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d232b; --muted: #5d6875; --line: #d9dee5; --soft: #eef1f5;
+  --agent: #6b4fd8; --agent-bg: #f3f0ff; --cmd: #4a5563; --cmd-bg: #f1f3f6; --pr: #1f8a5b; --pr-bg: #e9f7f0;
+  --check: #b8650a; --check-bg: #fff6e8; --bad: #c62828; --bad-bg: #fdecec; --good: #1f8a5b; --focus: #2f6fde;
+  --add: #e6f4ea; --del: #fbe9e9; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c; --panel: #1c2027; --ink: #e6e9ee; --muted: #9aa4b1; --line: #313844; --soft: #232934;
+    --agent: #a993ff; --agent-bg: #262040; --cmd: #b4bcc8; --cmd-bg: #242a33; --pr: #5fd19c; --pr-bg: #18302a;
+    --check: #f2b25c; --check-bg: #33280f; --bad: #ff8a80; --bad-bg: #3a1f1f; --good: #5fd19c; --focus: #7aa7ff;
+    --add: #1c3326; --del: #3a2121;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+header .grow { flex: 1; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--soft); color: var(--muted); white-space: nowrap; }
+.badge.good { color: var(--good); border-color: currentColor; background: transparent; }
+.badge.bad { color: var(--bad); border-color: currentColor; background: transparent; }
+.badge.warn { color: var(--check); border-color: currentColor; background: transparent; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--focus); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--focus); border-color: var(--focus); color: #fff; }
+button.small { padding: 1px 7px; font-size: 12px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+main { flex: 1; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px); min-height: 0; }
+#flow { overflow: auto; padding: 20px 24px 60px; }
+#side { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; border-radius: 0; background: transparent; padding: 9px 14px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--focus); }
+.pane { flex: 1; overflow: auto; padding: 16px; display: none; }
+.pane.on { display: block; }
+#banner { display: none; margin: 0; padding: 8px 16px; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; border-bottom: 1px solid var(--line); white-space: pre-wrap; }
+#banner.bad { display: block; background: var(--bad-bg); color: var(--bad); }
+#banner.warn { display: block; background: var(--check-bg); color: var(--check); }
+/* flow */
+.node { position: relative; max-width: 560px; margin: 0 auto; border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; background: var(--panel); padding: 10px 12px; cursor: pointer; }
+.node:hover { border-color: var(--focus); }
+.node.sel { box-shadow: 0 0 0 2px var(--focus); }
+.node.agent { border-left-color: var(--agent); }
+.node.command { border-left-color: var(--cmd); }
+.node.pull-request { border-left-color: var(--pr); }
+.node.terminal { cursor: default; border-left-color: var(--muted); background: var(--soft); }
+.node.terminal:hover { border-color: var(--line); border-left-color: var(--muted); }
+.node .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.node .title { font-weight: 600; margin: 1px 0 2px; word-break: break-word; }
+.node .sub { color: var(--muted); font-size: 13px; word-break: break-word; }
+.node .row { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip { font: 12px var(--mono); background: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.chip.none { font-family: inherit; color: var(--muted); }
+.chip.keep { border-style: dashed; }
+.label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.each { display: inline-block; font-size: 12px; color: var(--agent); background: var(--agent-bg); border-radius: 4px; padding: 1px 6px; }
+.until { margin-top: 8px; border: 1px dashed var(--check); background: var(--check-bg); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+.until b { color: var(--check); }
+.until code, .node code { font: 12px var(--mono); }
+.loop { position: absolute; right: -54px; top: 18px; bottom: 18px; width: 44px; border: 2px solid var(--check); border-left: 0; border-radius: 0 12px 12px 0; }
+.loop span { position: absolute; right: -6px; top: 50%; transform: translate(100%, -50%); font-size: 11px; color: var(--check); white-space: nowrap; }
+.loop::before { content: ""; position: absolute; left: -6px; top: -6px; border: 5px solid transparent; border-right-color: var(--check); }
+.actions { position: absolute; top: 6px; right: 6px; display: none; gap: 2px; }
+.node:hover .actions, .node.sel .actions { display: flex; }
+.link { display: flex; flex-direction: column; align-items: center; height: 46px; justify-content: center; position: relative; }
+.link::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid var(--line); }
+.link .add { position: relative; z-index: 1; display: none; }
+.link:hover .add, .link:focus-within .add { display: flex; gap: 4px; }
+.link .arrow { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--line); margin-bottom: -5px; }
+/* forms */
+.f { margin-bottom: 12px; }
+.f > label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+.f .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+input[type=text], input[type=number], select, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+textarea { font: 13px/1.45 var(--mono); resize: vertical; min-height: 60px; }
+textarea.prompt { min-height: 140px; font-family: inherit; font-size: 14px; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px 2px; margin: 0 0 12px; }
+legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.agentinfo { font-size: 12px; color: var(--muted); background: var(--soft); border-radius: 6px; padding: 6px 8px; margin-top: 4px; }
+#yaml { width: 100%; height: calc(100% - 4px); min-height: 400px; font: 13px/1.5 var(--mono); white-space: pre; }
+.diff { font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.diff div { padding: 0 8px; }
+.diff .a { background: var(--add); }
+.diff .d { background: var(--del); }
+.diff .s { color: var(--muted); background: var(--soft); text-align: center; }
+.muted { color: var(--muted); }
+table.est { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } #side { border-left: 0; border-top: 1px solid var(--line); min-height: 60vh; } .loop { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">workflow</h1>
+  <span id="approval" class="badge">…</span>
+  <span id="estimate" class="badge" title="optimistic – pessimistic, from this package's records">…</span>
+  <span id="dirty" class="badge warn" hidden>unsaved</span>
+  <span class="grow"></span>
+  <button id="revert" disabled>Revert</button>
+  <button id="save" class="primary" disabled>Save</button>
+  <button id="close" title="stop the editor">Close</button>
+</header>
+<pre id="banner"></pre>
+<main>
+  <section id="flow" aria-label="steps"></section>
+  <aside id="side">
+    <div class="tabs" role="tablist">
+      <button data-tab="step" class="on">Step</button>
+      <button data-tab="workflow">Workflow</button>
+      <button data-tab="yaml">YAML</button>
+      <button data-tab="changes">Changes</button>
+      <button data-tab="cost">Cost</button>
+    </div>
+    <div id="pane-step" class="pane on"></div>
+    <div id="pane-workflow" class="pane"></div>
+    <div id="pane-yaml" class="pane"><textarea id="yaml" spellcheck="false" aria-label="workflow.yaml"></textarea></div>
+    <div id="pane-changes" class="pane"></div>
+    <div id="pane-cost" class="pane"></div>
+  </aside>
+</main>
+<script>
+'use strict';
+(() => {
+  // The key to the API is in the address fragment; keep it for reloads of this tab only.
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get('t');
+  let token = fromHash;
+  try { if (fromHash) sessionStorage.setItem('aidev-token', fromHash); else token = sessionStorage.getItem('aidev-token'); } catch (e) { /* storage off */ }
+  if (fromHash) history.replaceState(null, '', location.pathname);
+
+  const $ = (s, el = document) => el.querySelector(s);
+  const h = (tag, attrs = {}, ...kids) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (k === 'text') el.textContent = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    return el;
+  };
+
+  let st = null;          // the server's state (saved file, approval, agents)
+  let raw = null;         // the definition being edited, as parsed YAML
+  let text = '';          // its YAML
+  let check = null;       // the last check of `text`
+  let sel = null;         // index of the selected step
+  let tab = 'step';
+  let busy = false;
+  let notice = '';        // a message shown once nothing is wrong
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'x-aidev-token': token || '', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { data, status: res.status });
+    return data;
+  }
+
+  const banner = (msg, kind = 'bad') => { const b = $('#banner'); b.className = msg ? kind : ''; b.textContent = msg || ''; };
+  const steps = () => (raw && Array.isArray(raw.steps) ? raw.steps : []);
+  const kindOf = (s) => (s && s.agent != null ? 'agent' : s && s.command != null ? 'command' : s && 'pull_request' in s ? 'pull-request' : 'unknown');
+  const list = (v) => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]);
+  const usd = (x) => `$${Number(x).toFixed(2)}`;
+
+  // ------------------------------------------------------------ edit cycle
+  let pending = null;
+  function changed(fromYaml = false) {
+    notice = '';
+    clearTimeout(pending);
+    render(fromYaml);
+    pending = setTimeout(() => recheck(fromYaml ? { text: $('#yaml').value } : { raw }), fromYaml ? 400 : 150);
+  }
+  async function recheck(body) {
+    try {
+      const r = await api('/api/check', body);
+      text = r.text;
+      check = r;
+      // YAML typed by hand: the flow follows it as soon as it parses.
+      if (body.text !== undefined && r.raw && typeof r.raw === 'object') raw = r.raw;
+      if (body.raw !== undefined && document.activeElement !== $('#yaml')) $('#yaml').value = text;
+    } catch (e) { check = { ok: false, error: e.message }; }
+    render(body.text !== undefined);
+  }
+
+  // ---------------------------------------------------------------- render
+  function render(keepYaml) {
+    $('#title').textContent = st ? `aidev edit workflow ${st.name}` : 'workflow';
+    const ap = $('#approval');
+    const same = st && text === st.text;
+    if (st && st.approval.approved && same) { ap.className = 'badge good'; ap.textContent = `approved (matches ${st.ref})`; }
+    else if (st && st.origin != null && text === st.origin) { ap.className = 'badge good'; ap.textContent = `same as ${st.ref}`; }
+    else { ap.className = 'badge warn'; ap.textContent = st && st.origin == null ? `not on ${st ? st.ref : 'origin'} yet` : `differs from ${st ? st.ref : 'origin'}`; }
+    ap.title = st && st.approval.reason ? st.approval.reason : '';
+    const es = $('#estimate');
+    if (check && check.estimate && check.estimate.optimistic != null) { es.textContent = `${usd(check.estimate.optimistic)} – ${usd(check.estimate.pessimistic)} / budget ${usd(check.estimate.budget)}`; es.className = `badge${check.estimate.optimistic >= check.estimate.budget ? ' bad' : ''}`; }
+    else es.textContent = 'estimate: -';
+    $('#dirty').hidden = !st || same;
+    $('#save').disabled = busy || !st || same || !(check && check.ok);
+    $('#revert').disabled = busy || !st || same;
+    if (check && !check.ok) banner(check.error);
+    else if (st && st.comments && !same && tab !== 'yaml') banner('Saving from the form writes the YAML anew: the comments of the file are not kept. Edit in the YAML tab to keep them.', 'warn');
+    else banner(notice, 'warn');
+    renderFlow();
+    renderTab(keepYaml);
+  }
+
+  function chips(globs, cls = '') {
+    const g = list(globs);
+    return g.length ? g.map((x) => h('span', { class: `chip ${cls}`, text: x })) : [h('span', { class: 'chip none', text: 'nothing' })];
+  }
+
+  function link(at) {
+    const add = (k) => h('button', { class: 'small', title: `insert ${k} step here`, onclick: (e) => { e.stopPropagation(); insert(at, k); } }, `+ ${k}`);
+    return h('div', { class: 'link' }, h('div', { class: 'add' }, add('agent'), add('command'), steps().some((s) => kindOf(s) === 'pull-request') ? null : add('pull_request')), h('span', { class: 'arrow' }));
+  }
+
+  function renderFlow() {
+    const flow = $('#flow');
+    flow.textContent = '';
+    if (!raw) return;
+    flow.append(h('div', { class: 'node terminal' }, h('div', { class: 'kind', text: 'objective' }), h('div', { class: 'sub', text: String(raw.objective || '(none)').trim().slice(0, 400) })));
+    steps().forEach((s, i) => {
+      flow.append(link(i));
+      const k = kindOf(s);
+      const node = h('div', { class: `node ${k}${sel === i ? ' sel' : ''}`, tabindex: '0', onclick: () => select(i), onkeydown: (e) => { if (e.key === 'Enter') select(i); } });
+      const act = h('div', { class: 'actions' },
+        h('button', { class: 'small', title: 'move up', disabled: i === 0, onclick: (e) => { e.stopPropagation(); move(i, -1); } }, '↑'),
+        h('button', { class: 'small', title: 'move down', disabled: i === steps().length - 1, onclick: (e) => { e.stopPropagation(); move(i, 1); } }, '↓'),
+        h('button', { class: 'small', title: 'delete step', onclick: (e) => { e.stopPropagation(); remove(i); } }, '✕'));
+      node.append(act, h('div', { class: 'kind', text: k === 'pull-request' ? 'pull request' : `${k} step` }), h('div', { class: 'title', text: s.id || `step-${i + 1}` }));
+      if (s.description) node.append(h('div', { class: 'sub', text: s.description }));
+      if (k === 'agent') {
+        node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'agent' }), h('code', { text: s.agent })));
+        node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'writes' }), ...chips(s.writable)));
+        if (list(s.unchanged).length) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'keeps' }), ...chips(s.unchanged, 'keep')));
+        if (s.for_each) node.append(h('div', { class: 'row' }, h('span', { class: 'each', text: `for each line of ${s.for_each.from} (≤ ${s.for_each.max_items}${s.for_each.on_failure === 'continue' ? ', a failure is undone and skipped' : ''})` })));
+        if (s.until) {
+          const u = s.until;
+          const parts = [];
+          if (list(u.command).length) parts.push(h('div', {}, 'commands: ', ...list(u.command).map((c, j) => [j ? ' → ' : '', h('code', { text: c })]), ' exit 0'));
+          if (u.agent) parts.push(h('div', {}, 'agent ', h('code', { text: u.agent }), ' answers VERDICT: PASS'));
+          const retries = u.max_retries == null ? 3 : u.max_retries;
+          node.append(h('div', { class: 'until' }, h('b', { text: 'until ' }), ...parts));
+          if (retries > 0) node.append(h('div', { class: 'loop', title: 'the agent is started again while the check fails' }, h('span', { text: `retry ≤ ${retries}` })));
+        }
+      } else if (k === 'command') {
+        node.append(h('div', { class: 'row' }, h('code', { text: `$ ${s.command}` })));
+        if (list(s.writable).length) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'commits' }), ...chips(s.writable)));
+      } else if (k === 'pull-request') {
+        node.append(h('div', { class: 'sub', text: `commit what the steps may write, push, open the pull request${s.pull_request && s.pull_request.title ? `: “${s.pull_request.title}”` : ''}` }));
+      }
+      const est = check && check.estimate && check.estimate.steps && check.estimate.steps.find((x) => x.id === s.id);
+      if (est && est.usd && est.usd[1] > 0) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'cost' }), `${usd(est.usd[0])} – ${usd(est.usd[1])}`));
+      flow.append(node);
+    });
+    flow.append(link(steps().length));
+    const lim = raw.limits || {};
+    flow.append(h('div', { class: 'node terminal' }, h('div', { class: 'kind', text: 'stops at' }),
+      h('div', { class: 'sub', text: `budget ${lim.max_usd != null ? usd(lim.max_usd) : '(missing: limits.max_usd is required)'} · ${lim.max_minutes != null ? `${lim.max_minutes} min` : 'no time limit'}` })));
+  }
+
+  // ------------------------------------------------------------------ forms
+  function field(label, input, hint) { return h('div', { class: 'f' }, h('label', {}, label), input, hint ? h('div', { class: 'hint', text: hint }) : null); }
+  const setOrDrop = (obj, key, v) => { if (v === '' || v == null || (Array.isArray(v) && !v.length)) delete obj[key]; else obj[key] = v; };
+  const lines = (s) => String(s).split('\n').map((x) => x.trim()).filter(Boolean);
+  const num = (s) => (String(s).trim() === '' ? null : Number(s));
+  function text1(obj, key, label, hint, opts = {}) {
+    return field(label, h('input', { type: 'text', value: obj[key] == null ? '' : String(obj[key]), placeholder: opts.placeholder || '', oninput: (e) => { setOrDrop(obj, key, e.target.value); changed(); } }), hint);
+  }
+  function area(obj, key, label, hint, cls = '') {
+    return field(label, h('textarea', { class: cls, oninput: (e) => { setOrDrop(obj, key, e.target.value); changed(); } }, obj[key] == null ? '' : String(obj[key])), hint);
+  }
+  function globs(obj, key, label, hint, required = false) {
+    return field(label, h('textarea', { rows: 3, oninput: (e) => { const v = lines(e.target.value); if (required) obj[key] = v; else setOrDrop(obj, key, v); changed(); } }, list(obj[key]).join('\n')), hint);
+  }
+  function number(obj, key, label, hint, step = '1') {
+    return field(label, h('input', { type: 'number', step, min: '0', value: obj[key] == null ? '' : obj[key], oninput: (e) => { setOrDrop(obj, key, num(e.target.value)); changed(); } }), hint);
+  }
+  function agentPick(obj, key, label, hint) {
+    const opts = (st ? st.agents : []).map((a) => h('option', { value: a.name, selected: a.name === obj[key] }, `${a.name}${a.source === 'kit' ? ' (kit)' : ''}`));
+    const known = (st ? st.agents : []).some((a) => a.name === obj[key]);
+    const sel = h('select', { onchange: (e) => { obj[key] = e.target.value; changed(); renderTab(); } }, known ? null : h('option', { value: obj[key] || '', selected: true }, obj[key] ? `${obj[key]} (not found)` : '(choose)'), ...opts);
+    const a = (st ? st.agents : []).find((x) => x.name === obj[key]);
+    const info = a ? h('div', { class: 'agentinfo' }, a.description || '(no description)', h('br'),
+      `tools: ${a.tools ? a.tools.join(', ') : 'the tool default'} · MCP: ${a.mcp.length ? a.mcp.join(', ') : 'none'} · skills: ${a.skills.length ? a.skills.join(', ') : 'none'}`,
+      a.error ? h('div', { style: 'color: var(--bad)', text: a.error }) : null) : null;
+    return field(label, h('div', {}, sel, info), hint);
+  }
+  function envField(obj, key, label) {
+    const cur = obj[key] && typeof obj[key] === 'object' ? Object.entries(obj[key]).map(([k, v]) => `${k}=${v}`).join('\n') : '';
+    return field(label, h('textarea', { rows: 2, oninput: (e) => {
+      const m = {};
+      for (const l of lines(e.target.value)) { const i = l.indexOf('='); if (i > 0) m[l.slice(0, i).trim()] = l.slice(i + 1); }
+      setOrDrop(obj, key, Object.keys(m).length ? m : null); changed();
+    } }, cur), 'NAME=value, one per line. Settings only: this file is reviewed and committed, never put secrets here.');
+  }
+  function toggle(label, on, flip) {
+    return h('label', { style: 'display:flex;gap:6px;align-items:center;margin-bottom:8px;font-weight:600;font-size:12px' }, h('input', { type: 'checkbox', checked: on, onchange: (e) => flip(e.target.checked) }), label);
+  }
+
+  function stepForm(s) {
+    const k = kindOf(s);
+    const out = [text1(s, 'id', 'id', 'lowercase letters, digits and dashes'), text1(s, 'description', 'description', 'for the reviewer; the agent does not see it')];
+    if (k === 'agent') {
+      out.push(agentPick(s, 'agent', 'agent', 'what it can do (tools, MCP, skills) is in the agent’s own file'));
+      out.push(area(s, 'prompt', 'prompt', s.for_each ? 'write {item} where the target goes' : 'what this step asks of the agent', 'prompt'));
+      out.push(globs(s, 'writable', 'writable', 'paths this step may write, one glob per line; empty writes nothing', true));
+      out.push(globs(s, 'unchanged', 'unchanged', 'paths it must leave as they are, even inside writable (the tests an upgrade must not weaken)'));
+      out.push(number(s, 'timeout_minutes', 'timeout_minutes', 'the most one start of the agent may take (default 30, at most 240)', 'any'));
+      const fe = h('fieldset', {}, h('legend', {}, 'for_each'), toggle('run once per target', !!s.for_each, (on) => { if (on) s.for_each = { from: 'targets.txt', max_items: 20 }; else delete s.for_each; if (on && !String(s.prompt || '').includes('{item}')) s.prompt = `${s.prompt || ''}\nTarget: {item}`.trim(); changed(); renderTab(); }));
+      if (s.for_each) {
+        fe.append(h('div', { class: 'two' }, text1(s.for_each, 'from', 'from', 'a file in the run’s notes, one target per line'), number(s.for_each, 'max_items', 'max_items', `at most ${st ? st.limits.maxItems : 10000}`)));
+        fe.append(field('on_failure', h('select', { onchange: (e) => { setOrDrop(s.for_each, 'on_failure', e.target.value === 'stop' ? null : e.target.value); changed(); } },
+          h('option', { value: 'stop', selected: s.for_each.on_failure !== 'continue' }, 'stop — the first failure stops the run'),
+          h('option', { value: 'continue', selected: s.for_each.on_failure === 'continue' }, 'continue — undo the failed target, go on'))));
+      }
+      out.push(fe);
+      const u = h('fieldset', {}, h('legend', {}, 'until'), toggle('repeat until a check passes', !!s.until, (on) => { if (on) s.until = { command: 'npm test' }; else delete s.until; changed(); renderTab(); }));
+      if (s.until) {
+        const un = s.until;
+        u.append(field('command', h('textarea', { rows: 2, oninput: (e) => { const v = lines(e.target.value); setOrDrop(un, 'command', v.length > 1 ? v : v[0]); changed(); } }, list(un.command).join('\n')), 'one command per line, run in order without a shell; each must exit 0'));
+        u.append(h('div', { class: 'two' }, text1(un, 'cwd', 'cwd', 'directory to run in'), number(un, 'timeout_minutes', 'timeout_minutes', 'per command', 'any')));
+        u.append(envField(un, 'env', 'env'));
+        u.append(agentPick(un, 'agent', 'agent (checker)', 'optional: answers VERDICT: PASS or FAIL, writes nothing'));
+        if (un.agent) u.append(area(un, 'prompt', 'what the checker looks at'));
+        if (un.agent && !st.agents.some((a) => a.name === un.agent)) { /* shown as not found */ }
+        u.append(h('div', { class: 'two' }, number(un, 'max_retries', 'max_retries', `starts of the agent again while it fails (default 3, at most ${st ? st.limits.maxRetries : 10})`), h('div', { class: 'f' }, h('label', {}, ' '), h('button', { class: 'small', onclick: () => { delete un.agent; delete un.prompt; changed(); renderTab(); } }, 'remove checker'))));
+      }
+      out.push(u);
+    } else if (k === 'command') {
+      out.push(text1(s, 'command', 'command', 'one command line, run once without a shell; a failure stops the run'));
+      out.push(h('div', { class: 'two' }, text1(s, 'cwd', 'cwd', 'directory to run in'), number(s, 'timeout_minutes', 'timeout_minutes', 'at most 240', 'any')));
+      out.push(envField(s, 'env', 'env'));
+      out.push(globs(s, 'writable', 'writable', 'files it makes that the pull request should commit'));
+    } else if (k === 'pull-request') {
+      if (s.pull_request == null || typeof s.pull_request !== 'object') s.pull_request = {};
+      out.push(text1(s.pull_request, 'title', 'title', 'default: aidev: <description of the workflow>'));
+      out.push(h('p', { class: 'muted', text: 'Commits everything the steps may write, pushes a new branch and opens the pull request (Azure DevOps). It never merges.' }));
+    }
+    return out;
+  }
+
+  function workflowForm() {
+    raw.limits = raw.limits && typeof raw.limits === 'object' ? raw.limits : {};
+    return [
+      field('name', h('input', { type: 'text', value: raw.name || '', disabled: true }), 'the directory name; it cannot change here'),
+      text1(raw, 'description', 'description', 'one line for the reviewer'),
+      area(raw, 'objective', 'objective', 'every agent step is given this', 'prompt'),
+      h('div', { class: 'two' }, text1(raw, 'tool', 'tool', 'claude, copilot, codex, kiro (default: aidev.yaml)'), text1(raw, 'model', 'model', 'default: aidev.yaml')),
+      h('fieldset', {}, h('legend', {}, 'limits'), h('div', { class: 'two' },
+        number(raw.limits, 'max_usd', 'max_usd', 'required: no agent starts once the reported cost reaches it', 'any'),
+        number(raw.limits, 'max_minutes', 'max_minutes', 'optional: without it, time does not stop the run'))),
+    ];
+  }
+
+  // Line diff (longest common subsequence), with long unchanged stretches folded.
+  function diffLines(a, b) {
+    const x = a.split('\n'); const y = b.split('\n');
+    const n = x.length; const m = y.length;
+    if (n * m > 4e6) return null;
+    const L = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = []; let i = 0; let j = 0;
+    while (i < n && j < m) {
+      if (x[i] === y[j]) { out.push([' ', x[i]]); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) { out.push(['-', x[i]]); i++; } else { out.push(['+', y[j]]); j++; }
+    }
+    while (i < n) out.push(['-', x[i++]]);
+    while (j < m) out.push(['+', y[j++]]);
+    return out;
+  }
+  function diffView(a, b) {
+    const d = diffLines(a, b);
+    if (!d) return h('p', { class: 'muted', text: 'too large to compare here; use git diff' });
+    if (!d.some(([t]) => t !== ' ')) return h('p', { class: 'muted', text: 'no differences' });
+    const box = h('div', { class: 'diff' });
+    d.forEach(([t, l], k) => {
+      if (t === ' ') {
+        const near = d.slice(Math.max(0, k - 3), k + 4).some(([u]) => u !== ' ');
+        if (!near) { if (box.lastChild && box.lastChild.className === 's') return; box.append(h('div', { class: 's', text: '…' })); return; }
+      }
+      box.append(h('div', { class: t === '+' ? 'a' : t === '-' ? 'd' : '', text: `${t} ${l}` }));
+    });
+    return box;
+  }
+
+  function renderTab(keepYaml) {
+    document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === `pane-${tab}`));
+    if (!raw) return;
+    if (tab === 'step') {
+      const p = $('#pane-step'); p.textContent = '';
+      const s = sel != null ? steps()[sel] : null;
+      if (!s) p.append(h('p', { class: 'muted', text: 'Select a step in the flow to edit it, or hover between two steps to insert one.' }));
+      else p.append(...stepForm(s));
+    } else if (tab === 'workflow') {
+      const p = $('#pane-workflow'); p.textContent = ''; p.append(...workflowForm());
+    } else if (tab === 'yaml') {
+      if (!keepYaml && document.activeElement !== $('#yaml')) $('#yaml').value = text;
+    } else if (tab === 'changes') {
+      const p = $('#pane-changes'); p.textContent = '';
+      p.append(h('h3', { text: `Against ${st.ref} (the approved copy)` }));
+      p.append(st.origin == null ? h('p', { class: 'muted', text: `${st.rel} is not on ${st.ref} yet: all of it is new.` }) : diffView(st.origin, text));
+      p.append(h('h3', { text: 'Against the saved file' }), diffView(st.text, text));
+      const others = st.approval.files.filter((f) => f.rel !== st.rel && f.state !== 'approved');
+      if (others.length) p.append(h('p', { class: 'muted', text: `Other files this workflow depends on and that are not approved: ${others.map((f) => `${f.rel} (${f.state})`).join(', ')}` }));
+    } else if (tab === 'cost') {
+      const p = $('#pane-cost'); p.textContent = '';
+      const e = check && check.estimate;
+      if (!e || e.optimistic == null) { p.append(h('p', { class: 'muted', text: e && e.error ? e.error : 'fix the definition to see an estimate' })); return; }
+      p.append(h('p', {}, `Optimistic ${usd(e.optimistic)}, pessimistic ${usd(e.pessimistic)}, budget ${usd(e.budget)}.`));
+      p.append(h('table', { class: 'est' }, h('tr', {}, h('th', {}, 'step'), h('th', {}, 'cost'), h('th', {}, 'priced from')),
+        ...e.steps.map((x) => h('tr', {}, h('td', {}, x.id), h('td', {}, x.usd[1] > 0 ? `${usd(x.usd[0])} – ${usd(x.usd[1])}` : '-'), h('td', { class: 'muted' }, x.basis || '')))));
+      p.append(h('p', { class: 'muted', text: 'For this task’s sizes and targets, run "aidev estimate workflow <name> --ai".' }));
+    }
+  }
+
+  // --------------------------------------------------------------- actions
+  function select(i) { sel = i; tab = 'step'; render(); }
+  function insert(at, kind) {
+    const ids = new Set(steps().map((s) => s.id));
+    let n = steps().length + 1; let id = `step-${n}`;
+    while (ids.has(id)) id = `step-${++n}`;
+    const agent = st && st.agents.find((a) => a.source === 'pkg');
+    const s = kind === 'agent' ? { id, agent: agent ? agent.name : 'my-agent', writable: [], prompt: 'Describe the work.' }
+      : kind === 'command' ? { id, command: 'npm run lint' } : { id: 'pr', pull_request: {} };
+    if (!Array.isArray(raw.steps)) raw.steps = [];
+    raw.steps.splice(at, 0, s);
+    sel = at; tab = 'step'; changed();
+  }
+  function move(i, d) { const a = raw.steps; [a[i], a[i + d]] = [a[i + d], a[i]]; if (sel === i) sel = i + d; else if (sel === i + d) sel = i; changed(); }
+  function remove(i) { raw.steps.splice(i, 1); if (sel === i) sel = null; else if (sel > i) sel--; changed(); }
+
+  async function load() {
+    try {
+      st = await api('/api/state');
+      text = st.text; check = st.check; raw = st.check.raw; sel = sel != null && raw && steps()[sel] ? sel : null;
+      $('#yaml').value = text;
+      render();
+    } catch (e) {
+      banner(e.status === 403 ? 'This page has no key to the editor. Open the address the "aidev edit workflow" command printed.' : `Could not load: ${e.message}`);
+    }
+  }
+  $('#save').addEventListener('click', async () => {
+    busy = true; render();
+    try {
+      st = await api('/api/save', { text, base: st.base });
+      text = st.text; check = st.check; raw = st.check.raw;
+      notice = `Saved ${st.rel}. It runs once it is submitted ("aidev submit workflow ${st.name}") and the pull request is merged.`;
+      busy = false; render();
+    } catch (e) { busy = false; render(); banner(e.status === 409 ? e.message : `Not saved: ${e.message}`); }
+  });
+  $('#revert').addEventListener('click', () => { text = st.text; check = st.check; raw = JSON.parse(JSON.stringify(st.check.raw)); $('#yaml').value = text; render(); });
+  $('#close').addEventListener('click', async () => {
+    if (st && text !== st.text && !confirm('Close without saving the changes?')) return;
+    try { await api('/api/close', {}); } catch (e) { /* already gone */ }
+    document.body.textContent = '';
+    document.body.append(h('p', { style: 'padding: 24px', text: 'The editor is closed. You can close this tab.' }));
+  });
+  document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
+  $('#yaml').addEventListener('input', () => { text = $('#yaml').value; changed(true); });
+  window.addEventListener('beforeunload', (e) => { if (st && text !== st.text) { e.preventDefault(); e.returnValue = ''; } });
+  load();
+})();
+</script>
+</body>
+</html>

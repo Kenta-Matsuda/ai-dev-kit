@@ -71,13 +71,13 @@ steps:                             # required; run top to bottom
       timeout_minutes: 15
       agent: e2e-reviewer
       prompt: Does the test cover every main action of screen {item}?
-    max_retries: 3
+      max_retries: 3
     timeout_minutes: 30
   - id: lint                       # a command step
     command: npm run lint
   - id: pr                         # a pull-request step
-    kind: pull-request
-    title: "test: add e2e tests"
+    pull_request:
+      title: "test: add e2e tests"
 
 limits:
   max_usd: 10                      # required
@@ -121,7 +121,7 @@ A field that is not in the tables below is refused by validation (`unknown key â
 |`steps`
 |list
 |required
-|The steps, at least one, run top to bottom. Each step is exactly one of an agent step, a command step or a pull-request step (the sections below).
+|The steps, at least one, run top to bottom. Each step is exactly one of an agent step, a command step or a pull-request step, decided by which key it has: `agent`, `command` or `pull_request` (the sections below). A step with two of them is refused.
 
 |`limits`
 |mapping
@@ -186,12 +186,6 @@ A step that starts an agent to do the work. A step with `agent` is an agent step
 |none
 |When the step is done. The agent is started again until it is met (xref:workflow-reference-until[until]).
 
-|`max_retries`
-|integer
-|optional
-|3 with `until`, else 0
-|How many times to try again after the first attempt. 0 to 10. Above 0 needs `until` or `unchanged`.
-
 |`timeout_minutes`
 |number
 |optional
@@ -237,6 +231,11 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |string
 |required with `agent`
 |What the checking agent checks.
+
+|`max_retries`
+|integer
+|optional (default 3)
+|How many times the agent is started again after the first attempt when the check fails. 0 to 10; 0 means no retry. A failed `unchanged` check is retried the same way. A step without `until` is not retried.
 |===
 
 [[workflow-reference-for-each]]
@@ -303,17 +302,17 @@ A step where ADK runs a command once. Anything but exit 0 stops the workflow the
 |===
 |Field |Type |Required |Description
 
-|`kind`
-|`pull-request`
-|required
-|The kind of step. At most one per workflow.
-
 |`id`, `description`
 |string
 |optional
 |As in an agent step.
 
-|`title`
+|`pull_request`
+|mapping
+|required
+|A step with this key is a pull-request step. At most one per workflow. It holds only `title`; without a title, write `pull_request: {}`.
+
+|`pull_request.title`
 |string
 |optional
 |The title of the PR and the commit. When omitted: `aidev: <description, or name>`.

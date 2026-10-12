@@ -183,11 +183,35 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D20: 無人の大規模実行は費用と回数の上限で止め、時間の天井は置かない
 
-**判断**: `limits.max_usd`（必須）、`max_retries`（≤10）、`for_each.max_items`（≤10000）、agent 1回とcommand 1つの`timeout_minutes`（≤240）で実行を止めます。全体の時間`limits.max_minutes`は任意で、天井を置きません（旧: 必須ではないが既定・天井60分）。ただし費用を報告しないtool（claude以外）で動くagentがあるときは、`max_usd`が効かないので`max_minutes`（か`--max-minutes`）を要求します。`for_each.on_failure: continue`で、失敗した件の変更を戻して次の件へ進めます。予算は`limits`に`max_minutes`と並べて書きます（旧`cost.max_usd`）。時間はmsでなく分（`timeout_minutes`）で書きます（2026-10-13）。
+**判断**: `limits.max_usd`（必須）、`until.max_retries`（≤10）、`for_each.max_items`（≤10000）、agent 1回とcommand 1つの`timeout_minutes`（≤240）で実行を止めます。全体の時間`limits.max_minutes`は任意で、天井を置きません（旧: 必須ではないが既定・天井60分）。ただし費用を報告しないtool（claude以外）で動くagentがあるときは、`max_usd`が効かないので`max_minutes`（か`--max-minutes`）を要求します。`for_each.on_failure: continue`で、失敗した件の変更を戻して次の件へ進めます。予算は`limits`に`max_minutes`と並べて書きます（旧`cost.max_usd`）。時間はmsでなく分（`timeout_minutes`）で書きます（2026-10-13）。
 
 **理由**: 数百〜数千件のE2E作成や大規模なversion upのように、実行したら終わるまで人が介入しない使い方では、60分の天井は「人が`--resume`する」ことを前提にしてしまいます。暴走の害は費用であり、それは`max_usd`で止まります。hangは`timeout_minutes`が止めます。1件の失敗で全体が止まると、数千件の仕事は終わりません。`cost`と`limits`が別keyなのは「実行を止める条件」が2か所に分かれて読みにくく、msの数値は桁を読み違えます。
 
 **却下した代替案**: PKGごとの天井を`aidev.yaml`で上げる案（`proposals/2026-10-01-workflow-long-running.md`の提案4。天井を設定する場所が増えるだけで、無人実行の判断はworkflowのreviewで足りる）。失敗した件を戻さずに残す案（失敗したテストがPRに入りCIを壊す）。並列実行（同じ作業treeを共有するため、件ごとのworktreeが先に要る）。
+
+### D21: stepの種類はkeyで決め、やり直しは`until`に属する
+
+**判断**: stepの種類は`agent:` / `command:` / `pull_request:`のどのkeyを持つかで決めます（ちょうど1つ）。pull-request stepは`pull_request: { title: ... }`（titleが無ければ`pull_request: {}`）と書き、旧`kind: pull-request`とstep直下の`title`はerrorです。やり直しの回数は`until.max_retries`（既定3、≤10）に書き、step直下の`max_retries`はerrorです。`until`の無いstepはやり直さず、`unchanged`だけのstepの違反はそのstep（`for_each`ならその件）の不合格です（2026-10-13）。
+
+**理由**: agent stepとcommand stepはkeyの有無で種類が決まるのに、PRだけ`kind`で書く形は揃っていませんでした。`max_retries`は「判定に落ちたらやり直す」回数なので、判定（`until`）の中にある方が読み手に意味が伝わり、`until`の無いstepに書いても意味が無いことが形で分かります。
+
+**却下した代替案**: 全stepに`kind`を書かせる案（agent / command stepの記述が長くなるだけ）。`unchanged`だけのstepにも`max_retries`を残す案（判定の無いstepに再試行の数だけが残り、どこに書くかが2通りになる。やり直したいなら`until`を書く）。
+
+### D22: 見積もりは記録で学び、AIに金額を推測させない
+
+**判断**: `run workflow`は開始時の見積もりと実費を、stepごとにrecord（`.aidev/estimates/records/`）として残し、PKGにcommitしてteamで共有します。学習は3段です。(1) 見積もりのたびに、recordからsize classの価格と幅の倍率（過去の8割が入る最小の倍率）を計算する（AIなし）。(2) 幅を外れたstepが3つ溜まると、`run`の終わりにestimate-reviewer（読むだけ）が外れた理由を読み、agent別・仕事の種類別の1回の価格（prior）と注意書きを答え、CLIが検査して`priors.json` / `notes.md`に書く（`estimates.review: off`で止める）。(3) kit開発者が複数PKGのrecordをbacktestにかけ、見積もりの方法そのものをPRで直す（`npm run evolve -- estimates`）。価格はmodelの単価比で換算します。AI（cost-estimator、estimate-reviewer）は仕事の大きさ・種類・回数・件数とpriorの幅を返すだけで、見積もりの金額はkitが計算します（2026-10-13）。
+
+**理由**: 実績の無い仕事の見積もりは粗く、modelで価格が何倍も違います。recordを個人の端末（`runs/`、gitignore）に置くと、人数分の実績が見積もりに届きません。recordは小さくpromptや出力を含まないので、commitしても秘密の経路になりません。金額をAIに推測させると根拠が検証できず、記録で補正もできません。方法そのものの変更は全PKGに効くので、PKG側の自動変更ではなく、kitのreview（PR）を通します。
+
+**却下した代替案**: recordをgitignoreして各自の端末に置く案（共有されない）。1つの集計fileに追記する案（並行するbranchで必ずconflictする。run 1つにfile 1つ）。reviewerにpriorsを直接書かせる案（agentの書込経路が増える。CLIが答えを検査して書く）。kitが利用者のrecordを自動で送る案（tokenの埋め込みと送信先が要る。kit開発者の端末にあるPKGのrecordだけを使う）。
+
+### D23: workflowのbrowser editorは手元のserverで、保存するのはYAMLだけ
+
+**判断**: `aidev edit workflow <name>`は`127.0.0.1`にserverを立て、stepの流れの図、form、YAML、差分、見積もりを1つのpageで見せます。変更のたびにrunと同じ検証（`validateDefinition`、name、`resolveDependencies`）をserver側で行い、保存は検証が通ったときに`workflow.yaml`だけを書きます。approve・commit・submit・agentの起動はしません。APIは起動ごとのtoken（URLのfragment）、loopbackの`Host` / `Origin`、CSPで守ります（2026-10-13）。
+
+**理由**: reviewerと責任者はYAMLの`until` / `for_each` / retryの組み合わせを頭で組み立てていました。図にすると流れとloopが一目で分かります。検証と書込をserver（CLIと同じcode）に置けば、pageは表示と入力だけになり、別の検証規則が生まれません。承認は`origin`との一致なので、保存を承認と混同させないことが重要です。
+
+**却下した代替案**: 静的HTMLを書き出して見るだけにする案（直せない）。agentやskillもpageから編集する案（共有agentの変更は他のworkflowに波及する。`modify` / 手編集に残す）。`aidev submit`をpageのボタンにする案（pushと PR作成は外向きの操作で、terminalで明示的に行う）。外部のCDNのgraph libraryを使う案（offlineで動かず、CSPを広げる）。
 
 ## 未決の論点
 

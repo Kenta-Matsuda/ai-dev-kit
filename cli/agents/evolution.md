@@ -35,6 +35,17 @@ ai-dev-kit の **テンプレート（`templates/<tool>/`）を、実際のセ�
 5. PR を作る。手元のツール（GitHub MCP、`gh pr create`、Azure DevOps MCP）のうち、この checkout の `origin` に合うものを使う。**自動マージはしない。**
 6. 報告する: ブランチ、PR のリンク（作れなければ理由）、採用しなかった提案とその理由。
 
+## 見積もりの改善（`npm run evolve -- estimates`）
+
+prompt が「estimate mode」と言うときは、テンプレートではなく **費用の見積もり方法**を改善します。
+
+- 入力は、各 PKG の見積もりの記録（`.aidev/estimates/records/` の写し）と、今の方法での backtest の数字（`node scripts/estimate-backtest.js <dir>...`）
+- 変えてよいのは `cli/lib/estimate.js`（size の既定値、モデルの単価表、根拠の順番、幅の広げ方、補正）、`cli/agents/cost-estimator.md`、`cli/agents/estimate-reviewer.md`、`scripts/estimate-backtest.js`、テスト、docs
+- 変更の前後で backtest を実行し、**目標の割合（80%）に近づき、幅の中央値が広がらない**か、**同じ割合で幅が狭まる**変更だけを残す。どちらでもない変更は戻す
+- 複数の PKG に共通する外れ方を優先する。1 つの PKG だけの事情は、その PKG の振り返り（priors）の仕事なので kit に入れない
+- 記録の中の step 名・対象・agent 名・PKG 名を kit のファイルや PR 本文に写さない
+- PR 本文に変更前後の数字を書く
+
 ## 停止条件
 
 - 振り返りが kit の変更を示唆しない → 変更せず、その旨を報告

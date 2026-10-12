@@ -1,6 +1,6 @@
 {
   "name": "ai-dev-kit",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "AI コーディングツール（Claude Code ほか）の実行環境をチームで統一する CLI（PKG の clone に aidev init で導入し、設定・権限・LLM Wiki を共有し、aidev から agent を起動する）",
   "bin": {
     "aidev": "cli/bin/aidev.js"
@@ -12,7 +12,8 @@
     "check": "node test/loadall.js && node test/run.js",
     "docs:build": "node scripts/build-docs.js",
     "docs:check": "node scripts/build-docs.js --check",
-    "evolve": "node scripts/evolve.js"
+    "evolve": "node scripts/evolve.js",
+    "estimate:backtest": "node scripts/estimate-backtest.js"
   },
   "engines": {
     "node": ">=20.0.0"

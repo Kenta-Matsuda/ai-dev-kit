@@ -83,7 +83,12 @@ process.stdin.on('end', () => {
     { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'tu0', message: { content: [
     { type: 'tool_use', id: 'tu2', name: 'Glob', input: { pattern: 'stub/**' } }] } }) + '\\n');
-  process.stdout.write(JSON.stringify({ type: 'result', result: answer, is_error: false, total_cost_usd: 0.0123, session_id: 's' }) + '\\n');
+  // STUB_COST prices this start; the estimate reviewer answers STUB_REVIEW_ANSWER.
+  const cost = Number(process.env.STUB_COST || 0.0123);
+  const review = /# Review the cost estimates/.test(stdin) && process.env.STUB_REVIEW_ANSWER;
+  process.stdout.write(JSON.stringify({ type: 'result', result: review || answer, is_error: false, total_cost_usd: cost, session_id: 's',
+    usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 50 },
+    modelUsage: { 'claude-haiku-5-5': { costUSD: 0.0001 }, 'claude-sonnet-5-5': { costUSD: cost } } }) + '\\n');
 });
 `, 'utf8');
   return p;
@@ -143,11 +148,11 @@ function run() {
       { agent: 'x', writable: [], prompt: 'p', description: 'look first' },
       { agent: 'x', writable: ['src/**'], prompt: 'p', until: { command: 'npm test' } },
       { command: 'npm run gen', writable: ['gen/**'] },
-      { kind: 'pull-request', title: 't' },
+      { pull_request: { title: 't' } },
     ] }, 'wf');
     eq(u.steps.map((s) => s.id), ['step-1', 'step-2', 'step-3', 'step-4'], 'ids default from position');
     eq(u.steps[0].description, 'look first');
-    eq(u.steps[1].until, { commands: [{ text: 'npm test', argv: ['npm', 'test'] }], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null });
+    eq(u.steps[1].until, { commands: [{ text: 'npm test', argv: ['npm', 'test'] }], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null, max_retries: 3 });
     const many = wfMod.validateDefinition(withStep({ until: {
       command: ['npm ci', 'npx playwright test'], cwd: 'e2e/', env: { CI: 1, BASE_URL: 'http://localhost:3000' }, timeout_minutes: 10,
     } }), 'wf').steps[0].until;
@@ -175,8 +180,9 @@ function run() {
     throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_usd: 1, max_tokens: 5 } }, 'wf'), /limits: unknown key max_tokens/);
     throws(() => wfMod.validateDefinition(withStep({ timeout_ms: 60000 }), 'wf'), /timeout_ms is timeout_minutes now/);
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', timeout_ms: 1 } }), 'wf'), /timeout_ms is timeout_minutes now/);
-    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test' }, max_retries: 11 }), 'wf'), /above the hard ceiling of 10/);
-    throws(() => wfMod.validateDefinition(withStep({ max_retries: 2 }), 'wf'), /needs an until/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', max_retries: 11 } }), 'wf'), /above the hard ceiling of 10/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test' }, max_retries: 2 }), 'wf'), /max_retries is written inside until now/);
+    eq(wfMod.validateDefinition(withStep({ until: { command: 'npm test', max_retries: 0 } }), 'wf').steps[0].max_retries, 0, 'until.max_retries: 0 checks without retrying');
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test | tee log' } }), 'wf'), /without a shell/);
     throws(() => wfMod.validateDefinition(withStep({ until: 'npm test' }), 'wf'), /until must be a mapping/);
     throws(() => wfMod.validateDefinition(withStep({ until: {} }), 'wf'), /until needs a command, an agent, or both/);
@@ -206,15 +212,20 @@ function run() {
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test {item}' }] }, 'wf'), /belongs to an agent step with for_each/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test', unchanged: ['tests/**'] }] }, 'wf'), /unchanged does not belong to a command step/);
     throws(() => wfMod.validateDefinition(withStep({ unchanged: ['../x'] }), 'wf'), /repo-relative/);
-    eq(wfMod.validateDefinition(withStep({ unchanged: ['tests/**'], max_retries: 2 }), 'wf').steps[0].max_retries, 2, 'unchanged alone is a check worth retrying for');
+    eq(wfMod.validateDefinition(withStep({ unchanged: ['tests/**'] }), 'wf').steps[0].max_retries, 0, 'without an until a step is not retried');
     for (const bad of ['--config=evil.js', 'a b', '../up', 'x/../y', 'semi;colon', '$HOME']) {
       throws(() => wfMod.parseItems(`ok\n${bad}\n`, FE), /line 2: .* is not a target/);
     }
     throws(() => wfMod.parseItems('a\nb\nc\nd\ne\nf\n', FE), /lists 6 targets, above for_each\.max_items \(5\)/);
-    throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command or kind/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'shell' }] }, 'wf'), /kind must be "pull-request"/);
+    throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command or pull_request/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request' }] }, 'wf'), /pull_request: \{ title: \.\.\. \} now/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: null, title: 'x' }] }, 'wf'), /title of a pull request is written inside it/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: 'yes' }] }, 'wf'), /pull_request is a mapping/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: { body: 'x' } }] }, 'wf'), /pull_request: unknown key body/);
+    eq(wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'pr', pull_request: null }] }, 'wf').steps[0], { id: 'pr', kind: 'pull-request', description: '', title: null }, 'pull_request: with nothing after it');
+    eq(wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'pr', pull_request: { title: 'T' } }] }, 'wf').steps[0].title, 'T');
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'a', agent: 'x', writable: [], prompt: 'p' }, { id: 'a', command: 'npm test' }] }, 'wf'), /duplicate step id/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request' }, { kind: 'pull-request' }] }, 'wf'), /at most one pull-request/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: {} }, { pull_request: {} }] }, 'wf'), /at most one pull-request/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [] }, 'wf'), /steps must be a non-empty list/);
     throws(() => wfMod.validateDefinition({ ...GOOD, tool: 'cursor' }, 'wf'), /not a supported tool/);
     throws(() => wfMod.validateDefinition({ ...GOOD, model: '-p' }, 'wf'), /model/);
@@ -227,7 +238,7 @@ function run() {
     throws(() => wfMod.validateDefinition({ ...GOOD, agents: ['x'] }, 'wf'), /agents is not a workflow key/);
     throws(() => wfMod.validateDefinition({ ...GOOD, retries: 3 }, 'wf'), /unknown key retries/);
     throws(() => wfMod.validateDefinition(withStep({ mcp: ['x'] }), 'wf'), /mcp does not belong to an agent step/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request', writable: ['src/**'] }] }, 'wf'), /writable does not belong to a pull-request step/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: {}, writable: ['src/**'] }] }, 'wf'), /writable does not belong to a pull-request step/);
     throws(() => wfMod.validateDefinition({ ...GOOD, limits: { minutes: 5 } }, 'wf'), /limits: unknown key minutes/);
   });
 
@@ -385,7 +396,8 @@ function run() {
   suite('workflow: run');
 
   {
-    const fx = makeRepo({ hosting: 'generic' });
+    // The estimate reviewer is tested on its own; here it would add starts to every count.
+    const fx = makeRepo({ hosting: 'generic', configExtra: ['estimates:', '  review: off'] });
     const tmp = stubDir();
     const stub = writeToolStub(tmp);
     const argvOut = path.join(tmp, 'argv.json');
@@ -447,7 +459,7 @@ function run() {
         eq(j.steps.map((s) => [s.id, s.kind, s.starts]), [['think', 'agent', [1, 1]], ['check', 'command', [0, 0]], ['act', 'agent', [1, 4]]],
           'act: one start when the check passes first time, four when all three retries are used');
         ok(/history of this step \(1\)/.test(j.steps[0].basis), j.steps[0].basis);
-        eq(j.steps[0].perStart.agent, [0.01, 0.02], 'one sample: the observed cost, widened (x0.5, x2)');
+        eq(j.steps[0].perStart.agent, [0.0062, 0.0246], 'one sample: the observed cost, widened (x0.5, x2)');
         eq([j.optimistic, j.pessimistic], [0.01, 0.12], 'think 0.0062 + act 0.0062 .. think 0.0246 + 4 x act 0.0246');
         ok(fs.readdirSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs')).length === 1, 'estimate starts no run');
         const dry = aidev(fx.root, ['run', 'workflow', 'plain', '--dry-run'], { env: env() });
@@ -471,12 +483,16 @@ function run() {
         ok(/## What earlier runs recorded\n\n- think: agent 1 start\(s\)/.test(prompt), 'the estimator sees the history');
         const bad = aidev(fx.root, ['estimate', 'workflow', 'plain', '--ai', '--json'], { env: env({ STUB_ANSWER: 'no idea' }) });
         eq(bad.code, 0, 'an unusable answer falls back to the definition');
-        eq([lastJson(bad.out).ai, lastJson(bad.out).estimator.reason], [false, 'its answer had no JSON block to read']);
+        eq([lastJson(bad.out).estimator.ok, lastJson(bad.out).estimator.reason], [false, 'its answer had no JSON block to read']);
+        eq(lastJson(bad.out).ai, true, 'the judgment of the answer before is kept for this definition');
+        const kept = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'estimates', 'judgments', 'plain.json'), 'utf8'));
+        eq(kept.steps.find((s) => s.id === 'act').size, 'L', 'the estimator sizes are kept (not its attempts or targets)');
+        fs.rmSync(path.join(fx.root, '.aidev', 'estimates'), { recursive: true, force: true });
       });
 
       test('an until command that keeps failing with the same output stops the step early', () => {
         define('loop', { steps: [
-          '  - id: fix', '    agent: coder', '    prompt: fix it', '    until:', '      command: node -e process.exit(3)', '    max_retries: 5',
+          '  - id: fix', '    agent: coder', '    prompt: fix it', '    until:', '      command: node -e process.exit(3)', '      max_retries: 5',
         ] });
         reset();
         const r = aidev(fx.root, ['run', 'workflow', 'loop', '--json'], { env: env() });
@@ -495,7 +511,7 @@ function run() {
         define('reviewed', { steps: [
           '  - id: write', '    agent: coder', '    prompt: write the tests',
           '    until:', '      command: node --version', '      agent: reviewer', '      prompt: Check that the tests cover the edge cases.',
-          '    max_retries: 3',
+          '      max_retries: 3',
         ] });
         const stepsOut = path.join(tmp, 'steps.txt');
         const verdicts = path.join(tmp, 'verdicts.json');
@@ -617,7 +633,7 @@ function run() {
           "require('fs').mkdirSync('src/gen', { recursive: true }); require('fs').writeFileSync('src/gen/out.txt', 'made\\n'); require('fs').writeFileSync('notes.txt', 'outside\\n');\n");
         define('pr', { steps: [
           '  - id: make', '    command: node tools/touch.js', '    writable: [src/**]',
-          '  - id: pr', '    kind: pull-request', '    title: "aidev: generated"',
+          '  - id: pr', '    pull_request:', '      title: "aidev: generated"',
         ] });
         write(path.join(fx.root, 'dirty.txt'), 'x\n');
         const dirty = aidev(fx.root, ['run', 'workflow', 'pr', '--json'], { env: env() });
@@ -640,7 +656,7 @@ function run() {
         fs.rmSync(path.join(fx.root, 'notes.txt'), { force: true });
         git(['checkout', '-q', 'main'], fx.root);
         // Nothing inside the scope changes on a run whose steps write nothing: no commit, no branch pushed.
-        define('quiet', { steps: ['  - id: noop', '    command: node --version', '  - id: pr', '    kind: pull-request'] });
+        define('quiet', { steps: ['  - id: noop', '    command: node --version', '  - id: pr', '    pull_request: {}'] });
         const none = aidev(fx.root, ['run', 'workflow', 'quiet', '--json'], { env: env() });
         eq(none.code, 0, none.out);
         const q = lastJson(none.out);
@@ -782,7 +798,7 @@ function run() {
         define('judged', { steps: [
           '  - id: write', '    agent: coder', '    prompt: write it',
           '    until:', '      command: node tools/edit.js', '      agent: reviewer', '      prompt: check the change',
-          '  - id: pr', '    kind: pull-request',
+          '  - id: pr', '    pull_request:',
         ] });
         const verdicts = path.join(tmp, 'verdicts.json');
         fs.writeFileSync(verdicts, JSON.stringify(['PASS']));
@@ -796,6 +812,9 @@ function run() {
         ok(prompts[1].includes(`The diff itself is in ${diffRel}`), prompts[1]);
         ok(/^\+changed$/m.test(fs.readFileSync(path.join(fx.root, diffRel), 'utf8')), 'the diff is written for the until agent to read');
         eq(j.pr.description, `.aidev/workflows/judged/runs/${j.runId}/pull-request.md`, 'generic hosting: the text is kept for a pull request opened by hand');
+        const committed = git(['show', '--name-only', '--format=', 'HEAD'], fx.root).split('\n').filter(Boolean);
+        ok(committed.includes(`.aidev/estimates/records/judged-${j.runId}.json`), `the estimate record goes with the pull request: ${committed.join(', ')}`);
+        ok(!git(['status', '--porcelain', '--', '.aidev/estimates'], fx.root).trim(), 'the record does not change after the push');
         const text = fs.readFileSync(path.join(fx.root, j.pr.description), 'utf8');
         ok(/## Reports\n\n### write \(agent coder\)\n\nstub answer\n\n### write \(until\) \(agent reviewer\)\n\n[\s\S]*VERDICT: PASS/.test(text), text);
         git(['checkout', '-q', 'main'], fx.root);
@@ -855,7 +874,7 @@ function run() {
           '  - id: plan', '    command: node tools/targets.js',
           '  - id: write', '    agent: coder', '    prompt: Write the IT test for the screen {item}.',
           '    for_each:', '      from: targets.txt', '      max_items: 5',
-          '    until:', '      command: node tools/screen.js {item}', '    max_retries: 1',
+          '    until:', '      command: node tools/screen.js {item}', '      max_retries: 1',
           '  - id: sum', '    agent: coder', '    writable: []', '    prompt: summarise',
         ] });
         const stepsOut = path.join(tmp, 'steps.txt');
@@ -917,7 +936,7 @@ function run() {
           '  - id: plan', `    command: node tools/list.js ${list}`,
           '  - id: write', '    agent: coder', '    prompt: Write the test for {item}.',
           '    for_each:', '      from: targets.txt', '      max_items: 5', '      on_failure: continue',
-          '    until:', '      command: node tools/check.js {item}', '    max_retries: 1',
+          '    until:', '      command: node tools/check.js {item}', '      max_retries: 1',
         ];
         define('skip', { steps: steps('skip login,bad,settings'), minutes: null });
         reset();
@@ -958,8 +977,8 @@ function run() {
     steps: [
       { id: 'plan', agent: 'planner', writable: [], prompt: 'list them' },
       { id: 'write', agent: 'writer', writable: ['e2e/**'], prompt: 'test {item}', for_each: { from: 't.txt', max_items: 10 },
-        until: { command: 'npx playwright test {item}', agent: 'reviewer', prompt: 'covers it' }, max_retries: 2 },
-      { kind: 'pull-request' },
+        until: { command: 'npx playwright test {item}', agent: 'reviewer', prompt: 'covers it', max_retries: 2 } },
+      { pull_request: {} },
     ],
   }, 'wf');
 
@@ -1003,6 +1022,154 @@ function run() {
     eq(estimateMod.parseAiAnswer('no json here'), null);
     eq(estimateMod.parseAiAnswer('{"steps":[{"id":"a","size":"S"}]}').steps[0].size, 'S', 'a bare object is read too');
   });
+
+  // ------------------------------------------------------ estimate learning
+  suite('workflow: estimate learning');
+
+  test('a cost converts between models; unknown models convert 1:1', () => {
+    eq(estimateMod.modelFactor('sonnet', 'opus'), 2, 'Opus 5.5 is twice Sonnet 5.5');
+    eq(estimateMod.modelFactor('claude-sonnet-5-5', 'claude-haiku-5-5'), 0.05);
+    eq(estimateMod.modelFactor('claude-sonnet-4-6', 'claude-sonnet-5-5'), 2 / 3);
+    eq(estimateMod.modelFactor('mystery', 'opus'), 1);
+    eq(estimateMod.modelFactor(null, 'opus'), 1);
+    const history = { calls: [1, 2, 3].map(() => ({ workflow: 'wf', step: 'plan', role: 'agent', agent: 'planner', model: 'sonnet', costUsd: 0.2 })), runs: [] };
+    const onOpus = estimateMod.estimateDefinition(eachDef, { history, models: { planner: 'opus' } });
+    eq(onOpus.steps[0].perStart.agent, [0.4, 0.4], 'Sonnet history priced for an Opus run');
+    eq(estimateMod.estimateDefinition(eachDef, { history: EMPTY, models: { planner: 'haiku' } }).steps[0].perStart.agent, [0.015, 0.05], 'size M on Haiku');
+  });
+
+  const recordOf = (runId, steps) => ({
+    schemaVersion: 1, workflow: 'wf', runId, startedAt: runId, done: true,
+    estimate: { steps: steps.map((x) => ({ id: x.id, agent: 'planner', size: x.size || 'M', usd: x.usd, basis: 'size M' })) },
+    steps: steps.map((x) => ({ id: x.id, kind: 'agent', ok: true, attempts: 1, starts: 1, costUsd: x.actual })),
+    calls: steps.map((x) => ({ step: x.id, role: 'agent', agent: 'planner', model: 'sonnet', costUsd: x.actual })),
+  });
+  const historyOf = (records) => {
+    const calls = records.flatMap((r) => r.calls.map((c) => ({ ...c, workflow: r.workflow, runId: r.runId })));
+    return { calls, runs: [], records };
+  };
+
+  test('calibration: the ranges widen until 80% of past steps fall inside; sizes are priced from this package', () => {
+    const records = [0.5, 0.6, 0.9, 1.4, 2.5].map((actual, i) => recordOf(`r${i}`, [{ id: `s${i}`, usd: [0.3, 1], actual }]));
+    const cal = estimateMod.calibrate(historyOf(records));
+    eq([cal.pairs, cal.inside, cal.misses.length], [5, 3, 2]);
+    eq(cal.widen, 1.5, '1.4 is inside 1 x 1.5; 2.5 stays out, and 4 of 5 is enough');
+    eq(cal.sizes.M.n, 5, 'five starts estimated at size M');
+    eq(cal.sizes.M.range, [0.5, 2.5], 'fewer than 10 samples: their whole range');
+    const est = estimateMod.estimateDefinition(eachDef, { history: { ...historyOf(records), calls: [] }, calibration: cal });
+    eq(est.steps[0].perStart.agent, [0.3333, 3.75], 'size M learned here (0.5–2.5), widened x1.5');
+    ok(/size M in this package \(5\)/.test(est.steps[0].basis), est.steps[0].basis);
+    eq(estimateMod.calibrate(historyOf(records.slice(0, 4))).widen, 1, 'below five pairs nothing is widened');
+  });
+
+  test('priors from the review: an agent prior first, then a kind prior; a review is due after three misses', () => {
+    const priors = { priors: [
+      { agent: 'planner', role: 'agent', perStart: [0.1, 0.2] },
+      { kind: 'write-tests', role: 'agent', perStart: [1, 2] },
+    ] };
+    const ai = { steps: [{ id: 'write', kind: 'write-tests' }] };
+    const e = estimateMod.estimateDefinition(eachDef, { history: EMPTY, priors, ai, models: { writer: 'opus' } });
+    eq([e.steps[0].perStart.agent, e.steps[0].basis], [[0.1, 0.2], 'review of agent planner; checker: size S'.split(';')[0]]);
+    eq([e.steps[1].perStart.agent, e.steps[1].basis.split(';')[0]], [[2, 4], 'review of write-tests work'], 'a kind prior on Opus');
+    const misses = [0.5, 5, 6, 7].map((actual, i) => recordOf(`m${i}`, [{ id: 'plan', usd: [0.3, 1], actual }]));
+    eq(estimateMod.reviewDue(historyOf(misses.slice(0, 3)), { priors: [] }).due, false, 'two misses');
+    const due = estimateMod.reviewDue(historyOf(misses), { priors: [] });
+    eq([due.due, due.misses.length], [true, 3]);
+    eq(estimateMod.reviewDue(historyOf(misses), { priors: [], reviewedThrough: misses.map((r) => `wf/${r.runId}`) }).due, false, 'reviewed runs do not count again');
+    ok(/m1 step plan: agent planner; size M; model sonnet; estimated \$0\.3–\$1 \(size M\); actual \$5 in 1 start\(s\), 1 attempt\(s\) — ABOVE/.test(estimateMod.reviewLines(misses).join('\n')), estimateMod.reviewLines(misses)[1]);
+  });
+
+  test('the review answer is checked and kept on the reference model', () => {
+    const r = estimateMod.parseReview('Looked.\n```json\n' + JSON.stringify({ priors: [
+      { agent: 'planner', role: 'agent', model: 'opus', perStart: [1, 2], why: 'dear' },
+      { kind: 'fix', role: 'until', perStart: [0.1, 0.3] },
+      { kind: 'nonsense', perStart: [1, 2] },
+      { agent: 'x', perStart: [3, 1] },
+      { agent: 'Bad Name', perStart: [1, 2] },
+    ], notes: '- planner is dear' }) + '\n```');
+    eq(r.priors, [
+      { agent: 'planner', role: 'agent', perStart: [0.5, 1], why: 'dear' },
+      { kind: 'fix', role: 'until', perStart: [0.1, 0.3], why: '' },
+    ], 'Opus prices are halved to Sonnet; unknown kinds, upside-down ranges and bad names are dropped');
+    eq(r.notes, '- planner is dear');
+    eq(estimateMod.parseReview('no json'), null);
+  });
+
+  test('a run record keeps the estimate, the agent steps and every start, and nothing of the prompts', () => {
+    const rec = estimateMod.buildRecord({
+      name: 'wf', runId: 'r1', hash: 'sha256:x', startedAt: 't', done: true, costUsd: 0.3,
+      estimate: { steps: [{ id: 'plan', usd: [0.3, 1] }] },
+      steps: [{ id: 'plan', kind: 'agent', ok: true, attempts: 2, report: 'secret report' }, { id: 'pr', kind: 'pull-request', ok: true },
+        { id: 'w', kind: 'agent', ok: true, attempts: 3, items: [{ item: 'a', ok: true }, { item: 'b', failed: true }] }],
+      calls: [{ step: 'plan', role: 'agent', agent: 'planner', attempt: 1, tool: 'claude', model: 'sonnet', actualModel: 'claude-sonnet-5-5', ok: true, costUsd: 0.1, durationMs: 5, tokens: { input: 1 } },
+        { step: 'plan', role: 'agent', agent: 'planner', attempt: 2, tool: 'claude', model: 'sonnet', ok: true, costUsd: 0.2, durationMs: 5 }],
+    }, { kitVersion: '9.9.9' });
+    eq(rec.steps, [{ id: 'plan', kind: 'agent', ok: true, attempts: 2, starts: 2, costUsd: 0.3 }, { id: 'w', kind: 'agent', ok: true, attempts: 3, starts: 0, costUsd: null, items: 2, failed: 1 }]);
+    eq([rec.kitVersion, rec.calls[0].actualModel, rec.calls[0].tokens], ['9.9.9', 'claude-sonnet-5-5', { input: 1 }]);
+    ok(!JSON.stringify(rec).includes('secret report'), 'reports are not copied');
+    const pairs = estimateMod.estimatePairs([{ ...rec, workflow: 'wf' }]);
+    eq(pairs.map((x) => [x.step, x.lo, x.hi, x.actual]), [['plan', 0.3, 1, 0.3]]);
+  });
+
+  {
+    // The learning loop end to end: runs write records, the third miss starts the reviewer.
+    const fx = makeRepo({ hosting: 'generic' });
+    const tmp = stubDir();
+    const stub = writeToolStub(tmp);
+    const promptOut = path.join(tmp, 'prompt.txt');
+    const argvOut = path.join(tmp, 'argv.json');
+    const env = (extra = {}) => ({ AIDEV_CLAUDE_BIN: stub, STUB_PROMPT_OUT: promptOut, STUB_ARGV_OUT: argvOut, ...extra });
+    write(path.join(fx.root, '.aidev', 'agents', 'coder.md'), '---\nname: coder\ndescription: writes code for tests\n---\n\nYou are the coder.\n');
+    write(path.join(fx.root, '.aidev', 'workflows', 'learn', 'workflow.yaml'), yamlOf('learn', { cost: 500, steps: ['  - id: work', '    agent: coder', '    prompt: do it'] }));
+    approve(fx, 'workflow learn');
+    const recordsDir = path.join(fx.root, '.aidev', 'estimates', 'records');
+    const answer = 'Done.\n```json\n' + JSON.stringify({ priors: [{ agent: 'coder', role: 'agent', model: 'sonnet', perStart: [2, 60], why: 'swings widely' }], notes: '- coder costs swing widely' }) + '\n```';
+    try {
+      test('every run writes a record of its estimate and its cost; the third run outside its range starts the reviewer', () => {
+        const costs = [5, 0.5, 50];
+        const outs = costs.map((c) => {
+          fs.rmSync(promptOut, { force: true });
+          const r = aidev(fx.root, ['run', 'workflow', 'learn', '--json'], { env: env({ STUB_COST: String(c), STUB_REVIEW_ANSWER: answer }) });
+          eq(r.code, 0, r.out);
+          return lastJson(r.out);
+        });
+        const files = fs.readdirSync(recordsDir).sort();
+        eq(files.length, 3, files.join(', '));
+        const first = JSON.parse(fs.readFileSync(path.join(recordsDir, files[0]), 'utf8'));
+        eq([first.workflow, first.done, first.steps[0].costUsd, first.estimate.steps[0].usd], ['learn', true, 5, [0.3, 1]], 'estimated by size M, cost 5');
+        eq([first.calls[0].actualModel, first.calls[0].tokens.cacheRead], ['claude-sonnet-5-5', 300], 'the tool reported model and tokens are kept');
+        eq(outs[1].estimate.steps[0].usd, [2.5, 10], 'the second run is estimated from the first');
+        eq([outs[0].estimateReview, outs[1].estimateReview], [null, null], 'one and two misses: no review yet');
+        eq([outs[2].estimateReview.ok, outs[2].estimateReview.priors], [true, 1], 'the third miss starts the reviewer');
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        eq(a.slice(a.indexOf('--tools') + 1), ['Read', 'Glob', 'Grep'], 'the reviewer reads and writes nothing itself');
+        const prompt = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean).pop();
+        ok(/# Agent: estimate-reviewer/.test(prompt) && /step work: agent coder; size M; model claude-sonnet-5-5; estimated \$0\.3–\$1 \(size M\); actual \$5/.test(prompt), prompt.slice(0, 1200));
+        const priors = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'estimates', 'priors.json'), 'utf8'));
+        eq([priors.priors, priors.reviewedThrough.length], [[{ agent: 'coder', role: 'agent', perStart: [2, 60], why: 'swings widely' }], 3]);
+        ok(/coder costs swing widely/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'estimates', 'notes.md'), 'utf8')));
+      });
+
+      test('estimate shows the calibration and the priors; --review runs the reviewer on demand; review: off turns it off', () => {
+        const r = aidev(fx.root, ['estimate', 'workflow', 'learn', '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq([j.history.records, j.priors, j.calibration.pairs], [3, 1, 3]);
+        const none = aidev(fx.root, ['estimate', 'workflow', 'learn', '--review', '--json'], { env: env({ STUB_REVIEW_ANSWER: answer }) });
+        eq([lastJson(none.out).review.ok, lastJson(none.out).review.reason], [false, 'there is no new record to review']);
+        write(path.join(fx.root, 'aidev.yaml'), fs.readFileSync(path.join(fx.root, 'aidev.yaml'), 'utf8') + 'estimates:\n  review: off\n');
+        for (const c of [70, 0.001, 900]) {
+          const run = aidev(fx.root, ['run', 'workflow', 'learn', '--json'], { env: env({ STUB_COST: String(c), STUB_REVIEW_ANSWER: answer }) });
+          eq(lastJson(run.out).estimateReview, null, 'estimates.review: off');
+        }
+        const now = aidev(fx.root, ['estimate', 'workflow', 'learn', '--review', '--json'], { env: env({ STUB_REVIEW_ANSWER: answer }) });
+        eq(lastJson(now.out).review.ok, true, '--review reviews the new records even when the automatic review is off');
+      });
+    } finally {
+      fx.cleanup();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
 
   // --------------------------------------------------------------- modify
   suite('workflow: modify');

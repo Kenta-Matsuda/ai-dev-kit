@@ -166,6 +166,10 @@ references:                     # agent に読ませる既存の文書（テキ�
 |`knowledge.evidence.include` / `exclude`
 |`["**"]` / `package.exclude`
 |agent が調査に読んでよいファイル。
+
+|`estimates.review`
+|`auto`
+|`auto` は、見積もりの外れが溜まったとき、`aidev run workflow` の最後に見積もりの振り返り（estimate-reviewer）を自動で起動します。`off` で起動しません（`aidev estimate workflow --review` では動きます）。`auto` と `off` 以外は設定エラーです（xref:cli-estimate-learning[見積もりが使うほど正確になる仕組み]）。
 |===
 
 知らない項目は無視されます（エラーになりません）。項目名の打ち間違いは `aidev doctor` でも見つからないので、この表の名前を確かめてください。

@@ -166,6 +166,10 @@ references:                     # existing documents handed to agents (text only
 |`knowledge.evidence.include` / `exclude`
 |`["**"]` / `package.exclude`
 |Files the agent may read while researching.
+
+|`estimates.review`
+|`auto`
+|`auto` starts the estimate review (estimate-reviewer) at the end of `aidev run workflow` once estimates have missed often enough. `off` never starts it (`aidev estimate workflow --review` still does). Anything other than `auto` or `off` is a configuration error (xref:cli-estimate-learning[How the estimate gets better with use]).
 |===
 
 Unknown keys are ignored (they are not an error). A misspelled key name is not caught by `aidev doctor` either, so check the names against these tables.

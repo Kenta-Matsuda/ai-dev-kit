@@ -1,0 +1,109 @@
+[[cli-edit]]
+== aidev edit
+
+Opens a workflow in the browser, to check the flow of its steps as a picture and change it. It saves only `workflow.yaml`; it runs and submits nothing.
+
+=== Synopsis
+
+[source,text]
+----
+aidev edit workflow <name> [--port <n>] [--no-open] [--json]
+----
+
+=== Description
+
+Starts a small server that answers on this machine only (`127.0.0.1`) and opens the editor in the browser. It runs until you close the page (**Close**) or press Ctrl-C in the terminal.
+
+The left of the page draws the steps from top to bottom:
+
+* the `objective` first, and at the end what stops the run (`limits.max_usd` and `limits.max_minutes`)
+* an agent step: the agent, where it may write (`writable`), what it must leave as it is (`unchanged`), `for_each`, and the `until` check (commands and checking agent). With retries, an arrow on the right shows the loop and how often (`retry ≤ n`)
+* a command step: the command it runs
+* a pull-request step: the pull request title
+* the estimated cost of each step
+
+Select a step to change it on the **Step** tab on the right. Hover between two steps for buttons that insert a step (agent, command, pull_request). The buttons at the top right of a step move it up or down or delete it.
+
+[cols="1,3",options="header"]
+|===
+|Tab |Contents
+
+|Step
+|The fields of the selected step. The agent is chosen from the PKG's and the kit's agents, with that agent's description, tools, MCP servers and skills
+
+|Workflow
+|`description`, `objective`, `tool`, `model`, `limits`
+
+|YAML
+|The text of `workflow.yaml`. Editing it changes the picture and the forms with it
+
+|Changes
+|The differences from the approved copy (`origin/main`) and from the saved file
+
+|Cost
+|The estimated cost of each step and what it is based on (the same as xref:cli-estimate[aidev estimate] without `--ai`)
+|===
+
+Every change is checked the way `aidev run workflow` checks a workflow (the keys, the limits, that the agents and skills exist, that `name` is the directory name). A mistake is shown at the top of the page, and the workflow cannot be saved until it is fixed.
+
+* **Save** writes `.aidev/workflows/<name>/workflow.yaml` only. It writes no agent, skill or permission file, and commits nothing.
+* A saved workflow differs from `origin/main`, so it is not approved. Submit it with `aidev submit workflow <name>`; it is approved when the pull request is merged (xref:workflows-approval[What approval means]).
+* If `workflow.yaml` was changed elsewhere after the page loaded it, saving is refused. Reload, then make the change again.
+* Saving after changes made in the forms (Step and Workflow tabs) writes the YAML anew, so **the file's comments are lost**. To keep them, edit on the YAML tab. The page says so when a file with comments is changed in the forms.
+* **Revert** goes back to the saved file.
+
+The address shown when it starts (`http://127.0.0.1:<port>/#t=…`) carries a key for this session only. Without the key the editor can neither be read nor written. Do not hand the address to anyone. The server accepts connections from this machine only.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--port <n>`
+|Listen on this port of `127.0.0.1` (default: any free port)
+
+|`--no-open`
+|Do not open a browser; print the address to open yourself
+
+|`--json`
+|Output JSON when it starts listening (`url`, `port`) and when it stops (`saved`: the files saved)
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Stopped with Close on the page or Ctrl-C (saved or not)
+
+|1
+|An object other than `workflow`, or no name. No such workflow. `--port` is not a port number, or the port cannot be listened on
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev edit workflow write-tests
+----
+
+[source,text]
+----
+aidev edit workflow write-tests
+ℹ editor: http://127.0.0.1:52314/#t=6f1c…
+    opening it in your browser; if nothing opens, paste the address above
+    the address carries a one-time key: do not share it. Ctrl-C (or "Close" on the page) stops the editor.
+✓ saved .aidev/workflows/write-tests/workflow.yaml
+✓ editor closed; .aidev/workflows/write-tests/workflow.yaml was saved
+    next: git diff -- .aidev/workflows/write-tests/workflow.yaml, then "aidev submit workflow write-tests" (it runs once the pull request is merged)
+----
+
+=== Related information
+
+* xref:workflows-fix[Fixing a workflow] — what to change, and how to submit again
+* xref:workflow-reference[Workflow definition reference]
+* xref:cli-modify[aidev modify] — change it with instructions in plain language
+* xref:cli-estimate[aidev estimate], xref:cli-submit[aidev submit]

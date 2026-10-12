@@ -80,6 +80,32 @@ function run() {
       eq(evolveMod.collectReflections(fx.root).map((x) => x.session), ['sess-9']);
     });
 
+    test('estimates --dry-run replays the records of this package and starts nothing; the backtest scores them', () => {
+      const recDir = path.join(fx.root, '.aidev', 'estimates', 'records');
+      const rec = (runId, actual) => ({
+        schemaVersion: 1, workflow: 'wf', runId, startedAt: runId, done: true,
+        estimate: { steps: [{ id: 'work', agent: 'coder', size: 'M', maxAttempts: 1, maxItems: null, model: 'sonnet', usd: [0.3, 1] }] },
+        steps: [{ id: 'work', kind: 'agent', ok: true, attempts: 1, starts: 1, costUsd: actual }],
+        calls: [{ step: 'work', role: 'agent', agent: 'coder', attempt: 1, model: 'sonnet', ok: true, costUsd: actual }],
+      });
+      [['r1', 0.5], ['r2', 0.6], ['r3', 3]].forEach(([id, c]) => write(path.join(recDir, `wf-${id}.json`), JSON.stringify(rec(id, c))));
+      const backtest = require('../scripts/estimate-backtest');
+      const b = backtest.backtest([fx.root]);
+      // r1: size M 0.3–1 holds 0.5. r2: one sample 0.5 → 0.25–1 holds 0.6. r3: 0.5, 0.6 → 0.25–1.2 misses 3.
+      eq([b.pairs, b.coverage], [3, 2 / 3]);
+      eq(b.packages[0].records, 3);
+      const stub = path.join(fx.root, 'never-run.js');
+      const ran = path.join(fx.root, 'ran.txt');
+      const r = evolve(fx.root, ['estimates', '--dry-run', '--json'], { env: env({ AIDEV_CLAUDE_BIN: stub, STUB_RAN: ran }) });
+      eq(r.code, 0, r.out);
+      const j = lastJson(r.out);
+      eq([j.dryRun, j.sources.length, j.sources[0].records, j.baseline.pairs], [true, 1, 3, 3]);
+      ok(/aidev\/evolve-estimates-\d{8}/.test(j.branch), j.branch);
+      ok(!fs.existsSync(ran), 'the agent was started during a dry run');
+      evolve(fx.root, ['disable', '--json'], { env: env() });
+      ok(/kit developers only/.test(evolve(fx.root, ['estimates'], { env: env() }).out), 'estimates is refused on an ordinary machine');
+    });
+
     test('the evolution agent definition ships with the kit and is not a PKG template', () => {
       const def = path.join(__dirname, '..', ...evolveMod.AGENT_DEF_REL.split('/'));
       ok(fs.existsSync(def), `${evolveMod.AGENT_DEF_REL} missing`);
