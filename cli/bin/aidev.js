@@ -25,7 +25,7 @@ const ui = require('../lib/ui');
  */
 const COMMANDS = [
   'init', 'check', 'doctor',
-  'create', 'remove', 'list', 'submit', 'run',
+  'create', 'modify', 'estimate', 'remove', 'list', 'submit', 'run',
   'update', 'sync', 'uninstall',
   'hook',
 ];
@@ -33,6 +33,8 @@ const COMMANDS = [
 /** Objects are routed inside the command module, but listed here for help. */
 const SUBCOMMANDS = {
   create: ['workflow', 'agent', 'skill', 'policy'],
+  modify: ['workflow'],
+  estimate: ['workflow'],
   remove: ['workflow', 'agent', 'skill'],
   list: ['workflows', 'agents', 'skills', 'packages'],
   submit: ['workflow'],
@@ -56,7 +58,7 @@ const NO_OFFER_COMMANDS = new Set(['uninstall']);
  * at a registered package or a clone elsewhere instead of the current
  * directory. `update` acts on the machine only; `hook` follows the tool.
  */
-const PACKAGE_COMMANDS = new Set(['init', 'check', 'doctor', 'create', 'remove', 'list', 'submit', 'run', 'sync', 'uninstall']);
+const PACKAGE_COMMANDS = new Set(['init', 'check', 'doctor', 'create', 'modify', 'estimate', 'remove', 'list', 'submit', 'run', 'sync', 'uninstall']);
 
 /** Internal entry points (the AI tools' hooks call them); routable, not advertised. */
 const HIDDEN_COMMANDS = new Set(['hook']);
@@ -87,7 +89,7 @@ function usage() {
   ui.out('  usage: aidev <command> [subcommand] [options]');
   ui.out('');
   const groups = [
-    ['develop (in a package clone)', ['run', 'create', 'submit', 'list', 'remove']],
+    ['develop (in a package clone)', ['run', 'estimate', 'create', 'modify', 'submit', 'list', 'remove']],
     ['maintain (in a package clone)', ['init', 'check', 'sync']],
     ['this machine', ['update', 'doctor', 'uninstall']],
   ];

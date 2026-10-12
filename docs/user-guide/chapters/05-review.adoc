@@ -114,7 +114,7 @@ aidev run workflow write-tests --dry-run
 |確認役の agent は読むだけのツールで、確認の観点が具体的
 |確認役の agent に `Edit`・`Write`・`Bash` がある（書き込みは hook が拒否しますが、要らない権限です）。「良ければ合格」のような観点の無い `until.prompt`
 
-|`cost.max_usd`・`limits.max_minutes`
+|`limits.max_usd`・`limits.max_minutes`
 |仕事の大きさに合っている
 |小さな仕事に大きな上限
 

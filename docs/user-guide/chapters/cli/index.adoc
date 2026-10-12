@@ -17,7 +17,7 @@ aidev <verb> [<object>] [<name>] [options]
 
 * オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
 * 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
-* `run`、`create`、`submit`、`list`、`remove`、`update`、`configure`、`show`、`evolve`、`hook`、`mcp` は対象（object）が必須です。
+* `run`、`estimate`、`create`、`modify`、`submit`、`list`、`remove`、`sync`、`hook` は対象（object）が必須です。
 * PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。別の PKG に対して実行するときは `--package <name|path>` で指定します（xref:cli-common-options[共通オプション]）。
 
 [[cli-common-options]]
@@ -34,7 +34,7 @@ aidev <verb> [<object>] [<name>] [options]
 |何が変わるかを表示し、何も書きません（対応コマンドのみ）。
 
 |`--package <name\|path>`, `-p <name\|path>`
-|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`）で使えます。`update` に付けるとエラーです。
+|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`modify`、`estimate`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`）で使えます。`update` に付けるとエラーです。
 
 |`--help`, `-h`
 |コマンド一覧、またはそのコマンドのオプションを表示します。
@@ -78,6 +78,12 @@ aidev <verb> [<object>] [<name>] [options]
 
 |xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
 |workflow・agent・skill を作る（書くだけで、実行はしない）。`policy` は書き込み権限 policy の候補を作り `--approve` で置く
+
+|xref:cli-modify[`aidev modify workflow <name>`]
+|既存の workflow を自然言語の指示で直す（書くだけで、実行はしない）
+
+|xref:cli-estimate[`aidev estimate workflow <name>`]
+|workflow を実行する前に費用を見積もる（楽観〜悲観）
 
 |xref:cli-list[`aidev list workflows\|agents\|skills\|packages`]
 |workflow（承認状態）・agent・skill の一覧。`packages` はこの端末で {project-name} を導入した PKG の一覧
@@ -139,11 +145,15 @@ include::create.adoc[]
 
 include::doctor.adoc[]
 
+include::estimate.adoc[]
+
 include::hook.adoc[]
 
 include::init.adoc[]
 
 include::list.adoc[]
+
+include::modify.adoc[]
 
 include::remove.adoc[]
 

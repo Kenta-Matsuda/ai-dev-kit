@@ -107,7 +107,7 @@ function formatClock(durationMs) {
 const PROGRESS_LINE_CHARS = 92;
 
 /** Agent output on one printable line: control bytes gone, whitespace folded, truncated. */
-function oneLine(text, max = PROGRESS_LINE_CHARS) {
+function oneLineOf(text, max = PROGRESS_LINE_CHARS) {
   const folded = toolsMod.stripControl(text).replace(/\s+/g, ' ').trim();
   return folded.length > max ? `${folded.slice(0, max - 1)}…` : folded;
 }
@@ -155,10 +155,16 @@ function describeToolUse({ name, input }, repoRoot) {
  * that prints nothing until it exits, it falls back to the elapsed time.
  *
  *   status()  optional; appended to the waiting lines (batch progress, …)
+ *   write()   optional; where the lines go instead of the terminal (a log file)
+ *   maxChars  how much of a message or tool call one line keeps
  */
-function progressReporter({ repoRoot, status = null } = {}) {
+function progressReporter({ repoRoot, status = null, write = null, maxChars = PROGRESS_LINE_CHARS } = {}) {
   const names = new Map(); // tool_use id → tool name, so a failure names its tool
-  const line = (elapsedMs, text) => ui.dim(`    ${formatClock(elapsedMs).padStart(5)}  ${text}`);
+  const line = (elapsedMs, text) => {
+    const shown = `${formatClock(elapsedMs).padStart(5)}  ${text}`;
+    if (write) write(shown); else ui.dim(`    ${shown}`);
+  };
+  const oneLine = (text, max) => (Number.isFinite(maxChars) ? oneLineOf(text, Math.min(max, maxChars)) : oneLineOf(text, Infinity));
   return ({ elapsedMs, event, quietMs }) => {
     if (!event) {
       const extra = typeof status === 'function' ? `, ${status()}` : '';
@@ -170,7 +176,7 @@ function progressReporter({ repoRoot, status = null } = {}) {
     const indent = event.nested ? '  ' : '';
     if (event.kind === 'tool') {
       if (event.id) names.set(event.id, event.name);
-      line(elapsedMs, indent + oneLine(describeToolUse(event, repoRoot)));
+      line(elapsedMs, indent + oneLine(describeToolUse(event, repoRoot), PROGRESS_LINE_CHARS));
     } else if (event.kind === 'text') {
       line(elapsedMs, `${indent}“${oneLine(event.text, PROGRESS_LINE_CHARS - 4)}”`);
     } else if (event.kind === 'error') {

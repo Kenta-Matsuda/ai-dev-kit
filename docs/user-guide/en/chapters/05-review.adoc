@@ -114,7 +114,7 @@ aidev run workflow write-tests --dry-run
 |The checking agent has read-only tools, and the check is specific
 |A checking agent with `Edit`, `Write` or `Bash` (the hook refuses its writes, but it does not need them). An `until.prompt` with no points to check, such as "pass it if it is good"
 
-|`cost.max_usd`, `limits.max_minutes`
+|`limits.max_usd`, `limits.max_minutes`
 |They fit the size of the job
 |Large limits for a small job
 

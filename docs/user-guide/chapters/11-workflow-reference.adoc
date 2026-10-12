@@ -1,0 +1,502 @@
+[[workflow-reference]]
+== workflow 定義リファレンス
+
+workflow と、それが使う agent・skill の書き方を、項目ごとに説明します。考え方と使い方は xref:workflows[AI への作業委譲（workflow）] にあります。この章は、書いている途中に引くためのものです。
+
+[[workflow-reference-files]]
+=== ファイルと関係
+
+[cols="2,3,3",options="header"]
+|===
+|ファイル |書くもの |誰が参照するか
+
+|`.aidev/workflows/<name>/workflow.yaml`
+|ステップの順番と、各ステップの制約（書ける場所、終わりの判定、上限）
+|`aidev run workflow <name>`
+
+|`.aidev/agents/<name>.md`
+|agent の役割（本文）と能力（frontmatter の `skills`・`tools`・`mcp`）
+|workflow のステップの `agent:`、`until.agent:`
+
+|`.aidev/skills/<name>/SKILL.md`
+|手順書
+|agent の frontmatter の `skills:`
+|===
+
+.workflow はステップで agent を名前で参照し、agent は skill を名前で参照する
+[mermaid]
+----
+flowchart LR
+  W["workflow.yaml"] -- "steps[].agent" --> A["agents/#60;name#62;.md"]
+  W -- "steps[].until.agent" --> R["agents/#60;checker#62;.md"]
+  A -- "frontmatter skills" --> S["skills/#60;name#62;/SKILL.md"]
+  A -- "frontmatter mcp" --> M[".mcp.json の server"]
+----
+
+agent と skill は、PKG の `.aidev/` を先に探し、無ければ ADK 同梱のものを使います。同名なら PKG のものが優先です。
+
+[[workflow-reference-skeleton]]
+=== workflow.yaml の全体
+
+すべての項目を書いた例です。`#` の後ろは説明です。
+
+[source,yaml]
+----
+name: e2e-tests                    # 必須
+description: 主要画面の IT テストを書いて PR にする
+objective: |                       # 必須
+  Add Playwright tests for the screens named in the task.
+tool: claude                       # 任意
+model: sonnet                      # 任意
+
+steps:                             # 必須。上から順に実行する
+  - id: plan                       # agent step
+    description: テストが要る画面を洗い出す
+    agent: e2e-planner
+    writable: []
+    prompt: 画面を調べ、notes ディレクトリの targets.txt に 1 行 1 件で書く。
+  - id: write                      # agent step（for_each、until、unchanged あり）
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    unchanged: [e2e/playwright.config.ts]
+    for_each:
+      from: targets.txt
+      max_items: 20
+      on_failure: continue
+    prompt: 画面 {item} の IT テストを e2e/tests/{item}.spec.ts に書く。
+    until:
+      command: [npm ci, npx playwright test tests/{item}.spec.ts]
+      cwd: e2e
+      env: { CI: 1 }
+      timeout_minutes: 15
+      agent: e2e-reviewer
+      prompt: 画面 {item} の主要な操作がすべて検証されているか。
+    max_retries: 3
+    timeout_minutes: 30
+  - id: lint                       # command step
+    command: npm run lint
+  - id: pr                         # pull-request step
+    kind: pull-request
+    title: "test: add e2e tests"
+
+limits:
+  max_usd: 10                      # 必須
+  max_minutes: 45                  # 任意
+----
+
+表にない項目を書くと、検証で拒否されます（`unknown key …`）。検証は `aidev list workflows`（`invalid:` と表示）、`aidev run workflow <name> --dry-run`、`aidev submit workflow` が行います。
+
+[[workflow-reference-top]]
+=== トップレベル
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`name`
+|文字列
+|必須
+|workflow の名前。ディレクトリ名と同じにします。小文字・数字・ハイフン、64 文字まで、英数字で始まる（`^[a-z0-9][a-z0-9-]{0,63}$`）。
+
+|`description`
+|文字列
+|任意
+|1 行の説明。`aidev list workflows`、PR のタイトルと本文に出ます。
+
+|`objective`
+|文字列
+|必須
+|この workflow の目的。すべての agent step の指示の先頭に入ります。
+
+|`tool`
+|文字列
+|任意
+|agent を動かす AI ツール（`claude`、`copilot`、`codex`、`kiro`）。`aidev.yaml` の `tools.default` にあるものだけ使えます。省略すると `aidev.yaml` の `tools.agents.<agent>.tool`、`tools.agent` の順に決まります。
+
+|`model`
+|文字列
+|任意
+|モデル名（`sonnet` など）。`""` を書くとモデルを指定せず、AI ツールの既定に任せます。省略すると `aidev.yaml` の `tools.agents.<agent>.model`、`tools.agent_model` の順に決まります。英数字と `. _ - : / @ [ ]`、200 文字まで。
+
+|`steps`
+|list
+|必須
+|ステップの list。1 つ以上。上から順に実行します。1 つのステップは agent step・command step・pull-request step のどれか 1 つです（下の節）。
+
+|`limits`
+|mapping
+|必須
+|実行を止める条件。`max_usd`（必須）と `max_minutes`（任意）だけを持ちます（xref:workflow-reference-limits[limits]）。
+|===
+
+[[workflow-reference-agent-step]]
+=== agent step
+
+agent を起動して仕事をさせるステップです。`agent` を持つステップが agent step です。
+
+[cols="1,1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |既定 |説明
+
+|`id`
+|文字列
+|任意
+|`step-<番号>`
+|ステップの名前。workflow の中で重複できません。小文字・数字・ハイフン、32 文字まで。実行記録のファイル名と `--resume` の表示に使います。
+
+|`description`
+|文字列
+|任意
+|なし
+|レビューする人向けの説明。`--dry-run` と提出の PR 本文に出ます。agent には渡しません。
+
+|`agent`
+|文字列
+|必須
+|
+|起動する agent の名前（英数字と `. _ -`）。`.aidev/agents/<name>.md`、無ければ ADK 同梱のものを使います。
+
+|`prompt`
+|文字列
+|必須
+|
+|このステップでさせること。`for_each` があるときは `{item}` が必須です。
+
+|`writable`
+|glob の list
+|必須
+|
+|このステップの agent が書けるパス。`[]` なら何も書けません。PKG のルートからの相対パスで、`/` で始まるもの、`..` を含むもの、protected のパス（`.claude/**`、`.aidev/policy.yaml` など。xref:permissions[権限と安全性]）は書けません。
+
+|`unchanged`
+|glob の list
+|任意
+|`[]`
+|このステップが変えてはいけないパス。`writable` の中でも書けず、試行のたびに、ステップを始めたときの状態と比べます（xref:workflows-unchanged[変えてはいけない場所を決める]）。
+
+|`for_each`
+|mapping
+|任意
+|なし
+|対象ごとに agent を新しく起動して繰り返します（xref:workflow-reference-for-each[for_each]）。
+
+|`until`
+|mapping
+|任意
+|なし
+|ステップの終わりの判定。満たすまで agent を繰り返します（xref:workflow-reference-until[until]）。
+
+|`max_retries`
+|整数
+|任意
+|`until` があれば 3、無ければ 0
+|最初の試行の後に、何回までやり直すか。0〜10。1 以上にするには `until` か `unchanged` が必要です。
+
+|`timeout_minutes`
+|数値
+|任意
+|30
+|agent 1 回の起動の時間の上限（分）。0 より大きく 240 以下（`0.5` も可）。workflow の残り時間の方が短ければ、そちらで打ち切ります。
+|===
+
+[[workflow-reference-until]]
+==== until
+
+`command` と `agent` のどちらか、または両方を書きます。両方あるときは、コマンドがすべて通ってから agent が確認します。
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`command`
+|文字列、または文字列の list
+|`agent` が無ければ必須
+|exit 0 になれば合格のコマンド。list は上から順に実行し、最初に失敗したところで不合格です。shell を通さないので、引用符・パイプ・リダイレクト・変数（`\|&;<>$"'` とバッククォート、`\`）は書けません。
+
+|`cwd`
+|文字列
+|任意
+|コマンドを実行するディレクトリ（PKG の中）。省略すると PKG のルート。絶対パスと `..` は書けません。`command` があるときだけ書けます。
+
+|`env`
+|mapping
+|任意
+|コマンドに渡す環境変数（`名前: 値`）。値は 1 行の固定の文字列です。`AIDEV_` で始まる名前は書けません。PR でレビューされる値なので、秘密情報は書きません。`command` があるときだけ書けます。
+
+|`timeout_minutes`
+|数値
+|任意
+|コマンド 1 つの時間の上限（分）。0 より大きく 240 以下。`command` があるときだけ書けます。
+
+|`agent`
+|文字列
+|`command` が無ければ必須
+|確認役の agent。何も書けません。最終メッセージの最後の `VERDICT: PASS` 行で合格です（xref:workflows-until-agent[agent のレビューで終わりを判定する]）。
+
+|`prompt`
+|文字列
+|`agent` があれば必須
+|確認役に確認させる観点。
+|===
+
+[[workflow-reference-for-each]]
+==== for_each
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`from`
+|文字列
+|必須
+|対象の一覧のファイル名。その実行の notes ディレクトリ（`.aidev/workflows/<name>/runs/<id>/notes/`）にあり、前のステップが書きます。英数字と `. _ -`、100 文字まで。
+
+|`max_items`
+|整数
+|必須
+|1 回の実行で扱う件数の上限。1〜10000。一覧がこれを超えると、agent を起動せずに止まります。
+
+|`on_failure`
+|`stop` か `continue`
+|任意
+|1 件が失敗したとき。`stop`（既定）はそこで止まります。`continue` はその件の間に `writable` の中で変わったファイルを元に戻し、次の件へ進みます。全件が失敗したとき、費用・時間の上限に達したときは止まります（xref:workflows-unattended[人が介入せずに大きな仕事を走らせる]）。
+|===
+
+一覧は 1 行 1 件です。空行と `#` で始まる行は飛ばし、行頭の `- ` と `* ` は取り除き、同じ行は 1 件にします。1 件は英数字と `. _ / @ -` の 1 語（200 文字まで、先頭は `-` 以外、`..` を含まない）です。
+
+`{item}` は、`for_each` のあるステップの `prompt`（必須）、`until.command`、`until.prompt` にだけ書けます。それ以外の場所に書くと検証で拒否されます。
+
+[[workflow-reference-command-step]]
+=== command step
+
+ADK がコマンドを 1 回実行するステップです。exit 0 以外なら workflow はそこで止まります。agent は起動しません。
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`id`、`description`
+|文字列
+|任意
+|agent step と同じです。
+
+|`command`
+|文字列
+|必須
+|実行するコマンド（1 行）。`until.command` と同じく shell を通しません。`{item}` は書けません。
+
+|`cwd`、`env`、`timeout_minutes`
+|
+|任意
+|`until` の同名の項目と同じです。`timeout_minutes` を省略すると、workflow の残り時間まで（時間の上限が無ければ終わるまで）待ちます。
+
+|`writable`
+|glob の list
+|任意
+|コマンドが作るファイルのうち、pull-request step でコミットするもの。ADK 自身が実行するコマンドなので、書き込みの検問はかかりません。
+|===
+
+[[workflow-reference-pr-step]]
+=== pull-request step
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`kind`
+|`pull-request`
+|必須
+|このステップの種類。workflow に 1 つまでです。
+
+|`id`、`description`
+|文字列
+|任意
+|agent step と同じです。
+
+|`title`
+|文字列
+|任意
+|PR とコミットのタイトル。省略すると `aidev: <description、無ければ name>`。
+|===
+
+すべてのステップの `writable` を合わせた範囲の変更だけをコミットし、push して PR を作ります（Azure DevOps）。範囲内に変更が無ければ何もしません。この step がある workflow は、きれいな作業ツリーから `aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。
+
+[[workflow-reference-limits]]
+=== limits
+
+[cols="1,1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |既定 |説明
+
+|`limits.max_usd`
+|数値
+|必須
+|
+|費用の上限（USD）。AI ツールが報告した費用の合計がこれに達すると、次の agent を起動せずに止まります。動いている agent は止めないので、最後の 1 回分だけ超えることがあります。費用を報告するのは Claude Code だけです。見積もりは xref:cli-estimate[aidev estimate] で出せます。
+
+|`limits.max_minutes`
+|整数
+|任意
+|なし
+|workflow 全体の時間の上限（分）。上限の値はありません。書かなければ、時間では止めません。Claude Code 以外の AI ツールで動く agent があるときは必須です（費用が報告されず、`max_usd` で止められないため）。`aidev run workflow --max-minutes` で、その実行だけ下げられます（書いていなければ、その実行だけ時間の上限を付けられます）。
+|===
+
+[[workflow-reference-agent]]
+=== agent 定義（`.aidev/agents/<name>.md`）
+
+frontmatter と本文の Markdown です。`aidev create agent <name>` で雛形を書けます。
+
+[source,markdown]
+----
+---
+name: e2e-writer
+description: 画面ごとに Playwright のテストを書く。e2e-tests workflow から起動される
+skills: [test-and-verify]
+tools: Read, Grep, Glob, Edit, Write
+mcp: []
+model: inherit
+---
+
+# e2e-writer
+
+（役割、入出力、手順、止まる条件）
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`name`
+|文字列
+|推奨
+|ファイル名と同じにします（英数字と `. _ -`）。ADK が探すのはファイル名です。
+
+|`description`
+|文字列
+|推奨
+|いつ起動され、何をするか。`aidev list agents` と、workflow-creator が agent を選ぶときに使います。
+
+|`skills`
+|list（`[a, b]` か `a, b`）
+|任意
+|指示に本文を入れる skill。PKG、ADK 同梱の順に探し、どちらにも無ければ workflow は検証で止まります。
+
+|`tools`
+|list
+|任意
+|使える組み込みツール（`Read`、`Edit`、`Bash` など）。省略するとツールの既定のすべてです。Claude Code はこれだけを渡して起動し、hook も他のツールを拒否します。
+
+|`mcp`
+|list
+|任意
+|使える MCP server（PKG の `.mcp.json` のキー）。省略すると MCP server を渡しません。`.mcp.json` に無い名前があると、workflow は起動前に止まります。
+
+|`model`
+|文字列
+|任意
+|`inherit` にします。workflow から起動するときは使われず、workflow の `model` と `aidev.yaml` の設定に従います。
+|===
+
+* `tools` か `mcp` を書いた agent は、Claude Code でだけ動きます（他の AI ツールは渡すツールを絞れないため、起動前に止まります）。
+* 外部システムに触る agent に `Bash` を渡さないでください。`mcp` で絞っても、`Bash` があれば MCP を通さずに外へ出られます。
+* 同じ agent に仕事ごとに違う権限を持たせる項目はありません。権限が違う仕事は agent を分けます。
+* agent を直すと、その agent を使うすべての workflow が変わります。
+
+本文は、ADK が agent step の指示の先頭に入れます。その後ろに、ADK が次のものを足します。本文に同じことを書く必要はありません。
+
+[cols="1,3",options="header"]
+|===
+|ADK が足すもの |中身
+
+|Workflow と Objective
+|workflow の名前、`description`、`objective`
+
+|Task for this run
+|`--task` の内容（データとして）
+
+|Reports from the earlier steps
+|前の agent step の最終報告（ステップごとに末尾 6000 文字）
+
+|Notes of this run
+|notes ディレクトリの場所と、いまあるファイル
+
+|Step
+|ステップの `prompt`。`for_each` なら今回の対象。やり直しなら前回の失敗の内容
+
+|Rules
+|書ける場所（`writable`）、変えてはいけない場所（`unchanged`）、commit しないこと、最終報告に書くこと
+
+|Reference documents
+|`aidev.yaml` の `references` のパス一覧（xref:configuration[aidev.yaml リファレンス]）
+|===
+
+確認役（`until.agent`）には、ステップの `prompt`、ステップの agent の報告、変わったファイルの一覧、差分のファイルの場所、`until.prompt`、`VERDICT:` 行で終える決まりが渡ります。
+
+[[workflow-reference-skill]]
+=== skill 定義（`.aidev/skills/<name>/SKILL.md`）
+
+[source,markdown]
+----
+---
+name: deploy-checklist
+description: リリース前に確認する項目と順番
+---
+
+# deploy-checklist
+
+1. ...
+----
+
+[cols="1,1,4",options="header"]
+|===
+|項目 |必須 |説明
+
+|`name`
+|推奨
+|ディレクトリ名と同じにします。ADK が探すのはディレクトリ名です。
+
+|`description`
+|推奨
+|いつ使う手順か（1 文）。
+
+|本文
+|必須
+|手順。agent の frontmatter の `skills` に名前があると、その agent の指示に本文がそのまま入ります。
+|===
+
+[[workflow-reference-records]]
+=== 実行記録（`runs/<id>/run.json`）
+
+`aidev run workflow` が実行しながら書きます（gitignore 済み）。見積もり（xref:cli-estimate[aidev estimate]）は、PKG のすべての workflow の `run.json` の `calls` を読みます。
+
+[cols="1,4",options="header"]
+|===
+|項目 |中身
+
+|`runId`、`name`、`hash`
+|実行の id（開始時刻）、workflow の名前、開始時の `workflow.yaml` の hash
+
+|`approvedRef`、`approvedSha`
+|承認の基準にした ref（`origin/main` など）と、その commit
+
+|`startedAt`、`finishedAt`、`startedBy`
+|開始・終了の時刻と、実行したユーザー名（記録用）
+
+|`branch`、`baseSha`、`task`
+|動いたブランチ、起点の commit、`--task` の内容
+
+|`steps`
+|ステップごとの `id`、`kind`、`ok`、`attempts`。agent step は最後の結果の要約（`result`）、確認役の報告（`review`）、コマンドの出力のファイル（`log`）。`for_each` は件ごとの `items`（`on_failure: continue` で失敗した件は `failed: true` と `reason`）と、失敗した件の数（`failed`）
+
+|`calls`
+|agent を起動するたびに 1 件: `step`、`role`（`agent` か、確認役の `until`）、`agent`、`item`（`for_each` の件）、`attempt`、`tool`、`model`、`ok`、`costUsd`、`durationMs`
+
+|`done`、`stopReason`
+|最後まで終わったか、止まった理由
+
+|`agentRuns`、`costUsd`
+|agent の起動回数と、報告された費用の合計（`--resume` した分も含む）
+
+|`pr`、`resumes`
+|作った PR、`--resume` した時刻と再開したステップ
+|===

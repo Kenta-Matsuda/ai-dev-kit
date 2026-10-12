@@ -268,7 +268,7 @@ function run() {
     '  - id: a', '    agent: dev', `    writable: [${writable}]`, '    prompt: go',
     '    until:', '      agent: dev', '      prompt: check',
     '  - id: b', '    agent: dev', '    writable: []', '    prompt: look',
-    'cost:', '  max_usd: 1', '',
+    'limits:', '  max_usd: 1', '',
   ].join('\n');
   const DEV = '---\nname: dev\ndescription: t\ntools: Read, Edit\nmcp: [tickets]\n---\n\nbody\n';
   const putOnMain = (fx, writable) => {
@@ -355,7 +355,7 @@ function run() {
         'name: wf', 'objective: do it', 'steps:',
         '  - id: a', '    agent: dev', '    writable: [e2e/**]', '    unchanged: [e2e/playwright.config.ts]', '    prompt: go',
         '  - id: b', '    agent: dev', '    writable: [e2e/**]', '    prompt: go',
-        'cost:', '  max_usd: 1', '',
+        'limits:', '  max_usd: 1', '',
       ].join('\n'), 'utf8');
       git(['add', '-A'], fx.root);
       git(['commit', '-q', '-m', 'workflow'], fx.root);

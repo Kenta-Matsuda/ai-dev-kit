@@ -1,0 +1,502 @@
+[[workflow-reference]]
+== Workflow definition reference
+
+This chapter describes every field of a workflow and of the agents and skills it uses. The ideas and how to use them are in xref:workflows[Delegating work to the AI (workflows)]; this chapter is for looking things up while you write.
+
+[[workflow-reference-files]]
+=== Files and how they relate
+
+[cols="2,3,3",options="header"]
+|===
+|File |What it holds |Who refers to it
+
+|`.aidev/workflows/<name>/workflow.yaml`
+|The order of the steps and each step's limits (where it may write, when it is done, ceilings)
+|`aidev run workflow <name>`
+
+|`.aidev/agents/<name>.md`
+|An agent's role (the body) and what it can use (`skills`, `tools`, `mcp` in its frontmatter)
+|A step's `agent:` and `until.agent:`
+
+|`.aidev/skills/<name>/SKILL.md`
+|A procedure
+|An agent's frontmatter `skills:`
+|===
+
+.A workflow names agents in its steps; an agent names skills
+[mermaid]
+----
+flowchart LR
+  W["workflow.yaml"] -- "steps[].agent" --> A["agents/#60;name#62;.md"]
+  W -- "steps[].until.agent" --> R["agents/#60;checker#62;.md"]
+  A -- "frontmatter skills" --> S["skills/#60;name#62;/SKILL.md"]
+  A -- "frontmatter mcp" --> M["server in .mcp.json"]
+----
+
+Agents and skills are looked up in the PKG's `.aidev/` first, then among those bundled with ADK. With the same name, the PKG's wins.
+
+[[workflow-reference-skeleton]]
+=== workflow.yaml as a whole
+
+An example with every field. Text after `#` explains it.
+
+[source,yaml]
+----
+name: e2e-tests                    # required
+description: Write e2e tests for the main screens and open a PR
+objective: |                       # required
+  Add Playwright tests for the screens named in the task.
+tool: claude                       # optional
+model: sonnet                      # optional
+
+steps:                             # required; run top to bottom
+  - id: plan                       # an agent step
+    description: Find the screens that need tests
+    agent: e2e-planner
+    writable: []
+    prompt: Survey the screens and write them to targets.txt in the notes directory, one per line.
+  - id: write                      # an agent step with for_each, until and unchanged
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    unchanged: [e2e/playwright.config.ts]
+    for_each:
+      from: targets.txt
+      max_items: 20
+      on_failure: continue
+    prompt: Write the e2e test for screen {item} in e2e/tests/{item}.spec.ts.
+    until:
+      command: [npm ci, npx playwright test tests/{item}.spec.ts]
+      cwd: e2e
+      env: { CI: 1 }
+      timeout_minutes: 15
+      agent: e2e-reviewer
+      prompt: Does the test cover every main action of screen {item}?
+    max_retries: 3
+    timeout_minutes: 30
+  - id: lint                       # a command step
+    command: npm run lint
+  - id: pr                         # a pull-request step
+    kind: pull-request
+    title: "test: add e2e tests"
+
+limits:
+  max_usd: 10                      # required
+  max_minutes: 45                  # optional
+----
+
+A field that is not in the tables below is refused by validation (`unknown key …`). `aidev list workflows` (shown as `invalid:`), `aidev run workflow <name> --dry-run` and `aidev submit workflow` validate.
+
+[[workflow-reference-top]]
+=== Top level
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`name`
+|string
+|required
+|The workflow's name, the same as its directory. Lowercase letters, digits and dashes, up to 64 characters, starting with a letter or digit (`^[a-z0-9][a-z0-9-]{0,63}$`).
+
+|`description`
+|string
+|optional
+|One line. Shown by `aidev list workflows` and in the PR title and body.
+
+|`objective`
+|string
+|required
+|What the workflow is for. It heads the instructions of every agent step.
+
+|`tool`
+|string
+|optional
+|The AI tool that runs the agents (`claude`, `copilot`, `codex`, `kiro`). Only one listed in `tools.default` in `aidev.yaml`. When omitted: `tools.agents.<agent>.tool`, then `tools.agent` in `aidev.yaml`.
+
+|`model`
+|string
+|optional
+|The model name (`sonnet` and so on). `""` passes no model and leaves it to the AI tool. When omitted: `tools.agents.<agent>.model`, then `tools.agent_model` in `aidev.yaml`. Letters, digits and `. _ - : / @ [ ]`, up to 200 characters.
+
+|`steps`
+|list
+|required
+|The steps, at least one, run top to bottom. Each step is exactly one of an agent step, a command step or a pull-request step (the sections below).
+
+|`limits`
+|mapping
+|required
+|What stops the run. Holds `max_usd` (required) and `max_minutes` (optional) only (xref:workflow-reference-limits[limits]).
+|===
+
+[[workflow-reference-agent-step]]
+=== Agent step
+
+A step that starts an agent to do the work. A step with `agent` is an agent step.
+
+[cols="1,1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Default |Description
+
+|`id`
+|string
+|optional
+|`step-<number>`
+|The step's name, unique in the workflow. Lowercase letters, digits and dashes, up to 32 characters. Used in the run record's file names and in what `--resume` shows.
+
+|`description`
+|string
+|optional
+|none
+|For the reviewer. Shown by `--dry-run` and in the submit PR body. Not given to the agent.
+
+|`agent`
+|string
+|required
+|
+|The agent to start (letters, digits and `. _ -`). `.aidev/agents/<name>.md`, else the one bundled with ADK.
+
+|`prompt`
+|string
+|required
+|
+|What this step asks for. With `for_each`, it must contain `{item}`.
+
+|`writable`
+|list of globs
+|required
+|
+|Where this step's agent may write. `[]` writes nothing. Relative to the PKG root; an entry that starts with `/`, contains `..` or is a protected path (`.claude/**`, `.aidev/policy.yaml` and so on; xref:permissions[Permissions and safety]) is refused.
+
+|`unchanged`
+|list of globs
+|optional
+|`[]`
+|Paths this step must leave as they are. They cannot be written even inside `writable`, and after every attempt they are compared with how they were when the step started (xref:workflows-unchanged[Naming what must not change]).
+
+|`for_each`
+|mapping
+|optional
+|none
+|Start the agent afresh once per target (xref:workflow-reference-for-each[for_each]).
+
+|`until`
+|mapping
+|optional
+|none
+|When the step is done. The agent is started again until it is met (xref:workflow-reference-until[until]).
+
+|`max_retries`
+|integer
+|optional
+|3 with `until`, else 0
+|How many times to try again after the first attempt. 0 to 10. Above 0 needs `until` or `unchanged`.
+
+|`timeout_minutes`
+|number
+|optional
+|30
+|The time allowed for one start of the agent, in minutes. Above 0 and at most 240 (`0.5` is fine). When less time is left in the workflow, that is used instead.
+|===
+
+[[workflow-reference-until]]
+==== until
+
+Write `command`, `agent`, or both. With both, the agent checks only after every command has passed.
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`command`
+|string, or a list of strings
+|required without `agent`
+|Passes when it exits 0. A list runs top to bottom and fails at the first command that fails. No shell: quotes, pipes, redirections and variables (`\|&;<>$"'`, backquote, `\`) cannot be written.
+
+|`cwd`
+|string
+|optional
+|The directory to run the commands in (inside the PKG). The PKG root when omitted. No absolute path, no `..`. Only with `command`.
+
+|`env`
+|mapping
+|optional
+|Environment variables for the commands (`NAME: value`). Each value is one fixed line. Names starting with `AIDEV_` are refused. The values are reviewed in the PR, so never put secrets here. Only with `command`.
+
+|`timeout_minutes`
+|number
+|optional
+|The time allowed for one command, in minutes. Above 0 and at most 240. Only with `command`.
+
+|`agent`
+|string
+|required without `command`
+|The checking agent. It writes nothing. It passes the work when its final message ends with a `VERDICT: PASS` line (xref:workflows-until-agent[Letting an agent's review decide when a step is done]).
+
+|`prompt`
+|string
+|required with `agent`
+|What the checking agent checks.
+|===
+
+[[workflow-reference-for-each]]
+==== for_each
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`from`
+|string
+|required
+|The name of the list file. It is in the run's notes directory (`.aidev/workflows/<name>/runs/<id>/notes/`), written by an earlier step. Letters, digits and `. _ -`, up to 100 characters.
+
+|`max_items`
+|integer
+|required
+|The most targets one run takes on. 1 to 10000. A longer list stops the run before any agent starts.
+
+|`on_failure`
+|`stop` or `continue`
+|optional
+|What happens when a target fails. `stop` (the default) stops there. `continue` puts back the files inside `writable` that changed during that target and starts the next one. The run still stops when every target fails or a cost or time limit is reached (xref:workflows-unattended[Running a large job without anyone stepping in]).
+|===
+
+The list has one target per line. Blank lines and lines starting with `#` are skipped, a leading `- ` or `* ` is removed, and a repeated line counts once. A target is one word of letters, digits and `. _ / @ -` (up to 200 characters, not starting with `-`, no `..`).
+
+`{item}` can be written only in the `prompt` (where it is required), `until.command` and `until.prompt` of a step with `for_each`. Anywhere else, validation refuses it.
+
+[[workflow-reference-command-step]]
+=== Command step
+
+A step where ADK runs a command once. Anything but exit 0 stops the workflow there. No agent is started.
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`id`, `description`
+|string
+|optional
+|As in an agent step.
+
+|`command`
+|string
+|required
+|The command to run (one line). No shell, as with `until.command`. `{item}` cannot be written.
+
+|`cwd`, `env`, `timeout_minutes`
+|
+|optional
+|As the fields of the same name in `until`. Without `timeout_minutes`, the command may use the rest of the workflow's time (or run until it ends when there is no time limit).
+
+|`writable`
+|list of globs
+|optional
+|Which of the command's output files the pull-request step commits. ADK runs the command itself, so no write guard applies.
+|===
+
+[[workflow-reference-pr-step]]
+=== Pull-request step
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`kind`
+|`pull-request`
+|required
+|The kind of step. At most one per workflow.
+
+|`id`, `description`
+|string
+|optional
+|As in an agent step.
+
+|`title`
+|string
+|optional
+|The title of the PR and the commit. When omitted: `aidev: <description, or name>`.
+|===
+
+It commits only the changes inside the `writable` of all steps together, pushes, and opens a PR (Azure DevOps). With no change in that range it does nothing. A workflow with this step starts from a clean working tree on a new `aidev/<name>-<yyyymmddHHMM>` branch.
+
+[[workflow-reference-limits]]
+=== limits
+
+[cols="1,1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Default |Description
+
+|`limits.max_usd`
+|number
+|required
+|
+|The cost ceiling in USD. Once the cost the AI tool reported adds up to it, no further agent starts. An agent already running is not stopped, so a run can go past it by its last start. Only Claude Code reports cost. xref:cli-estimate[aidev estimate] gives an estimate.
+
+|`limits.max_minutes`
+|integer
+|optional
+|none
+|A time limit for the whole workflow, in minutes, with no ceiling. Without it, time does not stop the run. Required when an agent runs on an AI tool other than Claude Code (no cost is reported, so `max_usd` cannot stop it). `aidev run workflow --max-minutes` lowers it for one run (or sets one for that run when the workflow has none).
+|===
+
+[[workflow-reference-agent]]
+=== Agent definition (`.aidev/agents/<name>.md`)
+
+A frontmatter and a Markdown body. `aidev create agent <name>` writes a template.
+
+[source,markdown]
+----
+---
+name: e2e-writer
+description: Writes a Playwright test per screen. Started by the e2e-tests workflow
+skills: [test-and-verify]
+tools: Read, Grep, Glob, Edit, Write
+mcp: []
+model: inherit
+---
+
+# e2e-writer
+
+(role, inputs and outputs, procedure, when to stop)
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`name`
+|string
+|recommended
+|The same as the file name (letters, digits and `. _ -`). ADK looks agents up by file name.
+
+|`description`
+|string
+|recommended
+|When it is started and what it does. Shown by `aidev list agents` and read by workflow-creator when it picks agents.
+
+|`skills`
+|list (`[a, b]` or `a, b`)
+|optional
+|Skills whose body goes into its instructions. Looked up in the PKG, then in ADK; a skill found in neither stops the workflow at validation.
+
+|`tools`
+|list
+|optional
+|The built-in tools it may use (`Read`, `Edit`, `Bash` and so on). When omitted, the tool's default set. Claude Code is started with these only, and the hook refuses any other.
+
+|`mcp`
+|list
+|optional
+|The MCP servers it may use (keys of the PKG's `.mcp.json`). When omitted, no MCP server is given. A name missing from `.mcp.json` stops the workflow before it starts.
+
+|`model`
+|string
+|optional
+|Write `inherit`. It is not used when a workflow starts the agent; the workflow's `model` and `aidev.yaml` decide.
+|===
+
+* An agent with `tools` or `mcp` runs only with Claude Code (other AI tools cannot be limited to them, so the run stops before it starts).
+* Do not give `Bash` to an agent that touches an external system. With `Bash` it can go out without MCP, however `mcp` is limited.
+* No field gives one agent different permissions per job. Work that needs different permissions gets a separate agent.
+* Changing an agent changes every workflow that uses it.
+
+ADK puts the body at the head of an agent step's instructions and adds the following after it. The body does not need to repeat them.
+
+[cols="1,3",options="header"]
+|===
+|What ADK adds |Contents
+
+|Workflow and Objective
+|The workflow's name, `description` and `objective`
+
+|Task for this run
+|What `--task` says (as data)
+
+|Reports from the earlier steps
+|The final reports of the earlier agent steps (the last 6000 characters of each)
+
+|Notes of this run
+|Where the notes directory is and which files it holds
+
+|Step
+|The step's `prompt`; with `for_each`, this target; on a retry, what failed last time
+
+|Rules
+|Where it may write (`writable`), what must not change (`unchanged`), not to commit, what to put in the final report
+
+|Reference documents
+|The paths listed in `references` in `aidev.yaml` (xref:configuration[aidev.yaml reference])
+|===
+
+The checking agent (`until.agent`) receives the step's `prompt`, the report of the step's agent, the list of changed files, where the diff file is, `until.prompt`, and the rule to end on a `VERDICT:` line.
+
+[[workflow-reference-skill]]
+=== Skill definition (`.aidev/skills/<name>/SKILL.md`)
+
+[source,markdown]
+----
+---
+name: deploy-checklist
+description: What to check before a release, in order
+---
+
+# deploy-checklist
+
+1. ...
+----
+
+[cols="1,1,4",options="header"]
+|===
+|Field |Required |Description
+
+|`name`
+|recommended
+|The same as the directory name. ADK looks skills up by directory name.
+
+|`description`
+|recommended
+|When to use the procedure (one sentence).
+
+|Body
+|required
+|The procedure. When an agent's frontmatter lists the skill in `skills`, the body goes into that agent's instructions as it is.
+|===
+
+[[workflow-reference-records]]
+=== Run record (`runs/<id>/run.json`)
+
+`aidev run workflow` writes it as the run goes (gitignored). The estimate (xref:cli-estimate[aidev estimate]) reads `calls` from the `run.json` of every workflow in the PKG.
+
+[cols="1,4",options="header"]
+|===
+|Field |Contents
+
+|`runId`, `name`, `hash`
+|The run's id (its start time), the workflow's name, the hash of `workflow.yaml` at the start
+
+|`approvedRef`, `approvedSha`
+|The ref approval was checked against (`origin/main` and so on) and its commit
+
+|`startedAt`, `finishedAt`, `startedBy`
+|When it started and finished, and the user name that ran it (for the record)
+
+|`branch`, `baseSha`, `task`
+|The branch it ran on, the commit it started from, what `--task` said
+
+|`steps`
+|Per step: `id`, `kind`, `ok`, `attempts`. An agent step also has a summary of its last result (`result`), the checking agent's report (`review`), the command output file (`log`); a `for_each` step has `items` per target (a target that failed under `on_failure: continue` has `failed: true` and `reason`) and the number that failed (`failed`)
+
+|`calls`
+|One entry per agent start: `step`, `role` (`agent`, or `until` for the checking agent), `agent`, `item` (the `for_each` target), `attempt`, `tool`, `model`, `ok`, `costUsd`, `durationMs`
+
+|`done`, `stopReason`
+|Whether it finished, and why it stopped
+
+|`agentRuns`, `costUsd`
+|The number of agent starts and the total reported cost (including any `--resume`)
+
+|`pr`, `resumes`
+|The PR it opened; when it was resumed and at which step
+|===

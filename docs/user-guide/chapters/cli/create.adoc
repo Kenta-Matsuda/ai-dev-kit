@@ -32,6 +32,8 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |`.aidev/policy.candidate.yaml`（書き込み権限 policy の候補）。`aidev.yaml` の `secrets_paths` と ADK の既定から作る。`--approve` で `.aidev/policy.yaml` として置き、候補を消す（人間の判断）。policy が既にあっても同じ（`secrets_paths` を変えたときなど）。今の policy より保護が減る候補は `--force` が無いと終了コード 3。候補は手で編集しても反映されない。チームが足す `writable` は置いた後の `.aidev/policy.yaml` を直接編集して PR にする（`create policy --approve` で消える）。名前は取らない
 |===
 
+既存の workflow を一部だけ直すときは、xref:cli-modify[`aidev modify workflow <name> --describe "…"`] を使います。`create workflow --describe --force` は今の定義を見ずに、説明だけから書き直します。
+
 名前は小文字・数字・ハイフンです。ADK が同梱する agent は仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent は PKG が作ります。同名なら PKG のものが優先されます。書いたあとは編集し、名前で参照し（agent は workflow のステップの `agent: <name>`、skill は agent の frontmatter の `skills: [<name>]`）、`aidev submit workflow <workflow>` で workflow と一緒に PR にします。
 
 === オプション

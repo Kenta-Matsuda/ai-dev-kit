@@ -54,8 +54,10 @@ if (mcpAt >= 0 && process.env.STUB_MCP_OUT) fs.writeFileSync(process.env.STUB_MC
 if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null }));
 if (process.env.STUB_STEPS_OUT) fs.appendFileSync(process.env.STUB_STEPS_OUT, (process.env.AIDEV_WORKFLOW_STEP || '') + '\\n');
 // An until agent (step "<id>:until") answers the next verdict from STUB_VERDICTS (a JSON list).
-let answer = 'stub answer';
+let answer = process.env.STUB_ANSWER || 'stub answer';
 const step = process.env.AIDEV_WORKFLOW_STEP || '';
+// An editing agent (aidev modify): write STUB_WRITE_TEXT to STUB_WRITE_FILE, relative to the repository.
+if (process.env.STUB_WRITE_FILE) fs.writeFileSync(process.env.STUB_WRITE_FILE, process.env.STUB_WRITE_TEXT || '');
 if (step.endsWith(':until') && process.env.STUB_VERDICTS && fs.existsSync(process.env.STUB_VERDICTS)) {
   const queue = JSON.parse(fs.readFileSync(process.env.STUB_VERDICTS, 'utf8'));
   const v = queue.shift();
@@ -66,6 +68,14 @@ let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; });
 process.stdin.on('end', () => {
+  // A for_each agent: write <STUB_ITEM_DIR>/<target>.txt for the target its prompt names.
+  const target = /## Your target: (\\S+)/.exec(stdin);
+  if (process.env.STUB_ITEM_DIR && target) {
+    const f = require('path').join(process.env.STUB_ITEM_DIR, target[1] + '.txt');
+    fs.mkdirSync(require('path').dirname(f), { recursive: true });
+    fs.writeFileSync(f, 'test for ' + target[1] + '\\n');
+    if (process.env.STUB_ITEM_TOUCH) fs.appendFileSync(process.env.STUB_ITEM_TOUCH, target[1] + '\\n');
+  }
   if (process.env.STUB_PROMPT_OUT) fs.appendFileSync(process.env.STUB_PROMPT_OUT, stdin + '\\n=====\\n');
   if (process.env.STUB_MODE === 'fail') { process.stderr.write('stub: refused\\n'); process.exit(2); }
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\\n');
@@ -81,7 +91,7 @@ process.stdin.on('end', () => {
 
 const GOOD = {
   name: 'wf', objective: 'do the thing',
-  steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }], cost: { max_usd: 1 },
+  steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }], limits: { max_usd: 1 },
 };
 const withStep = (patch) => ({ ...GOOD, steps: [{ ...GOOD.steps[0], ...patch }] });
 
@@ -99,7 +109,7 @@ function yamlOf(name, { writable = 'src/**', steps, extra = [], cost = 1, minute
   return [
     `name: ${name}`, 'description: "test workflow"', 'objective: |', '  Make the thing work.',
     ...extra, 'steps:', ...lines,
-    'limits:', `  max_minutes: ${minutes}`, 'cost:', `  max_usd: ${cost}`, '',
+    'limits:', `  max_usd: ${cost}`, ...(minutes == null ? [] : [`  max_minutes: ${minutes}`]), '',
   ].join('\n');
 }
 
@@ -114,7 +124,7 @@ function run() {
   // -------------------------------------------------------------- schema
   suite('workflow: definition schema');
 
-  test('a valid definition normalises steps, agents, writable, limits and cost', () => {
+  test('a valid definition normalises steps, agents, writable and limits', () => {
     const d = wfMod.validateDefinition({ ...GOOD, tool: 'claude', model: '' }, 'wf');
     eq(d.agents, ['issue-to-pr'], 'the agents are the ones the steps name');
     eq([d.tool, d.model], ['claude', null]);
@@ -122,13 +132,13 @@ function run() {
     const each = wfMod.validateDefinition(withStep({
       prompt: 'test {item}', unchanged: ['tests/**'], for_each: { from: 'targets.txt', max_items: 5 }, until: { command: 'npx playwright test {item}' },
     }), 'wf').steps[0];
-    eq([each.unchanged, each.for_each], [['tests/**'], { from: 'targets.txt', max_items: 5 }]);
+    eq([each.unchanged, each.for_each], [['tests/**'], { from: 'targets.txt', max_items: 5, on_failure: 'stop' }]);
     const one = wfMod.forItem(each, 'e2e/login.spec.ts');
     eq([one.prompt, one.until.commands[0].argv], ['test e2e/login.spec.ts', ['npx', 'playwright', 'test', 'e2e/login.spec.ts']], '{item} is the target, one argv entry');
     eq(wfMod.parseItems('# screens\n\n- login\n* orders/list\nlogin\n  @scope/pkg  \n', each.for_each), ['login', 'orders/list', '@scope/pkg'],
       'one target per line; comments, blanks, list marks and repeats dropped');
-    eq(d.limits, { max_minutes: 60 });
-    eq(d.cost, { max_usd: 1 });
+    eq(d.limits, { max_usd: 1, max_minutes: null }, 'no time limit unless the workflow sets one');
+    eq(wfMod.validateDefinition({ ...GOOD, limits: { max_usd: 3, max_minutes: 600 } }, 'wf').limits, { max_usd: 3, max_minutes: 600 }, 'a time limit has no ceiling');
     const u = wfMod.validateDefinition({ ...GOOD, steps: [
       { agent: 'x', writable: [], prompt: 'p', description: 'look first' },
       { agent: 'x', writable: ['src/**'], prompt: 'p', until: { command: 'npm test' } },
@@ -139,7 +149,7 @@ function run() {
     eq(u.steps[0].description, 'look first');
     eq(u.steps[1].until, { commands: [{ text: 'npm test', argv: ['npm', 'test'] }], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null });
     const many = wfMod.validateDefinition(withStep({ until: {
-      command: ['npm ci', 'npx playwright test'], cwd: 'e2e/', env: { CI: 1, BASE_URL: 'http://localhost:3000' }, timeout_ms: 600000,
+      command: ['npm ci', 'npx playwright test'], cwd: 'e2e/', env: { CI: 1, BASE_URL: 'http://localhost:3000' }, timeout_minutes: 10,
     } }), 'wf').steps[0].until;
     eq(many.commands.map((c) => c.text), ['npm ci', 'npx playwright test'], 'a list of commands runs in order');
     eq([many.cwd, many.env, many.timeout_ms], ['e2e', { CI: '1', BASE_URL: 'http://localhost:3000' }, 600000]);
@@ -159,8 +169,12 @@ function run() {
     throws(() => wfMod.validateDefinition(withStep({ writable: undefined }), 'wf'), /writable is required for an agent step/);
     throws(() => wfMod.validateDefinition(withStep({ writable: ['.aidev/policy.yaml'] }), 'wf'), /protected path/);
     throws(() => wfMod.validateDefinition(withStep({ writable: ['.claude/**'] }), 'wf'), /protected path/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, cost: {} }, 'wf'), /cost\.max_usd is required/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_minutes: 61 } }, 'wf'), /above the hard ceiling of 60/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_minutes: 30 } }, 'wf'), /limits\.max_usd is required/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, limits: undefined }, 'wf'), /limits is required/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, cost: { max_usd: 1 } }, 'wf'), /the budget is limits\.max_usd now/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, limits: { max_usd: 1, max_tokens: 5 } }, 'wf'), /limits: unknown key max_tokens/);
+    throws(() => wfMod.validateDefinition(withStep({ timeout_ms: 60000 }), 'wf'), /timeout_ms is timeout_minutes now/);
+    throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', timeout_ms: 1 } }), 'wf'), /timeout_ms is timeout_minutes now/);
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test' }, max_retries: 11 }), 'wf'), /above the hard ceiling of 10/);
     throws(() => wfMod.validateDefinition(withStep({ max_retries: 2 }), 'wf'), /needs an until/);
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test | tee log' } }), 'wf'), /without a shell/);
@@ -179,10 +193,12 @@ function run() {
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', env: { 'A B': 'x' } } }), 'wf'), /not an environment variable name/);
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test', env: ['CI=1'] } }), 'wf'), /must be a mapping/);
     throws(() => wfMod.validateDefinition(withStep({ until: { agent: 'reviewer', prompt: 'x', cwd: 'e2e' } }), 'wf'), /until\.cwd needs until\.command/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test', timeout_ms: 3600001 }] }, 'wf'), /above the hard ceiling of 3600000/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test', timeout_minutes: 241 }] }, 'wf'), /above the ceiling of 240 minutes/);
+    eq(wfMod.validateDefinition(withStep({ timeout_minutes: 0.5 }), 'wf').steps[0].timeout_ms, 30000, 'minutes, kept as milliseconds');
     const FE = { from: 'targets.txt', max_items: 5 };
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt' } }), 'wf'), /for_each\.max_items is required/);
-    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt', max_items: 101 } }), 'wf'), /above the hard ceiling of 100/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt', max_items: 10001 } }), 'wf'), /above the hard ceiling of 10000/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt', max_items: 5, on_failure: 'skip' } }), 'wf'), /on_failure is stop or continue/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: '../targets.txt', max_items: 5 } }), 'wf'), /name of a file in the run's notes directory/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { ...FE, parallel: 2 } }), 'wf'), /for_each: unknown key parallel/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do it', for_each: FE }), 'wf'), /prompt must name its target as \{item\}/);
@@ -419,6 +435,43 @@ function run() {
         const record = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs', runsOf('plain')[0], 'run.json'), 'utf8'));
         eq([record.name, record.done, record.approvedRef, record.branch], ['plain', true, 'origin/main', null]);
         ok(/^sha256:/.test(record.hash));
+        eq(record.calls.map((c) => [c.step, c.role, c.agent, c.attempt, c.ok, c.costUsd]), [['think', 'agent', 'coder', 1, true, 0.0123], ['act', 'agent', 'coder', 1, true, 0.0123]],
+          'every agent start is recorded with what it cost, for the next estimate');
+      });
+
+      test('estimate prices a run from the definition and from the recorded runs; dry-run shows the range', () => {
+        const r = aidev(fx.root, ['estimate', 'workflow', 'plain', '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq(j.history.starts >= 2, true, 'the run above was recorded');
+        eq(j.steps.map((s) => [s.id, s.kind, s.starts]), [['think', 'agent', [1, 1]], ['check', 'command', [0, 0]], ['act', 'agent', [1, 4]]],
+          'act: one start when the check passes first time, four when all three retries are used');
+        ok(/history of this step \(1\)/.test(j.steps[0].basis), j.steps[0].basis);
+        eq(j.steps[0].perStart.agent, [0.01, 0.02], 'one sample: the observed cost, widened (x0.5, x2)');
+        eq([j.optimistic, j.pessimistic], [0.01, 0.12], 'think 0.0062 + act 0.0062 .. think 0.0246 + 4 x act 0.0246');
+        ok(fs.readdirSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs')).length === 1, 'estimate starts no run');
+        const dry = aidev(fx.root, ['run', 'workflow', 'plain', '--dry-run'], { env: env() });
+        ok(/cost\s+\$0\.01 – \$0\.12 \(optimistic – pessimistic/.test(dry.out), dry.out);
+      });
+
+      test('estimate --ai asks the read-only cost-estimator, and its sizes and targets narrow the range', () => {
+        reset();
+        const answer = 'Sized it.\n```json\n{"steps":[{"id":"act","size":"L","attempts":{"high":2},"why":"two files"}],"notes":"small task"}\n```';
+        const r = aidev(fx.root, ['estimate', 'workflow', 'plain', '--ai', '--task', 'one link', '--json'], { env: env({ STUB_ANSWER: answer }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq([j.ai, j.estimator.ok, j.estimator.answer.notes], [true, true, 'small task']);
+        const act = j.steps.find((s) => s.id === 'act');
+        eq([act.starts, act.why], [[1, 2], 'two files'], 'the estimator expects two attempts at worst');
+        ok(/history of this step/.test(act.basis), 'recorded costs still price one start; the size is the fallback');
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        eq(a.slice(a.indexOf('--tools') + 1), ['Read', 'Glob', 'Grep'], 'the estimator reads and writes nothing');
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(/# Agent: cost-estimator/.test(prompt) && /## Task for this run[\s\S]*one link/.test(prompt), prompt.slice(0, 300));
+        ok(/## What earlier runs recorded\n\n- think: agent 1 start\(s\)/.test(prompt), 'the estimator sees the history');
+        const bad = aidev(fx.root, ['estimate', 'workflow', 'plain', '--ai', '--json'], { env: env({ STUB_ANSWER: 'no idea' }) });
+        eq(bad.code, 0, 'an unusable answer falls back to the definition');
+        eq([lastJson(bad.out).ai, lastJson(bad.out).estimator.reason], [false, 'its answer had no JSON block to read']);
       });
 
       test('an until command that keeps failing with the same output stops the step early', () => {
@@ -835,7 +888,7 @@ function run() {
         const after = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
         ok(/## Your target: orders\/list \(2 of 3\)/.test(after[0]) && /## This run was resumed/.test(after[0]), after[0]);
         ok(/## Your target: settings \(3 of 3\)/.test(after[1]) && !/## This run was resumed/.test(after[1]), after[1]);
-        ok(/### Step write \(agent coder\)\n\n3 target\(s\) from [^\n]+targets\.txt:\n\n- login: done[^\n]*\n {2}stub answer\n- orders\/list: done/.test(after[2]),
+        ok(/### Step write \(agent coder\)\n\n3 target\(s\) from [^\n]+targets\.txt: 3 done\.\n\n- login: done[^\n]*\n {2}stub answer\n- orders\/list: done/.test(after[2]),
           'the next step gets one report for the whole step: ' + after[2]);
 
         // A list the kit cannot take as written stops the step before any agent starts.
@@ -850,6 +903,160 @@ function run() {
         eq(bad.code, 1, bad.out);
         ok(/step write: targets\.txt line 2: "--config=evil\.js" is not a target/.test(lastJson(bad.out).stopReason), lastJson(bad.out).stopReason);
         ok(!fs.existsSync(promptOut), 'no agent was started');
+      });
+
+      test('on_failure: continue undoes a target that fails and goes on; --log keeps the whole run and a summary', () => {
+        // node tools/list.js <workflow> <a,b,c>: the planning step, writing the targets into the run's notes.
+        write(path.join(fx.root, 'tools', 'list.js'), [
+          "const fs = require('fs'); const path = require('path');",
+          "const runs = path.join('.aidev', 'workflows', process.argv[2], 'runs');",
+          "fs.writeFileSync(path.join(runs, fs.readdirSync(runs).sort().pop(), 'notes', 'targets.txt'), process.argv[3].split(',').join('\\n') + '\\n');", '',
+        ].join('\n'));
+        write(path.join(fx.root, 'tools', 'check.js'), "console.log('checking ' + process.argv[2]); process.exit(process.argv[2] === 'bad' ? 3 : 0);\n");
+        const steps = (list) => [
+          '  - id: plan', `    command: node tools/list.js ${list}`,
+          '  - id: write', '    agent: coder', '    prompt: Write the test for {item}.',
+          '    for_each:', '      from: targets.txt', '      max_items: 5', '      on_failure: continue',
+          '    until:', '      command: node tools/check.js {item}', '    max_retries: 1',
+        ];
+        define('skip', { steps: steps('skip login,bad,settings'), minutes: null });
+        reset();
+        const logFile = path.join(tmp, 'logs', 'skip.log');
+        const r = aidev(fx.root, ['run', 'workflow', 'skip', '--json', '--log', logFile], { env: env({ STUB_ITEM_DIR: 'src/out' }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        const w = j.steps.find((s) => s.id === 'write');
+        eq(w.items.map((x) => [x.item, x.ok, !!x.failed]), [['login', true, false], ['bad', false, true], ['settings', true, false]]);
+        eq([w.ok, w.failed], [true, 1]);
+        ok(/the same failure repeated/.test(w.items[1].reason), w.items[1].reason);
+        const out = (f) => path.join(fx.root, 'src', 'out', f);
+        ok(fs.existsSync(out('login.txt')) && fs.existsSync(out('settings.txt')), 'the targets that passed keep their work');
+        ok(!fs.existsSync(out('bad.txt')), 'the target that failed was undone');
+        const text = fs.readFileSync(logFile, 'utf8');
+        ok(/^# aidev run workflow skip\n/.test(text) && /limits: +no time limit, \$1/.test(text), text.slice(0, 400));
+        ok(/\n {2}write \[login\] #1 +\d:\d\d {2}Read stub-read\.md\n/.test(text), 'every tool call of every agent');
+        ok(/----- final report of agent coder \(step write, target login, attempt 1\) -----\nstub answer\n----- end -----/.test(text), 'each final report');
+        ok(/----- output of "node tools\/check\.js bad" -----[\s\S]*?checking bad/.test(text), 'each command\'s output');
+        ok(/target bad failed \(.*\); 1 changed file\(s\) undone, going on/.test(text), text);
+        ok(/# Summary\n\nresult: +finished[\s\S]*targets: 2 done, 1 failed and undone, 0 not finished\n {4}failed bad: /.test(text), text.slice(-800));
+
+        define('skipall', { steps: steps('skipall bad'), minutes: null });
+        const all = aidev(fx.root, ['run', 'workflow', 'skipall', '--json'], { env: env({ STUB_ITEM_DIR: 'src/out' }) });
+        eq(all.code, 1, all.out);
+        ok(/every target failed \(the first: bad:/.test(lastJson(all.out).stopReason), lastJson(all.out).stopReason);
+      });
+    } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+
+  // ------------------------------------------------------------- estimate
+  suite('workflow: estimate');
+
+  const estimateMod = require('../cli/lib/estimate');
+  const EMPTY = { calls: [], runs: [] };
+  const eachDef = wfMod.validateDefinition({
+    ...GOOD, limits: { max_usd: 100, max_minutes: null },
+    steps: [
+      { id: 'plan', agent: 'planner', writable: [], prompt: 'list them' },
+      { id: 'write', agent: 'writer', writable: ['e2e/**'], prompt: 'test {item}', for_each: { from: 't.txt', max_items: 10 },
+        until: { command: 'npx playwright test {item}', agent: 'reviewer', prompt: 'covers it' }, max_retries: 2 },
+      { kind: 'pull-request' },
+    ],
+  }, 'wf');
+
+  test('without history: one start per attempt (two with a checker), times the targets, priced by size', () => {
+    const e = estimateMod.estimateDefinition(eachDef, { history: EMPTY });
+    const [plan, write, pr] = e.steps;
+    eq([plan.starts, plan.usd, plan.basis], [[1, 1], [0.3, 1], 'size M']);
+    eq([write.starts, write.items.low, write.items.high, write.items.basis], [[2, 60], 1, 10, 'max_items'], '1 target x 1 attempt x 2 .. 10 x 3 x 2');
+    eq(write.perStart, { agent: [0.3, 1], checker: [0.05, 0.3] }, 'the checker defaults to size S');
+    eq(write.usd, [0.35, 39], '0.3 + 0.05 .. 10 x 3 x (1 + 0.3)');
+    eq(pr.starts, [0, 0]);
+    eq([e.optimistic, e.pessimistic, e.cap], [0.65, 40, 101]);
+  });
+
+  test('the pessimistic figure stops where the runner stops: the budget plus one start', () => {
+    const small = { ...eachDef, limits: { max_usd: 5, max_minutes: null } };
+    const e = estimateMod.estimateDefinition(small, { history: EMPTY });
+    eq([e.pessimistic, e.uncapped, e.cap], [6, 40, 6]);
+    eq(estimateMod.estimateDefinition(small, { history: EMPTY, reportsCost: false }).pessimistic, 40, 'no cost reported, no budget stop');
+    ok(estimateMod.estimateDefinition({ ...eachDef, limits: { max_usd: 0.5, max_minutes: null } }, { history: EMPTY }).overBudget, 'optimistic 0.65 reaches a $0.5 budget');
+  });
+
+  test('history prices a start: the step first, then the agent anywhere; the estimator sizes and counts the rest', () => {
+    const history = {
+      calls: [
+        { workflow: 'wf', step: 'plan', role: 'agent', agent: 'planner', costUsd: 0.2 },
+        { workflow: 'wf', step: 'plan', role: 'agent', agent: 'planner', costUsd: 0.4 },
+        { workflow: 'wf', step: 'plan', role: 'agent', agent: 'planner', costUsd: 0.3 },
+        { workflow: 'other', step: 'x', role: 'agent', agent: 'writer', costUsd: 1 },
+      ],
+      runs: [{ workflow: 'wf', steps: [{ id: 'write', items: [{}, {}, {}] }] }, { workflow: 'wf', steps: [{ id: 'write', items: [{}, {}, {}, {}, {}] }] }],
+    };
+    const e = estimateMod.estimateDefinition(eachDef, { history });
+    eq([e.steps[0].perStart.agent, e.steps[0].basis], [[0.2, 0.4], 'history of this step (3)'], 'three samples: the observed range as is');
+    eq(e.steps[1].perStart.agent, [0.5, 2], 'one sample of the agent elsewhere, widened');
+    eq([e.steps[1].items.low, e.steps[1].items.high, e.steps[1].items.basis], [3, 5, 'earlier runs (2)']);
+    const ai = estimateMod.parseAiAnswer('ok\n```json\n{"steps":[{"id":"write","size":"xl","checkSize":"M","attempts":{"high":9},"items":{"low":2,"high":40},"why":"w"}]}\n```');
+    const f = estimateMod.estimateDefinition(eachDef, { history: EMPTY, ai });
+    eq([f.steps[1].items.low, f.steps[1].items.high, f.steps[1].starts], [2, 10, [4, 60]], 'targets and attempts are clamped to what the definition allows');
+    eq(f.steps[1].perStart, { agent: [3, 8], checker: [0.3, 1] }, 'sizes are read case-insensitively');
+    eq(estimateMod.parseAiAnswer('no json here'), null);
+    eq(estimateMod.parseAiAnswer('{"steps":[{"id":"a","size":"S"}]}').steps[0].size, 'S', 'a bare object is read too');
+  });
+
+  // --------------------------------------------------------------- modify
+  suite('workflow: modify');
+
+  {
+    const fx = makeRepo({ hosting: 'generic' });
+    const tmp = stubDir();
+    const stub = writeToolStub(tmp);
+    const promptOut = path.join(tmp, 'prompt.txt');
+    const wfRel = '.aidev/workflows/fix/workflow.yaml';
+    const original = yamlOf('fix', { steps: ['  - id: work', '    agent: coder', '    prompt: do it'] });
+    const env = (extra = {}) => ({ AIDEV_CLAUDE_BIN: stub, STUB_PROMPT_OUT: promptOut, ...extra });
+    write(path.join(fx.root, '.aidev', 'agents', 'coder.md'), '---\nname: coder\ndescription: writes code\n---\n\nYou are the coder.\n');
+    write(path.join(fx.root, ...wfRel.split('/')), original);
+    write(path.join(fx.root, '.aidev', 'workflows', 'other', 'workflow.yaml'), yamlOf('other', { steps: ['  - id: x', '    agent: coder', '    prompt: other work'] }));
+    approve(fx, 'two workflows sharing coder');
+    try {
+      test('modify needs an existing workflow and --describe; --dry-run starts nothing', () => {
+        ok(/no such workflow: nope/.test(aidev(fx.root, ['modify', 'workflow', 'nope', '--describe', 'x']).out));
+        ok(/needs --describe/.test(aidev(fx.root, ['modify', 'workflow', 'fix']).out));
+        const dry = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'add a review', '--dry-run', '--json'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        eq(lastJson(dry.out).shared, { coder: ['other'] }, 'coder is shared with the other workflow');
+        ok(!fs.existsSync(promptOut), 'no agent was started');
+      });
+
+      test('the workflow-creator edits in place from the current YAML; the change is validated and the old file kept', () => {
+        const edited = original.replace('prompt: do it', 'prompt: do it carefully');
+        const r = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'be careful', '--json'], { env: env({ STUB_WRITE_FILE: wfRel, STUB_WRITE_TEXT: edited }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq([j.ok, j.changed, j.added, j.problem], [true, [wfRel], [], null]);
+        eq(fs.readFileSync(path.join(fx.root, ...j.backup.split('/'), ...wfRel.split('/')), 'utf8'), original, 'the previous file is kept under .aidev/cache/modify/');
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(/# Agent: workflow-creator/.test(prompt) && /# Modify the workflow "fix"/.test(prompt), prompt.slice(0, 200));
+        ok(/## What the team wants changed\n\nbe careful/.test(prompt));
+        ok(prompt.includes('## The current workflow.yaml\n\n```yaml\n' + original.trimEnd()), 'the agent starts from the current definition');
+        ok(/shared with other workflows[\s\S]*- coder \(\.aidev\/agents\/coder\.md\): also used by other/.test(prompt), 'it is told not to edit the shared agent');
+        eq(lastJson(aidev(fx.root, ['list', 'workflows', '--json']).out).workflows.find((w) => w.name === 'fix').status, 'changed since origin/main',
+          'a modified workflow needs a new review');
+      });
+
+      test('a result that does not validate, an edited shared agent, or no change at all is reported', () => {
+        fs.rmSync(promptOut, { force: true });
+        const broken = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'x', '--json'], { env: env({ STUB_WRITE_FILE: wfRel, STUB_WRITE_TEXT: 'name: fix\nsteps: []\n' }) });
+        eq(broken.code, 1, broken.out);
+        ok(/objective is required/.test(lastJson(broken.out).problem), broken.out);
+        write(path.join(fx.root, ...wfRel.split('/')), original);
+        const shared = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'x', '--json'],
+          { env: env({ STUB_WRITE_FILE: '.aidev/agents/coder.md', STUB_WRITE_TEXT: '---\nname: coder\ndescription: changed\n---\n' }) });
+        eq(lastJson(shared.out).editedShared, ['coder'], shared.out);
+        const none = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'x'], { env: env() });
+        eq(none.code, 1, none.out);
+        ok(/the agent changed nothing/.test(none.out), none.out);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

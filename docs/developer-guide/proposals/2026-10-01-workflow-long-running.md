@@ -1,6 +1,6 @@
 # 提案: 長く・多く・失敗しやすい仕事のための workflow 改善
 
-日付: 2026-10-01 / 状態: 提案（未実装）
+日付: 2026-10-01 / 状態: 提案（一部実装。2026-10-13: 提案 1 の `on_failure` を実装、提案 4 は D20 で置き換え）
 
 ## ねらい
 
@@ -15,6 +15,8 @@ PKG がこれから作る workflow は、IT テスト（Playwright）の作成�
 | その他（入力の宣言、失敗時の draft PR、worktree 実行、実行中の費用上限、PR branch の Wiki） | 5 |
 
 ## 提案 1: `for_each` の失敗の扱いと並列
+
+> 2026-10-13: `for_each.on_failure: stop | continue` を実装（`architecture.md` §9）。失敗した件の変更は件の開始時の snapshot へ戻す。並列は未実装。
 
 いまは 1 件が不合格ならそこで止まる。通らない件を飛ばすには、人が一覧の file からその行を消して `--resume` する。
 
@@ -36,6 +38,8 @@ PKG がこれから作る workflow は、IT テスト（Playwright）の作成�
 - 同一失敗の判定（出力の完全一致）は、所要時間を出力する test runner では働かない。比較の前に時刻と秒数を正規化するか、判定を「exit code と失敗したテスト名の集合」に変える
 
 ## 提案 4: `limits.max_minutes` の天井（60 分）
+
+> 2026-10-13: 採らず、天井そのものを撤去した（`design-decisions.md` D20）。`limits.max_minutes` は任意で、無人実行は `limits.max_usd` と再試行・件数の上限で止める。
 
 install・build・全テストを数回まわす仕事は 60 分に収まらない。`for_each` で件数が増えるとなおさらである。`--resume` が上限を数え直すので、人が続ければ進められるようにはなった。無人で長く走らせたい PKG には、`aidev.yaml`（PR で review される）で PKG ごとの天井を上げる項目を足す。
 
