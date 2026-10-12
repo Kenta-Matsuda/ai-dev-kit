@@ -118,9 +118,10 @@ steps:                             # run top to bottom
     prompt: Write the tests the previous step listed, in the existing style, and run them.
     until:                         # when the step is done; the agent is repeated until it is
       command: npm test            # this exits 0 (no shell)
-    max_retries: 4                 # retries for until (ceiling 10)
+      max_retries: 4               # how often the agent is started again when the check fails (default 3, ceiling 10)
   - id: pr
-    kind: pull-request             # commit the changes in each step's writable → push → PR
+    pull_request:                  # commit the changes in each step's writable → push → PR
+      title: "test: add the missing tests"   # optional
 
 limits:                            # what stops the run
   max_usd: 8                       # required. Once the reported cost reaches this, no further agent is started
@@ -138,13 +139,13 @@ limits:                            # what stops the run
 |If omitted, `tools.agent` / `tools.agent_model` of `aidev.yaml` apply (or the per-agent `tools.agents.<name>` if present). `tool` must be one of `tools.default`.
 
 |`steps`
-|Run from top to bottom. Each step is exactly one of three kinds. Every kind may have a `description` (optional) for the reviewer.
+|Run from top to bottom. Each step is exactly one of three kinds, decided by which key it has: `agent`, `command` or `pull_request`. Every kind may have a `description` (optional) for the reviewer.
 
 |agent step
-|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until `until` is met. `timeout_minutes` (the time allowed for one start of the agent) is optional.
+|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated until `until` is met (started again at most `until.max_retries` times). `timeout_minutes` (the time allowed for one start of the agent) is optional.
 
 |`until`
-|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. A list under `command` runs from top to bottom. `cwd`, `env` and `timeout_minutes` say how the commands run (xref:workflows-commands[Writing commands]). For the agent check, see xref:workflows-until-agent[Letting an agent's review decide when a step is done].
+|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. A list under `command` runs from top to bottom. `cwd`, `env` and `timeout_minutes` say how the commands run (xref:workflows-commands[Writing commands]). `max_retries` is how often the agent is started again when the check fails (default 3, at most 10; 0 means no retry). A step without `until` is not retried. For the agent check, see xref:workflows-until-agent[Letting an agent's review decide when a step is done].
 
 |`writable`
 |Paths (globs) the agent of that step may write. **The only place the AI can write PKG source is this range of the step now running in an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only step).
@@ -158,8 +159,8 @@ limits:                            # what stops the run
 |command step
 |`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_minutes` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
 
-|`kind: pull-request`
-|Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` optional. At most one.
+|`pull_request`
+|Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` is optional; without it, write `pull_request: {}`. At most one.
 
 |`limits.max_usd`
 |Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
@@ -173,7 +174,7 @@ Any key not in the table above is refused by validation. The type, default and a
 What stops a run is the following. The cost limit cannot be omitted, and the retry and target ceilings cannot be raised.
 
 * The cost limit (`limits.max_usd`, required)
-* The retries per step (`max_retries`, at most 10) and detection of the same failure (stop when the result of `until` is identical twice in a row)
+* The retries per step (`until.max_retries`, at most 10) and detection of the same failure (stop when the result of `until` is identical twice in a row)
 * The targets of a `for_each` (`max_items`, at most 10000)
 * The time for one start of an agent and for one command (`timeout_minutes`, at most 240; 30 by default for an agent), which ends an agent or a command that hangs
 * The time for the whole run (`limits.max_minutes`), optional
@@ -262,12 +263,12 @@ Split a job with many targets, such as writing tests screen by screen or migrati
     until:
       command: npx playwright test tests/{item}.spec.ts   # checks this target only
       cwd: e2e
-    max_retries: 3
+      max_retries: 3
 ----
 
 * The ADK reads the list. One line is one target; blank lines and lines starting with `#` are skipped. A line that appears twice is one target.
 * `{item}` can be written in `prompt`, `until.command` and `until.prompt`. It is required in `prompt`.
-* The agent is started anew for each target. `until` and `max_retries` apply per target. The time and cost limits count for the whole run.
+* The agent is started anew for each target. `until` and its retries apply per target. The time and cost limits count for the whole run.
 * When one target fails, the run stops there. The targets that passed stay as they are, and `--resume` continues from the target that stopped (xref:workflows-resume[Continuing a stopped run]).
 * With `on_failure: continue` under `for_each`, the changes of a target that fails are undone and the next target starts. What is undone is the files inside the step's `writable` that changed during that target. The failed targets and why are listed in `run.json`, in the report to the later steps and in the PR body. When every target fails, the run stops. Reaching the cost or time limit stops the run even with `continue`.
 * The later steps get one report that sums up the result of each target.
@@ -291,7 +292,7 @@ A target is one word made of letters, digits and `. _ / @ -` (up to 200 characte
 ----
 
 * The agent cannot write a path in `unchanged`, even inside `writable` (the hook refuses it).
-* The ADK remembers the state when the step started and compares after every attempt. If something changed, the attempt fails and the agent is started again with the changed paths. Changes made by a command or through `Bash` are detected too.
+* The ADK remembers the state when the step started and compares after every attempt. If something changed, the attempt fails; with `until`, the agent is started again with the changed paths (at most `until.max_retries` times). A step without `until` fails there (with `for_each`, that target fails). Changes made by a command or through `Bash` are detected too.
 * If the same paths are changed twice in a row, the run stops. Put them back, then `--resume`.
 * What an earlier step changed is part of the state "when the step started". An implementation step with `unchanged: [tests/**]` can follow a step that writes the tests.
 * Gitignored files are not compared.
@@ -326,9 +327,9 @@ steps:
       command: npx playwright test tests/{item}.spec.ts
       cwd: e2e
       timeout_minutes: 15
-    max_retries: 3
+      max_retries: 3
   - id: pr
-    kind: pull-request
+    pull_request: {}
 
 limits:
   max_usd: 400                     # the only stop; no max_minutes
@@ -365,7 +366,7 @@ These still need a person:
       prompt: |                    # what test-reviewer checks
         Every behaviour the previous step listed is tested.
         The tests check behaviour seen from outside, not the implementation's internals.
-    max_retries: 4
+      max_retries: 4
 ----
 
 One attempt goes in this order:
@@ -379,8 +380,8 @@ About the checking agent:
 
 * **It writes nothing.** The step's `writable` does not apply to it. What it can use (skills, tools, MCP servers) is its own frontmatter; give it read-only tools such as `tools: Read, Grep, Glob`.
 * The ADK puts the pass/fail format (the `VERDICT:` line) into its instructions. You do not need to write it in the agent's body or in `until.prompt`.
-* Write in `until.prompt` exactly what to check. A vague check makes the same remark repeat and stop the run, or uses up `max_retries`.
-* Its starts count toward `max_retries`, the cost limit and the time limit. An attempt starts two agents, so allow for that in `limits.max_usd`.
+* Write in `until.prompt` exactly what to check. A vague check makes the same remark repeat and stop the run, or uses up `until.max_retries`.
+* Its starts count toward the retries (`until.max_retries`), the cost limit and the time limit. An attempt starts two agents, so allow for that in `limits.max_usd`.
 * When it passes the work, its report also goes into the instructions of the later agent steps.
 * The checking agent is reviewed in the pull request together with the workflow, and the workflow runs only while it matches `origin/main`.
 
@@ -494,13 +495,13 @@ aidev run workflow write-tests
 
 This is what happens during a run.
 
-* A workflow with a `pull-request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
+* A workflow with a `pull_request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
 * The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
 * Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
 * The final report of each earlier agent step goes into the instructions of the later agent steps. The files in the notes directory can be read too (xref:workflows-handoff[Passing results between steps]).
 * If `until` is not met, the same agent is started again with the result attached (the command's output, or the checking agent's report). If the same result appears twice in a row, the run stops.
 * When a command takes longer than 15 seconds, one line with the elapsed time is shown every 15 seconds.
-* The `pull-request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts, the cost, and the final report of each agent step (shortened to fit the 4000 characters Azure DevOps accepts). The full text is in `pull-request.md` in the run record. If there are no changes in the range, neither a commit nor a PR is created.
+* The `pull_request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts, the cost, and the final report of each agent step (shortened to fit the 4000 characters Azure DevOps accepts). The full text is in `pull-request.md` in the run record. If there are no changes in the range, neither a commit nor a PR is created.
 * The record is written to `.aidev/workflows/<name>/runs/<id>/` as the run goes. It is gitignored and never committed.
 
 [%autowidth.stretch,options="header"]
@@ -549,7 +550,7 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 * The step that stopped starts over. The working tree still holds the earlier changes, and the agent is told why the run stopped.
 * The time and cost limits are counted anew for the continued run. The cost and the agent starts in `run.json` are totals.
 * If the definition (`workflow.yaml`) changed after the run started, the run cannot continue. Start a new run.
-* A workflow with a `pull-request` step must be on the run's branch (`aidev/<name>-<yyyymmddHHMM>`).
+* A workflow with a `pull_request` step must be on the run's branch (`aidev/<name>-<yyyymmddHHMM>`).
 
 When the cause is in the definition (the `until` command does not pass in this PKG, `writable` is too narrow, and so on), the run stops at the same place again. Ask the Engineering Manager to fix the definition, then start a new run.
 
@@ -566,11 +567,11 @@ Messages when it stops, and what to do. The exit code is 1.
 |The definition was changed locally. Revert it, or ask the Engineering Manager to submit again.
 
 |`the working tree has uncommitted changes; commit or stash them first`
-|A workflow with a `pull-request` step runs from a clean working tree.
+|A workflow with a `pull_request` step runs from a clean working tree.
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, and at the command's output (the file `log` in `run.json` points to) or `review` in `run.json` (the checking agent's last report). If you can fix the cause by hand, fix it and continue with `--resume last`. Otherwise make `--task` more specific or ask the Engineering Manager to revisit `max_retries`, the `prompt` or `until.prompt`.
+|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, and at the command's output (the file `log` in `run.json` points to) or `review` in `run.json` (the checking agent's last report). If you can fix the cause by hand, fix it and continue with `--resume last`. Otherwise make `--task` more specific or ask the Engineering Manager to revisit `until.max_retries`, the `prompt` or `until.prompt`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -651,7 +652,7 @@ Start from the problem you see.
 |Add that tool. Do not add `Bash` to an agent that touches external systems; split it into another agent instead.
 
 |`until` keeps failing and the run stops
-|`until`, `max_retries`, how the steps are split
+|`until` (with its `max_retries`), how the steps are split
 |Check by hand that the `until` command really passes in this PKG (`cwd` is the directory it runs in, `env` its environment variables). If the job is too big, split the step.
 
 |The checking agent keeps failing the work
@@ -683,6 +684,13 @@ aidev modify workflow write-tests --describe "Add a reviewer to the write step's
 ----
 +
 `modify` gives the agent the current definition and has it leave what the request does not touch. An agent other workflows also use is not edited; a new agent is written instead. The files as they were are kept in `.aidev/cache/modify/`.
++
+To change it while looking at the flow of its steps, use the editor in the browser (xref:cli-edit[aidev edit]). Every change is checked as a run would check it, and the page shows the difference from the approved copy and the estimated cost. It saves `workflow.yaml` only.
++
+[source,bash]
+----
+aidev edit workflow write-tests
+----
 . Check for mistakes in how it is written. If it shows `invalid:`, fix the item it names.
 +
 [source,bash]
@@ -764,7 +772,7 @@ List them with `aidev list agents` / `aidev list skills`, and remove them with `
 * xref:review-workflow-def[Workflow definition pull requests], xref:review-workflow-result[Workflow result pull requests]
 * xref:workflows-fix[Fixing a workflow] — where to fix, and how to submit again
 * xref:workflow-reference[Workflow definition reference] — every field of workflow.yaml, agents and skills
-* xref:cli-modify[aidev modify], xref:cli-estimate[aidev estimate]
+* xref:cli-modify[aidev modify], xref:cli-edit[aidev edit], xref:cli-estimate[aidev estimate]
 * xref:cli-run[aidev run workflow] — options, exit codes
 * xref:permissions[Permissions and safety] — how a step's `writable` relates to the policy
 * xref:configuration[aidev.yaml reference] — `tools.agent`, `tools.agents`, `references`

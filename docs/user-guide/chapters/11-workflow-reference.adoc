@@ -71,13 +71,13 @@ steps:                             # 必須。上から順に実行する
       timeout_minutes: 15
       agent: e2e-reviewer
       prompt: 画面 {item} の主要な操作がすべて検証されているか。
-    max_retries: 3
+      max_retries: 3
     timeout_minutes: 30
   - id: lint                       # command step
     command: npm run lint
   - id: pr                         # pull-request step
-    kind: pull-request
-    title: "test: add e2e tests"
+    pull_request:
+      title: "test: add e2e tests"
 
 limits:
   max_usd: 10                      # 必須
@@ -121,7 +121,7 @@ limits:
 |`steps`
 |list
 |必須
-|ステップの list。1 つ以上。上から順に実行します。1 つのステップは agent step・command step・pull-request step のどれか 1 つです（下の節）。
+|ステップの list。1 つ以上。上から順に実行します。1 つのステップは agent step・command step・pull-request step のどれか 1 つで、`agent`・`command`・`pull_request` のどのキーを持つかで決まります（下の節）。2 つ以上持つと検証で拒否されます。
 
 |`limits`
 |mapping
@@ -186,12 +186,6 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |なし
 |ステップの終わりの判定。満たすまで agent を繰り返します（xref:workflow-reference-until[until]）。
 
-|`max_retries`
-|整数
-|任意
-|`until` があれば 3、無ければ 0
-|最初の試行の後に、何回までやり直すか。0〜10。1 以上にするには `until` か `unchanged` が必要です。
-
 |`timeout_minutes`
 |数値
 |任意
@@ -237,6 +231,11 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |文字列
 |`agent` があれば必須
 |確認役に確認させる観点。
+
+|`max_retries`
+|整数
+|任意（既定 3）
+|不合格のとき、最初の試行の後に何回まで agent をやり直すか。0〜10。0 ならやり直しません。`unchanged` の検査で不合格になったときも、この回数までやり直します。`until` が無いステップはやり直しません。
 |===
 
 [[workflow-reference-for-each]]
@@ -303,17 +302,17 @@ ADK がコマンドを 1 回実行するステップです。exit 0 以外なら
 |===
 |項目 |型 |必須 |説明
 
-|`kind`
-|`pull-request`
-|必須
-|このステップの種類。workflow に 1 つまでです。
-
 |`id`、`description`
 |文字列
 |任意
 |agent step と同じです。
 
-|`title`
+|`pull_request`
+|mapping
+|必須
+|このキーを持つステップが pull-request step です。workflow に 1 つまでです。持てるのは `title` だけで、書かないときは `pull_request: {}` と書きます。
+
+|`pull_request.title`
 |文字列
 |任意
 |PR とコミットのタイトル。省略すると `aidev: <description、無ければ name>`。

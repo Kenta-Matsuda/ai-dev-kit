@@ -7,7 +7,7 @@ Estimates what one run of a workflow will cost, before you run it: an optimistic
 
 [source,text]
 ----
-aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--json]
+aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--review] [--json]
 ----
 
 === Description
@@ -19,10 +19,17 @@ A run costs the number of agent starts times what one start costs, added up. The
 | |How it is decided
 
 |Agent starts
-|From the definition. An agent step starts its agent once per attempt (twice with a checking `until.agent`), times the targets of a `for_each`. **Optimistic**: every check passes the first time, fewest targets. **Pessimistic**: every `max_retries` is used, `max_items` targets.
+|From the definition. An agent step starts its agent once per attempt (twice with a checking `until.agent`), times the targets of a `for_each`. **Optimistic**: every check passes the first time, fewest targets. **Pessimistic**: every `until.max_retries` is used, `max_items` targets.
 
 |One start
-|From this PKG's run records (`calls` in `runs/<id>/run.json`): the same step of the same workflow first, then the same agent in other workflows. With fewer than 3 records the range is widened (half the lowest to twice the highest). With no record, the default range of a work size (table below): `M` for a step, `S` for a checking agent.
+|The first of these that exists:
+. what the same step of the same workflow cost before
+. what the same agent cost in other workflows
+. a guide the estimate review wrote (see "How the estimate gets better with use" below), for the agent by name or for its kind of work
+. what a work size (table below) costs in this PKG, learned from its runs
+. the default range of the work size: `M` for a step, `S` for a checking agent
+
+What things cost before comes from the records the team shares (`.aidev/estimates/records/`) and from `calls` in this machine's `runs/<id>/run.json`. With fewer than 3 the range is widened (half the lowest to twice the highest). With 10 or more, the most extreme tenth at each end is left out.
 |===
 
 [cols="1,2,1",options="header"]
@@ -46,19 +53,58 @@ A run costs the number of agent starts times what one start costs, added up. The
 |$3.00 – $8.00
 |===
 
-The default ranges are rough figures for a Sonnet-class model. Real costs vary widely with the model, the amount of code and the prompts. Every run adds records, and the next estimate moves closer to what the PKG actually spends.
+The default ranges are rough figures for Sonnet.
+
+**Models are converted.** What one start costs is roughly proportional to the model's price. ADK converts between models by their price ratio (for example, Opus 5.5 costs twice Sonnet 5.5, Haiku 5.5 a twentieth). A step that has run only on Sonnet and now runs on Opus is priced at twice its Sonnet record. The default ranges are converted to the model the step runs on as well. A model whose price ADK does not know is not converted (1:1).
 
 With `--ai`, the **cost-estimator** agent runs first. It reads the workflow and `--task`, looks at the Wiki and the source, and estimates per step the following. It only reads (Claude Code is started with `Read`, `Glob` and `Grep` only).
 
 * The size of the work (`S` to `XL`), used for the cost of one start where there is no record
 * At which attempt it passes in a bad case, used for the pessimistic number of attempts
 * The range of `for_each` targets, used for the optimistic and pessimistic target counts
+* The kind of work (`survey`, `plan`, `implement`, `write-tests`, `fix`, `migrate`, `review`, `docs`, `other`). An agent that has never run can still be priced by a guide for the same kind of work
 
-ADK, not cost-estimator, computes the amounts. If cost-estimator's answer cannot be read, a warning is shown and the estimate uses the definition alone. What cost-estimator itself cost is shown on the `estimator` line.
+ADK, not cost-estimator, computes the amounts. The sizes and kinds cost-estimator decides are kept in `.aidev/estimates/judgments/<name>.json` and, while the workflow definition does not change, also used by the estimate without `--ai` and by the estimate of `aidev run workflow` (the attempts and targets belong to one task, so they are not kept). If cost-estimator's answer cannot be read, a warning is shown and the estimate uses the definition alone. What cost-estimator itself cost is shown on the `estimator` line.
 
 The pessimistic amount stops where a run stops. Once the reported cost adds up to `limits.max_usd`, ADK starts no further agent, so one run does not go much past "`limits.max_usd` plus its last start". When the amount is capped, the uncapped one is shown too.
 
 `aidev run workflow <name> --dry-run` shows the estimate without `--ai` on its `cost` line.
+
+[[cli-estimate-learning]]
+=== How the estimate gets better with use
+
+Work done for the first time has no record, so its estimate is rough. ADK keeps what each run was estimated to cost and what it did cost, and uses that to correct the next estimate, in three layers.
+
+[mermaid]
+....
+flowchart LR
+  R["aidev run workflow"] --> REC["records<br/>.aidev/estimates/records/"]
+  REC --> CAL["1. calibration<br/>(every time, no AI)"]
+  REC --> REV["2. review<br/>(after misses pile up, AI)"]
+  REV --> PRI["priors.json / notes.md"]
+  CAL --> EST["the next estimate"]
+  PRI --> EST
+  REC -. kit developers .-> KIT["3. the method itself<br/>(arrives with aidev update)"]
+....
+
+**Records.** Each `aidev run workflow` writes `.aidev/estimates/records/<workflow>-<run id>.json` when it ends: for each agent step the estimated range and the actual cost, the attempts and targets, and for each agent start the model, cost and tokens. No prompts, agent reports or command output. The records are committed to Git and shared by the team.
+
+* With a pull-request step, the records go into that pull request (this run's, and any left in the working tree before).
+* A run without a pull-request step leaves its record in the working tree. Commit it yourself, or leave it to the next run that opens a pull request. The "no uncommitted changes" check before a pull-request step does not count `.aidev/estimates/`.
+
+**1. Calibration (every time, no AI).** Each estimate works out from the records:
+
+* what one start of each work size costs in this PKG, used instead of the default range
+* how far to widen the ranges: 1 to 4 times, so that about 8 in 10 earlier steps fall inside. Nothing is widened until there are 5 records to compare.
+
+**2. Review (after misses pile up, AI).** Once 3 steps since the last review have cost more or less than their range, the **estimate-reviewer** agent starts by itself at the end of `aidev run workflow`. It reads the records, works out why they missed, and answers with guides for what one start costs (per agent, or per kind of work) and notes. ADK checks the answer and writes `.aidev/estimates/priors.json` and `notes.md`. estimate-reviewer only reads (Claude Code is started with `Read`, `Glob` and `Grep` only). A review costs a little. To turn it off, write `estimates.review: off` in `aidev.yaml` (xref:configuration[aidev.yaml]). To review now, run `aidev estimate workflow <name> --review`. cost-estimator (`--ai`) reads `notes.md` too.
+
+**3. The method itself (kit developers).** The default sizes, the model prices and how ranges are made live in ADK itself. Kit developers recompute estimates over the records of several PKGs and improve them. Improvements arrive with `aidev update`.
+
+**Estimating work done for the first time.** Two things help most:
+
+* `aidev estimate workflow <name> --ai` decides the kind of work of each step. If the review has a guide for that kind, a new agent is priced by it.
+* For `for_each` work, the first targets tell the most. After 3 targets (then every 10), `aidev run workflow` writes to its log what the remaining targets are likely to cost, and says so as soon as `limits.max_usd` looks too small (the run does not stop for it: it stops at the budget, and `--resume` continues it).
 
 A workflow that is not approved yet can be estimated, while you write it or after `aidev modify workflow`.
 
@@ -75,10 +121,13 @@ A workflow that is not approved yet can be estimated, while you write it or afte
 |Read `--task` from a file. Not with `--task`
 
 |`--ai`
-|First have the cost-estimator agent estimate the amount of work for this task (this costs a little)
+|First have the cost-estimator agent estimate the amount of work for this task (this costs a little). The sizes and kinds it decides are kept until the definition changes
+
+|`--review`
+|First have the estimate-reviewer agent review the records it has not seen (without waiting for the automatic review; works with `estimates.review: off` too; this costs a little)
 
 |`--json`
-|Output JSON (`optimistic`, `pessimistic`, `uncapped`, `worstCase`, `budget`, `cap`, per step `starts`, `usd`, `perStart`, `basis`, and `estimator`)
+|Output JSON (`optimistic`, `pessimistic`, `uncapped`, `worstCase`, `budget`, `cap`, per step `starts`, `usd`, `perStart`, `basis` and `model`, `calibration`, `priors`, `estimator`, `review`)
 |===
 
 === Exit codes
@@ -88,7 +137,7 @@ A workflow that is not approved yet can be estimated, while you write it or afte
 |Code |Condition
 
 |0
-|Estimated (also when cost-estimator's answer could not be read and the definition alone was used)
+|Estimated (also when cost-estimator's answer could not be read and the definition alone was used, and when the `--review` review did not finish: a warning is shown)
 
 |1
 |An object other than `workflow`, or no name. No such workflow, an invalid definition, an agent or skill not found. Both `--task` and `--task-file`
@@ -109,8 +158,10 @@ With no run records:
 aidev estimate workflow e2e-tests
   workflow   e2e-tests (approved)
   task       (none)
-  history    no recorded runs yet: one start is priced by size
-  estimator  not used (--ai sizes the work for this task)
+  history      no recorded runs yet: one start is priced by size
+  calibration  no earlier estimate to compare with yet
+  priors       none yet (the estimate reviewer writes them once runs miss their range)
+  estimator    not used (--ai sizes the work for this task)
 
   step   agent starts  cost            one start                      basis
   plan   1             $0.30 – $1.00   $0.30 – $1.00                  size M
@@ -136,7 +187,13 @@ How to read it:
 |The range of one start; with a checking agent, the part after `+` is the checker
 
 |`basis`
-|Where the cost of one start comes from (`history of this step (n)`, `history of agent <name> (n)`, `size <S to XL>`) and where the target count comes from (`max_items`, `earlier runs (n)`, `estimator`)
+|Where the cost of one start comes from (`history of this step (n)`, `history of agent <name> (n)`, `review of agent <name>`, `review of <kind> work`, `size <S to XL> in this package (n)`, `size <S to XL>`), the model it runs on (`on <model>`), and where the target count comes from (`max_items`, `earlier runs (n)`, `estimator`)
+
+|`calibration`
+|The share of earlier estimates whose actual cost fell inside the range, how far the ranges are widened, and the work sizes priced from this PKG's runs
+
+|`priors`
+|How many guides the review wrote, and when
 
 |`worst case`
 |With `--ai` only: the amount the definition allows at most (every retry, `max_items`), rather than what cost-estimator expects

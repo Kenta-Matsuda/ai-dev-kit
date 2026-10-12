@@ -17,7 +17,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 
 * Options are `--name` or `--name <value>`. `--name=value` also works.
 * An option the command does not accept is an error (`unknown option: --bogus`, exit code 1).
-* `run`, `estimate`, `create`, `modify`, `submit`, `list`, `remove`, `sync` and `hook` require an object.
+* `run`, `estimate`, `create`, `modify`, `edit`, `submit`, `list`, `remove`, `sync` and `hook` require an object.
 * Commands for a PKG run inside the PKG clone (a subdirectory is fine; `init` needs the root). To run one on another PKG, name it with `--package <name|path>` (see xref:cli-common-options[Common options]).
 
 [[cli-common-options]]
@@ -34,7 +34,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 |Show what would change and write nothing (supported commands only).
 
 |`--package <name\|path>`, `-p <name\|path>`
-|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `modify`, `estimate`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`). An error on `update`.
+|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `modify`, `edit`, `estimate`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`). An error on `update`.
 
 |`--help`, `-h`
 |Show the command list, or the options of one command.
@@ -81,6 +81,9 @@ Every command except `hook` and `update` (including `--help` and `--version`) te
 
 |xref:cli-modify[`aidev modify workflow <name>`]
 |Change an existing workflow from instructions in plain language (writes the files only; runs nothing)
+
+|xref:cli-edit[`aidev edit workflow <name>`]
+|Check and change a workflow as a picture in the browser (saves workflow.yaml only)
 
 |xref:cli-estimate[`aidev estimate workflow <name>`]
 |Estimate what a run of a workflow will cost, before running it (optimistic to pessimistic)
@@ -144,6 +147,8 @@ include::check.adoc[]
 include::create.adoc[]
 
 include::doctor.adoc[]
+
+include::edit.adoc[]
 
 include::estimate.adoc[]
 

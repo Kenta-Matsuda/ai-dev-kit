@@ -71,7 +71,7 @@ npm run docs:build     # build/docs/ai-dev-kit-user-guide.html（日本語）と
 
 - 導入担当者の手順、メンバーの手順、日常の使い方、LLM Wiki、権限、自動化、トラブルシューティング
 - `aidev.yaml` リファレンス、環境変数、PKG 内のファイル
-- `aidev init` / `check` / `doctor [<package>]` / `run|estimate|create|modify|submit|list|remove … workflow` / `create agent|skill|policy` / `sync tools|wiki [<package>]` / `update` / `uninstall [<package>] [--all]`。詳細は `docs/developer-guide/cli-reference.md`
+- `aidev init` / `check` / `doctor [<package>]` / `run|estimate|create|modify|edit|submit|list|remove … workflow` / `create agent|skill|policy` / `sync tools|wiki [<package>]` / `update` / `uninstall [<package>] [--all]`。詳細は `docs/developer-guide/cli-reference.md`
 
 CI の例は `pipelines/azure-pipelines-check.yml`（PR ごとの `aidev check`）と `pipelines/azure-pipelines-wiki.yml`（夜間に `main` で `aidev sync wiki --branch`。agent のツールと認証情報が必要）です。
 

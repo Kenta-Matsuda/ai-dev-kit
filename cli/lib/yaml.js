@@ -273,18 +273,46 @@ function parseMap(rows, i, indent) {
   return [out, i];
 }
 
-const PLAIN_SAFE = /^[A-Za-z0-9_][A-Za-z0-9_\-./ ]*$/;
+/**
+ * A string that reads back as itself without quotes: one line, no
+ * surrounding space, no character that opens something else at its start
+ * (a sequence, a flow collection, a quote, a comment, an anchor, a block),
+ * no `: ` or ` #` inside, and nothing that reads as a number, a boolean or
+ * null. In a flow list (`[a, b]`) the separators are not allowed either.
+ */
+function plainSafe(s, inFlow = false) {
+  if (!s || s.trim() !== s || /[\n\r\t\0]/.test(s)) return false;
+  if (/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)) return false;
+  if (/: |:$| #/.test(s)) return false;
+  if (inFlow && /[,[\]{}'"]/.test(s)) return false;
+  if (/^(true|false|null|yes|no|on|off|~)$/i.test(s) || /^-?\d+(\.\d+)?$/.test(s) || /^-?\d*\.\d+$/.test(s)) return false;
+  return true;
+}
 
-function formatScalar(v) {
+function formatScalar(v, inFlow = false) {
   if (v === null || v === undefined) return 'null';
   if (typeof v === 'boolean' || typeof v === 'number') return String(v);
   const s = String(v);
   if (s === '') return "''";
-  if (PLAIN_SAFE.test(s) && !/^(true|false|null|yes|no|on|off)$/i.test(s) &&
-      !/^-?\d+(\.\d+)?$/.test(s) && s.trim() === s) {
-    return s;
-  }
+  if (plainSafe(s, inFlow)) return s;
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+}
+
+/** A short list of scalars, written on one line: `[src/**, docs/**]`. Null when it would not fit. */
+function flowList(v) {
+  if (!Array.isArray(v) || !v.length || v.some((x) => x !== null && typeof x === 'object')) return null;
+  const line = `[${v.map((x) => formatScalar(x, true)).join(', ')}]`;
+  return line.length <= 72 ? line : null;
+}
+
+/**
+ * A multi-line string that reads back the same as a `|` block: its first
+ * line is not indented (that would set the block's indent), no line ends in
+ * spaces, and it ends in at most one newline.
+ */
+function blockSafe(v) {
+  return typeof v === 'string' && v.includes('\n') && !/^\s/.test(v) && !/\n\n$/.test(v)
+    && !/[ \t]\n/.test(v) && !/[ \t]$/.test(v) && !/\r/.test(v);
 }
 
 function stringify(value, indent = 0) {
@@ -304,6 +332,8 @@ function stringify(value, indent = 0) {
     if (keys.length === 0) return `${pad}{}\n`;
     return keys.map((k) => {
       const v = value[k];
+      const flow = flowList(v);
+      if (flow) return `${pad}${k}: ${flow}\n`;
       if (v !== null && typeof v === 'object' &&
           !(Array.isArray(v) && v.length === 0) &&
           !(!Array.isArray(v) && Object.keys(v).length === 0)) {
@@ -311,6 +341,10 @@ function stringify(value, indent = 0) {
       }
       if (Array.isArray(v) || (v && typeof v === 'object')) {
         return `${pad}${k}: ${Array.isArray(v) ? '[]' : '{}'}\n`;
+      }
+      if (blockSafe(v)) {
+        const body = v.replace(/\n$/, '').split('\n').map((l) => (l ? `${pad}  ${l}` : '')).join('\n');
+        return `${pad}${k}: |${v.endsWith('\n') ? '' : '-'}\n${body}\n`;
       }
       return `${pad}${k}: ${formatScalar(v)}\n`;
     }).join('');

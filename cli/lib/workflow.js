@@ -70,14 +70,25 @@ const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
 const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits'];
 const LIMIT_KEYS = ['max_usd', 'max_minutes'];
+/**
+ * A step is the kind its one kind key names: `agent:`, `command:` or
+ * `pull_request:`. Everything else on the step says how that kind runs.
+ */
+const STEP_KINDS = [['agent', 'agent'], ['command', 'command'], ['pull_request', 'pull-request']];
 const STEP_KEYS = {
-  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'max_retries', 'timeout_minutes'],
+  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'timeout_minutes'],
   command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_minutes', 'writable'],
-  'pull-request': ['id', 'description', 'kind', 'title'],
+  'pull-request': ['id', 'description', 'pull_request'],
 };
-const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_minutes', 'agent', 'prompt'];
-/** Keys that were renamed: the message says the new name. */
-const RENAMED = { timeout_ms: 'timeout_ms is timeout_minutes now (minutes, not milliseconds)' };
+const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_minutes', 'agent', 'prompt', 'max_retries'];
+const PULL_REQUEST_KEYS = ['title'];
+/** Keys that were renamed or moved: the message says where they are now. */
+const RENAMED = {
+  timeout_ms: 'timeout_ms is timeout_minutes now (minutes, not milliseconds)',
+  kind: 'a pull-request step is written as pull_request: { title: ... } now (no kind)',
+  title: 'the title of a pull request is written inside it now (pull_request: { title: ... })',
+  max_retries: 'max_retries is written inside until now (until: { ..., max_retries: 3 }); retries only happen when until fails',
+};
 
 /**
  * `for_each`: an agent step run once per target. The targets are the lines of
@@ -231,15 +242,18 @@ function timeoutMinutes(v, field, where) {
  * A step's `until`: when the step's work is done. Every `command` (one line,
  * or a list run in order) must exit 0, and `agent` (with `prompt`, what to
  * check) must answer VERDICT: PASS; with both, the commands run first and the
- * agent only after they pass. `cwd`, `env` and `timeout_ms` apply to the commands.
+ * agent only after they pass. `cwd`, `env` and `timeout_minutes` apply to the
+ * commands; `max_retries` (default 3) is how often the step's agent is started
+ * again when the check fails.
  */
 function untilSpec(v, where) {
   if (v == null) return null;
   if (typeof v !== 'object' || Array.isArray(v)) {
     throw new AidevError(`${where}: until must be a mapping with command, agent (and prompt), or both (e.g. until: { command: npm test })`);
   }
-  assertKnownKeys(v, UNTIL_KEYS, `${where}: until`, RENAMED);
+  assertKnownKeys(v, UNTIL_KEYS, `${where}: until`, { timeout_ms: RENAMED.timeout_ms });
   const out = { commands: [], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null };
+  out.max_retries = v.max_retries == null ? 3 : positiveInt(v.max_retries, 'until.max_retries', where, { max: LIMITS.maxRetries, min: 0 });
   if (v.command != null) {
     const list = Array.isArray(v.command) ? v.command : [v.command];
     if (list.length === 0) throw new AidevError(`${where}: until.command must not be an empty list`);
@@ -367,17 +381,12 @@ function validateDefinition(raw, source = 'workflow.yaml') {
     if (!STEP_ID_RE.test(id)) throw new AidevError(`${where}: id ${JSON.stringify(id)} must be lowercase letters, digits and dashes (max 32)`);
     if (ids.has(id)) throw new AidevError(`${where}: duplicate step id ${id}`);
     ids.add(id);
-    if (s.kind != null && s.kind !== 'pull-request') {
-      throw new AidevError(`${where}: kind must be "pull-request" (agent and command steps have no kind)`);
-    }
-    const kinds = [];
-    if (s.agent != null) kinds.push('agent');
-    if (s.command != null) kinds.push('command');
-    if (s.kind === 'pull-request') kinds.push('pull-request');
-    if (kinds.length !== 1) throw new AidevError(`${where}: exactly one of agent, command or kind: pull-request is required`);
+    for (const k of Object.keys(s)) if (RENAMED[k]) throw new AidevError(`${where}: ${RENAMED[k]}`);
+    // `pull_request:` with nothing after it is a pull request with the default title.
+    const kinds = STEP_KINDS.filter(([key]) => (key === 'pull_request' ? key in s : s[key] != null)).map(([, kind]) => kind);
+    if (kinds.length !== 1) throw new AidevError(`${where}: a step has exactly one of agent, command or pull_request`);
     const kind = kinds[0];
     for (const k of Object.keys(s)) {
-      if (RENAMED[k]) throw new AidevError(`${where}: ${RENAMED[k]}`);
       if (!STEP_KEYS[kind].includes(k)) throw new AidevError(`${where}: ${k} does not belong to ${kind === 'agent' ? 'an' : 'a'} ${kind} step (allowed: ${STEP_KEYS[kind].join(', ')})`);
     }
     const step = { id, kind, description: s.description == null ? '' : String(s.description).trim() };
@@ -402,11 +411,9 @@ function validateDefinition(raw, source = 'workflow.yaml') {
         throw new AidevError(`${where}: a for_each step's prompt must name its target as ${ITEM_TOKEN}`);
       }
       if (!step.for_each && usesItem) throw new AidevError(`${where}: ${ITEM_TOKEN} needs for_each (the list the targets come from)`);
-      if (s.max_retries == null) step.max_retries = step.until ? 3 : 0;
-      else step.max_retries = positiveInt(s.max_retries, 'max_retries', where, { max: LIMITS.maxRetries, min: 0 });
-      if (step.max_retries > 0 && !step.until && !step.unchanged.length) {
-        throw new AidevError(`${where}: max_retries needs an until to decide when to retry`);
-      }
+      // Retries belong to the check: without an until, a failed attempt
+      // (a changed `unchanged` path) ends the step.
+      step.max_retries = step.until ? step.until.max_retries : 0;
       step.timeout_ms = timeoutMinutes(s.timeout_minutes, 'timeout_minutes', where);
     } else if (kind === 'command') {
       step.command = splitCommand(s.command, 'command', where);
@@ -419,7 +426,13 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       // pull-request step commits.
       step.writable = writableList(s.writable == null ? [] : s.writable, where);
     } else {
-      step.title = s.title == null ? null : (String(s.title).trim() || null);
+      const pr = s.pull_request == null ? {} : s.pull_request;
+      if (typeof pr !== 'object' || Array.isArray(pr)) {
+        throw new AidevError(`${where}: pull_request is a mapping (pull_request: { title: ... }, or pull_request: {} for the default title)`);
+      } else {
+        assertKnownKeys(pr, PULL_REQUEST_KEYS, `${where}: pull_request`);
+        step.title = pr.title == null ? null : (String(pr.title).trim() || null);
+      }
     }
     return step;
   });

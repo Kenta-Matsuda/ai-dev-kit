@@ -163,6 +163,12 @@ section名は歴史的なもので、`aidev sync`というcommandはありませ
 
 `auto_pr: true`でも、hostingが`generic`、`auth_env`未設定、pushの失敗のいずれかでPRは作られません。commitは`aidev/wiki-<sha12>` branchに残ります。
 
+### `estimates`
+
+| key | 型 | 既定 | 説明 |
+| --- | --- | --- | --- |
+| `review` | `auto` \| `off` | `auto` | `auto`: `run workflow`の終わりに、前回のreview以降で見積もりの幅を外れたstepが3つ以上あれば`estimate-reviewer`を起動する（architecture §9「見積もりの学習」）。`off`: 起動しない（`estimate workflow --review`は動く）。他の値は`validateConfig`がerror |
+
 ### `quality_gates`
 
 任意のkeyからcommand文字列へのmapping。PostToolUse hookが、編集対象にPKG file（kit管理path以外）が含まれるときだけ、repo rootでplatform shell経由に実行します（1 commandあたり120秒timeout）。失敗時は`additionalContext`で出力を返します。
@@ -213,7 +219,7 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 
 ### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`）、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`）、`max_retries`、`timeout_minutes`。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`kind`、`title`。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。stepの種類は`agent` / `command` / `pull_request`のどのkeyを持つかで決まります（1つだけ）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`）、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`、`max_retries`（0〜10、既定3））、`timeout_minutes`。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`pull_request`（mapping。`title`だけ。空か`{}`なら既定のtitle）。旧`kind: pull-request`、stepの`title`、stepの`max_retries`は移動先を示すerrorです。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
 
 ### agentのfrontmatter（`.aidev/agents/<name>.md`、kit同梱agent）
 
@@ -287,6 +293,11 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `.aidev/knowledge/.cache/agent-task-*.json` | `agent.prepareTask` | 大きいplan（`schemaVersion: 2`） |
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |
 | `.aidev/workflows/<name>/workflow.yaml` | `create workflow`（template / `--describe`でworkflow-creator） | 定義。`submit`がPRにし、`origin/<tracking_branch>`との一致が承認 |
+| `.aidev/estimates/records/<workflow>-<runId>.json` | `run workflow`の終わり（agentを起動したrunだけ）と、pull-request stepのcommit直前 | `{schemaVersion: 1, workflow, runId, hash, kitVersion, startedAt, done, costUsd, estimate, steps: [{id, kind, ok, attempts, starts, costUsd, items?, failed?}], calls: [{step, role, agent, item?, attempt, tool, model, actualModel?, ok, costUsd, durationMs, tokens?}]}`。commitしてteamで共有（gitignoreしない）。pull-request stepが`.aidev/estimates/`ごとstageする |
+| `.aidev/estimates/priors.json` | `estimate-reviewer`の答えをCLIが検査して書く | `{schemaVersion: 1, reviewedAt, reviewedThrough: ["<wf>/<runId>"], costUsd, priors: [{agent | kind, role, perStart: [lo, hi]（sonnet換算のUSD）, why}]}` |
+| `.aidev/estimates/notes.md` | 同上 | reviewerの注意書き（Markdown）。cost-estimatorのpromptに入る |
+| `.aidev/estimates/judgments/<name>.json` | `estimate workflow --ai`（答えが読めたとき） | `{schemaVersion: 1, hash, steps: [{id, size, checkSize, kind}]}`。`hash`が今の定義の`contentHash`と同じ間だけ使う |
+| `AIDEV_HOME/cache/evolve/estimates-<yyyymmdd>/`、`estimates-<yyyymmdd>-input/<pkg>/` | `npm run evolve -- estimates` | kit checkoutのworktree（branch `aidev/evolve-estimates-<yyyymmdd>`）と、PKGごとのrecordのcopy |
 | `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`run.json`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`（`cli-reference.md`の`run`） |
 | `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall --package`（書く）。`list packages`、`update`、`doctor`、`--package`（読む） | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |

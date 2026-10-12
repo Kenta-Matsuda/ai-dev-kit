@@ -1,0 +1,109 @@
+[[cli-edit]]
+== aidev edit
+
+workflow をブラウザで開き、ステップの流れを図で確認しながら直します。保存するのは `workflow.yaml` だけで、実行も提出もしません。
+
+=== 書式
+
+[source,text]
+----
+aidev edit workflow <name> [--port <n>] [--no-open] [--json]
+----
+
+=== 説明
+
+この端末の中だけで動く小さなサーバー（`127.0.0.1`）を起動し、編集画面をブラウザで開きます。画面を閉じる（**Close**）か、端末で Ctrl-C を押すまで動き続けます。
+
+画面の左には、ステップの流れを上から順に描きます。
+
+* 先頭に `objective`、最後に止まる条件（`limits.max_usd` と `limits.max_minutes`）
+* agent step: agent、書ける場所（`writable`）、変えてはいけない場所（`unchanged`）、`for_each`、`until` の判定（コマンドと確認役）。やり直しがあれば、右側に繰り返しの矢印と回数（`retry ≤ n`）
+* command step: 実行するコマンド
+* pull-request step: PR のタイトル
+* ステップごとの費用の見積もり
+
+ステップを選ぶと、右の **Step** タブでその項目を直せます。ステップの間にマウスを置くと、ステップを足すボタン（agent・command・pull_request）が出ます。各ステップの右上のボタンで、順番を入れ替えたり消したりできます。
+
+[cols="1,3",options="header"]
+|===
+|タブ |内容
+
+|Step
+|選んだステップの項目。agent は PKG と kit の agent から選び、その agent の説明・ツール・MCP server・skill を表示します
+
+|Workflow
+|`description`、`objective`、`tool`、`model`、`limits`
+
+|YAML
+|`workflow.yaml` の本文。直接書き換えると、図とフォームもそれに合わせて変わります
+
+|Changes
+|承認済みの版（`origin/main`）との差分と、保存済みのファイルとの差分
+
+|Cost
+|ステップごとの費用の見積もりと、その根拠（xref:cli-estimate[aidev estimate] と同じ。`--ai` なし）
+|===
+
+変更するたびに、`aidev run workflow` と同じ検証をします（項目、上限、agent・skill が存在するか、`name` がディレクトリ名と同じか）。誤りがあれば画面の上に表示し、保存できません。
+
+* 保存（**Save**）は `.aidev/workflows/<name>/workflow.yaml` だけを書きます。agent・skill・権限のファイルは書きません。コミットもしません。
+* 保存した workflow は `origin/main` と違うので、未承認です。`aidev submit workflow <name>` で提出し、PR がマージされると承認されます（xref:workflows-approval[承認とは]）。
+* 画面を開いた後に、別の場所で `workflow.yaml` が書き換えられていたら、保存を断ります。読み込み直してから直します。
+* フォーム（Step・Workflow タブ）で直して保存すると、YAML は書き直されるので、**ファイルのコメントは消えます**。コメントを残したいときは YAML タブで直します。コメントのあるファイルをフォームで直すと、画面にその旨を表示します。
+* 保存前の内容は **Revert** で保存済みの状態に戻せます。
+
+起動時に表示されるアドレス（`http://127.0.0.1:<port>/#t=…`）には、その回だけの鍵が入っています。この鍵が無いと、編集画面は読むことも書くこともできません。アドレスを人に渡さないでください。サーバーはこの端末からの接続しか受けません。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--port <n>`
+|`127.0.0.1` のこのポートで待ち受ける（既定: 空いているポート）
+
+|`--no-open`
+|ブラウザを開かず、アドレスだけを表示する。表示されたアドレスを自分で開く
+
+|`--json`
+|待ち受けを始めたとき（`url`、`port`）と、止まったとき（`saved`: 保存したファイル）に JSON を出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|画面の Close か Ctrl-C で止めた（保存したかどうかによらない）
+
+|1
+|`workflow` 以外の object、名前が無い。workflow が無い。`--port` が正しくない、またはそのポートで待ち受けられない
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev edit workflow write-tests
+----
+
+[source,text]
+----
+aidev edit workflow write-tests
+ℹ editor: http://127.0.0.1:52314/#t=6f1c…
+    opening it in your browser; if nothing opens, paste the address above
+    the address carries a one-time key: do not share it. Ctrl-C (or "Close" on the page) stops the editor.
+✓ saved .aidev/workflows/write-tests/workflow.yaml
+✓ editor closed; .aidev/workflows/write-tests/workflow.yaml was saved
+    next: git diff -- .aidev/workflows/write-tests/workflow.yaml, then "aidev submit workflow write-tests" (it runs once the pull request is merged)
+----
+
+=== 関連情報
+
+* xref:workflows-fix[workflow の修正] — どこを直すか、提出し直す手順
+* xref:workflow-reference[workflow 定義リファレンス]
+* xref:cli-modify[aidev modify] — 自然言語の指示で直す
+* xref:cli-estimate[aidev estimate]、xref:cli-submit[aidev submit]

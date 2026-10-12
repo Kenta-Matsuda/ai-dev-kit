@@ -21,6 +21,7 @@ const suites = [
   './wiki-hooks.test.js',
   './agent.test.js',
   './workflow.test.js',
+  './editor.test.js',
   './evolve.test.js',
   './update-check.test.js',
   // Last: this one checks the kit's own shipped files rather than a fixture,

@@ -15,7 +15,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 
 `.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
 
-手順（`steps`）を順に実行します。`pull-request` step がある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、止まったステップから続けられます（xref:workflows-resume[止まった実行を続ける]）。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
+手順（`steps`）を順に実行します。`pull_request` のステップがある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、止まったステップから続けられます（xref:workflows-resume[止まった実行を続ける]）。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
 
 === オプション
 
@@ -44,6 +44,16 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 |`--json`
 |JSON で出力する
 |===
+
+[[cli-run-estimate]]
+=== 実行と費用の見積もり
+
+実行は、見積もりを先に出し、終わったら実際の費用と並べて残します。これが次の見積もりを直す材料になります（xref:cli-estimate-learning[見積もりが使うほど正確になる仕組み]）。
+
+* **始め**: `estimate: $0.65 – $11.00 (optimistic – pessimistic)` の行をログに出します。`aidev estimate workflow --ai` が決めた仕事の大きさが残っていれば、それを使います。`--resume` で続けた実行は、最初の実行の見積もりのままです。
+* **`for_each` の途中**: 3 件終わった時点と、その後 10 件ごとに、1 件あたりの費用と残りの件数にかかる費用の見込み、`limits.max_usd` の残りをログに出します。このままでは予算が足りないと分かった時点で、その旨を 1 回だけ出します。実行は止めません（上限に達すれば止まり、`--resume` で続けられます）。Claude Code 以外の AI ツールは費用を報告しないので、出しません。
+* **終わり**: agent を起動した実行は、見積もりと実際の費用を `.aidev/estimates/records/<name>-<run id>.json` に書きます。pull-request step がある workflow は、その PR のコミットに記録を入れます（それまで作業ツリーに残っていた記録も一緒に）。pull-request step が無ければ作業ツリーに残るので、自分でコミットするか、次に PR を作る実行に任せます。pull-request step の前に確かめる「未コミットの変更が無いこと」は、`.aidev/estimates/` を数えません。
+* **振り返り**: 前回の振り返りの後に、見積もりの幅から外れたステップが 3 つになると、最後に estimate-reviewer agent を自動で起動し、`.aidev/estimates/priors.json` と `notes.md` を書きます（少し費用がかかります。`aidev.yaml` の `estimates.review: off` で止まります）。振り返りが失敗しても、実行の結果（終了コード）は変わりません。
 
 === ログファイル（`--log`）
 
@@ -89,7 +99,7 @@ aidev run workflow e2e-tests --task "注文画面" --log ~/aidev-logs/e2e-tests.
 |すべての step を終えた。`--dry-run` で承認済みで、起動前に止まる問題が無かった
 
 |1
-|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull-request` step があるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、その実行のブランチに居ない
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull_request` のステップがあるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、その実行のブランチに居ない
 |===
 
 === 例

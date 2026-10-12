@@ -119,7 +119,13 @@ const DEFAULTS = Object.freeze({
     // agent's orientation less often.
     agent_batch_size: 20,
   },
+  estimates: {
+    // auto: after enough runs land outside their estimate, aidev run workflow
+    // starts the estimate reviewer at its end. off: never.
+    review: 'auto',
+  },
 });
+const ESTIMATE_REVIEW = Object.freeze(['auto', 'off']);
 
 function readTextIfExists(p) {
   try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
@@ -412,6 +418,12 @@ function validateConfig(raw, source = CONFIG_NAME) {
         };
       })(),
     },
+    estimates: (() => {
+      const estimates = mapping(raw.estimates, 'estimates');
+      const review = asString(estimates.review, 'estimates.review', DEFAULTS.estimates.review);
+      if (!ESTIMATE_REVIEW.includes(review)) throw new AidevError(`${source}: estimates.review must be ${ESTIMATE_REVIEW.join(' or ')} (got ${review})`);
+      return { review };
+    })(),
     quality_gates: {},
     references: {},
   };

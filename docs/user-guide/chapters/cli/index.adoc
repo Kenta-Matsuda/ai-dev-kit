@@ -17,7 +17,7 @@ aidev <verb> [<object>] [<name>] [options]
 
 * オプションは `--name` または `--name <value>` です。`--name=value` も使えます。
 * 受け付けないオプションはエラーです（`unknown option: --bogus`、終了コード 1）。
-* `run`、`estimate`、`create`、`modify`、`submit`、`list`、`remove`、`sync`、`hook` は対象（object）が必須です。
+* `run`、`estimate`、`create`、`modify`、`edit`、`submit`、`list`、`remove`、`sync`、`hook` は対象（object）が必須です。
 * PKG 用のコマンドは PKG の clone の中で実行します（サブディレクトリでも可。`init` はルートのみ）。別の PKG に対して実行するときは `--package <name|path>` で指定します（xref:cli-common-options[共通オプション]）。
 
 [[cli-common-options]]
@@ -34,7 +34,7 @@ aidev <verb> [<object>] [<name>] [options]
 |何が変わるかを表示し、何も書きません（対応コマンドのみ）。
 
 |`--package <name\|path>`, `-p <name\|path>`
-|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`modify`、`estimate`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`）で使えます。`update` に付けるとエラーです。
+|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`modify`、`edit`、`estimate`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`）で使えます。`update` に付けるとエラーです。
 
 |`--help`, `-h`
 |コマンド一覧、またはそのコマンドのオプションを表示します。
@@ -81,6 +81,9 @@ aidev <verb> [<object>] [<name>] [options]
 
 |xref:cli-modify[`aidev modify workflow <name>`]
 |既存の workflow を自然言語の指示で直す（書くだけで、実行はしない）
+
+|xref:cli-edit[`aidev edit workflow <name>`]
+|workflow をブラウザで図として確認・編集する（保存するのは workflow.yaml だけ）
 
 |xref:cli-estimate[`aidev estimate workflow <name>`]
 |workflow を実行する前に費用を見積もる（楽観〜悲観）
@@ -144,6 +147,8 @@ include::check.adoc[]
 include::create.adoc[]
 
 include::doctor.adoc[]
+
+include::edit.adoc[]
 
 include::estimate.adoc[]
 

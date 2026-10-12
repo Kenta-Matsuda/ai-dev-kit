@@ -12,7 +12,8 @@
     "check": "node test/loadall.js && node test/run.js",
     "docs:build": "node scripts/build-docs.js",
     "docs:check": "node scripts/build-docs.js --check",
-    "evolve": "node scripts/evolve.js"
+    "evolve": "node scripts/evolve.js",
+    "estimate:backtest": "node scripts/estimate-backtest.js"
   },
   "engines": {
     "node": ">=20.0.0"

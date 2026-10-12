@@ -58,21 +58,21 @@ steps:                                 # 上から順に実行する
       timeout_minutes: 15              #   任意。command 1 つの時間の上限（分。上限 240）
       agent: e2e-reviewer              #   この agent が VERDICT: PASS と答えること（何も書けない。command が通ってから起動）
       prompt: 追加したテストが要件の各項目を検証しているかを確認する   # agent に確認させる観点（agent を書くなら必須）
-    max_retries: 5                     # until の再試行回数。上限 10
+      max_retries: 5                   #   不合格のとき agent をやり直す回数（既定 3、上限 10。0 ならやり直さない）
     timeout_minutes: 30                # 任意。agent 1 回の起動の時間の上限（分。既定 30、上限 240）
   - id: verify
     command: npm run lint              # command step: 1 回実行。exit 0 以外で workflow 失敗
     # cwd / env / timeout_minutes      # 任意。until と同じ意味
     # writable: [gen/**]               # 任意。コマンドが作るファイルのうち PR に入れるもの
   - id: pr
-    kind: pull-request                 # 各ステップの writable の変更を commit → push → PR。最大 1 つ
-    title: "..."                       # 任意
+    pull_request:                      # 各ステップの writable の変更を commit → push → PR。最大 1 つ
+      title: "..."                     #   任意（書かなければ pull_request: {}）
 limits:
   max_usd: 10                          # 必須。報告された費用がこれに達したら次の agent を起動しない
   max_minutes: 120                     # 任意。全体の時間の上限。書かなければ時間では止めない
 ```
 
-- step は `agent` / `command` / `kind: pull-request` のどれか 1 つだけを持ちます
+- step の種類は、`agent` / `command` / `pull_request` のどのキーを持つかで決まります。どれか 1 つだけを書きます。やり直しの回数（`max_retries`）は `until` の中に書きます（`until` が無いステップはやり直しません）
 - 各 agent step は新しいプロセスとして起動されます。前のステップの会話は残りません。**前の agent step の最終報告は、kit が後の agent step の指示に入れます**。調査ステップは、次のステップが使う結果を最終報告に書くよう `prompt` で指示します
 - 最終報告に収まらないもの（計画、対象ファイルの一覧）は、**その実行の notes ディレクトリ**に file として書かせます。場所は kit が各 agent step の指示に入れます。どのステップの agent も書けて（`writable: []` でも）、後のステップが読めます。コミットはされません
 - `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません。複数のコマンドは `until.command` の list か、command step を並べて書きます。環境変数は `env`、実行場所は `cwd` で渡します
@@ -102,7 +102,7 @@ model: inherit
 
 ## 手順
 
-1. **要望を読む** — 何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until` のコマンドか、確認の観点を決めたレビュー agent）を決める。判定できない終了条件（観点の無い「良くなるまで」）は作らない。決められないときは最も狭い `writable` と `max_retries: 0` にして、final message で選択肢を示す
+1. **要望を読む** — 何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until` のコマンドか、確認の観点を決めたレビュー agent）を決める。判定できない終了条件（観点の無い「良くなるまで」）は作らない。決められないときは最も狭い `writable` にし、`until` を書くなら `max_retries: 0`（やり直さない）にして、final message で選択肢を示す
 2. **agent を選ぶ** — prompt に添付された一覧から名前で参照する。kit が同梱するのは仕組みの agent（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent（実装する、テストを書く、規約を書き出す…）は PKG のもの。足りないときは **`agents-creator` を Agent tool（サブエージェント）で起動**し、役割・想定タスク・必要な skill / tools / MCP・書き先（`.aidev/agents/<name>.md`、必要なら `.aidev/skills/<name>/SKILL.md`）を渡して書かせる。自分で agent 本文を書かない。既存の同梱 agent を書き換えない
 3. **外部システムを確認する** — Work Item・チケット・DB・API など、agent が MCP で触る必要があるものがあれば、その agent の `mcp` に server 名を書かせる。`.mcp.json` にまだ無い server は、PKG の `.mcp.json`（PKG が所有。kit は配布しない）に足す定義を **final message に提案**する。自分では書かない（MCP の追加は人が行う。認証情報は環境変数で渡し、file に書かない）
 4. **書く** — `.aidev/workflows/<name>/workflow.yaml`。添付された template に構成を合わせる。各ステップに、レビュアーが読む `description` を付ける

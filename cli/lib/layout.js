@@ -27,6 +27,8 @@ const WORKFLOWS_REL = '.aidev/workflows';
 const AGENTS_REL = '.aidev/agents';
 const SKILLS_REL = '.aidev/skills';
 const CONVENTIONS_REL = '.aidev/conventions';
+/** What runs were estimated to cost and what they did cost: committed, so every run of the team calibrates the next estimate. */
+const ESTIMATES_REL = '.aidev/estimates';
 const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
 
 /**
@@ -93,7 +95,7 @@ function ensureAidevGitignore(repoRoot) {
 
 module.exports = {
   CONFIG_NAME, AIDEV_DIR, KNOWLEDGE_REL, POLICY_REL, POLICY_CANDIDATE_REL, MATERIALIZED_REL,
-  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, AGENTS_REL, SKILLS_REL, CONVENTIONS_REL,
+  EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, AGENTS_REL, SKILLS_REL, CONVENTIONS_REL, ESTIMATES_REL,
   AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
   TOOL_CONFIG_GLOBS, ALL_TOOL_CONFIG_GLOBS, KIT_MANAGED_GLOBS, isKitManaged, toPosix, abs, ensureAidevGitignore,
 };

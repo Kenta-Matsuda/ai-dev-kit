@@ -114,6 +114,31 @@ function jsonLine(line) {
  * wins). Also accepts a single JSON object, which is what `--output-format
  * json` prints, so a stub that answers with one object still parses.
  */
+/**
+ * What a start used, from Claude Code's result record: { tokens, actualModel }
+ * — the tokens summed over the models it ran, and the model that cost the
+ * most (the one the agent ran on; a subagent or a small helper call may use
+ * another). Empty when the record has neither.
+ */
+function claudeUsage(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+  const out = {};
+  const u = payload.usage;
+  if (u && typeof u === 'object') {
+    const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    out.tokens = {
+      input: n(u.input_tokens), output: n(u.output_tokens),
+      cacheRead: n(u.cache_read_input_tokens), cacheWrite: n(u.cache_creation_input_tokens),
+    };
+  }
+  const models = payload.modelUsage && typeof payload.modelUsage === 'object' ? Object.entries(payload.modelUsage) : [];
+  if (models.length) {
+    models.sort((a, b) => (Number(b[1] && b[1].costUSD) || 0) - (Number(a[1] && a[1].costUSD) || 0));
+    out.actualModel = models[0][0];
+  }
+  return out;
+}
+
 function claudeResultRecord(stdout) {
   let result = null;
   for (const line of String(stdout || '').split('\n')) {
@@ -226,6 +251,7 @@ const REGISTRY = Object.freeze({
           ok: false,
           reason: (payload && payload.result) || String(stderr || '').trim() || `the agent exited ${exitCode}`,
           costUsd: payload ? payload.total_cost_usd : undefined,
+          ...claudeUsage(payload),
         };
       }
       // The result record is a protocol contract. Treating arbitrary text as
@@ -239,6 +265,7 @@ const REGISTRY = Object.freeze({
         costUsd: payload.total_cost_usd,
         sessionId: payload.session_id,
         permissionDenials: Array.isArray(payload.permission_denials) ? payload.permission_denials.length : 0,
+        ...claudeUsage(payload),
       };
     },
     configGlobs: layout.TOOL_CONFIG_GLOBS.claude,

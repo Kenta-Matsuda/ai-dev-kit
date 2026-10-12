@@ -118,9 +118,10 @@ steps:                             # 上から順に実行する
     prompt: 前のステップが列挙したテストを既存の書き方で書き、実行する。
     until:                         # 終わりの判定。満たすまで agent を繰り返す
       command: npm test            # exit 0 になること（shell を通さない）
-    max_retries: 4                 # until の再試行回数（上限 10）
+      max_retries: 4               # 不合格のとき agent をやり直す回数（既定 3、上限 10）
   - id: pr
-    kind: pull-request             # 各ステップの writable の変更を commit → push → PR
+    pull_request:                  # 各ステップの writable の変更を commit → push → PR
+      title: "test: 足りないテストを追加"   # 任意
 
 limits:                            # 実行を止める条件
   max_usd: 8                       # 必須。報告された費用がこれに達したら次の agent を起動しない
@@ -138,13 +139,13 @@ limits:                            # 実行を止める条件
 |省略すると `aidev.yaml` の `tools.agent` / `tools.agent_model`（agent ごとの `tools.agents.<name>` があればそれ）に従います。`tool` は `tools.default` にあるものだけです。
 
 |`steps`
-|上から順に実行します。1 つの step は次の 3 種類のどれか 1 つです。どの種類にも、レビューする人向けの `description`（任意）を書けます。
+|上から順に実行します。1 つの step は次の 3 種類のどれか 1 つで、種類は `agent`・`command`・`pull_request` のどのキーを持つかで決まります。どの種類にも、レビューする人向けの `description`（任意）を書けます。
 
 |agent step
-|`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで `max_retries` 回まで agent を繰り返します。`timeout_minutes`（agent 1 回の時間の上限）は任意です。
+|`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで agent を繰り返します（やり直しは `until.max_retries` 回まで）。`timeout_minutes`（agent 1 回の時間の上限）は任意です。
 
 |`until`
-|そのステップの終わりの判定です。`command`（exit 0 になること）と `agent` + `prompt`（その agent が合格と判定すること）のどちらか、または両方を書きます。両方あるときはコマンドが通ってから agent が確認します。`command` は list にすると上から順に実行します。コマンドの実行の仕方は `cwd`・`env`・`timeout_minutes` で決めます（xref:workflows-commands[コマンドの書き方]）。agent での判定は xref:workflows-until-agent[agent のレビューで終わりを判定する] を参照してください。
+|そのステップの終わりの判定です。`command`（exit 0 になること）と `agent` + `prompt`（その agent が合格と判定すること）のどちらか、または両方を書きます。両方あるときはコマンドが通ってから agent が確認します。`command` は list にすると上から順に実行します。コマンドの実行の仕方は `cwd`・`env`・`timeout_minutes` で決めます（xref:workflows-commands[コマンドの書き方]）。`max_retries` は、不合格のとき agent をやり直す回数です（既定 3、上限 10。0 ならやり直しません）。`until` が無いステップはやり直しません。agent での判定は xref:workflows-until-agent[agent のレビューで終わりを判定する] を参照してください。
 
 |`writable`
 |そのステップの agent が書けるパス（glob）。**PKG のソースを AI が書けるのは、承認済み workflow の、いま動いているステップのこの範囲だけです。** `protected`（`.claude/**`、`.aidev/policy.yaml` など）と `secrets_paths` は書けません。`[]` なら何も書けません（調査だけのステップ）。
@@ -158,8 +159,8 @@ limits:                            # 実行を止める条件
 |command step
 |`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。`cwd`・`env`・`timeout_minutes` は任意です。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
 
-|`kind: pull-request`
-|各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` 任意。1 つまでです。
+|`pull_request`
+|各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` は任意で、書かないときは `pull_request: {}` と書きます。1 つまでです。
 
 |`limits.max_usd`
 |必須。ツールが報告した費用（Claude Code のみ）の合計がこれに達すると、次の agent を起動せず止まります。
@@ -173,7 +174,7 @@ limits:                            # 実行を止める条件
 実行を止める仕組みは次のとおりです。費用の上限は省略できず、再試行回数と件数の上限は上げられません。
 
 * 費用の上限（`limits.max_usd`、必須）
-* step ごとの再試行回数（`max_retries`、10 回まで）と、同じ失敗の検知（`until` の結果が 2 回続けて同じなら停止）
+* step ごとのやり直しの回数（`until.max_retries`、10 回まで）と、同じ失敗の検知（`until` の結果が 2 回続けて同じなら停止）
 * `for_each` の件数（`max_items`、10000 件まで）
 * agent 1 回の起動とコマンド 1 つの時間（`timeout_minutes`、240 分まで。agent の既定は 30 分）。止まって動かない agent やコマンドを打ち切るためのものです
 * 全体の時間（`limits.max_minutes`）。任意です
@@ -262,12 +263,12 @@ limits:                            # 実行を止める条件
     until:
       command: npx playwright test tests/{item}.spec.ts   # この件だけを判定する
       cwd: e2e
-    max_retries: 3
+      max_retries: 3
 ----
 
 * 一覧は ADK が読みます。1 行が 1 件で、空行と `#` で始まる行は飛ばします。同じ行が 2 回あれば 1 件です。
 * `{item}` は `prompt`、`until.command`、`until.prompt` に書けます。`prompt` には必須です。
-* 1 件ごとに agent を新しく起動します。`until` と `max_retries` も 1 件ごとです。時間と費用の上限は実行全体で数えます。
+* 1 件ごとに agent を新しく起動します。`until` とやり直しの回数も 1 件ごとです。時間と費用の上限は実行全体で数えます。
 * 1 件が失敗すると、そこで止まります。通った件はそのまま残り、`--resume` は止まった件から続けます（xref:workflows-resume[止まった実行を続ける]）。
 * `for_each` に `on_failure: continue` を書くと、失敗した件の変更を戻して次の件へ進みます。戻すのは、そのステップの `writable` の中で、その件の間に変わったファイルです。失敗した件と理由は `run.json`、後のステップへの報告、PR 本文に並びます。全件が失敗したときは止まります。費用と時間の上限に達したときは、`continue` でも止まります。
 * 後のステップには、件ごとの結果をまとめた報告が 1 つ渡ります。
@@ -291,7 +292,7 @@ limits:                            # 実行を止める条件
 ----
 
 * `unchanged` のパスは、`writable` の中にあっても agent は書けません（hook が拒否します）。
-* ADK はステップを始めたときの状態を覚えておき、試行のたびに比べます。変わっていれば不合格で、変わったパスを添えて agent をやり直させます。コマンドや `Bash` が変えた場合も検出します。
+* ADK はステップを始めたときの状態を覚えておき、試行のたびに比べます。変わっていれば不合格で、`until` があれば、変わったパスを添えて agent をやり直させます（`until.max_retries` 回まで）。`until` が無いステップは、そこで不合格です（`for_each` ならその件が不合格）。コマンドや `Bash` が変えた場合も検出します。
 * 同じパスが 2 回続けて変わっていれば止まります。元に戻してから `--resume` します。
 * 前のステップが変えた内容は、そのステップの「始めたときの状態」に含まれます。テストを書くステップの後に、`unchanged: [tests/**]` の実装ステップを置けます。
 * gitignore されたファイルは比べません。
@@ -326,9 +327,9 @@ steps:
       command: npx playwright test tests/{item}.spec.ts
       cwd: e2e
       timeout_minutes: 15
-    max_retries: 3
+      max_retries: 3
   - id: pr
-    kind: pull-request
+    pull_request: {}
 
 limits:
   max_usd: 400                     # これだけで止める。max_minutes は書かない
@@ -365,7 +366,7 @@ limits:
       prompt: |                    # test-reviewer に確認させる観点
         前のステップが列挙した振る舞いがすべてテストされているか。
         実装の内部ではなく、外から見える振る舞いを検証しているか。
-    max_retries: 4
+      max_retries: 4
 ----
 
 1 回の試行は次の順で進みます。
@@ -379,8 +380,8 @@ limits:
 
 * **何も書けません。** ステップの `writable` は確認役には効きません。確認役が使える skill・ツール・MCP server は、その agent の frontmatter で決まります（`tools: Read, Grep, Glob` など、読むだけのものにします）。
 * 合格・不合格の書き方（`VERDICT:` の行）は ADK が指示に入れます。agent の本文や `until.prompt` に書く必要はありません。
-* `until.prompt` には、何を確認するかを具体的に書きます。観点が曖昧だと、同じ指摘が繰り返されて止まるか、`max_retries` を使い切ります。
-* 確認役の起動も `max_retries`、費用の上限、時間の上限に数えます。1 回の試行で agent が 2 回起動するので、`limits.max_usd` はその分を見込みます。
+* `until.prompt` には、何を確認するかを具体的に書きます。観点が曖昧だと、同じ指摘が繰り返されて止まるか、`until.max_retries` を使い切ります。
+* 確認役の起動も、やり直しの回数（`until.max_retries`）、費用の上限、時間の上限に数えます。1 回の試行で agent が 2 回起動するので、`limits.max_usd` はその分を見込みます。
 * 合格したときの確認役の報告は、後の agent step の指示にも入ります。
 * 確認役の agent も workflow と一緒に PR でレビューされ、`origin/main` と同じでなければ実行できません。
 
@@ -494,13 +495,13 @@ aidev run workflow write-tests
 
 実行中に起きることは次のとおりです。
 
-* `pull-request` step がある workflow は、作業ツリーがきれいであることを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。無い workflow は今のブランチで動き、変更は作業ツリーに残ります。
+* `pull_request` のステップがある workflow は、作業ツリーがきれいであることを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。無い workflow は今のブランチで動き、変更は作業ツリーに残ります。
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
 * Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
-* `pull-request` step は、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。範囲内に変更が無ければ commit も PR も作りません。
+* `pull_request` のステップは、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。範囲内に変更が無ければ commit も PR も作りません。
 * 記録は `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。
 
 [%autowidth.stretch,options="header"]
@@ -549,7 +550,7 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 * 止まったステップは最初からやり直します。作業ツリーには前回の変更が残っていて、agent には前回止まった理由を伝えます。
 * 時間と費用の上限は、続きの実行で新しく数えます。`run.json` の費用と起動回数は合計です。
 * 実行を始めたあとに定義（`workflow.yaml`）が変わっていると続けられません。新しく実行します。
-* `pull-request` step のある workflow は、その実行のブランチ（`aidev/<name>-<yyyymmddHHMM>`）に居る必要があります。
+* `pull_request` のステップがある workflow は、その実行のブランチ（`aidev/<name>-<yyyymmddHHMM>`）に居る必要があります。
 
 原因が定義にあるとき（`until` のコマンドがこの PKG で通らない、`writable` が足りないなど）は、続けても同じところで止まります。 Engineering Manager に定義を直してもらい、新しく実行します。
 
@@ -566,11 +567,11 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |手元で定義を変えています。戻すか、 Engineering Manager に提出し直してもらいます。
 
 |`the working tree has uncommitted changes; commit or stash them first`
-|`pull-request` step のある workflow は、きれいな作業ツリーで実行します。
+|`pull_request` のステップがある workflow は、きれいな作業ツリーで実行します。
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と、コマンドの出力（`run.json` の `log` が指す file）か `run.json` の `review`（確認役の最後の報告）を見ます。手で直せる原因なら直して `--resume last` で続けます。そうでなければ `--task` を具体的にするか、 Engineering Manager に `max_retries` や `prompt`、`until.prompt` の見直しを相談します。
+|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と、コマンドの出力（`run.json` の `log` が指す file）か `run.json` の `review`（確認役の最後の報告）を見ます。手で直せる原因なら直して `--resume last` で続けます。そうでなければ `--task` を具体的にするか、 Engineering Manager に `until.max_retries` や `prompt`、`until.prompt` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -651,7 +652,7 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 |そのツールを足します。外部システムに触る agent には `Bash` を足さず、別の agent に分けます。
 
 |`until` がずっと失敗して止まる
-|`until`、`max_retries`、ステップの分け方
+|`until`（`max_retries` を含む）、ステップの分け方
 |`until` のコマンドがこの PKG で本当に通るかを手で確かめます（実行するディレクトリは `cwd`、環境変数は `env`）。仕事が大きすぎるなら、ステップを分けます。
 
 |確認役の agent が何度も不合格にする
@@ -683,6 +684,13 @@ aidev modify workflow write-tests --describe "write ステップの until に、
 ----
 +
 `modify` は今の定義を渡して、指示に関係しない部分はそのまま残させます。他の workflow も使う agent は書き換えず、新しい agent を作らせます。変わる前のファイルは `.aidev/cache/modify/` に残ります。
++
+ステップの流れを図で見ながら直すときは、ブラウザの編集画面を使います（xref:cli-edit[aidev edit]）。変更するたびに実行と同じ検証をし、承認済みの版との差分と費用の見積もりも表示します。保存するのは `workflow.yaml` だけです。
++
+[source,bash]
+----
+aidev edit workflow write-tests
+----
 . 書き方の間違いがないかを確かめます。`invalid:` と出たら、表示された項目を直します。
 +
 [source,bash]
@@ -764,7 +772,7 @@ model: inherit
 * xref:review-workflow-def[workflow 定義の PR]、xref:review-workflow-result[workflow 成果物の PR]
 * xref:workflows-fix[workflow の修正] — 直す場所と、提出し直す手順
 * xref:workflow-reference[workflow 定義リファレンス] — workflow.yaml・agent・skill の全項目
-* xref:cli-modify[aidev modify]、xref:cli-estimate[aidev estimate]
+* xref:cli-modify[aidev modify]、xref:cli-edit[aidev edit]、xref:cli-estimate[aidev estimate]
 * xref:cli-run[aidev run workflow] — オプション、終了コード
 * xref:permissions[権限と安全性] — ステップの `writable` と policy の関係
 * xref:configuration[aidev.yaml リファレンス] — `tools.agent`、`tools.agents`、`references`

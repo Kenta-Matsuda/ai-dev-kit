@@ -7,7 +7,7 @@ workflow を実行する前に、1 回の実行にかかる費用を見積もり
 
 [source,text]
 ----
-aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--json]
+aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--review] [--json]
 ----
 
 === 説明
@@ -19,10 +19,17 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 | |決め方
 
 |起動回数
-|定義から決めます。agent step は試行 1 回につき 1 回（確認役の `until.agent` があれば 2 回）、`for_each` なら件数を掛けます。**楽観**はどの判定も 1 回目で通り、件数が最少の場合です。**悲観**は `max_retries` を使い切り、件数が `max_items` の場合です。
+|定義から決めます。agent step は試行 1 回につき 1 回（確認役の `until.agent` があれば 2 回）、`for_each` なら件数を掛けます。**楽観**はどの判定も 1 回目で通り、件数が最少の場合です。**悲観**は `until.max_retries` を使い切り、件数が `max_items` の場合です。
 
 |1 回の起動の費用
-|この PKG の実行記録（`runs/<id>/run.json` の `calls`）から決めます。同じ workflow の同じステップの記録を先に使い、無ければ同じ agent の他の workflow での記録を使います。記録が 3 件未満のときは、幅を広げます（最小の半分〜最大の 2 倍）。記録が無ければ、仕事の大きさ（下の表）の既定の幅を使います。ステップは `M`、確認役は `S` です。
+|次の順で、最初に見つかったものを使います。
+. 同じ workflow の同じステップの実績
+. 同じ agent の、他の workflow での実績
+. 見積もりの振り返り（下の「見積もりが使うほど正確になる仕組み」）が書いた目安。agent の名前ごとか、仕事の種類ごと
+. この PKG の実績から学んだ、仕事の大きさ（下の表）ごとの費用
+. 仕事の大きさの既定の幅。ステップは `M`、確認役は `S`
+
+実績は、チームで共有する記録（`.aidev/estimates/records/`）と、この端末の `runs/<id>/run.json` の `calls` です。実績が 3 件未満のときは幅を広げます（最小の半分〜最大の 2 倍）。10 件以上あるときは、極端な 1 割ずつを除いた幅にします。
 |===
 
 [cols="1,2,1",options="header"]
@@ -46,19 +53,58 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 |$3.00 – $8.00
 |===
 
-既定の幅は、Sonnet 相当のモデルで動かした場合の目安です。実際の費用はモデル・コード量・プロンプトで大きく変わります。実行するたびに記録が増え、次の見積もりはその PKG の実績に近づきます。
+既定の幅は、Sonnet で動かした場合の目安です。
+
+**モデルの違いは換算します。** 1 回の起動の費用は、モデルの単価にほぼ比例します。ADK はモデルごとの単価の比（例: Opus 5.5 は Sonnet 5.5 の 2 倍、Haiku 5.5 は 20 分の 1）で換算します。たとえば Sonnet で動かした実績しか無いステップを Opus で動かすときは、その実績を 2 倍にして使います。既定の幅も、ステップが動くモデルに合わせて換算します。ADK が単価を知らないモデルは換算しません（1 倍）。
 
 `--ai` を付けると、先に **cost-estimator** agent を起動します。cost-estimator は workflow の定義と `--task` を読み、Wiki とソースを調べて、ステップごとに次のことを見積もります。読むだけで、何も書きません（Claude Code では `Read`・`Glob`・`Grep` だけを渡して起動します）。
 
 * 仕事の大きさ（`S`〜`XL`）。実行記録が無いステップの 1 回の費用に使います
 * 悪い場合に何回目の試行で通るか。悲観の試行回数に使います
 * `for_each` の件数の幅。楽観と悲観の件数に使います
+* 仕事の種類（`survey`、`plan`、`implement`、`write-tests`、`fix`、`migrate`、`review`、`docs`、`other`）。まだ一度も動いていない agent でも、同じ種類の仕事の目安があればそれを使えます
 
-金額は cost-estimator ではなく ADK が計算します。cost-estimator の答えが読めなかったときは、警告を出して定義だけで見積もります。cost-estimator 自身の費用は「estimator」の行に出ます。
+金額は cost-estimator ではなく ADK が計算します。cost-estimator が決めた仕事の大きさと種類は `.aidev/estimates/judgments/<name>.json` に残り、workflow の定義が変わらない間、`--ai` なしの見積もりと `aidev run workflow` の見積もりにも使われます（試行回数と件数は今回の task に固有なので残しません）。cost-estimator の答えが読めなかったときは、警告を出して定義だけで見積もります。cost-estimator 自身の費用は「estimator」の行に出ます。
 
 悲観の金額は、実行が止まるところで頭打ちにします。ADK は報告された費用の合計が `limits.max_usd` に達すると次の agent を起動しないので、1 回の実行は「`limits.max_usd` ＋ 最後の 1 回分」を大きく超えません。頭打ちにしたときは、頭打ちにする前の金額も表示します。
 
 `aidev run workflow <name> --dry-run` も、`--ai` なしの見積もりを `cost` の行に表示します。
+
+[[cli-estimate-learning]]
+=== 見積もりが使うほど正確になる仕組み
+
+初めての仕事は実績が無いので、見積もりは粗くなります。ADK は、実行のたびに「見積もり」と「実際の費用」を残し、それを使って次の見積もりを直します。3 つの段階があります。
+
+[mermaid]
+....
+flowchart LR
+  R["aidev run workflow"] --> REC["記録<br/>.aidev/estimates/records/"]
+  REC --> CAL["1. 補正<br/>（毎回・AI なし）"]
+  REC --> REV["2. 振り返り<br/>（外れが溜まったら・AI）"]
+  REV --> PRI["priors.json / notes.md"]
+  CAL --> EST["次の見積もり"]
+  PRI --> EST
+  REC -. kit 開発者 .-> KIT["3. 見積もり方法そのものの改善<br/>（aidev update で届く）"]
+....
+
+**記録。** `aidev run workflow` は終わるたびに、`.aidev/estimates/records/<workflow>-<run id>.json` を書きます。中身は、agent step ごとの見積もりの幅と実際の費用、試行回数、件数、agent の起動ごとのモデル・費用・トークン数です。プロンプト、agent の報告、コマンドの出力は入りません。記録は Git にコミットしてチームで共有します。
+
+* workflow に pull-request step があれば、その PR に記録が入ります（その実行の記録と、それまでに作業ツリーに残っていた記録）。
+* pull-request step が無い実行の記録は、作業ツリーに残ります。自分でコミットするか、次に PR を作る実行に任せます。pull-request step の前に確かめる「未コミットの変更が無いこと」は、`.aidev/estimates/` を数えません。
+
+**1. 補正（毎回、AI なし）。** 見積もるたびに、記録から次の 2 つを計算します。
+
+* 仕事の大きさごとの、この PKG での 1 回の起動の費用。既定の幅の代わりに使います。
+* 幅の広げ方。過去のステップの約 8 割が見積もりの幅に収まるよう、幅を 1〜4 倍に広げます。記録が 5 件たまるまでは広げません。
+
+**2. 振り返り（外れが溜まったとき、AI）。** 前回の振り返りの後に、見積もりの幅から外れたステップが 3 つになると、`aidev run workflow` の最後に **estimate-reviewer** agent が自動で起動します。estimate-reviewer は記録を読み、外れた理由を考えて、1 回の起動の費用の目安（agent ごと、または仕事の種類ごと）と注意書きを答えます。ADK はその答えを確かめてから `.aidev/estimates/priors.json` と `notes.md` に書きます。estimate-reviewer 自身は読むだけで、何も書きません（Claude Code では `Read`・`Glob`・`Grep` だけを渡して起動します）。振り返りには少し費用がかかります。止めるときは `aidev.yaml` に `estimates.review: off` と書きます（xref:configuration[aidev.yaml]）。今すぐ振り返らせるときは `aidev estimate workflow <name> --review` を使います。`notes.md` は `--ai` の cost-estimator も読みます。
+
+**3. 見積もり方法そのものの改善（kit 開発者）。** 仕事の大きさの既定値、モデルの単価、幅の決め方などは ADK 本体にあります。kit 開発者が、複数の PKG の記録で見積もりを再計算して改善します。改善は `aidev update` で届きます。
+
+**初めての仕事を見積もるには。** 次の 2 つが効きます。
+
+* `aidev estimate workflow <name> --ai` で、ステップごとの仕事の種類を決めさせる。同じ種類の仕事の振り返りの目安があれば、新しい agent でもそれを使います。
+* `for_each` の仕事は、最初の数件が一番の手がかりです。`aidev run workflow` は 3 件終わった時点（その後は 10 件ごと）で、残りの件数にかかる費用の見込みをログに書きます。このままでは `limits.max_usd` が足りないと分かった時点で、その旨も書きます（実行は止めません。上限に達すれば止まり、`--resume` で続けられます）。
 
 承認されていない workflow でも見積もれます。定義を書いている途中や、`aidev modify workflow` で直した後の確認に使えます。
 
@@ -75,10 +121,13 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 |`--task` をファイルから読む。`--task` とは併用できない
 
 |`--ai`
-|先に cost-estimator agent に、今回の task での仕事の量を見積もらせる（その分の費用がかかる）
+|先に cost-estimator agent に、今回の task での仕事の量を見積もらせる（その分の費用がかかる）。決めた仕事の大きさと種類は、定義が変わるまで残る
+
+|`--review`
+|先に estimate-reviewer agent に、まだ振り返っていない記録を振り返らせる（自動の振り返りを待たずに。`estimates.review: off` でも動く。その分の費用がかかる）
 
 |`--json`
-|JSON で出力する（`optimistic`、`pessimistic`、`uncapped`、`worstCase`、`budget`、`cap`、ステップごとの `starts`・`usd`・`perStart`・`basis`、`estimator`）
+|JSON で出力する（`optimistic`、`pessimistic`、`uncapped`、`worstCase`、`budget`、`cap`、ステップごとの `starts`・`usd`・`perStart`・`basis`・`model`、`calibration`、`priors`、`estimator`、`review`）
 |===
 
 === 終了コード
@@ -88,7 +137,7 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 |コード |条件
 
 |0
-|見積もった（cost-estimator の答えが読めなかったときも、定義だけで見積もって 0）
+|見積もった（cost-estimator の答えが読めなかったときも、定義だけで見積もって 0。`--review` の振り返りが終わらなかったときも、警告を出して 0）
 
 |1
 |`workflow` 以外の object、名前が無い。workflow が無い、定義が不正、agent か skill が見つからない。`--task` と `--task-file` を両方付けた
@@ -109,8 +158,10 @@ aidev estimate workflow e2e-tests --ai --task "注文画面と決済画面"
 aidev estimate workflow e2e-tests
   workflow   e2e-tests (approved)
   task       (none)
-  history    no recorded runs yet: one start is priced by size
-  estimator  not used (--ai sizes the work for this task)
+  history      no recorded runs yet: one start is priced by size
+  calibration  no earlier estimate to compare with yet
+  priors       none yet (the estimate reviewer writes them once runs miss their range)
+  estimator    not used (--ai sizes the work for this task)
 
   step   agent starts  cost            one start                      basis
   plan   1             $0.30 – $1.00   $0.30 – $1.00                  size M
@@ -136,7 +187,13 @@ aidev estimate workflow e2e-tests
 |1 回の起動の費用の幅。確認役があれば `+` の後ろが確認役
 
 |`basis`
-|1 回の費用の根拠（`history of this step (n)`、`history of agent <name> (n)`、`size <S〜XL>`）と、件数の根拠（`max_items`、`earlier runs (n)`、`estimator`）
+|1 回の費用の根拠（`history of this step (n)`、`history of agent <name> (n)`、`review of agent <name>`、`review of <種類> work`、`size <S〜XL> in this package (n)`、`size <S〜XL>`）、動くモデル（`on <model>`）、件数の根拠（`max_items`、`earlier runs (n)`、`estimator`）
+
+|`calibration`
+|過去の見積もりのうち、実際の費用が幅に収まった割合と、幅を広げた倍率。この PKG の実績から費用を決めた仕事の大きさ
+
+|`priors`
+|振り返りが書いた目安の数と、振り返った日
 
 |`worst case`
 |`--ai` のときだけ。cost-estimator の見積もりではなく、定義が許す最大（全再試行・`max_items`）の金額
