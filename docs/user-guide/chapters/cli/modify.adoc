@@ -1,0 +1,86 @@
+[[cli-modify]]
+== aidev modify
+
+既存の workflow を、自然言語の指示で直します。書くだけで、実行も提出もしません。
+
+=== 書式
+
+[source,text]
+----
+aidev modify workflow <name> --describe "<直したいこと>" [--dry-run] [--json]
+----
+
+=== 説明
+
+workflow-creator agent（`aidev.yaml` の `tools.agent`）に、いまの `.aidev/workflows/<name>/workflow.yaml` の内容と `--describe` の指示を渡し、その場で書き換えさせます。指示に関係しない部分（項目、順番、コメント、言い回し）はそのまま残すよう伝えます。
+
+* 足りない agent・skill があれば、`create workflow --describe` と同じく agents-creator に書かせます。
+* この workflow だけが使う PKG の agent・skill は、指示に必要なら書き換えます。**他の workflow も使っている agent は書き換えず**、新しい agent を作ってこの workflow のステップから参照させるよう伝えます（agent を直すと、それを使うすべての workflow が変わるため）。それでも共有の agent が変わったときは警告します。
+* 書き換えたあと、`create` と同じく定義を検証し、変わったファイル（`changed`・`added`・`removed`）を表示します。
+* 変わる前のファイルは `.aidev/cache/modify/<name>-<時刻>/` に残します（gitignore 済み）。結果が気に入らなければ、ここから戻すか、`git checkout -- <path>` で戻します。
+* 直した workflow は `main` と違うので、未承認になります。`aidev submit workflow <name>` で提出し直し、マージされると承認されます。
+
+いまの YAML が検証を通らない状態でも使えます。そのときは、その誤りも直すよう伝えます。
+
+`aidev create workflow <name> --describe "…" --force` でも上書きできますが、こちらは今の定義を見ずに、説明だけから書き直します。一部だけ直すときは `modify` を使います。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--describe <text>`
+|必須。直したいことを自然言語で書く
+
+|`--dry-run`
+|起動する agent、AI ツール、対象のファイル、他の workflow と共有している agent を表示し、何も書かず、agent も起動しない
+
+|`--json`
+|JSON で出力する
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|書き換えて、検証を通った。`--dry-run`
+
+|1
+|`workflow` 以外の object、名前が無い。workflow が無い。`--describe` が無い。agent が失敗した。書き換えた結果が検証を通らない。agent が何も変えなかった
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev modify workflow write-tests --describe "write ステップに、テストの中身を確認するレビュー役を足す。skip したテストは不合格にする"
+----
+
+[source,text]
+----
+aidev modify workflow write-tests
+ℹ starting workflow-creator via claude (sonnet)…
+     0:03  Read .aidev/workflows/write-tests/workflow.yaml
+     0:41  Agent agents-creator: Create test-reviewer agent
+     1:12    Write .aidev/agents/test-reviewer.md
+     1:30  Write .aidev/workflows/write-tests/workflow.yaml
+✓ modified .aidev/workflows/write-tests/workflow.yaml (3 step(s); writable: tests/**) in 1m 38s ($0.2410)
+    changed: .aidev/workflows/write-tests/workflow.yaml
+    added: .aidev/agents/test-reviewer.md
+    previous files: .aidev/cache/modify/write-tests-2026-10-12T03-10-44-120Z/
+
+ℹ Next:
+    1. review:   git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+    2. estimate: aidev estimate workflow write-tests
+    3. submit:   aidev submit workflow write-tests     ← the change is approved when its pull request is merged
+----
+
+=== 関連情報
+
+* xref:workflows-fix[workflow の修正] — どこを直すか、提出し直す手順
+* xref:workflow-reference[workflow 定義リファレンス]
+* xref:cli-create[aidev create]、xref:cli-estimate[aidev estimate]、xref:cli-submit[aidev submit]

@@ -599,7 +599,7 @@ function run() {
       write(path.join(fx.root, '.aidev', 'agents', 'reader.md'), '---\nname: reader\ndescription: t\nmcp: [tickets]\n---\n\nRead.\n');
       write(path.join(fx.root, '.aidev', 'workflows', 'wf', 'workflow.yaml'), [
         'name: wf', 'objective: read', 'steps:', '  - id: a', '    agent: reader', '    writable: []', '    prompt: go',
-        'cost:', '  max_usd: 1', '',
+        'limits:', '  max_usd: 1', '',
       ].join('\n'));
       git(['add', '-A'], fx.root);
       git(['commit', '-q', '-m', 'wf'], fx.root);

@@ -38,10 +38,17 @@ const gitMod = require('./git');
 const toolsMod = require('./tools');
 const yaml = require('./yaml');
 
-/** Hard ceilings: a definition may lower these, never raise them. */
+/**
+ * Hard ceilings a definition cannot raise. There is no ceiling on a run's
+ * time: limits.max_usd (required) and the bounded retries are what stop an
+ * unattended run, and limits.max_minutes is the team's choice — required only
+ * when an agent runs on a tool that reports no cost (the budget cannot stop it).
+ */
 const LIMITS = Object.freeze({
-  maxMinutes: 60,
   maxRetries: 10,
+  // One start of an agent, one command: a hang must end even without a run time limit.
+  maxTimeoutMinutes: 240,
+  maxItems: 10000,
 });
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -61,13 +68,16 @@ const ENV_RUN = 'AIDEV_WORKFLOW_RUN';
 const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
-const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits', 'cost'];
+const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits'];
+const LIMIT_KEYS = ['max_usd', 'max_minutes'];
 const STEP_KEYS = {
-  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'max_retries', 'timeout_ms'],
-  command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_ms', 'writable'],
+  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'max_retries', 'timeout_minutes'],
+  command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_minutes', 'writable'],
   'pull-request': ['id', 'description', 'kind', 'title'],
 };
-const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_ms', 'agent', 'prompt'];
+const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_minutes', 'agent', 'prompt'];
+/** Keys that were renamed: the message says the new name. */
+const RENAMED = { timeout_ms: 'timeout_ms is timeout_minutes now (minutes, not milliseconds)' };
 
 /**
  * `for_each`: an agent step run once per target. The targets are the lines of
@@ -76,14 +86,14 @@ const UNTIL_KEYS = ['command', 'cwd', 'env', 'timeout_ms', 'agent', 'prompt'];
  * target. A target reaches a command's argv, so it is one plain token: no
  * whitespace, nothing a command would read as an option, no way up the tree.
  */
-const FOR_EACH_KEYS = ['from', 'max_items'];
-const FOR_EACH_MAX_ITEMS = 100;
+const FOR_EACH_KEYS = ['from', 'max_items', 'on_failure'];
+const FOR_EACH_MAX_ITEMS = LIMITS.maxItems;
+/** stop: the first target that fails stops the run. continue: its changes are undone and the next target starts. */
+const ON_FAILURE = ['stop', 'continue'];
 const ITEM_TOKEN = '{item}';
 const ITEM_RE = /^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$/;
 const NOTE_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
-/** A command may run at most this long on its own (the run's time ceiling still applies). */
-const COMMAND_TIMEOUT_MAX_MS = 3600000;
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
 /**
@@ -208,8 +218,13 @@ function envMap(v, field, where) {
   return out;
 }
 
-function commandTimeout(v, field, where) {
-  return v == null ? null : positiveInt(v, field, where, { max: COMMAND_TIMEOUT_MAX_MS, min: 1000 });
+/** `timeout_minutes`: a positive number of minutes up to the ceiling, kept as milliseconds (null: none given). */
+function timeoutMinutes(v, field, where) {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new AidevError(`${where}: ${field} must be a positive number of minutes`);
+  if (n > LIMITS.maxTimeoutMinutes) throw new AidevError(`${where}: ${field} is ${n}, above the ceiling of ${LIMITS.maxTimeoutMinutes} minutes`);
+  return Math.round(n * 60000);
 }
 
 /**
@@ -223,7 +238,7 @@ function untilSpec(v, where) {
   if (typeof v !== 'object' || Array.isArray(v)) {
     throw new AidevError(`${where}: until must be a mapping with command, agent (and prompt), or both (e.g. until: { command: npm test })`);
   }
-  assertKnownKeys(v, UNTIL_KEYS, `${where}: until`);
+  assertKnownKeys(v, UNTIL_KEYS, `${where}: until`, RENAMED);
   const out = { commands: [], cwd: null, env: {}, timeout_ms: null, agent: null, prompt: null };
   if (v.command != null) {
     const list = Array.isArray(v.command) ? v.command : [v.command];
@@ -231,9 +246,9 @@ function untilSpec(v, where) {
     out.commands = list.map((c) => splitCommand(c, 'until.command', where));
     out.cwd = cwdRel(v.cwd, 'until.cwd', where);
     out.env = envMap(v.env, 'until.env', where);
-    out.timeout_ms = commandTimeout(v.timeout_ms, 'until.timeout_ms', where);
+    out.timeout_ms = timeoutMinutes(v.timeout_minutes, 'until.timeout_minutes', where);
   } else {
-    for (const k of ['cwd', 'env', 'timeout_ms']) {
+    for (const k of ['cwd', 'env', 'timeout_minutes']) {
       if (v[k] != null) throw new AidevError(`${where}: until.${k} needs until.command (it says how the command runs)`);
     }
   }
@@ -259,7 +274,9 @@ function forEachSpec(v, where) {
     throw new AidevError(`${where}: for_each.from is the name of a file in the run's notes directory, one target per line (${from || 'missing'})`);
   }
   if (v.max_items == null) throw new AidevError(`${where}: for_each.max_items is required (how many targets one run may take on)`);
-  return { from, max_items: positiveInt(v.max_items, 'for_each.max_items', where, { max: FOR_EACH_MAX_ITEMS }) };
+  const onFailure = v.on_failure == null ? 'stop' : String(v.on_failure).trim();
+  if (!ON_FAILURE.includes(onFailure)) throw new AidevError(`${where}: for_each.on_failure is ${ON_FAILURE.join(' or ')}`);
+  return { from, max_items: positiveInt(v.max_items, 'for_each.max_items', where, { max: FOR_EACH_MAX_ITEMS }), on_failure: onFailure };
 }
 
 /**
@@ -320,6 +337,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   assertKnownKeys(raw, TOP_KEYS, source, {
     scope: 'writable is written on each step now (steps[].writable)',
     agents: 'the agents are the ones the steps name',
+    cost: 'the budget is limits.max_usd now',
     skills: 'an agent lists its skills in its own frontmatter (.aidev/agents/<name>.md: skills: [...])',
   });
 
@@ -359,6 +377,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
     if (kinds.length !== 1) throw new AidevError(`${where}: exactly one of agent, command or kind: pull-request is required`);
     const kind = kinds[0];
     for (const k of Object.keys(s)) {
+      if (RENAMED[k]) throw new AidevError(`${where}: ${RENAMED[k]}`);
       if (!STEP_KEYS[kind].includes(k)) throw new AidevError(`${where}: ${k} does not belong to ${kind === 'agent' ? 'an' : 'a'} ${kind} step (allowed: ${STEP_KEYS[kind].join(', ')})`);
     }
     const step = { id, kind, description: s.description == null ? '' : String(s.description).trim() };
@@ -388,13 +407,13 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       if (step.max_retries > 0 && !step.until && !step.unchanged.length) {
         throw new AidevError(`${where}: max_retries needs an until to decide when to retry`);
       }
-      step.timeout_ms = s.timeout_ms == null ? null : positiveInt(s.timeout_ms, 'timeout_ms', where, { max: 7200000, min: 10000 });
+      step.timeout_ms = timeoutMinutes(s.timeout_minutes, 'timeout_minutes', where);
     } else if (kind === 'command') {
       step.command = splitCommand(s.command, 'command', where);
       if (step.command.text.includes(ITEM_TOKEN)) throw new AidevError(`${where}: ${ITEM_TOKEN} belongs to an agent step with for_each`);
       step.cwd = cwdRel(s.cwd, 'cwd', where);
       step.env = envMap(s.env, 'env', where);
-      step.timeout_ms = commandTimeout(s.timeout_ms, 'timeout_ms', where);
+      step.timeout_ms = timeoutMinutes(s.timeout_minutes, 'timeout_minutes', where);
       // A command is run by the kit, not an agent, so no hook stands between
       // it and the tree; its writable only says which of its outputs the
       // pull-request step commits.
@@ -408,24 +427,23 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   // What the pull-request step commits: everything any step may write.
   def.writable = [...new Set(def.steps.flatMap((s) => s.writable || []))];
 
-  const limits = raw.limits == null ? {} : raw.limits;
-  if (typeof limits !== 'object' || Array.isArray(limits)) throw new AidevError(`${source}: limits must be a mapping`);
-  assertKnownKeys(limits, ['max_minutes'], `${source}: limits`);
-  def.limits = {
-    max_minutes: limits.max_minutes == null
-      ? LIMITS.maxMinutes
-      : positiveInt(limits.max_minutes, 'limits.max_minutes', source, { max: LIMITS.maxMinutes }),
-  };
-
-  const cost = raw.cost == null ? {} : raw.cost;
-  if (typeof cost !== 'object' || Array.isArray(cost)) throw new AidevError(`${source}: cost must be a mapping`);
-  assertKnownKeys(cost, ['max_usd'], `${source}: cost`);
-  if (cost.max_usd == null) {
-    throw new AidevError(`${source}: cost.max_usd is required — a workflow must state its budget before it may run unattended`);
+  // The budget and the time limit, together. max_usd is required: it is what
+  // stops an unattended run. max_minutes is optional: without it a run goes on
+  // until it finishes, the budget is spent or a step runs out of retries.
+  const limits = raw.limits;
+  if (limits == null || typeof limits !== 'object' || Array.isArray(limits)) {
+    throw new AidevError(`${source}: limits is required, with limits.max_usd — a workflow must state its budget before it may run unattended`);
   }
-  const usd = Number(cost.max_usd);
-  if (!Number.isFinite(usd) || usd <= 0) throw new AidevError(`${source}: cost.max_usd must be a positive number`);
-  def.cost = { max_usd: usd };
+  assertKnownKeys(limits, LIMIT_KEYS, `${source}: limits`);
+  if (limits.max_usd == null) {
+    throw new AidevError(`${source}: limits.max_usd is required — a workflow must state its budget before it may run unattended`);
+  }
+  const usd = Number(limits.max_usd);
+  if (!Number.isFinite(usd) || usd <= 0) throw new AidevError(`${source}: limits.max_usd must be a positive number`);
+  def.limits = {
+    max_usd: usd,
+    max_minutes: limits.max_minutes == null ? null : positiveInt(limits.max_minutes, 'limits.max_minutes', source, {}),
+  };
   return def;
 }
 

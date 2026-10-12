@@ -241,7 +241,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Run `git fetch origin`.
 
 |`aidev list workflows` shows `invalid: …`
-|`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `cost.max_usd`, an unknown key, a limit exceeded, `until` written as a string (put `command:` under `until:`), quotes or pipes in `until.command`, a `protected` path, and so on).
+|`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `limits.max_usd`, an unknown key, a limit exceeded, `until` written as a string (put `command:` under `until:`), quotes or pipes in `until.command`, a `protected` path, and so on).
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.

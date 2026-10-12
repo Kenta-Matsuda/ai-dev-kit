@@ -86,7 +86,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D9: 開発はworkflowだけから行い、workflowはYAMLのみ、承認は`origin/<tracking_branch>`との一致で判定する
 
-**判断**: 利用者が開発に使うcommandは`aidev create workflow|submit|run|list`だけです（`aidev agent`は撤去）。workflowは`.aidev/workflows/<name>/workflow.yaml`の1 fileで、`objective`・`steps`（`agent` / `command` / `pull-request`。agent stepはstepごとの`writable`を持つ）・`limits`・`cost`を書きます（agentの能力はagentのfrontmatter。D18）。実行logic（`until`の再試行loop、command実行、commit、push、PR）はkitのrunnerが持ちます。agentはstepから、skillはagentのfrontmatterから、`.aidev/agents/`・`.aidev/skills/`（PKG）かkit同梱を名前で参照し、複数のworkflowで再利用します。`approve` commandと`approval.json`は無く、「承認済み」= `workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`にあるものとbyte一致、です。
+**判断**: 利用者が開発に使うcommandは`aidev create workflow|submit|run|list`だけです（`aidev agent`は撤去）。workflowは`.aidev/workflows/<name>/workflow.yaml`の1 fileで、`objective`・`steps`（`agent` / `command` / `pull-request`。agent stepはstepごとの`writable`を持つ）・`limits`を書きます（agentの能力はagentのfrontmatter。D18）。実行logic（`until`の再試行loop、command実行、commit、push、PR）はkitのrunnerが持ちます。agentはstepから、skillはagentのfrontmatterから、`.aidev/agents/`・`.aidev/skills/`（PKG）かkit同梱を名前で参照し、複数のworkflowで再利用します。`approve` commandと`approval.json`は無く、「承認済み」= `workflow.yaml`と参照するPKG内agent / skillが`origin/<hosting.tracking_branch>`にあるものとbyte一致、です。
 
 **理由**: 3つの役割を分けるためです。kit開発者は実行するもの（runner、step種別、同梱workflow / agent / skill）の品質を持ち、PKGの責任者は「AIに何をさせるか」をYAMLに書いてPRでreviewし、実作業者は`aidev run workflow`を実行して生成されたPRをreviewerに渡すだけで、成果物に責任を持ちません。YAMLで書けないことはkitへの変更（新しいstep種別）であり、実行codeの品質責務がkit開発者に閉じます。承認をhostingに任せるのは、誰が承認したかをPR reviewerとbranch policyが記録し、CLIの記録（環境変数由来）を認証に使わないためです。
 
@@ -140,7 +140,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D15: commandは動詞先行（`aidev <動詞> [<object>] [<名前>]`）とする
 
-**判断**: 利用者向けcommandは動詞で始めます。開発は`run` / `create` / `submit` / `list` / `remove`（objectは`workflow`、`create`は`agent` / `skill` / `policy`も、`remove`は`agent` / `skill`も、`list`は複数形）、保守は`init` / `check` / `sync tools|wiki`、端末は`update`（objectなし。kit本体だけ）/ `doctor` / `uninstall [--all]`です（PKGの指定はD19）。objectを1つしか取らない動詞（`run` / `submit`）でもobjectを省略しません。旧`aidev status` / `knowledge update` / `permission *` / `workflow *` / `apply` / `configure` / `show` / `eject` / `mcp` / `evolve` / `update kit|wiki`は「unknown command」または「takes no object」です（2026-09-23）。
+**判断**: 利用者向けcommandは動詞で始めます。開発は`run` / `estimate` / `create` / `modify` / `submit` / `list` / `remove`（objectは`workflow`（`modify` / `estimate`は2026-10-12に追加）、`create`は`agent` / `skill` / `policy`も、`remove`は`agent` / `skill`も、`list`は複数形）、保守は`init` / `check` / `sync tools|wiki`、端末は`update`（objectなし。kit本体だけ）/ `doctor` / `uninstall [--all]`です（PKGの指定はD19）。objectを1つしか取らない動詞（`run` / `submit`）でもobjectを省略しません。旧`aidev status` / `knowledge update` / `permission *` / `workflow *` / `apply` / `configure` / `show` / `eject` / `mcp` / `evolve` / `update kit|wiki`は「unknown command」または「takes no object」です（2026-09-23）。
 
 **理由**: 「何をするか」で引けるcommand面のほうが、機能名（`workflow`、`knowledge`、`permission`）で引くより覚えやすく、help一覧が役割（開発 / 保守 / 端末）で読めるためです。動詞に対してobjectを必ず書かせるのは、`aidev run x`が何を実行するのか一覧から読めるようにするためと、将来objectを増やしても文法が変わらないためです。
 
@@ -180,6 +180,14 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 **理由**: 複数のPKG cloneを持つ人が`aidev update`のあと`cd`せずに追従でき、同じ書き方がどのcommandでも通じるからです。位置引数は`run workflow <name>`・`create agent <name>`のobjectと名前に衝突し、commandごとに意味が変わります。受け付けないcommandで黙って無視すると、別のPKGに対して実行したつもりの誤操作に気づけません。
 
 **却下した代替案**: commandごとの位置引数`<package>`（上記）。gitと同じ`-C <path>`（pathしか受けず、`list packages`が出す名前を使えない）。machine向けcommandでも受け付けて無視する形（scriptで一律に付けられるが、誤操作を隠す）。
+
+### D20: 無人の大規模実行は費用と回数の上限で止め、時間の天井は置かない
+
+**判断**: `limits.max_usd`（必須）、`max_retries`（≤10）、`for_each.max_items`（≤10000）、agent 1回とcommand 1つの`timeout_minutes`（≤240）で実行を止めます。全体の時間`limits.max_minutes`は任意で、天井を置きません（旧: 必須ではないが既定・天井60分）。ただし費用を報告しないtool（claude以外）で動くagentがあるときは、`max_usd`が効かないので`max_minutes`（か`--max-minutes`）を要求します。`for_each.on_failure: continue`で、失敗した件の変更を戻して次の件へ進めます。予算は`limits`に`max_minutes`と並べて書きます（旧`cost.max_usd`）。時間はmsでなく分（`timeout_minutes`）で書きます（2026-10-13）。
+
+**理由**: 数百〜数千件のE2E作成や大規模なversion upのように、実行したら終わるまで人が介入しない使い方では、60分の天井は「人が`--resume`する」ことを前提にしてしまいます。暴走の害は費用であり、それは`max_usd`で止まります。hangは`timeout_minutes`が止めます。1件の失敗で全体が止まると、数千件の仕事は終わりません。`cost`と`limits`が別keyなのは「実行を止める条件」が2か所に分かれて読みにくく、msの数値は桁を読み違えます。
+
+**却下した代替案**: PKGごとの天井を`aidev.yaml`で上げる案（`proposals/2026-10-01-workflow-long-running.md`の提案4。天井を設定する場所が増えるだけで、無人実行の判断はworkflowのreviewで足りる）。失敗した件を戻さずに残す案（失敗したテストがPRに入りCIを壊す）。並列実行（同じ作業treeを共有するため、件ごとのworktreeが先に要る）。
 
 ## 未決の論点
 

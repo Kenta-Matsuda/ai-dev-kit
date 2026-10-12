@@ -17,7 +17,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 
 * Options are `--name` or `--name <value>`. `--name=value` also works.
 * An option the command does not accept is an error (`unknown option: --bogus`, exit code 1).
-* `run`, `create`, `submit`, `list`, `remove`, `update`, `configure`, `show`, `evolve`, `hook` and `mcp` require an object.
+* `run`, `estimate`, `create`, `modify`, `submit`, `list`, `remove`, `sync` and `hook` require an object.
 * Commands for a PKG run inside the PKG clone (a subdirectory is fine; `init` needs the root). To run one on another PKG, name it with `--package <name|path>` (see xref:cli-common-options[Common options]).
 
 [[cli-common-options]]
@@ -34,7 +34,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 |Show what would change and write nothing (supported commands only).
 
 |`--package <name\|path>`, `-p <name\|path>`
-|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`). An error on `update`.
+|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `modify`, `estimate`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`). An error on `update`.
 
 |`--help`, `-h`
 |Show the command list, or the options of one command.
@@ -78,6 +78,12 @@ Every command except `hook` and `update` (including `--help` and `--version`) te
 
 |xref:cli-create[`aidev create workflow\|agent\|skill <name>`, `aidev create policy`]
 |Create a workflow, agent or skill (writes the files only; runs nothing). `policy` drafts the write-permission policy and places it with `--approve`
+
+|xref:cli-modify[`aidev modify workflow <name>`]
+|Change an existing workflow from instructions in plain language (writes the files only; runs nothing)
+
+|xref:cli-estimate[`aidev estimate workflow <name>`]
+|Estimate what a run of a workflow will cost, before running it (optimistic to pessimistic)
 
 |xref:cli-list[`aidev list workflows\|agents\|skills\|packages`]
 |List workflows (with approval state), agents and skills. `packages` lists the PKGs set up with {project-name} on this machine
@@ -139,11 +145,15 @@ include::create.adoc[]
 
 include::doctor.adoc[]
 
+include::estimate.adoc[]
+
 include::hook.adoc[]
 
 include::init.adoc[]
 
 include::list.adoc[]
+
+include::modify.adoc[]
 
 include::remove.adoc[]
 

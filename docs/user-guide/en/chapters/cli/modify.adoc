@@ -1,0 +1,86 @@
+[[cli-modify]]
+== aidev modify
+
+Changes an existing workflow from instructions in plain language. It only writes; it neither runs nor submits.
+
+=== Synopsis
+
+[source,text]
+----
+aidev modify workflow <name> --describe "<what to change>" [--dry-run] [--json]
+----
+
+=== Description
+
+The workflow-creator agent (`tools.agent` in `aidev.yaml`) is given the current `.aidev/workflows/<name>/workflow.yaml` and the `--describe` text, and edits the file in place. It is told to leave everything the request does not touch (fields, order, comments, wording) as it is.
+
+* When an agent or skill is missing, it has agents-creator write it, as `create workflow --describe` does.
+* A PKG agent or skill that only this workflow uses is edited when the request needs it. **An agent that other workflows also use is not edited**: the agent is told to write a new agent and point this workflow's step at it (changing an agent changes every workflow that uses it). If a shared agent changes anyway, a warning says so.
+* After the edit, the definition is validated as `create` does, and the files that changed (`changed`, `added`, `removed`) are listed.
+* The files as they were before are kept in `.aidev/cache/modify/<name>-<time>/` (gitignored). If you do not like the result, put them back from there, or with `git checkout -- <path>`.
+* The modified workflow differs from `main`, so it is no longer approved. Submit it again with `aidev submit workflow <name>`; it is approved once merged.
+
+It also works while the current YAML does not validate; the agent is told to fix that too.
+
+`aidev create workflow <name> --describe "…" --force` also overwrites, but it rewrites from the description alone without looking at the current definition. To change part of a workflow, use `modify`.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--describe <text>`
+|Required. What to change, in plain language
+
+|`--dry-run`
+|Show the agent, the AI tool, the file and the agents shared with other workflows; write nothing and start no agent
+
+|`--json`
+|Output JSON
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Edited, and the result validates. `--dry-run`
+
+|1
+|An object other than `workflow`, or no name. No such workflow. No `--describe`. The agent failed. The edited definition does not validate. The agent changed nothing
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev modify workflow write-tests --describe "Add a reviewer to the write step that checks what the tests verify; a skipped test fails the review"
+----
+
+[source,text]
+----
+aidev modify workflow write-tests
+ℹ starting workflow-creator via claude (sonnet)…
+     0:03  Read .aidev/workflows/write-tests/workflow.yaml
+     0:41  Agent agents-creator: Create test-reviewer agent
+     1:12    Write .aidev/agents/test-reviewer.md
+     1:30  Write .aidev/workflows/write-tests/workflow.yaml
+✓ modified .aidev/workflows/write-tests/workflow.yaml (3 step(s); writable: tests/**) in 1m 38s ($0.2410)
+    changed: .aidev/workflows/write-tests/workflow.yaml
+    added: .aidev/agents/test-reviewer.md
+    previous files: .aidev/cache/modify/write-tests-2026-10-12T03-10-44-120Z/
+
+ℹ Next:
+    1. review:   git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
+    2. estimate: aidev estimate workflow write-tests
+    3. submit:   aidev submit workflow write-tests     ← the change is approved when its pull request is merged
+----
+
+=== Related information
+
+* xref:workflows-fix[Fixing a workflow] — where to fix, and how to submit again
+* xref:workflow-reference[Workflow definition reference]
+* xref:cli-create[aidev create], xref:cli-estimate[aidev estimate], xref:cli-submit[aidev submit]

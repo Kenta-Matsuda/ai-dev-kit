@@ -50,28 +50,28 @@ steps:                                 # 上から順に実行する
     unchanged: [tests/e2e/playwright.config.ts]   # 任意。writable の中でも、このステップが変えてはいけないパス（試行のたびに kit が検査）
     for_each:                          # 任意。対象ごとに agent を新しく起動して繰り返す
       from: targets.txt                #   前のステップが notes ディレクトリに書いた一覧（1 行 1 件）
-      max_items: 20                    #   必須。上限 100
+      max_items: 20                    #   必須。上限 10000
+      on_failure: continue             #   任意。stop（既定）: 1 件の失敗で止まる。continue: 失敗した件の変更を戻して次の件へ
     prompt: 画面 {item} の IT テストを書く。   # for_each のステップは {item} が必須（until にも書ける）
     until:                             # 終了条件。満たすまで agent を繰り返す（command と agent のどちらか、または両方）
       command: npx playwright test     #   exit 0 になること。順に実行するなら list: [npm ci, npx playwright test]
       cwd: e2e                         #   任意。command を実行するディレクトリ（PKG 内）
       env: { CI: 1 }                   #   任意。command に渡す固定の環境変数（秘密情報は書かない）
-      timeout_ms: 900000               #   任意。command 1 つの時間予算（上限 3600000）
+      timeout_minutes: 15              #   任意。command 1 つの時間の上限（分。上限 240）
       agent: e2e-reviewer              #   この agent が VERDICT: PASS と答えること（何も書けない。command が通ってから起動）
       prompt: 追加したテストが要件の各項目を検証しているかを確認する   # agent に確認させる観点（agent を書くなら必須）
     max_retries: 5                     # until の再試行回数。上限 10
-    timeout_ms: 1800000                # 任意。1 回の起動の時間予算
+    timeout_minutes: 30                # 任意。agent 1 回の起動の時間の上限（分。既定 30、上限 240）
   - id: verify
     command: npm run lint              # command step: 1 回実行。exit 0 以外で workflow 失敗
-    # cwd / env / timeout_ms           # 任意。until と同じ意味
+    # cwd / env / timeout_minutes      # 任意。until と同じ意味
     # writable: [gen/**]               # 任意。コマンドが作るファイルのうち PR に入れるもの
   - id: pr
     kind: pull-request                 # 各ステップの writable の変更を commit → push → PR。最大 1 つ
     title: "..."                       # 任意
 limits:
-  max_minutes: 60                      # 上限 60。下げるのは可
-cost:
-  max_usd: 10                          # 必須
+  max_usd: 10                          # 必須。報告された費用がこれに達したら次の agent を起動しない
+  max_minutes: 120                     # 任意。全体の時間の上限。書かなければ時間では止めない
 ```
 
 - step は `agent` / `command` / `kind: pull-request` のどれか 1 つだけを持ちます
@@ -108,12 +108,12 @@ model: inherit
 2. **agent を選ぶ** — prompt に添付された一覧から名前で参照する。kit が同梱するのは仕組みの agent（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent（実装する、テストを書く、規約を書き出す…）は PKG のもの。足りないときは **`agents-creator` を Agent tool（サブエージェント）で起動**し、役割・想定タスク・必要な skill / tools / MCP・書き先（`.aidev/agents/<name>.md`、必要なら `.aidev/skills/<name>/SKILL.md`）を渡して書かせる。自分で agent 本文を書かない。既存の同梱 agent を書き換えない
 3. **外部システムを確認する** — Work Item・チケット・DB・API など、agent が MCP で触る必要があるものがあれば、その agent の `mcp` に server 名を書かせる。`.mcp.json` にまだ無い server は、PKG の `.mcp.json`（PKG が所有。kit は配布しない）に足す定義を **final message に提案**する。自分では書かない（MCP の追加は人が行う。認証情報は環境変数で渡し、file に書かない）
 4. **書く** — `.aidev/workflows/<name>/workflow.yaml`。添付された template に構成を合わせる。各ステップに、レビュアーが読む `description` を付ける
-5. **見直す** — 各ステップの `writable` が要望より広くないか（調査だけのステップは `[]`）、protected（`.claude/**`、`.aidev/policy.yaml` など）を含んでいないか、agent の `tools` / `mcp` が仕事に必要な分だけか、`cost.max_usd` と `limits.max_minutes` が要望の規模に合っているか
+5. **見直す** — 各ステップの `writable` が要望より広くないか（調査だけのステップは `[]`）、protected（`.claude/**`、`.aidev/policy.yaml` など）を含んでいないか、agent の `tools` / `mcp` が仕事に必要な分だけか、`limits.max_usd`（と書いたなら `limits.max_minutes`）が要望の規模に合っているか。対象が多い仕事（数百〜数千件）は `for_each` の `on_failure: continue` にして、1 件の失敗で全体を止めない
 6. **報告する** — final message に、何を書いたか（workflow と、agents-creator が書いた agent / skill）、ステップごとの agent と `writable`、agent ごとの skill / tools / MCP、終了条件、MCP の提案、レビュアーに見てほしい点を書く
 
 ## 拒否すること
 
 - 実行・commit・push を求められた → 書くだけだと答える
 - `writable` に protected や `**` を求められた → 理由を示して狭める
-- `limits` / `cost` を「不要」「上限を超えて」と求められた → 拒否し、上限内で書く
+- `limits.max_usd` を「不要」と求められた → 拒否する（無人の実行を止めるのはこれだけ）。`max_retries` や `max_items` の上限を超える値も書かない
 - workflow 以外の場所（`.claude/**` など）への書込を求められた → 拒否

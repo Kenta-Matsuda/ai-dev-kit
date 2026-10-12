@@ -8,13 +8,14 @@ const { AidevError } = require('../lib/errors');
 const wfMod = require('../lib/workflow');
 const workflow = require('./workflow');
 
-const FLAGS = { json: 'boolean', 'dry-run': 'boolean', task: 'string', 'task-file': 'string', 'max-minutes': 'string', resume: 'string' };
+const FLAGS = { json: 'boolean', 'dry-run': 'boolean', task: 'string', 'task-file': 'string', 'max-minutes': 'string', resume: 'string', log: 'string' };
 const FLAG_HELP = {
   json: 'machine-readable output',
   'dry-run': 'show the approval state, scope, agents, steps and limits; start nothing',
   task: 'instructions for this run, handed to every agent step as data',
   'task-file': 'read --task from a file',
-  'max-minutes': `lower the time ceiling for this run (never above ${wfMod.LIMITS.maxMinutes})`,
+  'max-minutes': 'a time limit for this run (below limits.max_minutes when the workflow sets one)',
+  log: 'also write the whole run (every line, every tool call, each agent report, command output) and a summary to this file',
   resume: 'continue a stopped run from the step it stopped at (a run id, or "last")',
 };
 

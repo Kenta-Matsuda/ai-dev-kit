@@ -241,7 +241,7 @@
 |`git fetch origin` を実行します。
 
 |`aidev list workflows` が `invalid: …`
-|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`cost.max_usd` が無い、知らない項目がある、上限超過、`until` が文字列（`until:` の下に `command:` を書く）、`until.command` に引用符やパイプ、`protected` のパスなど）を直します。
+|`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`limits.max_usd` が無い、知らない項目がある、上限超過、`until` が文字列（`until:` の下に `command:` を書く）、`until.command` に引用符やパイプ、`protected` のパスなど）を直します。
 
 |`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
 |agent 名の誤りか、PKG 固有の agent が未コミットです。名前を直すか、`.aidev/agents/<name>.md` を同じ PR に入れます。

@@ -7,8 +7,8 @@
 
 [source,text]
 ----
-aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--dry-run] [--json]
-aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--dry-run] [--json]
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
 ----
 
 === 説明
@@ -30,17 +30,54 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--dry-ru
 |`--task` をファイルから読む。`--task` とは併用できない
 
 |`--max-minutes <n>`
-|時間の上限をこの実行だけ下げる（60 より上にはできない）
+|この実行だけの時間の上限（分）。`limits.max_minutes` があれば、それより下げる方向にだけ効く。無ければ、この実行に時間の上限を付ける
+
+|`--log <file>`
+|実行の全過程とサマリを、このファイルに書く（下の「ログファイル」）。既定では書かない
 
 |`--resume <run id \| last>`
 |止まった実行を、止まったステップから続ける。`last` は最後の実行。終わったステップはやり直さない。`--task`・`--task-file` とは併用できない（指示は最初の実行のもの）
 
 |`--dry-run`
-|承認の状態、関係するファイル、agent と AI ツール、上限、今回の指示と、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
+|承認の状態、関係するファイル、agent と AI ツール、上限、費用の見積もり（楽観〜悲観。内訳は xref:cli-estimate[aidev estimate]）、今回の指示と、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
 
 |`--json`
 |JSON で出力する
 |===
+
+=== ログファイル（`--log`）
+
+実行の記録は、いつも `.aidev/workflows/<name>/runs/<id>/` に分けて残ります（`run.json`、`log.txt`、報告、コマンドの出力）。`--log <file>` を付けると、それに加えて、全過程を 1 つのファイルに順番どおりに書きます。人に渡す、別の場所に保存する、といった用途です。
+
+[%autowidth.stretch,options="header"]
+|===
+|中身 |書き方
+
+|先頭
+|workflow 名、run id、承認の基準、上限、記録の場所、`--task`
+
+|経過の行
+|画面と `log.txt` に出る行（ステップの開始・終了、コマンドの終了コード、費用）
+
+|agent の動き
+|agent がツールを呼ぶたびに 1 行と、agent のメッセージ。`<step> [<件>] #<試行>` を行の頭に付け、画面と違って切り詰めない
+
+|最終報告
+|agent と確認役の最終報告の全文（`----- final report of … -----` で囲む）
+
+|コマンドの出力
+|`until.command` と command step の出力の全文（`----- output of "…" -----` で囲む）
+
+|サマリ（末尾）
+|結果（終わった / 止まった理由）、開始・終了時刻と所要時間、ブランチ、agent の起動回数、費用、ステップごとの結果と試行回数、`for_each` の件数（終わった・失敗して戻した・未完了）と失敗した件の理由、PR、続けるときのコマンド
+|===
+
+ファイルは実行しながら追記するので、途中で止まった実行でもそこまでが残ります（サマリは終わったときに書きます）。既にあるファイルは上書きします。`--resume` と一緒に使うと、その続きの実行の分だけを書きます。ファイルは PKG の外に置くことをすすめます（コマンドの出力に秘密情報が含まれることがあるため。`runs/` は gitignore 済みです）。
+
+[source,bash]
+----
+aidev run workflow e2e-tests --task "注文画面" --log ~/aidev-logs/e2e-tests.log
+----
 
 === 終了コード
 
@@ -79,6 +116,7 @@ aidev run workflow write-tests (dry run)
   agents    test-investigator via claude [pkg]
 test-writer via claude [pkg]
   limits    45 min, $5
+  cost      $0.80 – $5.40 (optimistic – pessimistic; "aidev estimate workflow write-tests" for the breakdown)
   task      src/services/order.ts
 
     1. survey: agent test-investigator — 既存テストの書き方を調べ、足りないテストを洗い出す
@@ -121,5 +159,5 @@ test-writer via claude [pkg]
 === 関連情報
 
 * xref:workflows[AI への作業委譲] — 定義の項目、承認、実行中に起きること、レビュー
-* xref:cli-create[aidev create]、xref:cli-submit[aidev submit]、xref:cli-list[aidev list]
+* xref:cli-create[aidev create]、xref:cli-estimate[aidev estimate]、xref:cli-submit[aidev submit]、xref:cli-list[aidev list]
 * xref:permissions-source[AI にソースを書かせる方法]

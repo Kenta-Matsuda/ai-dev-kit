@@ -1,0 +1,151 @@
+[[cli-estimate]]
+== aidev estimate
+
+Estimates what one run of a workflow will cost, before you run it: an optimistic figure (the lower bound) and a pessimistic one (the upper bound). It runs nothing and writes nothing.
+
+=== Synopsis
+
+[source,text]
+----
+aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--json]
+----
+
+=== Description
+
+A run costs the number of agent starts times what one start costs, added up. The estimate gives a range for both, step by step.
+
+[cols="1,3",options="header"]
+|===
+| |How it is decided
+
+|Agent starts
+|From the definition. An agent step starts its agent once per attempt (twice with a checking `until.agent`), times the targets of a `for_each`. **Optimistic**: every check passes the first time, fewest targets. **Pessimistic**: every `max_retries` is used, `max_items` targets.
+
+|One start
+|From this PKG's run records (`calls` in `runs/<id>/run.json`): the same step of the same workflow first, then the same agent in other workflows. With fewer than 3 records the range is widened (half the lowest to twice the highest). With no record, the default range of a work size (table below): `M` for a step, `S` for a checking agent.
+|===
+
+[cols="1,2,1",options="header"]
+|===
+|Size |Rough meaning |One start
+
+|`S`
+|Reads a few files and answers briefly
+|$0.05 – $0.30
+
+|`M`
+|Reads tens of files, or writes a few
+|$0.30 – $1.00
+
+|`L`
+|Reads and writes many files, runs the tests many times
+|$1.00 – $3.00
+
+|`XL`
+|Migrates a whole large module, and the like
+|$3.00 – $8.00
+|===
+
+The default ranges are rough figures for a Sonnet-class model. Real costs vary widely with the model, the amount of code and the prompts. Every run adds records, and the next estimate moves closer to what the PKG actually spends.
+
+With `--ai`, the **cost-estimator** agent runs first. It reads the workflow and `--task`, looks at the Wiki and the source, and estimates per step the following. It only reads (Claude Code is started with `Read`, `Glob` and `Grep` only).
+
+* The size of the work (`S` to `XL`), used for the cost of one start where there is no record
+* At which attempt it passes in a bad case, used for the pessimistic number of attempts
+* The range of `for_each` targets, used for the optimistic and pessimistic target counts
+
+ADK, not cost-estimator, computes the amounts. If cost-estimator's answer cannot be read, a warning is shown and the estimate uses the definition alone. What cost-estimator itself cost is shown on the `estimator` line.
+
+The pessimistic amount stops where a run stops. Once the reported cost adds up to `limits.max_usd`, ADK starts no further agent, so one run does not go much past "`limits.max_usd` plus its last start". When the amount is capped, the uncapped one is shown too.
+
+`aidev run workflow <name> --dry-run` shows the estimate without `--ai` on its `cost` line.
+
+A workflow that is not approved yet can be estimated, while you write it or after `aidev modify workflow`.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--task <text>`
+|The `--task` you would run it with. cost-estimator reads it with `--ai`
+
+|`--task-file <path>`
+|Read `--task` from a file. Not with `--task`
+
+|`--ai`
+|First have the cost-estimator agent estimate the amount of work for this task (this costs a little)
+
+|`--json`
+|Output JSON (`optimistic`, `pessimistic`, `uncapped`, `worstCase`, `budget`, `cap`, per step `starts`, `usd`, `perStart`, `basis`, and `estimator`)
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Estimated (also when cost-estimator's answer could not be read and the definition alone was used)
+
+|1
+|An object other than `workflow`, or no name. No such workflow, an invalid definition, an agent or skill not found. Both `--task` and `--task-file`
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev estimate workflow e2e-tests
+aidev estimate workflow e2e-tests --ai --task "the order and payment screens"
+----
+
+With no run records:
+
+[source,text]
+----
+aidev estimate workflow e2e-tests
+  workflow   e2e-tests (approved)
+  task       (none)
+  history    no recorded runs yet: one start is priced by size
+  estimator  not used (--ai sizes the work for this task)
+
+  step   agent starts  cost            one start                      basis
+  plan   1             $0.30 – $1.00   $0.30 – $1.00                  size M
+  write  2 – 48        $0.35 – $31.20  $0.30 – $1.00 + $0.05 – $0.30  size M; checker: size S; targets 1–8 (max_items)
+  pr     -             -               -                              pull request (no agent)
+
+  optimistic   $0.65   every check passes the first time, fewest targets, cheapest starts
+  pessimistic  $11.00  every retry used, most targets, dearest starts (capped; $32.20 without the budget stop)
+  budget       $10     limits.max_usd: no agent starts once the reported cost reaches it, so a run stays under about $11.00
+    The price of one start is a default until this package has runs of its own; every run makes the next estimate closer.
+----
+
+How to read it:
+
+[%autowidth.stretch,options="header"]
+|===
+|Column or line |Meaning
+
+|`agent starts`
+|How many times the step starts an agent (optimistic – pessimistic), the checking agent included
+
+|`one start`
+|The range of one start; with a checking agent, the part after `+` is the checker
+
+|`basis`
+|Where the cost of one start comes from (`history of this step (n)`, `history of agent <name> (n)`, `size <S to XL>`) and where the target count comes from (`max_items`, `earlier runs (n)`, `estimator`)
+
+|`worst case`
+|With `--ai` only: the amount the definition allows at most (every retry, `max_items`), rather than what cost-estimator expects
+|===
+
+When even the optimistic amount reaches `limits.max_usd`, a warning says the run is likely to stop at the ceiling. With an AI tool other than Claude Code, which reports no cost, a warning says `limits.max_usd` cannot stop the run.
+
+=== Related information
+
+* xref:workflow-reference-limits[limits]
+* xref:workflow-reference-records[Run record (run.json)]
+* xref:cli-run[aidev run], xref:cli-modify[aidev modify]

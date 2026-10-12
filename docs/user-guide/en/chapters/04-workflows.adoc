@@ -122,11 +122,9 @@ steps:                             # run top to bottom
   - id: pr
     kind: pull-request             # commit the changes in each step's writable → push → PR
 
-limits:
-  max_minutes: 45                  # ceiling 60. You can lower it, not raise it
-
-cost:
+limits:                            # what stops the run
   max_usd: 8                       # required. Once the reported cost reaches this, no further agent is started
+  max_minutes: 45                  # optional. A time limit for the whole run; without it, time does not stop the run
 ----
 
 [%autowidth.stretch,options="header"]
@@ -143,10 +141,10 @@ cost:
 |Run from top to bottom. Each step is exactly one of three kinds. Every kind may have a `description` (optional) for the reviewer.
 
 |agent step
-|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until `until` is met. `timeout_ms` is optional.
+|`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated up to `max_retries` times until `until` is met. `timeout_minutes` (the time allowed for one start of the agent) is optional.
 
 |`until`
-|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. A list under `command` runs from top to bottom. `cwd`, `env` and `timeout_ms` say how the commands run (xref:workflows-commands[Writing commands]). For the agent check, see xref:workflows-until-agent[Letting an agent's review decide when a step is done].
+|When the step is done. Write `command` (it exits 0), `agent` + `prompt` (that agent passes the work), or both. With both, the agent checks only after the command passes. A list under `command` runs from top to bottom. `cwd`, `env` and `timeout_minutes` say how the commands run (xref:workflows-commands[Writing commands]). For the agent check, see xref:workflows-until-agent[Letting an agent's review decide when a step is done].
 
 |`writable`
 |Paths (globs) the agent of that step may write. **The only place the AI can write PKG source is this range of the step now running in an approved workflow.** `protected` (`.claude/**`, `.aidev/policy.yaml` and so on) and `secrets_paths` cannot be written. `[]` means nothing can be written (a research-only step).
@@ -158,21 +156,29 @@ cost:
 |Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]).
 
 |command step
-|`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_ms` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
+|`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_minutes` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
 
 |`kind: pull-request`
 |Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` optional. At most one.
 
-|`limits.max_minutes`
-|Time limit for the whole workflow. Cannot exceed 60.
-
-|`cost.max_usd`
+|`limits.max_usd`
 |Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
+
+|`limits.max_minutes`
+|Optional. A time limit for the whole workflow, in minutes. Without it, time does not stop the run (the cost limit and the retry limits do). AI tools other than Claude Code report no cost, so with them it is required.
 |===
 
-Any key not in the table above is refused by validation.
+Any key not in the table above is refused by validation. The type, default and allowed values of every field are in the xref:workflow-reference[Workflow definition reference].
 
-The safety valves cannot be omitted or raised: the time limit (60 minutes), the retries per step (10), the cost limit (required), detection of the same failure (stop when the result of `until` is identical twice in a row), and each agent start is cut off at the shorter of `timeout_ms` and the remaining time.
+What stops a run is the following. The cost limit cannot be omitted, and the retry and target ceilings cannot be raised.
+
+* The cost limit (`limits.max_usd`, required)
+* The retries per step (`max_retries`, at most 10) and detection of the same failure (stop when the result of `until` is identical twice in a row)
+* The targets of a `for_each` (`max_items`, at most 10000)
+* The time for one start of an agent and for one command (`timeout_minutes`, at most 240; 30 by default for an agent), which ends an agent or a command that hangs
+* The time for the whole run (`limits.max_minutes`), optional
+
+How to write a large job to run unattended is in xref:workflows-unattended[Running a large job without anyone stepping in].
 
 [[workflows-commands]]
 ==== Writing commands
@@ -193,7 +199,7 @@ The safety valves cannot be omitted or raised: the time limit (60 minutes), the 
       env:                         # environment variables for the commands (fixed values)
         CI: 1
         BASE_URL: http://localhost:3000
-      timeout_ms: 900000           # time limit for one command (at most 3600000)
+      timeout_minutes: 15          # time limit for one command (minutes; at most 240)
 ----
 
 [%autowidth.stretch,options="header"]
@@ -209,8 +215,8 @@ The safety valves cannot be omitted or raised: the time limit (60 minutes), the 
 |`env`
 |Environment variables for the command. The values are fixed text in the definition and are reviewed in the PR. **Do not write secrets.** A name starting with `AIDEV_` is refused.
 
-|`timeout_ms`
-|Time limit for one command. If omitted, the command may use the time the workflow has left.
+|`timeout_minutes`
+|Time limit for one command, in minutes. If omitted, the command may use the time the workflow has left (or, with no workflow time limit, run until it ends).
 |===
 
 The whole output of every command is kept under `logs/` in the run record. When an `until` command fails, the agent gets the end of the output and the location of that file.
@@ -251,7 +257,7 @@ Split a job with many targets, such as writing tests screen by screen or migrati
     writable: [e2e/tests/**]
     for_each:
       from: targets.txt            # a file in the notes directory; an earlier step writes it
-      max_items: 20                # required. How many targets one run may take on (at most 100)
+      max_items: 20                # required. How many targets one run may take on (at most 10000)
     prompt: Write the IT test for the screen {item} in e2e/tests/{item}.spec.ts.
     until:
       command: npx playwright test tests/{item}.spec.ts   # checks this target only
@@ -263,6 +269,7 @@ Split a job with many targets, such as writing tests screen by screen or migrati
 * `{item}` can be written in `prompt`, `until.command` and `until.prompt`. It is required in `prompt`.
 * The agent is started anew for each target. `until` and `max_retries` apply per target. The time and cost limits count for the whole run.
 * When one target fails, the run stops there. The targets that passed stay as they are, and `--resume` continues from the target that stopped (xref:workflows-resume[Continuing a stopped run]).
+* With `on_failure: continue` under `for_each`, the changes of a target that fails are undone and the next target starts. What is undone is the files inside the step's `writable` that changed during that target. The failed targets and why are listed in `run.json`, in the report to the later steps and in the PR body. When every target fails, the run stops. Reaching the cost or time limit stops the run even with `continue`.
 * The later steps get one report that sums up the result of each target.
 
 A target is one word made of letters, digits and `. _ / @ -` (up to 200 characters). If a line contains a space, starts with `-` or contains `..`, the ADK stops before it starts an agent. A target becomes an argument of a command, so text that could be an option or point somewhere else is refused. Write this format in the `prompt` of the step that writes the list.
@@ -293,6 +300,52 @@ Detection is per file. A change inside a file that stays in `writable` (a `test.
 
 * Have `until.command` call the test runner itself, not `npm test` (when `package.json` is in `writable`, `scripts.test` can be rewritten).
 * Add a checking agent to `until` and write "no skipped or empty tests" in `until.prompt` (xref:workflows-until-agent[Letting an agent's review decide when a step is done]).
+
+[[workflows-unattended]]
+==== Running a large job without anyone stepping in
+
+How to write a large job — writing hundreds or thousands of e2e tests, upgrading a framework — so that once it starts you only wait for it to finish.
+
+[source,yaml]
+----
+steps:
+  - id: plan
+    agent: e2e-planner
+    writable: []
+    prompt: Survey the screens that need tests and write them to targets.txt in the notes directory, one per line.
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    unchanged: [e2e/playwright.config.ts]
+    for_each:
+      from: targets.txt
+      max_items: 1500              # more than there are targets
+      on_failure: continue         # undo a target that does not pass and go on
+    prompt: Write the IT test for the screen {item} in e2e/tests/{item}.spec.ts.
+    until:
+      command: npx playwright test tests/{item}.spec.ts
+      cwd: e2e
+      timeout_minutes: 15
+    max_retries: 3
+  - id: pr
+    kind: pull-request
+
+limits:
+  max_usd: 400                     # the only stop; no max_minutes
+----
+
+* **Leave out the time limit.** Without `limits.max_minutes`, the run stops only on the cost limit, the retries and the target ceiling. `timeout_minutes` ends an agent or a command that hangs.
+* **Split the work per target.** Do not give one agent start the whole job: use `for_each` for one target at a time. A failure stays with its target, and `--resume` continues per target.
+* **Do not stop on a failed target.** With `on_failure: continue`, a target that does not pass is undone and the run goes on. The ones left are listed under "Targets left out" in the PR body, for another run (with a list of just those) or for a person.
+* **Look at the cost first.** Decide `limits.max_usd` from the optimistic and pessimistic figures of `aidev estimate workflow <name> --ai --task "…"` (xref:cli-estimate[aidev estimate]).
+* **Keep the record in one file.** `aidev run workflow <name> --log <file>` writes the whole run (each agent's tool calls, final reports, command output) and a summary to one file.
+
+These still need a person:
+
+* When the machine running it stops (sleep, restart, network loss), the run stops. `aidev run workflow <name> --resume last` continues and skips the targets already handled.
+* A passing failure of the AI tool (overload, rate limit) counts as that target failing (with `on_failure: continue`, it is undone and the run goes on).
+* Targets are handled one at a time, never in parallel.
+* The changes become one PR. When thousands of changes are too many to review in one PR, split the list and run it several times.
 
 [[workflows-until-agent]]
 ==== Letting an agent's review decide when a step is done
@@ -327,7 +380,7 @@ About the checking agent:
 * **It writes nothing.** The step's `writable` does not apply to it. What it can use (skills, tools, MCP servers) is its own frontmatter; give it read-only tools such as `tools: Read, Grep, Glob`.
 * The ADK puts the pass/fail format (the `VERDICT:` line) into its instructions. You do not need to write it in the agent's body or in `until.prompt`.
 * Write in `until.prompt` exactly what to check. A vague check makes the same remark repeat and stop the run, or uses up `max_retries`.
-* Its starts count toward `max_retries`, the cost limit and the time limit. An attempt starts two agents, so allow for that in `cost.max_usd`.
+* Its starts count toward `max_retries`, the cost limit and the time limit. An attempt starts two agents, so allow for that in `limits.max_usd`.
 * When it passes the work, its report also goes into the instructions of the later agent steps.
 * The checking agent is reviewed in the pull request together with the workflow, and the workflow runs only while it matches `origin/main`.
 
@@ -407,7 +460,14 @@ aidev run workflow write-tests --dry-run --task "src/services/order.ts"
 aidev run workflow write-tests --task "src/services/order.ts"
 ----
 
-`--dry-run` shows the approval state, the agents and AI tools used, the limits and what each step does (where it may write; skills, tools and MCP servers), and starts nothing. Check with this first.
+`--dry-run` shows the approval state, the agents and AI tools used, the limits, a cost estimate (optimistic to pessimistic) and what each step does (where it may write; skills, tools and MCP servers), and starts nothing. Check with this first.
+
+For the cost breakdown, use `aidev estimate workflow <name>`. With `--ai`, an agent reads this run's `--task` and the code, estimates the retries and the `for_each` targets, and narrows the range (xref:cli-estimate[aidev estimate]).
+
+[source,bash]
+----
+aidev estimate workflow write-tests --ai --task "src/services/order.ts"
+----
 
 `--task` is the instruction for this run (a Work Item number, a target path, and so on). It is handed to every agent step as data and cannot change the `objective` or any step's `writable`. Pass a long instruction with `--task-file <path>`.
 
@@ -448,7 +508,7 @@ This is what happens during a run.
 |File |Contents
 
 |`run.json`
-|The result of each step, why the run stopped, the cost. Updated each time a step ends.
+|The result of each step, why the run stopped, the cost, and the cost of each agent start (`calls`, which xref:cli-estimate[the estimate] reads). Updated each time a step ends.
 
 |`log.txt`
 |The progress lines shown on screen
@@ -514,7 +574,7 @@ Messages when it stops, and what to do. The exit code is 1.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
-|A limit was reached. Continue with `--resume last` (the limits are counted anew). If it keeps happening, make `--task` smaller, or ask the Engineering Manager to revisit the limits (60 minutes and the cost ceiling are part of the definition, so changing them is a PR).
+|A limit was reached. Continue with `--resume last` (the limits are counted anew). If it keeps happening, make `--task` smaller, or ask the Engineering Manager to revisit the limits (the limits are part of the definition, so changing them is a PR).
 
 |`workflow stopped — step <id>: <command> exited N`
 |A `command` step failed. Read the output (the file `log` in `run.json` points to), fix the cause and continue with `--resume last`.
@@ -599,8 +659,8 @@ Start from the problem you see.
 |Read its remarks in `review` in `run.json`. Make the check specific, and write the same points in the step's `prompt` so the working agent knows them from the start.
 
 |It stops at the cost or time limit
-|`cost.max_usd`, `limits.max_minutes`
-|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json`). Time cannot go above 60 minutes.
+|`limits.max_usd`, `limits.max_minutes`
+|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json`) and the estimate of `aidev estimate workflow <name>`.
 |===
 
 Agents and skills are shared by every workflow that uses them. **Changing an agent's .md also changes how the other workflows that use that agent behave.** To change only one workflow, make a separate agent (`aidev create agent <new-name>`).
@@ -615,7 +675,14 @@ git checkout aidev/workflow-write-tests    # only if you moved to another branch
 ----
 +
 To fix a workflow that is already merged, start from the latest `main` (`git checkout main`, `git pull`).
-. Edit `workflow.yaml`, the agents and the skills.
+. Edit `workflow.yaml`, the agents and the skills, by hand or by telling workflow-creator what to change in plain language (xref:cli-modify[aidev modify]).
++
+[source,bash]
+----
+aidev modify workflow write-tests --describe "Add a reviewer to the write step's until that checks what the tests verify"
+----
++
+`modify` gives the agent the current definition and has it leave what the request does not touch. An agent other workflows also use is not edited; a new agent is written instead. The files as they were are kept in `.aidev/cache/modify/`.
 . Check for mistakes in how it is written. If it shows `invalid:`, fix the item it names.
 +
 [source,bash]
@@ -627,6 +694,12 @@ aidev list workflows
 [source,bash]
 ----
 aidev run workflow write-tests --dry-run
+----
+. Check that the cost ceiling (`limits.max_usd`) still fits the changed definition.
++
+[source,bash]
+----
+aidev estimate workflow write-tests
 ----
 . Submit again. The fix is added as a commit on the same branch, and if a pull request exists, its body is updated to the new content.
 +
@@ -690,6 +763,8 @@ List them with `aidev list agents` / `aidev list skills`, and remove them with `
 
 * xref:review-workflow-def[Workflow definition pull requests], xref:review-workflow-result[Workflow result pull requests]
 * xref:workflows-fix[Fixing a workflow] — where to fix, and how to submit again
+* xref:workflow-reference[Workflow definition reference] — every field of workflow.yaml, agents and skills
+* xref:cli-modify[aidev modify], xref:cli-estimate[aidev estimate]
 * xref:cli-run[aidev run workflow] — options, exit codes
 * xref:permissions[Permissions and safety] — how a step's `writable` relates to the policy
 * xref:configuration[aidev.yaml reference] — `tools.agent`, `tools.agents`, `references`

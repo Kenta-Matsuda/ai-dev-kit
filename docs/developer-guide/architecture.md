@@ -444,11 +444,11 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 
 ## 9. workflow: 開発の唯一の入口
 
-利用者が開発に使うcommandは`aidev run|create|submit|list|remove … workflow`です（`aidev agent`は無い）。kitはframeworkで、同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装する、テストを書く、規約を書き出す…）、workflow、MCP serverはPKGのもので、`create workflow --describe`の中でworkflow-creatorがagents-creatorをsubagentとして起動して書きます。3つの役割が分かれます: kit開発者は実行するもの（runner、step種別、仕組みのagent / skill）の品質を持ち、PKGの責任者は「AIに何をさせるか」をYAMLに書いてPRでreviewし、実作業者は`aidev run workflow <name>`を実行して生成されたPRをreviewerに渡します。実作業者は成果物に責任を持ちません。
+利用者が開発に使うcommandは`aidev run|estimate|create|modify|submit|list|remove … workflow`です（`aidev agent`は無い）。kitはframeworkで、同梱するagentは仕組みのもの（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけです。開発作業をするagent（実装する、テストを書く、規約を書き出す…）、workflow、MCP serverはPKGのもので、`create workflow --describe`の中でworkflow-creatorがagents-creatorをsubagentとして起動して書きます。3つの役割が分かれます: kit開発者は実行するもの（runner、step種別、仕組みのagent / skill）の品質を持ち、PKGの責任者は「AIに何をさせるか」をYAMLに書いてPRでreviewし、実作業者は`aidev run workflow <name>`を実行して生成されたPRをreviewerに渡します。実作業者は成果物に責任を持ちません。
 
 ### 定義（`cli/lib/workflow.js`）
 
-`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。原則は「能力はagent、制約はstep」です（D18）。workflowにはstepの順番・agent・stepごとの`writable`・終了判定・上限だけを書き、agentが使えるskill / tool / MCP serverはagentのfrontmatterに書きます。`validateDefinition`が検証する項目（表にないkeyは、top level・step・`limits`・`cost`のどこでもerror。旧`scope` / `agents` / `skills`には移動先をmessageで示す）:
+`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。原則は「能力はagent、制約はstep」です（D18）。workflowにはstepの順番・agent・stepごとの`writable`・終了判定・上限だけを書き、agentが使えるskill / tool / MCP serverはagentのfrontmatterに書きます。`validateDefinition`が検証する項目（表にないkeyは、top level・step・`limits`のどこでもerror。旧`scope` / `agents` / `skills` / `cost` / `timeout_ms`には移動先をmessageで示す）:
 
 | 項目 | 内容 |
 | --- | --- |
@@ -456,14 +456,15 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 | `objective` | 必須。全agent stepのpromptに入る |
 | `description` | 任意 |
 | `tool` / `model` | 任意。`tool`はregistry、`model`は`assertModel` |
-| `steps[]` | agent step（`id`・`description`・`agent`・`prompt`・`writable`・`unchanged`・`for_each`・`until`・`max_retries`・`timeout_ms`。`agent` / `prompt` / `writable`必須。`max_retries`は≤10、`until`があれば既定3。`max_retries` > 0は`until`か`unchanged`が必要）、command step（`id`・`description`・`command`・`cwd`・`env`・`timeout_ms`・`writable`）、pull-request step（`id`・`description`・`kind: pull-request`・`title`。最大1つ）のどれか1つ。`id`は`^[a-z0-9][a-z0-9-]{0,31}$` |
-| `steps[].until` | 任意。mapping（`command`・`cwd`・`env`・`timeout_ms`・`agent`・`prompt`。他のkeyと文字列はerror）。`command`は1行かlist（上から順に実行し、最初の失敗で不合格。正規化後は`until.commands[]`）。`cwd` / `env` / `timeout_ms`は`command`があるときだけ書ける。`command`（exit 0で合格）と`agent`（`prompt`必須。最終messageの最後の`VERDICT: PASS|FAIL`行でPASSなら合格。行が無ければFAIL）のどちらか、または両方。両方ならcommandが先で、通ったときだけagentを起動。`agent`は`def.agents`に入り、解決・承認・起動前検査の対象になる |
+| `steps[]` | agent step（`id`・`description`・`agent`・`prompt`・`writable`・`unchanged`・`for_each`・`until`・`max_retries`・`timeout_minutes`。`agent` / `prompt` / `writable`必須。`max_retries`は≤10、`until`があれば既定3。`max_retries` > 0は`until`か`unchanged`が必要）、command step（`id`・`description`・`command`・`cwd`・`env`・`timeout_minutes`・`writable`）、pull-request step（`id`・`description`・`kind: pull-request`・`title`。最大1つ）のどれか1つ。`id`は`^[a-z0-9][a-z0-9-]{0,31}$` |
+| `steps[].until` | 任意。mapping（`command`・`cwd`・`env`・`timeout_minutes`・`agent`・`prompt`。他のkeyと文字列はerror）。`command`は1行かlist（上から順に実行し、最初の失敗で不合格。正規化後は`until.commands[]`）。`cwd` / `env` / `timeout_minutes`は`command`があるときだけ書ける。`command`（exit 0で合格）と`agent`（`prompt`必須。最終messageの最後の`VERDICT: PASS|FAIL`行でPASSなら合格。行が無ければFAIL）のどちらか、または両方。両方ならcommandが先で、通ったときだけagentを起動。`agent`は`def.agents`に入り、解決・承認・起動前検査の対象になる |
 | `steps[].writable` | agent stepは必須（`[]`可）。そのstepのagentが書けるglob。`ALWAYS_PROTECTED`は列挙できない。command stepは任意で、hookは関与しない（kitが自分で実行するため）。pull-request stepがcommitする範囲を示すだけ。`def.writable`は全stepの和集合 |
 | `steps[].unchanged` | 任意（agent stepのみ）。そのstepが変えてはいけないglob。guardは`writable`に当たっても`unchanged`に当たるpathをdeny（`workflow-unchanged`）し、runnerはstep開始時の状態と試行後の状態を比べる（下の「runnerの動作」） |
-| `steps[].for_each` | 任意（agent stepのみ）。mapping（`from`・`max_items`。他のkeyはerror）。`from`はrunの`notes/`の中のfile名（`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`）、`max_items`は必須で≤100。`prompt`は`{item}`を含むこと。`{item}`は`for_each`のあるagent stepの`prompt`・`until.command`・`until.prompt`にだけ書ける（command stepと`for_each`の無いstepではerror） |
+| `steps[].for_each` | 任意（agent stepのみ）。mapping（`from`・`max_items`・`on_failure`。他のkeyはerror）。`from`はrunの`notes/`の中のfile名（`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`）、`max_items`は必須で≤10000。`on_failure`は`stop`（既定）か`continue`。`prompt`は`{item}`を含むこと。`{item}`は`for_each`のあるagent stepの`prompt`・`until.command`・`until.prompt`にだけ書ける（command stepと`for_each`の無いstepではerror） |
 | `steps[].description` | 任意。reviewer向け。`--dry-run`とsubmitのPR本文に出し、agentには渡さない |
-| `limits.max_minutes` | ≤60（既定60）。`limits`の他のkeyはerror |
-| `cost.max_usd` | 必須。`cost`の他のkeyはerror |
+| `limits.max_usd` | 必須（`limits`も必須）。`limits`の他のkeyはerror |
+| `limits.max_minutes` | 任意。正の整数で天井なし。無ければ時間で止めない（`deadline = Infinity`）。claude以外のtoolで動くagentがあり、`--max-minutes`も無ければ起動前に拒否（費用が報告されず`max_usd`が効かないため） |
+| `timeout_minutes` | agent step・command step・`until`。0 < n ≤ 240（分。小数可）。正規化後は`timeout_ms`（ms）。agentの既定は`DEFAULT_TIMEOUT_MS`（30分）、commandは無し（runの残り時間、それも無ければ無制限） |
 
 `def.agents`はstepと`until`が名指すagentの一覧（重複なし）で、YAMLには書きません。
 
@@ -485,7 +486,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 
 ### commands（動詞先行）
 
-利用者向けcommandは`aidev <動詞> [<object>] [<名前>]`です（D15）。開発の動詞は`run` / `create` / `submit` / `list` / `remove`、objectは`workflow`（`list`は`workflows` / `agents` / `skills`、`create` / `remove`は`agent` / `skill`も）。`bin/aidev.js`の`SUBCOMMANDS`がobjectを検査し、無い・違うobjectはmoduleに入る前にexit 1です。動詞modul（`create.js`等）は薄く、workflowの実装は`cli/commands/workflow.js`が持ちます。
+利用者向けcommandは`aidev <動詞> [<object>] [<名前>]`です（D15）。開発の動詞は`run` / `estimate` / `create` / `modify` / `submit` / `list` / `remove`、objectは`workflow`（`list`は`workflows` / `agents` / `skills`、`create` / `remove`は`agent` / `skill`も）。`bin/aidev.js`の`SUBCOMMANDS`がobjectを検査し、無い・違うobjectはmoduleに入る前にexit 1です。動詞modul（`create.js`等）は薄く、workflowの実装は`cli/commands/workflow.js`が持ちます。
 
 - `create agent <name>` / `create skill <name>`: `.aidev/agents/<name>.md` / `.aidev/skills/<name>/SKILL.md`のtemplateを書く。agentのtemplateのfrontmatterは`name`・`description`・`skills: []`・`tools`・`mcp: []`・`model: inherit`。agentの`--describe`は`agents-creator`を起動し、書いたあとfrontmatterの`name`と`capabilityError`を検証する
 - `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧（同名はPKG優先）
@@ -494,6 +495,8 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 - `create workflow <name>`: template YAMLを書く（agentは`my-agent`のplaceholder）。`--describe "<text>"`は`workflow-creator` agent（`tools.agent`）に、参照できるagent / skillの一覧とschemaのtemplateを添えてYAMLを書かせる。足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書く。MCPが要るときはworkflow-creatorが`.mcp.json`（PKG所有）への追加案をfinal messageに書き、人が足す。終了後に`loadDefinition` + `resolveDependencies`で検証して結果を表示する。`create policy [--approve] [--force]`は`permission.configure`（policy候補の生成と配置）
 - `submit workflow <name>`: 検証 → `aidev/workflow-<name>`へ`checkout -B` → `reviewedFiles`だけを`aidev: workflow <name>`でcommit → `push --set-upstream` → `azure-devops`ならPR作成（同じsource branchのactive PRがあれば本文更新）。`generic`は手動。`--no-push`
 - `run workflow <name>`: 承認判定に失敗すればexit 1。`pull-request` stepがあればclean treeを要求し`aidev/<name>-<yyyymmddHHMM>`を`checkout -b`。stepを順に実行し、`runs/<id>/`（gitignore）に実行しながら記録する。`--resume <run id|last>`は止まった実行を、止まったstepから続ける（下の「runnerの動作」）。`--task` / `--task-file`は全agent stepのpromptに「Task for this run」として入る（外部入力。Work Item本文と同じdata）。`--max-minutes`は下げる方向にだけ効く。`--dry-run`は承認状態・file別の状態・agentとtool・上限・taskと、`describeSteps`によるstepごとの内容（agent、`writes`、`skills; tools; mcp`、`until`）を表示する。起動前に拒否される問題（claude以外のtoolで`tools` / `mcp`を持つagent、`.mcp.json`に無いserver・`.mcp.json`が無い）も表示し、承認済みかつ問題なしのときだけexit 0。submitのPR本文も同じ`describeSteps`の「Steps」節を持つ
+- `modify workflow <name> --describe "<text>"`: 既存のworkflowをworkflow-creatorにその場で直させる。promptは今のYAML全文・変更の指示・`catalogue`で、「指示に関係しない部分は変えない」「他のworkflowも名指すPKG agent（`sharedAgents`）は編集せず、agents-creatorに新しいagentを書かせてstepから参照する」を伝える。起動前後に`.aidev/workflows/<name>/`（`runs/`除く）・`.aidev/agents/`・`.aidev/skills/`を読み比べ（`definitionFiles` / `fileChanges`）、変わった・消えたfileの元の内容を`.aidev/cache/modify/<name>-<stamp>/`に残す。結果は`create`と同じく`loadDefinition` + `resolveDependencies`で検証し、変更なし・検証失敗はexit 1。`create workflow --describe --force`は今の定義を渡さずに書き直す
+- `estimate workflow <name>`: 下の「費用の見積もり」
 - `list workflows`: 各workflowの`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`と、同梱workflowの一覧。`--json`の行は`writable`（全stepの和集合）を持つ
 
 ### runnerの動作
@@ -506,7 +509,7 @@ agent stepの1回分の仕事（agentの起動 → `unchanged`の検査 → `unt
 
 `unchanged`: step開始時に`changedState`（`git status --porcelain -z --untracked-files=all -- <unchanged>`に出るpathごとの内容のsha256、無ければ`deleted`）を取り、`runs/<id>/unchanged/<step>.json`に書きます（resumeではそのfileを使うので、基準は最初の開始時のまま）。agentが終わるたび、および`until`が通った後に取り直し、基準と違うpathがあれば不合格（`kind: 'unchanged'`）として`until`の失敗と同じ経路に乗せます: 変わったpathをpromptの「Previous attempt」に入れて再試行し、同じpathが続けば同一失敗で停止。HEADとの差ではなく開始時との差なので、先のstepが変えたfileを後のstepで固定できます。gitignoreされたfileは`git status`に出ないので比べません。file単位の検査で、`writable`に残したfileの中の変更（新しいtestの`skip`、`package.json`の`scripts`）は見えません。
 
-`for_each`: step開始時にkitが`runs/<id>/notes/<from>`を読み、`parseItems`で対象にします（1行1件。空行・`#`行・先頭の`- ` / `* `を除き、重複は1件）。1件は`^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$`で`..`のsegmentを含まないこと。合わない行、`max_items`超過、fileが無い、のどれかならagentを起動せず停止します（対象はcommandのargvに1要素として入るので、optionに見える文字列や上のdirectoryを指す文字列を通さない。shellが無いことと合わせて注入の経路を作らない）。対象ごとに`forItem`が`prompt`・`until.commands`（textとargvの各要素）・`until.prompt`の`{item}`を置き換えたstepを作り、`runWork`を直列に呼びます。guardに渡すstep idは対象によらず`<id>`（`writable` / `unchanged`はstepのもの）。promptには「Your target: <item> (k of n)」を足し、他の対象の報告は渡しません。1件が不合格ならそこで停止（`step <id>: target <item>: …`）。`run.json`のstepは`items: [{item, ok, attempts, result?, review?, log?, report?}]`を持ち、1件終わるたびに保存します。file名のtagは`<step>.t<k>`（`logs/<step>.t<k>.<attempt>.<n>.log`、`reports/<step>.t<k>.md`）。全件が通ると、件ごとの結果と報告の冒頭300文字をまとめた1つの報告を`reports/<step>.md`に書き、後のstepに渡します。`--resume`は一覧を読み直し、前回`ok`だった対象（名前で照合）を飛ばします。並列実行と「失敗しても残りを続ける」はありません。
+`for_each`: step開始時にkitが`runs/<id>/notes/<from>`を読み、`parseItems`で対象にします（1行1件。空行・`#`行・先頭の`- ` / `* `を除き、重複は1件）。1件は`^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$`で`..`のsegmentを含まないこと。合わない行、`max_items`超過、fileが無い、のどれかならagentを起動せず停止します（対象はcommandのargvに1要素として入るので、optionに見える文字列や上のdirectoryを指す文字列を通さない。shellが無いことと合わせて注入の経路を作らない）。対象ごとに`forItem`が`prompt`・`until.commands`（textとargvの各要素）・`until.prompt`の`{item}`を置き換えたstepを作り、`runWork`を直列に呼びます。guardに渡すstep idは対象によらず`<id>`（`writable` / `unchanged`はstepのもの）。promptには「Your target: <item> (k of n)」を足し、他の対象の報告は渡しません。1件が不合格なら、`on_failure: stop`ではそこで停止（`step <id>: target <item>: …`）。`continue`では、件の開始時に`snapshotWritable`（stepの`writable`の中でHEADと違うfileの内容）を取っておき、失敗したら`restoreWritable`でその状態に戻し（snapshotにあるfileはその内容に、無いfileはHEADへ`git checkout`、HEADに無ければ削除。内容が同じfileは触らない）、`items[]`に`failed: true, reason`を残して次の件へ進む。agentの起動失敗（toolの異常終了・timeout）も件の失敗として扱うが、費用・時間の上限（`startAgent`の`limit: true`）は`continue`でも停止。全件が失敗したらstepは不合格。`run.json`のstepは`items: [{item, ok, attempts, result?, review?, log?, report?}]`を持ち、1件終わるたびに保存します。file名のtagは`<step>.t<k>`（`logs/<step>.t<k>.<attempt>.<n>.log`、`reports/<step>.t<k>.md`）。全件が通ると、件ごとの結果と報告の冒頭300文字をまとめた1つの報告を`reports/<step>.md`に書き、後のstepに渡します。`--resume`は一覧を読み直し、前回`ok`だった対象（名前で照合）を飛ばします。並列実行はありません。後のstepへの報告は`itemsReport`（件数、失敗した件と理由、50件以下なら件ごとの報告の冒頭）で、PR本文には「Targets left out」（20件まで）を足す。`--resume`は`ok`と`failed`の件を飛ばす。
 
 run directory（`runs/<id>/`、gitignore）は起動直後に作り、実行しながら書きます（終了時にまとめて書くと、中断した実行の記録が残らず、再開もできないため）。
 
@@ -522,7 +525,24 @@ run directory（`runs/<id>/`、gitignore）は起動直後に作り、実行し�
 
 `--resume <run id|last>`（`findRun`）: `run.json`が`done: false`で、`hash`が今の`workflow.yaml`と同じで、`branch`があれば今そのbranchに居るときだけ続けます。承認判定は通常どおり行います。`ok`のstepは実行せず結果をそのまま引き継ぎ、agent stepなら`reports/`から報告を読み戻して`earlier`に積みます。最初の未完了stepは1回目の試行からやり直し（toolの会話は引き継がない）、agent stepならpromptの「This run was resumed」に前回の`stopReason`を入れます。clean treeは要求しません（完了済みstepの変更が作業treeにあるのが正しい状態）。`limits.max_minutes`と`cost.max_usd`はその起動で数え直します（上限で止まった実行を続けられるようにするため。続けるのは人の判断）。`run.json`の`agentRuns` / `costUsd`は合計です。pull-request stepがcommit後のpushで止まっていた場合は、記録の`sha`が今のHEADと同じならcommitを作り直さずpushから続けます。
 
-安全弁: `limits.max_minutes`（≤60）、`max_retries`（≤10）、`cost.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0）、同一失敗検知、shellなしcommand、実行中stepの`writable`のみ書込可（hookが強制）、agentのfrontmatterにあるtool / MCP serverだけ（claudeは起動flagとhookの2段）。tokenは計測しません。
+### `--log <file>`
+
+`run workflow --log <file>`は`openFullLog`で`file`を空にして開き、実行しながら追記します: 先頭（workflow、run id、承認ref、上限、記録の場所、task）、`log()`の全行、agentのprogress event（`progressReporter({write, maxChars: Infinity})`。行頭に`<stepId> [<item>] #<attempt>`）、各agent・確認役の最終報告（`----- final report of … -----`）、commandの出力全文（`logs/`のfileを読み、無ければmemoryの末尾）、終了時に`runSummary(record)`。`runs/<id>/`の記録とは独立で、既定では書きません。
+
+### 費用の見積もり（`cli/lib/estimate.js`）
+
+`aidev estimate workflow`と`run --dry-run`の`cost`行が使います。費用 = Σ(agentの起動回数 × 1回の費用)として、agent stepごとに幅を出します。
+
+| 量 | 楽観 | 悲観 |
+| --- | --- | --- |
+| 試行 | 1 | `max_retries + 1`（`--ai`なら推定器の`attempts.high`を`[1, max_retries+1]`に丸めたもの） |
+| 対象（`for_each`） | 推定器の`items.low` > 過去の実行の最小件数 > 1 | 推定器の`items.high` > 過去の最大件数 > `max_items`（いずれも`max_items`で頭打ち） |
+| 1試行の起動 | agent 1回（`until.agent`があれば+確認役1回） | 同じ（確認役は毎試行起動すると仮定） |
+| 1回の費用 | 下端 | 上端 |
+
+1回の費用（`perStartCost`）は、同じworkflow・同じstep・同じrole（`agent` / `until`）の`calls` → 同じagent・同じroleの`calls`（全workflow）→ size classの既定（`SIZE_USD`: S 0.05–0.3、M 0.3–1、L 1–3、XL 3–8。stepはM、確認役はS、`--ai`なら推定器の`size` / `checkSize`）の順。記録が3件未満なら`[min×0.5, max×2]`に広げる。悲観と`worstCase`（全再試行・`max_items`）は、全agentがclaude（費用を報告する）なら`cost.max_usd + 最大の1回の上端`で頭打ち（runnerは報告費用が上限に達すると次を起動しないが、実行中の1回は止めない）。`uncapped`は頭打ち前の値。推定器（`cli/agents/cost-estimator.md`）は金額を出さず、size・試行・件数だけをJSONで返す。金額をLLMに推測させず、PKGの記録で校正できるようにするため。runnerはagentの起動ごとに`run.json`の`calls`へ`{step, role, agent, item?, attempt, tool, model, ok, costUsd, durationMs}`を積む（resumeでは前回分を引き継ぐ）。
+
+安全弁: `limits.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0なので、そのときは`limits.max_minutes`か`--max-minutes`が必須）、`max_retries`（≤10）、`max_items`（≤10000）、`timeout_minutes`（≤240。hangを止める）、任意の`limits.max_minutes`（天井なし。D20）、同一失敗検知、shellなしcommand、実行中stepの`writable`のみ書込可（hookが強制）、agentのfrontmatterにあるtool / MCP serverだけ（claudeは起動flagとhookの2段）。tokenは計測しません。
 
 ### 同梱しないもの
 
@@ -579,5 +599,5 @@ CLI起動agent（aidev sync wiki, aidev run workflow）:
 - publish（worktree、`aidev/wiki-<sha12>`、PR）: `cli/commands/knowledge.js`（`publish`）、`cli/lib/ado.js`
 - hooks: `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json`
 - pipeline: `pipelines/azure-pipelines-check.yml`、`pipelines/azure-pipelines-wiki.yml`
-- workflow: `cli/commands/workflow.js`
+- workflow: `cli/commands/workflow.js`（`modify.js` / `estimate.js`は薄いwrapper）、`cli/lib/workflow.js`、`cli/lib/estimate.js`、`cli/agents/cost-estimator.md`
 - update: `cli/commands/update.js`、`cli/bin/aidev.js`

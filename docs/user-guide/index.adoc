@@ -48,6 +48,8 @@ include::chapters/08-daily.adoc[]
 
 include::chapters/09-configuration.adoc[]
 
+include::chapters/11-workflow-reference.adoc[]
+
 include::chapters/10-troubleshooting.adoc[]
 
 include::chapters/cli/index.adoc[]
