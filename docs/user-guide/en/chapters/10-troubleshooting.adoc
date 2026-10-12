@@ -250,7 +250,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 `agent <name> uses MCP (…) but .mcp.json does not exist in this PKG`
 |A server in the agent's `mcp` is not in the PKG's `.mcp.json` (or there is no `.mcp.json`). Register the server in `.mcp.json`, or fix the agent's `mcp`.
 
-|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |An agent with `tools` or `mcp` starts only on Claude Code. Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
 
 |`the working tree has uncommitted changes; commit or stash them first`
@@ -296,6 +296,9 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 
 |`✗ the ADK checkout has diverged from origin/main`
 |The ADK clone has local commits. If they can be dropped, run `git reset --hard origin/main` there.
+
+|A workflow is refused with `cost is not a workflow key`, `timeout_ms is timeout_minutes now`, `max_retries is written inside until now` or `a pull-request step is written as pull_request: …`
+|It is written for ADK 2.0.0. Rewrite it with `scripts/convert-workflow-v2.ps1` (xref:maintain-workflow-v2[Rewriting a 2.0.0 workflow.yaml]).
 |===
 
 [[troubleshooting-windows]]

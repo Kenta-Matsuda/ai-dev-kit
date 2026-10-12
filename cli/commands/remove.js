@@ -31,7 +31,8 @@ function referencing(repoRoot, installRoot, kind, name) {
       continue;
     }
     const lists = def.agents.map((a) => wfMod.resolveAgent(repoRoot, installRoot, a))
-      .filter((a) => a && a.capabilities).map((a) => a.capabilities.skills);
+      .filter((a) => a && a.capabilities).map((a) => a.capabilities.skills)
+      .concat(Object.values(def.grants).map((g) => g.skills));
     if (lists.some((l) => l.includes(name))) out.push(wf);
   }
   return out;

@@ -599,7 +599,7 @@ Messages when it stops, and what to do. The exit code is 1.
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |A server in the agent's `mcp` is not in the PKG's `.mcp.json`. Register the server in `.mcp.json` (a person does this). Nothing has started.
 
-|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |An agent with `tools` or `mcp` does not start on an AI tool that cannot be limited (Copilot CLI and so on). Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
 
 |`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
@@ -764,6 +764,16 @@ model: inherit
 * An agent with `tools` or `mcp` runs only on Claude Code, because Copilot CLI and the others cannot limit the tools they are given.
 * Do not give `Bash` to an agent that touches an external system. With `Bash` it can reach outside without going through MCP, and limiting `mcp` means nothing. Tests are run by the ADK through `until`, not by the agent.
 * Give work with different permissions to different agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance).
+
+To add a skill or an MCP server in one workflow only, write it in that workflow.yaml's `agents:` rather than the agent's frontmatter. `skills` and `mcp` are added to the frontmatter's; `tools` is used instead of the frontmatter's (xref:workflow-reference-agents[agents]).
+
+[source,yaml]
+----
+agents:
+  ticket-reader:
+    skills: [ticket-format]
+    mcp: [azure-devops]
+----
 
 List them with `aidev list agents` / `aidev list skills`, and remove them with `aidev remove agent|skill <name>` (one referenced by a workflow is refused). All of them go into the PR together with the workflow through `aidev submit workflow`, are reviewed there, and only what is on `main` is used by a workflow.
 

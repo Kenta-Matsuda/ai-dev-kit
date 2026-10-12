@@ -25,7 +25,7 @@ model: inherit
 - **workflow.yaml に書くもの = 制約**：ステップの順番、各ステップの agent、そのステップが書けるパス（`writable`）、終了条件、上限
 - **agent の frontmatter に書くもの = 能力**：その agent が使える skill（`skills`）、組み込みツール（`tools`）、MCP server（`mcp`）
 
-同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（例：`ticket-reader` と `ticket-updater`）。workflow 側で agent の能力を上書きする項目はありません。
+同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（例：`ticket-reader` と `ticket-updater`）。ある workflow でだけ skill や MCP server を足したいときは、workflow.yaml のトップレベルの `agents:` に書けます（`skills` と `mcp` は frontmatter のものに足され、`tools` は書くと frontmatter のものの代わりに使われる）。ステップごとに能力を変える項目はありません。
 
 ## workflow.yaml の書き方
 
@@ -38,6 +38,11 @@ objective: |                           # 必須。全 agent step に渡る目的
   ...
 tool: claude                           # 任意。aidev.yaml の tools.default にあるもの
 model: sonnet                          # 任意。"" で model フラグを渡さない
+agents:                                # 任意。この workflow でだけ agent に足す能力（steps が使う agent だけ書ける）
+  my-agent:
+    skills: [test-and-verify]          #   frontmatter の skills に足す
+    mcp: [tickets]                     #   frontmatter の mcp に足す
+    # tools: [Read, Grep]              #   書くと frontmatter の tools の代わりに使う
 steps:                                 # 上から順に実行する
   - id: analyze                        # ^[a-z0-9][a-z0-9-]{0,31}$
     description: <レビュアー向けの説明>  # 任意。PR 本文と --dry-run に出る

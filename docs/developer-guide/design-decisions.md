@@ -165,7 +165,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 ### D18: 能力はagentのfrontmatter、制約はworkflowのstepに置き、Claude Codeでは起動flagとhookの2段で強制する
 
-**判断**: agentが使えるもの（`skills`・`tools`・`mcp`）は`.aidev/agents/<name>.md`のfrontmatterに書き、workflowにはstepごとの制約（`agent`・`writable`・`until`など）だけを書きます。workflowのtop-levelの`scope` / `agents` / `skills`は削除し、表にないkeyはerrorにしました。workflowがagentの能力を上書き・拡張するkeyはありません。権限が違う仕事は別のagentにします（読むだけの`ticket-reader`と更新する`ticket-updater`など）。強制はClaude Codeで2段です: runnerがagent stepごとに`--mcp-config <agentのserverだけの一時file（repo外、step後に削除）> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--tools <list>`で起動し（`mcp`の無いagentにはserverを渡さない）、guard-write（matcherに`mcp__.*`を追加）がworkflow step内で許されていないtool / MCP toolをdenyします。能力を絞れないtool（Copilot CLI、Codex、Kiro。adapterに`capabilities`が無い）では、`tools`か`mcp`を持つagentを起動前に拒否します。stepは毎回新しいprocessなので、先に完了したagent stepの最終報告を後のstepのpromptに入れます。
+**判断**: agentが使えるもの（`skills`・`tools`・`mcp`）は`.aidev/agents/<name>.md`のfrontmatterに書き、workflowにはstepごとの制約（`agent`・`writable`・`until`など）だけを書きます。workflowのtop-levelの`scope` / `agents` / `skills`は削除し、表にないkeyはerrorにしました。workflowがagentの能力を上書き・拡張するkeyはありません（→ D24でworkflowの`agents:`による追加を採用）。権限が違う仕事は別のagentにします（読むだけの`ticket-reader`と更新する`ticket-updater`など）。強制はClaude Codeで2段です: runnerがagent stepごとに`--mcp-config <agentのserverだけの一時file（repo外、step後に削除）> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--tools <list>`で起動し（`mcp`の無いagentにはserverを渡さない）、guard-write（matcherに`mcp__.*`を追加）がworkflow step内で許されていないtool / MCP toolをdenyします。能力を絞れないtool（Copilot CLI、Codex、Kiro。adapterに`capabilities`が無い）では、`tools`か`mcp`を持つagentを起動前に拒否します。stepは毎回新しいprocessなので、先に完了したagent stepの最終報告を後のstepのpromptに入れます。
 
 **理由**: 能力はagentの性質で、同じagentをどのworkflowで使っても同じ権限であるべきだからです。workflowで上書きできると、reviewerはagentのfileを読んでも実際の権限が分からず、workflowごとに組み合わせを確かめる必要が出ます。制約（どこに書くか、いつ終わるか）は仕事ごとに違うのでstepに置きます。起動flagだけではtool側の挙動変更に弱く、hookだけでは存在するtoolをAIが試す余地が残るので、2段にします（flagは`claude` 2.1.280で確認）。hookはworkflow外のMCP呼び出しには答えず、利用者に代わって承認しません。強制できないtoolで黙って起動すると、frontmatterに書いた制限が守られていると誤解させるので拒否します。
 
@@ -212,6 +212,14 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 **理由**: reviewerと責任者はYAMLの`until` / `for_each` / retryの組み合わせを頭で組み立てていました。図にすると流れとloopが一目で分かります。検証と書込をserver（CLIと同じcode）に置けば、pageは表示と入力だけになり、別の検証規則が生まれません。承認は`origin`との一致なので、保存を承認と混同させないことが重要です。
 
 **却下した代替案**: 静的HTMLを書き出して見るだけにする案（直せない）。agentやskillもpageから編集する案（共有agentの変更は他のworkflowに波及する。`modify` / 手編集に残す）。`aidev submit`をpageのボタンにする案（pushと PR作成は外向きの操作で、terminalで明示的に行う）。外部のCDNのgraph libraryを使う案（offlineで動かず、CSPを広げる）。
+
+### D24: workflowはtop-levelの`agents:`でagentに能力を足せる
+
+**判断**: workflow.yamlのtop-levelに`agents: { <agent>: { skills, mcp, tools } }`を書けます。keyはstep（`agent:` / `until.agent:`）が使うagentの名前だけです。`skills`と`mcp`はfrontmatterのものに足し、`tools`は書けばfrontmatterの`tools`を置き換えます。合わせた能力はfrontmatterの能力と同じ経路（promptへのskill差込、claudeの起動flag、guard-write）で強制し、`--dry-run`とsubmitのPR本文のstep一覧は合わせた後の能力を出します。stepごとの`skills` / `mcp` / `tools`は引き続き書けません（移動先をmessageで示す）。D18の「workflowで上書き・拡張しない」をこの範囲で改めます（2026-10-12）。
+
+**理由**: 同じagentを、あるworkflowでだけ特定のMCP server（Azure DevOps）やskill（そのworkflow固有の手順書）付きで使いたい場面があり、frontmatterに足すとそのagentを使う全workflowに能力が広がります。workflowごとにagentを複製すると、本文の重複と修正漏れが増えます。D18が懸念した「reviewerがagentのfileだけでは実際の権限を読めない」点は、workflow.yamlが承認の対象（PRの差分に入る）であることと、submitのPR本文・`--dry-run`が各stepの実際の能力を出すことで補います。`tools`だけ置き換えにするのは、frontmatterが`tools`を書かない（既定の全部）agentに足すと何も変わらず、workflowで絞る手段にならないためです。
+
+**却下した代替案**: stepごとの`skills` / `mcp` / `tools`（同じagentがstepで権限を変え、guardとreviewの単位がagentからstepに増える。権限が違うなら別agent、のままにする）。`tools`も和集合にする案（上記。既定の全部を持つagentを絞れない）。workflowが能力を減らす`deny`の類（frontmatterとworkflowの両方を読まないと結果が分からない。`tools`の置き換えで足りる）。
 
 ## 未決の論点
 

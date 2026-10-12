@@ -250,7 +250,7 @@
 `agent <name> uses MCP (…) but .mcp.json does not exist in this PKG`
 |agent の `mcp` にある server が、PKG の `.mcp.json` にありません（または `.mcp.json` がありません）。`.mcp.json` に server を登録するか、agent の `mcp` を直します。
 
-|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |`tools` や `mcp` を書いた agent は Claude Code でしか起動しません。`aidev.yaml` の `tools.agent`（または workflow の `tool`）を `claude` にします。
 
 |`the working tree has uncommitted changes; commit or stash them first`
@@ -296,6 +296,9 @@
 
 |`✗ the ADK checkout has diverged from origin/main`
 |ADK の clone にローカルコミットがあります。捨ててよければ `git reset --hard origin/main`。
+
+|workflow が `cost is not a workflow key`、`timeout_ms is timeout_minutes now`、`max_retries is written inside until now`、`a pull-request step is written as pull_request: …` で拒否される
+|ADK 2.0.0 の書き方です。`scripts/convert-workflow-v2.ps1` で書き換えます（xref:maintain-workflow-v2[2.0.0 の workflow.yaml の書き換え]）。
 |===
 
 [[troubleshooting-windows]]

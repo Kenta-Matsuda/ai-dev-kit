@@ -19,7 +19,8 @@
  * and the write guard checks it again on every write (lib/policy.js rule 6),
  * with the running step's `writable` as the only source of PKG write access.
  * Each agent step's tool is started with only the tools and MCP servers its
- * agent's frontmatter grants, and the guard refuses any other tool call.
+ * agent's frontmatter grants (plus what the workflow's `agents:` assigns to
+ * it), and the guard refuses any other tool call.
  *
  * Safety valves are mandatory, not defaults to taste: a time ceiling, a
  * bounded retry count per step, a required USD budget, a same-failure stop,
@@ -88,9 +89,17 @@ objective: |
 # tool: claude
 # model: sonnet
 
+# Optional: what this workflow adds to the agents its steps name, on top of each agent's
+# frontmatter. skills and mcp are added to the frontmatter's; tools, when given, replaces it.
+# agents:
+#   my-agent:
+#     skills: [test-and-verify]
+#     mcp: [tickets]             # keys of this PKG's .mcp.json
+#     tools: [Read, Grep, Edit]
+
 # The steps run top to bottom. Each agent step names:
 #   agent     who does it: .aidev/agents/<name>.md in this PKG (aidev create agent <name>),
-#             then the kit's. The agent's frontmatter says what it can use (skills, tools, mcp).
+#             then the kit's. Its frontmatter (and agents: above) says what it can use.
 #   writable  what this step may change. Everything else stays read-only; [] changes nothing.
 #             Protected paths (.claude/**, .aidev/policy.yaml, …) cannot be listed.
 # The final report of each agent step is handed to the agent steps after it; a step can also
@@ -167,7 +176,7 @@ function catalogue(repoRoot, installRoot) {
   try { pkgSkills = fs.readdirSync(layout.abs(repoRoot, layout.SKILLS_REL), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { pkgSkills = []; }
   for (const s of pkgSkills) lines.push(`- ${s} (this PKG)`);
   lines.push('', '## The schema (a template; only these keys exist)', '', '```yaml', TEMPLATE_YAML('example').trim(), '```');
-  lines.push('', '## What an agent can use: its frontmatter (not the workflow)', '', '```markdown', AGENT_FRONTMATTER_EXAMPLE, '```');
+  lines.push('', '## What an agent can use: its frontmatter, plus what the workflow\'s agents: adds for that workflow', '', '```markdown', AGENT_FRONTMATTER_EXAMPLE, '```');
   return lines.join('\n');
 }
 
@@ -887,7 +896,7 @@ function launchPlan(repoRoot, config, def, deps) {
     const enforce = !!toolsMod.getTool(tool).capabilities;
     let mcpServers = {};
     if (!enforce && (cap.tools || cap.mcp.length)) {
-      problems.push(`agent ${a} lists ${cap.tools ? 'tools' : 'mcp'} in its frontmatter, and ${toolsMod.getTool(tool).label} cannot be limited to them; run it with claude`);
+      problems.push(`agent ${a} is given ${cap.tools ? 'tools' : 'mcp'} (in its frontmatter or the workflow's agents:), and ${toolsMod.getTool(tool).label} cannot be limited to them; run it with claude`);
     }
     try { mcpServers = wfMod.mcpServersFor(repoRoot, agent); } catch (e) { problems.push(e.message); }
     launch[a] = { tool, model, enforce, mcpServers };

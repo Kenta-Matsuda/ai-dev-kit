@@ -11,7 +11,7 @@ workflow と、それが使う agent・skill の書き方を、項目ごとに�
 |ファイル |書くもの |誰が参照するか
 
 |`.aidev/workflows/<name>/workflow.yaml`
-|ステップの順番と、各ステップの制約（書ける場所、終わりの判定、上限）
+|ステップの順番と、各ステップの制約（書ける場所、終わりの判定、上限）。この workflow で agent に足す能力（`agents:`）
 |`aidev run workflow <name>`
 
 |`.aidev/agents/<name>.md`
@@ -20,7 +20,7 @@ workflow と、それが使う agent・skill の書き方を、項目ごとに�
 
 |`.aidev/skills/<name>/SKILL.md`
 |手順書
-|agent の frontmatter の `skills:`
+|agent の frontmatter の `skills:`、workflow の `agents.<agent>.skills`
 |===
 
 .workflow はステップで agent を名前で参照し、agent は skill を名前で参照する
@@ -31,6 +31,8 @@ flowchart LR
   W -- "steps[].until.agent" --> R["agents/#60;checker#62;.md"]
   A -- "frontmatter skills" --> S["skills/#60;name#62;/SKILL.md"]
   A -- "frontmatter mcp" --> M[".mcp.json の server"]
+  W -- "agents.#60;name#62;.skills" --> S
+  W -- "agents.#60;name#62;.mcp" --> M
 ----
 
 agent と skill は、PKG の `.aidev/` を先に探し、無ければ ADK 同梱のものを使います。同名なら PKG のものが優先です。
@@ -48,6 +50,11 @@ objective: |                       # 必須
   Add Playwright tests for the screens named in the task.
 tool: claude                       # 任意
 model: sonnet                      # 任意
+agents:                            # 任意。この workflow で agent に足す能力
+  e2e-writer:
+    skills: [test-and-verify]      # frontmatter の skills に足す
+    mcp: [playwright]              # frontmatter の mcp に足す
+    tools: [Read, Grep, Edit]      # frontmatter の tools の代わりに使う
 
 steps:                             # 必須。上から順に実行する
   - id: plan                       # agent step
@@ -118,6 +125,11 @@ limits:
 |任意
 |モデル名（`sonnet` など）。`""` を書くとモデルを指定せず、AI ツールの既定に任せます。省略すると `aidev.yaml` の `tools.agents.<agent>.model`、`tools.agent_model` の順に決まります。英数字と `. _ - : / @ [ ]`、200 文字まで。
 
+|`agents`
+|mapping
+|任意
+|この workflow で agent に足す能力。キーは steps（`agent:` か `until.agent:`）で使う agent の名前です（xref:workflow-reference-agents[agents]）。
+
 |`steps`
 |list
 |必須
@@ -128,6 +140,50 @@ limits:
 |必須
 |実行を止める条件。`max_usd`（必須）と `max_minutes`（任意）だけを持ちます（xref:workflow-reference-limits[limits]）。
 |===
+
+[[workflow-reference-agents]]
+=== agents
+
+agent が使える skill・MCP server・組み込みツールは、ふつう agent の frontmatter に書きます（xref:workflow-reference-agent[agent 定義]）。`agents:` は、**この workflow で使うときだけ** 足したいものを workflow.yaml に書く場所です。同じ agent を、別の workflow では別の能力で使えます。
+
+[source,yaml]
+----
+agents:
+  ticket-reader:
+    skills: [ticket-format]        # frontmatter の skills に足す
+    mcp: [azure-devops]            # frontmatter の mcp に足す
+  test-writer:
+    tools: [Read, Grep, Glob, Edit, Write]   # frontmatter の tools の代わりに使う
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`agents.<agent>`
+|mapping
+|任意
+|`<agent>` は steps の `agent:` か `until.agent:` が使う agent の名前です。どのステップも使わない名前は、検証で拒否されます（`no step names agent …`）。持てるのは `skills`・`mcp`・`tools` だけです。
+
+|`agents.<agent>.skills`
+|list
+|任意
+|frontmatter の `skills` に **足す** skill。PKG、ADK 同梱の順に探し、どちらにも無ければ検証で止まります（`<workflow.yaml>: agents.<agent>: skill … is neither in …`）。
+
+|`agents.<agent>.mcp`
+|list
+|任意
+|frontmatter の `mcp` に **足す** MCP server（PKG の `.mcp.json` のキー）。`.mcp.json` に無い名前があると、workflow は起動前に止まります。
+
+|`agents.<agent>.tools`
+|list
+|任意
+|この workflow で使える組み込みツール。書くと frontmatter の `tools` の **代わりに** これを使います（足すのではありません）。省略すると frontmatter の `tools` に従います。空の list は書けません。
+|===
+
+* 足した能力も frontmatter の能力と同じに扱われます。Claude Code はそれだけを渡して起動し、hook もそれ以外のツールを拒否します。`tools` か `mcp` を持つ agent は Claude Code でだけ動きます。
+* workflow.yaml は承認の対象なので、`agents:` を変えると workflow は承認前に戻ります。`aidev submit workflow` で PR にし、レビューを受けます。
+* ステップに `skills`・`mcp`・`tools` は書けません（`a step does not carry …`）。ステップごとに能力を変えたいときは、別の agent にします。
 
 [[workflow-reference-agent-step]]
 === agent step
@@ -378,7 +434,7 @@ model: inherit
 |`skills`
 |list（`[a, b]` か `a, b`）
 |任意
-|指示に本文を入れる skill。PKG、ADK 同梱の順に探し、どちらにも無ければ workflow は検証で止まります。
+|指示に本文を入れる skill。PKG、ADK 同梱の順に探し、どちらにも無ければ workflow は検証で止まります。workflow の `agents:` で、その workflow だけ足せます（xref:workflow-reference-agents[agents]）。
 
 |`tools`
 |list

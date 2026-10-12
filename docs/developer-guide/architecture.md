@@ -449,7 +449,7 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 
 ### 定義（`cli/lib/workflow.js`）
 
-`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。原則は「能力はagent、制約はstep」です（D18）。workflowにはstepの順番・agent・stepごとの`writable`・終了判定・上限だけを書き、agentが使えるskill / tool / MCP serverはagentのfrontmatterに書きます。`validateDefinition`が検証する項目（表にないkeyは、top level・step・`limits`のどこでもerror。旧`scope` / `agents` / `skills` / `cost` / `timeout_ms` / `kind` / stepの`title` / stepの`max_retries`には移動先をmessageで示す）:
+`.aidev/workflows/<name>/workflow.yaml`の1 fileです。実行logicはYAMLに書けません（`steps.js`、`commands` allowlist、`ctx.agent`は撤去）。原則は「能力はagent、制約はstep」です（D18）。workflowにはstepの順番・agent・stepごとの`writable`・終了判定・上限を書き、agentが使えるskill / tool / MCP serverはagentのfrontmatterに書きます。そのworkflowでだけagentに足す能力はtop-levelの`agents:`に書けます（D24）。`validateDefinition`が検証する項目（表にないkeyは、top level・step・`limits`のどこでもerror。旧`scope` / `cost` / `timeout_ms` / `kind` / stepの`title` / stepの`max_retries`、top level・stepの`skills` / `mcp` / `tools`には移動先をmessageで示す）:
 
 | 項目 | 内容 |
 | --- | --- |
@@ -457,6 +457,7 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 | `objective` | 必須。全agent stepのpromptに入る |
 | `description` | 任意 |
 | `tool` / `model` | 任意。`tool`はregistry、`model`は`assertModel` |
+| `agents` | 任意。`{ <agent>: { skills, mcp, tools } }`（`agentGrants`、正規化後は`def.grants`）。keyは`def.agents`にある名前だけ（stepも`until`も使わない名前はerror）。値はlistか1つの名前。`skills`は`assertAgentName`、`mcp`は`MCP_SERVER_RE`、`tools`は`TOOL_NAME_RE`、空の`tools`はerror。`resolveDependencies`が`mergeCapabilities`でfrontmatterと合わせる: `skills` / `mcp`は和集合、`tools`は書けばfrontmatterの`tools`を置き換える。合わせた結果が`deps.agents[n].capabilities`（frontmatterだけのものは`ownCapabilities`）で、prompt・起動flag・guard（`stepAccess`）・`--dry-run`とsubmitのstep一覧はすべてこれを使う |
 | `steps[]` | 種類はkind key（`agent` / `command` / `pull_request`）のどれを持つかで決まる（`STEP_KINDS`。ちょうど1つ。`pull_request`はkeyがあれば値が空でもよい）。agent step（`id`・`description`・`agent`・`prompt`・`writable`・`unchanged`・`for_each`・`until`・`timeout_minutes`。`agent` / `prompt` / `writable`必須）、command step（`id`・`description`・`command`・`cwd`・`env`・`timeout_minutes`・`writable`）、pull-request step（`id`・`description`・`pull_request`（mapping。`title`だけ。空・`{}`は既定title）。最大1つ。内部の`kind`は`pull-request`）。`id`は`^[a-z0-9][a-z0-9-]{0,31}$`。正規化後のstepは`max_retries`を持つ（`until.max_retries`、`until`が無ければ0） |
 | `steps[].until` | 任意。mapping（`command`・`cwd`・`env`・`timeout_minutes`・`agent`・`prompt`・`max_retries`。他のkeyと文字列はerror）。`max_retries`は0〜10で既定3（不合格のときagentを起動し直す回数。`unchanged`の不合格も同じ回数を使う。`until`の無いstepは再試行しない）。`command`は1行かlist（上から順に実行し、最初の失敗で不合格。正規化後は`until.commands[]`）。`cwd` / `env` / `timeout_minutes`は`command`があるときだけ書ける。`command`（exit 0で合格）と`agent`（`prompt`必須。最終messageの最後の`VERDICT: PASS|FAIL`行でPASSなら合格。行が無ければFAIL）のどちらか、または両方。両方ならcommandが先で、通ったときだけagentを起動。`agent`は`def.agents`に入り、解決・承認・起動前検査の対象になる |
 | `steps[].writable` | agent stepは必須（`[]`可）。そのstepのagentが書けるglob。`ALWAYS_PROTECTED`は列挙できない。command stepは任意で、hookは関与しない（kitが自分で実行するため）。pull-request stepがcommitする範囲を示すだけ。`def.writable`は全stepの和集合 |
@@ -479,7 +480,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 | `tools` | 同上 | 渡す組み込みtool。省略・空は`null`（toolの既定の全部） |
 | `mcp` | 同上 | 使えるMCP server（PKGの`.mcp.json`の`mcpServers`のkey）。省略は`[]`（無し） |
 
-書式が壊れていれば`capabilityError`を持ち、`resolveDependencies`がerrorにします。runnerはagent本文とそのagentのskill本文（`agentSkills`）を`definitionForPrompt`で1つにし、`runAgent({ definition })`でpromptの先頭に置きます（`--agent`は付けない）。名前でagentを選べないtoolでも同じ契約になります。workflow側でagentの能力を上書き・拡張するkeyはありません。権限が違うなら別agentにします。
+書式が壊れていれば`capabilityError`を持ち、`resolveDependencies`がerrorにします。runnerはagent本文とそのagentのskill本文（`agentSkills`）を`definitionForPrompt`で1つにし、`runAgent({ definition })`でpromptの先頭に置きます（`--agent`は付けない）。名前でagentを選べないtoolでも同じ契約になります。workflowの`agents:`（上の表）がそのworkflowでだけ能力を足します。stepごとに能力を変えるkeyは無く、権限が違うなら別agentにします。
 
 ### 承認 = `origin/<hosting.tracking_branch>`との一致
 
@@ -491,7 +492,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 
 - `create agent <name>` / `create skill <name>`: `.aidev/agents/<name>.md` / `.aidev/skills/<name>/SKILL.md`のtemplateを書く。agentのtemplateのfrontmatterは`name`・`description`・`skills: []`・`tools`・`mcp: []`・`model: inherit`。agentの`--describe`は`agents-creator`を起動し、書いたあとfrontmatterの`name`と`capabilityError`を検証する
 - `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧（同名はPKG優先）
-- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。stepが名指すagent、およびそのagentがfrontmatterの`skills`に挙げるskillは拒否する
+- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。stepが名指すagent、およびそのagentがfrontmatterの`skills`に挙げるskillと、workflowの`agents.<agent>.skills`が挙げるskillは拒否する
 
 - `create workflow <name>`: template YAMLを書く（agentは`my-agent`のplaceholder）。`--describe "<text>"`は`workflow-creator` agent（`tools.agent`）に、参照できるagent / skillの一覧とschemaのtemplateを添えてYAMLを書かせる。足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書く。MCPが要るときはworkflow-creatorが`.mcp.json`（PKG所有）への追加案をfinal messageに書き、人が足す。終了後に`loadDefinition` + `resolveDependencies`で検証して結果を表示する。`create policy [--approve] [--force]`は`permission.configure`（policy候補の生成と配置）
 - `submit workflow <name>`: 検証 → `aidev/workflow-<name>`へ`checkout -B` → `reviewedFiles`だけを`aidev: workflow <name>`でcommit → `push --set-upstream` → `azure-devops`ならPR作成（同じsource branchのactive PRがあれば本文更新）。`generic`は手動。`--no-push`
@@ -503,7 +504,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 
 ### runnerの動作
 
-起動前: agentごとにtool / modelを決め（`workflow.yaml` > `tools.agents.<name>` > `tools.agent`）、toolのadapterが`capabilities`を持たない（claude以外）のに`tools`か`mcp`を持つagentは`agent <name> lists tools in its frontmatter, and <tool label> cannot be limited to them; run it with claude`、`mcp`のserverが`.mcp.json`に無ければ`mcpServersFor`のerrorを集め、何も始めずにexit 1。
+起動前: agentごとにtool / modelを決め（`workflow.yaml` > `tools.agents.<name>` > `tools.agent`）、toolのadapterが`capabilities`を持たない（claude以外）のに`tools`か`mcp`を持つagentは`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool label> cannot be limited to them; run it with claude`、`mcp`のserverが`.mcp.json`に無ければ`mcpServersFor`のerrorを集め、何も始めずにexit 1。
 
 agent step: `stepPrompt`（workflow名・`objective`・task・先に完了したagent stepの最終報告（「## Reports from the earlier steps」、stepごとに末尾6000文字）・step prompt・前回の`until`失敗の出力（末尾4000文字）・Rules（そのstepの`writable`、commit禁止、報告））+ 参照文書 → `runAgent`（`env`に`AIDEV_WORKFLOW=<name>`、`AIDEV_WORKFLOW_STEP=<id>`、`AIDEV_WORKFLOW_RUN=<run id>`。claudeならagentの`mcp`のserver定義だけを`os.tmpdir()`の一時dir（repo外、mode 0600）の`mcp.json`に書いて`capabilities`で渡し、step後に削除。時間予算は`min(timeout_ms || DEFAULT_TIMEOUT_MS, 残り時間)`）。stepごとにtoolは新しいprocessで、会話は引き継がない。agentが失敗すれば停止。`until`があれば判定する（`runUntil`）: `until.commands`を順に実行し、exit 0以外が出たらそこで不合格（残りのcommandも`until.agent`も起動しない）。通れば`until.agent`を`untilPrompt`（`promptHead`（workflow名・`objective`・task・先の報告）・stepの`prompt`・今回のagentの最終報告・`git status --porcelain --untracked-files=all -- :(glob)<writable>…`・`until.prompt`・Rules（書かない、`VERDICT:`行で終える））で起動する。`env`の`AIDEV_WORKFLOW_STEP`は`<id>:until`（`untilStepId`。step idに`:`は使えないので実stepと衝突しない）で、`stepAccess`はそれに`writable: []`と`until.agent`のtools / MCPを返す。つまりguardは確認役の書込を全て拒否し、確認役のfrontmatterにあるtoolだけを許す。起動flag（`--tools` / MCP config）も`until.agent`のもの。`parseVerdict`がPASSなら完了（確認役の報告も`earlier`に`<id> (until)`として積む）。不合格ならagentを再起動（`until.max_retries`回まで）し、promptの「Previous attempt」にcommandの出力か確認役の報告（末尾4000文字）を入れる。不合格の種類・exit code・出力 / 報告（末尾2000文字）が前回と同じなら「同一失敗」で即停止。確認役の起動も`agentRuns`・`limits.max_usd`・時間予算に数える。`run.json`のstepは確認役の最後の報告を`review`に持つ。`command` step: 1回実行、exit 0以外で停止。pull-request step: `git add -A -- :(glob)<writable>…`で全stepの`writable`の和集合（`def.writable`）だけをstage、変更が無ければskip、あれば run記録（workflow hash・run id・base SHA・承認ref・task）を本文にしてcommit → push → `azure-devops`ならPR作成（本文にagent runs・費用・step一覧）。`generic`は理由を残して手動。
 

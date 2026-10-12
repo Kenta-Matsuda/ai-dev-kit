@@ -234,10 +234,10 @@ function run() {
 
   test('a key the runner would ignore is refused, and the removed ones say where they went', () => {
     throws(() => wfMod.validateDefinition({ ...GOOD, scope: { writable: ['src/**'] } }, 'wf'), /scope is not a workflow key; writable is written on each step/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, skills: ['x'] }, 'wf'), /skills is not a workflow key; an agent lists its skills in its own frontmatter/);
-    throws(() => wfMod.validateDefinition({ ...GOOD, agents: ['x'] }, 'wf'), /agents is not a workflow key/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, skills: ['x'] }, 'wf'), /skills is not a workflow key; skills belong to an agent; assign it to the agent in the top-level agents:/);
     throws(() => wfMod.validateDefinition({ ...GOOD, retries: 3 }, 'wf'), /unknown key retries/);
-    throws(() => wfMod.validateDefinition(withStep({ mcp: ['x'] }), 'wf'), /mcp does not belong to an agent step/);
+    throws(() => wfMod.validateDefinition(withStep({ mcp: ['x'] }), 'wf'), /steps\[0\]: a step does not carry MCP servers; assign it to the agent in the top-level agents:/);
+    throws(() => wfMod.validateDefinition(withStep({ skills: ['x'] }), 'wf'), /a step does not carry skills/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: {}, writable: ['src/**'] }] }, 'wf'), /writable does not belong to a pull-request step/);
     throws(() => wfMod.validateDefinition({ ...GOOD, limits: { minutes: 5 } }, 'wf'), /limits: unknown key minutes/);
   });
@@ -254,6 +254,28 @@ function run() {
     eq(['Read', 'Agent', 'Task', 'Bash', 'mcp__tickets__get', 'mcp__billing__charge', 'mcp__odd']
       .map((t) => wfMod.toolGranted(access, t)), [true, true, true, false, true, false, false], 'Task and Agent are one grant');
     eq(wfMod.toolGranted({ tools: null, mcp: [] }, 'Bash'), true, 'no tools listed: the default set');
+  });
+
+  test('a workflow\'s agents: assigns skills, MCP servers and tools to the agents its steps name', () => {
+    const def = wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { skills: ['a', 'a'], mcp: 'tickets', tools: ['Read', 'Edit'] } } }, 'wf');
+    eq(def.grants, { 'issue-to-pr': { skills: ['a'], mcp: ['tickets'], tools: ['Read', 'Edit'] } }, 'one name is a list of one; duplicates dropped');
+    eq(wfMod.validateDefinition(GOOD, 'wf').grants, {}, 'no agents: assigns nothing');
+    eq(wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': null } }, 'wf').grants['issue-to-pr'], { skills: [], mcp: [], tools: null });
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: ['x'] }, 'wf'), /agents is a mapping of agent name/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { other: { skills: ['a'] } } }, 'wf'), /agents\.other: no step names agent other/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { model: 'x' } } }, 'wf'), /agents\.issue-to-pr: unknown key model/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { mcp: ['a__b'] } } }, 'wf'), /mcp: "a__b" is not an MCP server name/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { tools: ['rm -rf'] } } }, 'wf'), /tools: "rm -rf" is not a tool name/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { tools: [] } } }, 'wf'), /tools must name at least one tool/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { skills: ['../x'] } } }, 'wf'), /agents\.issue-to-pr: skills/);
+    // An until agent is an agent the steps name, too.
+    const judged = withStep({ until: { agent: 'reviewer', prompt: 'check' } });
+    eq(Object.keys(wfMod.validateDefinition({ ...judged, agents: { reviewer: { mcp: ['tickets'] } } }, 'wf').grants), ['reviewer']);
+    // skills and mcp are added to the frontmatter's; tools replaces its list.
+    const own = { skills: ['s1'], tools: null, mcp: ['m1'] };
+    eq(wfMod.mergeCapabilities(own, { skills: ['s1', 's2'], mcp: ['m2'], tools: null }), { skills: ['s1', 's2'], tools: null, mcp: ['m1', 'm2'] });
+    eq(wfMod.mergeCapabilities({ ...own, tools: ['Read', 'Bash'] }, { skills: [], mcp: [], tools: ['Read'] }).tools, ['Read']);
+    eq(wfMod.mergeCapabilities(own, undefined), own);
   });
 
   test('an until agent writes nothing and uses its own grants; its verdict is the last VERDICT line', () => {
@@ -703,6 +725,43 @@ function run() {
         eq(lost.code, 1);
         ok(/does not register/.test(lost.out), lost.out);
         ok(!fs.existsSync(argvOut), 'nothing was started');
+      });
+
+      test('what a workflow\'s agents: assigns reaches the tool, the prompt and the guard, on top of the frontmatter', () => {
+        const mcpOut = path.join(tmp, 'mcp.json');
+        fs.rmSync(mcpOut, { force: true });
+        // `limited` (above) has skills: [test-and-verify], tools: Read, Grep, mcp: [tickets] of its own.
+        define('assigned', {
+          extra: ['agents:', '  limited:', '    skills: [code-review]', '    mcp: [billing]', '    tools: [Read, Edit]'],
+          steps: ['  - id: look', '    agent: limited', '    writable: []', '    prompt: read the ticket'],
+        });
+        reset();
+        const dry = aidev(fx.root, ['run', 'workflow', 'assigned', '--dry-run'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/skills: test-and-verify, code-review; tools: Read, Edit; mcp: tickets, billing/.test(dry.out), dry.out);
+        const r = aidev(fx.root, ['run', 'workflow', 'assigned', '--json'], { env: env({ STUB_MCP_OUT: mcpOut }) });
+        eq(r.code, 0, r.out);
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        eq(a.slice(a.indexOf('--allowedTools'), a.indexOf('--allowedTools') + 2), ['--allowedTools', 'mcp__tickets,mcp__billing']);
+        eq(a.slice(a.indexOf('--tools')), ['--tools', 'Read', 'Edit'], 'the workflow\'s tools replace the frontmatter\'s');
+        eq(Object.keys(JSON.parse(fs.readFileSync(mcpOut, 'utf8')).mcpServers), ['tickets', 'billing']);
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(/## Skill: test-and-verify/.test(prompt) && /## Skill: code-review/.test(prompt), 'both skills are inlined');
+        const def = wfMod.loadDefinition(fx.root, 'assigned');
+        const deps = wfMod.resolveDependencies(fx.root, KIT_ROOT, def);
+        const access = wfMod.stepAccess(def, deps, 'look');
+        eq([wfMod.toolGranted(access, 'mcp__billing__charge'), wfMod.toolGranted(access, 'Edit'), wfMod.toolGranted(access, 'Grep')], [true, true, false],
+          'the guard grants what the workflow assigns, and only the workflow\'s tools');
+        eq(deps.agents.limited.ownCapabilities.mcp, ['tickets'], 'the frontmatter alone is kept apart');
+
+        // A skill assigned by the workflow that exists nowhere is named against the workflow.
+        define('assigned-lost', {
+          extra: ['agents:', '  limited:', '    skills: [no-such-skill]'],
+          steps: ['  - id: look', '    agent: limited', '    writable: []', '    prompt: read'],
+        });
+        const lostDry = aidev(fx.root, ['run', 'workflow', 'assigned-lost', '--dry-run'], { env: env() });
+        eq(lostDry.code, 1, lostDry.out);
+        ok(/assigned-lost\/workflow\.yaml: agents\.limited: skill no-such-skill is neither/.test(lostDry.out), lostDry.out);
       });
 
       test('a tool that cannot be limited is never started with limits, and submit shows each step\'s grants', () => {
@@ -1226,6 +1285,69 @@ function run() {
         ok(/the agent changed nothing/.test(none.out), none.out);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+
+  suite('workflow: 2.0.0 definitions converted by scripts/convert-workflow-v2.ps1');
+  {
+    // PowerShell is not everywhere the suite runs; without it this suite says so and checks nothing.
+    const { spawnSync } = require('child_process');
+    const pwsh = ['pwsh', 'powershell'].find((b) => {
+      try { return spawnSync(b, ['-NoProfile', '-Command', 'exit 0'], { stdio: 'ignore' }).status === 0; } catch { return false; }
+    });
+    if (!pwsh) {
+      console.log('  --  skipped: no pwsh or powershell on PATH');
+    } else {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-convert-'));
+      const script = path.join(KIT_ROOT, 'scripts', 'convert-workflow-v2.ps1');
+      const convert = (...args) => spawnSync(pwsh, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args], { encoding: 'utf8' });
+      const V2 = [
+        '# kept as it is', 'name: e2e', 'objective: |', '  Add tests.', '', 'steps:',
+        '  - id: write', '    agent: coder', '    writable: [src/**]', '    prompt: go',
+        '    max_retries: 2   # short', '    timeout_ms: 90000', '    until:', '      command: npm test', '      agent: reviewer',
+        '      prompt: |', '        covered?', '',
+        '  - id: quick', '    agent: coder', '    writable: []', '    prompt: go', '    until: { command: npm test }', '    max_retries: 1',
+        '  - kind: pull-request', '    id: pr', '    title: "test: add"', '',
+        'cost:', '  max_usd: 10   # budget', '',
+      ].join('\n');
+      try {
+        test('the 2.0.0 keys are rewritten in place, comments and the rest kept, and the result validates', () => {
+          const file = path.join(tmp, 'e2e', 'workflow.yaml');
+          write(file, V2);
+          const r = convert('-Path', file);
+          eq(r.status, 0, r.stdout + r.stderr);
+          const text = fs.readFileSync(file, 'utf8');
+          ok(text.startsWith('# kept as it is\nname: e2e\n'), text);
+          ok(text.includes('    timeout_minutes: 1.5\n'), text);
+          ok(text.includes('        covered?\n      max_retries: 2   # short\n'), text);
+          ok(text.includes('    until: { command: npm test, max_retries: 1 }\n'), text);
+          ok(text.includes('  - pull_request:\n      title: "test: add"\n    id: pr\n'), text);
+          ok(text.endsWith('limits:\n  max_usd: 10   # budget\n  max_minutes: 60\n'), text);
+          const def = wfMod.parseDefinitionText(text, 'e2e');
+          eq([def.steps[0].timeout_ms, def.steps[0].max_retries, def.steps[1].max_retries, def.steps[2].title, def.limits],
+            [90000, 2, 1, 'test: add', { max_usd: 10, max_minutes: 60 }]);
+          const again = convert('-Path', file);
+          eq(again.status, 0);
+          ok(/already in the current format/.test(again.stdout), again.stdout);
+          eq(fs.readFileSync(file, 'utf8'), text, 'a second run changes nothing');
+        });
+
+        test('-WhatIf writes nothing, and a result that does not validate is not written', () => {
+          const file = path.join(tmp, 'dry', 'workflow.yaml');
+          write(file, V2.replace('name: e2e', 'name: dry'));
+          const r = convert('-Path', file, '-WhatIf', '-NoTimeLimit');
+          eq(r.status, 0, r.stdout + r.stderr);
+          eq(fs.readFileSync(file, 'utf8'), V2.replace('name: e2e', 'name: dry'));
+          ok(!/max_minutes/.test(r.stdout), '-NoTimeLimit adds no time limit');
+          const bad = path.join(tmp, 'bad', 'workflow.yaml');
+          const badText = 'name: bad\nobjective: x\ncost: { max_usd: 2 }\nsteps:\n  - id: a\n    agent: coder\n    prompt: go\n';
+          write(bad, badText);
+          const b = convert('-Path', bad);
+          eq(b.status, 1, b.stdout);
+          ok(/writable is required for an agent step/.test(b.stdout), b.stdout);
+          eq(fs.readFileSync(bad, 'utf8'), badText);
+        });
+      } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+    }
   }
 }
 

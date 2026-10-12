@@ -319,7 +319,7 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
     const k = kindOf(s);
     const out = [text1(s, 'id', 'id', 'lowercase letters, digits and dashes'), text1(s, 'description', 'description', 'for the reviewer; the agent does not see it')];
     if (k === 'agent') {
-      out.push(agentPick(s, 'agent', 'agent', 'what it can do (tools, MCP, skills) is in the agent’s own file'));
+      out.push(agentPick(s, 'agent', 'agent', 'what it can do (tools, MCP, skills) is in the agent’s own file, plus what the workflow’s top-level agents: assigns to it'));
       out.push(area(s, 'prompt', 'prompt', s.for_each ? 'write {item} where the target goes' : 'what this step asks of the agent', 'prompt'));
       out.push(globs(s, 'writable', 'writable', 'paths this step may write, one glob per line; empty writes nothing', true));
       out.push(globs(s, 'unchanged', 'unchanged', 'paths it must leave as they are, even inside writable (the tests an upgrade must not weaken)'));

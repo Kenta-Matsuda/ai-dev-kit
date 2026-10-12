@@ -599,7 +599,7 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |agent の `mcp` にある server が、PKG の `.mcp.json` にありません。`.mcp.json` に server を登録します（人が行います）。何も始まっていません。
 
-|`agent <name> lists tools in its frontmatter, and <tool> cannot be limited to them; run it with claude`
+|`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |`tools` や `mcp` を書いた agent は、制限できない AI ツール（Copilot CLI など）では起動しません。`aidev.yaml` の `tools.agent`（または workflow の `tool`）を `claude` にします。
 
 |`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
@@ -764,6 +764,16 @@ model: inherit
 * `tools` や `mcp` を書いた agent は、Claude Code でしか動きません。Copilot CLI などは、渡すツールを絞れないためです。
 * 外部システムに触る agent には `Bash` を渡さないでください。`Bash` があれば MCP を通さずに外部へ出られるので、`mcp` で絞っても意味がなくなります。テストの実行は agent ではなく、`until` で ADK が行います。
 * 権限の違う仕事は、別の agent にします（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。
+
+ある workflow でだけ skill や MCP server を足したいときは、agent の frontmatter ではなく workflow.yaml の `agents:` に書きます。`skills` と `mcp` は frontmatter のものに足され、`tools` は frontmatter のものの代わりに使われます（xref:workflow-reference-agents[agents]）。
+
+[source,yaml]
+----
+agents:
+  ticket-reader:
+    skills: [ticket-format]
+    mcp: [azure-devops]
+----
 
 一覧は `aidev list agents` / `aidev list skills`、削除は `aidev remove agent|skill <name>`（workflow から参照されているものは拒否）です。どれも `aidev submit workflow` で workflow と一緒に PR に入り、レビューされ、`main` にあるものだけが workflow から使われます。
 

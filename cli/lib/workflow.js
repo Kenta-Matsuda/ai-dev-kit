@@ -6,8 +6,10 @@
  * an objective and a list of steps; each agent step names its agent and the
  * paths that step may write (`writable`). What an agent can do — its skills,
  * its tools, its MCP servers — is the agent's own definition
- * (`.aidev/agents/<name>.md` frontmatter), not the workflow's: capabilities
- * belong to the agent, constraints to the step. All executable logic — the
+ * (`.aidev/agents/<name>.md` frontmatter), and a workflow may assign more in
+ * its top-level `agents:` (agents: { <agent>: { skills, mcp, tools } }) for
+ * the runs of that workflow only: capabilities belong to the agent, constraints
+ * to the step. All executable logic — the
  * retry loop behind `until` (a command that must exit 0 and/or an agent that
  * must answer VERDICT: PASS), command execution, commit, push, PR — lives in
  * the kit (`commands/workflow.js`), so reviewing a workflow means reading
@@ -68,7 +70,11 @@ const ENV_RUN = 'AIDEV_WORKFLOW_RUN';
 const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
-const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'steps', 'limits'];
+const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'steps', 'limits'];
+/** What a workflow's `agents: { <agent>: ... }` may assign to one agent. */
+const AGENT_GRANT_KEYS = ['skills', 'mcp', 'tools'];
+/** Where an agent's capabilities are written, for the messages that point there. */
+const GRANTS_HINT = 'assign it to the agent in the top-level agents: (agents: { <agent>: { skills: [...], mcp: [...], tools: [...] } }) or in the agent\'s own frontmatter';
 const LIMIT_KEYS = ['max_usd', 'max_minutes'];
 /**
  * A step is the kind its one kind key names: `agent:`, `command:` or
@@ -88,6 +94,9 @@ const RENAMED = {
   kind: 'a pull-request step is written as pull_request: { title: ... } now (no kind)',
   title: 'the title of a pull request is written inside it now (pull_request: { title: ... })',
   max_retries: 'max_retries is written inside until now (until: { ..., max_retries: 3 }); retries only happen when until fails',
+  skills: `a step does not carry skills; ${GRANTS_HINT}`,
+  mcp: `a step does not carry MCP servers; ${GRANTS_HINT}`,
+  tools: `a step does not carry tools; ${GRANTS_HINT}`,
 };
 
 /**
@@ -335,6 +344,72 @@ function positiveInt(v, field, source, { max, min = 1 }) {
   return n;
 }
 
+/** A list of names in a workflow's `agents:` entry: a YAML list (or one name), each passing `check`. */
+function grantList(v, field, where, check) {
+  const list = Array.isArray(v) ? v : [v];
+  const out = [];
+  for (const raw of list) {
+    const s = String(raw == null ? '' : raw).trim();
+    try { check(s); } catch (e) { throw new AidevError(`${where}: ${field}: ${e.message}`); }
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * The top-level `agents:`: what this workflow assigns to the agents its steps
+ * name, on top of each agent's own frontmatter.
+ *   skills  added to the agent's skills
+ *   mcp     added to the agent's MCP servers
+ *   tools   the built-in tools the agent may use in this workflow (replaces
+ *           the frontmatter's list; omitted: the frontmatter decides)
+ * An entry for an agent no step names is refused: it would grant nothing.
+ * Returns { <agent>: { skills, mcp, tools } } ({} when there is no agents:).
+ */
+function agentGrants(v, used, source) {
+  if (v == null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new AidevError(`${source}: agents is a mapping of agent name to what it is given (agents: { <agent>: { skills: [...], mcp: [...], tools: [...] } })`);
+  }
+  const out = {};
+  for (const [name, g] of Object.entries(v)) {
+    const where = `${source}: agents.${name}`;
+    try { toolsMod.assertAgentName(name); } catch (e) { throw new AidevError(`${where}: ${e.message}`); }
+    if (!used.includes(name)) {
+      throw new AidevError(`${where}: no step names agent ${name} (agents: assigns skills, MCP servers and tools to the agents the steps use)`);
+    }
+    if (g == null) { out[name] = { skills: [], mcp: [], tools: null }; continue; }
+    if (typeof g !== 'object' || Array.isArray(g)) throw new AidevError(`${where} must be a mapping with skills, mcp and/or tools`);
+    assertKnownKeys(g, AGENT_GRANT_KEYS, where);
+    out[name] = {
+      skills: g.skills == null ? [] : grantList(g.skills, 'skills', where, (s) => toolsMod.assertAgentName(s)),
+      mcp: g.mcp == null ? [] : grantList(g.mcp, 'mcp', where, (s) => {
+        if (!MCP_SERVER_RE.test(s)) throw new Error(`${JSON.stringify(s)} is not an MCP server name (a key of ${MCP_CONFIG_REL})`);
+      }),
+      tools: g.tools == null ? null : grantList(g.tools, 'tools', where, (s) => {
+        if (!TOOL_NAME_RE.test(s)) throw new Error(`${JSON.stringify(s)} is not a tool name (Read, Grep, Bash, …)`);
+      }),
+    };
+    if (out[name].tools && out[name].tools.length === 0) {
+      throw new AidevError(`${where}: tools must name at least one tool (leave it out for the agent's own tools)`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The capabilities an agent has in one workflow: its frontmatter's, plus what
+ * the workflow's `agents:` assigns to it (see agentGrants).
+ */
+function mergeCapabilities(own, grant) {
+  if (!grant) return own;
+  return {
+    skills: [...new Set([...own.skills, ...grant.skills])],
+    tools: grant.tools ? [...grant.tools] : own.tools,
+    mcp: [...new Set([...own.mcp, ...grant.mcp])],
+  };
+}
+
 /**
  * Validate a raw definition and normalise it. Everything that reaches a
  * subprocess argument (tool, model, agent names, commands) is validated here
@@ -350,9 +425,10 @@ function validateDefinition(raw, source = 'workflow.yaml') {
 
   assertKnownKeys(raw, TOP_KEYS, source, {
     scope: 'writable is written on each step now (steps[].writable)',
-    agents: 'the agents are the ones the steps name',
     cost: 'the budget is limits.max_usd now',
-    skills: 'an agent lists its skills in its own frontmatter (.aidev/agents/<name>.md: skills: [...])',
+    skills: `skills belong to an agent; ${GRANTS_HINT}`,
+    mcp: `MCP servers belong to an agent; ${GRANTS_HINT}`,
+    tools: `tools belong to an agent; ${GRANTS_HINT}`,
   });
 
   const objective = raw.objective == null ? '' : String(raw.objective).trim();
@@ -439,6 +515,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   if (def.steps.filter((s) => s.kind === 'pull-request').length > 1) throw new AidevError(`${source}: at most one pull-request step`);
   // What the pull-request step commits: everything any step may write.
   def.writable = [...new Set(def.steps.flatMap((s) => s.writable || []))];
+  def.grants = agentGrants(raw.agents, agents, source);
 
   // The budget and the time limit, together. max_usd is required: it is what
   // stops an unattended run. max_minutes is optional: without it a run goes on
@@ -548,11 +625,16 @@ function resolveDependencies(repoRoot, installRoot, def) {
     if (!a) throw new AidevError(`agent ${n} is neither in ${layout.AGENTS_REL}/ nor bundled with the kit`);
     const where = a.rel || `the kit's ${n}.md`;
     if (a.capabilityError) throw new AidevError(`${where}: ${a.capabilityError}`);
-    agents[n] = a;
-    for (const sn of a.capabilities.skills) {
+    // From here on `capabilities` is what the agent has in this workflow;
+    // `ownCapabilities` is what its frontmatter alone says.
+    agents[n] = { ...a, ownCapabilities: a.capabilities, capabilities: mergeCapabilities(a.capabilities, (def.grants || {})[n]) };
+    for (const sn of agents[n].capabilities.skills) {
       if (skills[sn]) continue;
       const s = resolveSkill(repoRoot, installRoot, sn);
-      if (!s) throw new AidevError(`${where}: skill ${sn} is neither in ${layout.SKILLS_REL}/ nor bundled with the kit`);
+      if (!s) {
+        const from = a.capabilities.skills.includes(sn) ? where : `${defRel(def.name)}: agents.${n}`;
+        throw new AidevError(`${from}: skill ${sn} is neither in ${layout.SKILLS_REL}/ nor bundled with the kit`);
+      }
       skills[sn] = s;
     }
   }
@@ -723,6 +805,6 @@ module.exports = {
   sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, runRel, notesRel, agentRel, skillRel,
   splitCommand, parseItems, forItem, ITEM_TOKEN, validateDefinition, parseDefinitionText, loadDefinition,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
-  agentCapabilities, agentSkills, stepAccess, toolGranted, mcpServersFor,
+  agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, mcpServersFor,
   trackingRef, approvalStatus, inspect, contentHash, listWorkflows,
 };
