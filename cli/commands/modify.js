@@ -1,7 +1,8 @@
 'use strict';
 /**
  * `aidev modify workflow <name> --describe "<what to change>"` — change an
- * existing workflow in plain language. The workflow-creator agent edits the
+ * existing workflow in plain language (or `--from-run <id>`: fix what made
+ * that run fail). The workflow-creator agent edits the
  * definition in place; see `./workflow` (modifyWorkflow) for what it is told
  * and how the result is checked. Like `create`, it writes and never runs.
  */
@@ -9,11 +10,12 @@
 const { AidevError } = require('../lib/errors');
 const workflow = require('./workflow');
 
-const FLAGS = { json: 'boolean', 'dry-run': 'boolean', describe: 'string' };
+const FLAGS = { json: 'boolean', 'dry-run': 'boolean', describe: 'string', 'from-run': 'string' };
 const FLAG_HELP = {
   json: 'machine-readable output',
   'dry-run': 'show which agent would edit what; start nothing, write nothing',
   describe: 'what to change, in plain language; the workflow-creator agent edits the files',
+  'from-run': 'a run of this workflow (an id, or "last") whose failure the change must fix; its record goes to the agent, and to the pull request of "aidev submit"',
 };
 
 async function run(ctx) {

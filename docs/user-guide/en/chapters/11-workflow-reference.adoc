@@ -412,7 +412,7 @@ A step where ADK runs a command once. Anything but exit 0 stops the workflow the
 |The title of the PR and the commit. When omitted: `aidev: <description, or name>`.
 |===
 
-It commits only the changes inside the `writable` of all steps together, pushes, and opens a PR (Azure DevOps). With no change in that range it does nothing. A workflow with this step starts from a clean working tree on a new `aidev/<name>-<yyyymmddHHMM>` branch.
+Each step's changes are already committed as a checkpoint when the step passes. This step makes a last commit of what is left inside the steps' `writable` and the run record, pushes the branch (`aidev/<name>`, or `aidev/<name>-<yyyymmddHHMM>` with `--dated`) and opens a PR (Azure DevOps; a PR already open for the branch has its description updated). When the branch has no change since the base, it does nothing.
 
 [[workflow-reference-limits]]
 === limits

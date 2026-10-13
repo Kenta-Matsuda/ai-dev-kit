@@ -124,18 +124,32 @@ function readJson(file) {
 }
 
 /** The records committed in `.aidev/estimates/records/`, oldest first. */
+/**
+ * The records under this checkout and its run worktrees (a run writes its
+ * record in its worktree, and the record reaches the tracking branch with the
+ * run's pull request); one per run.
+ */
 function readRecords(repoRoot) {
-  const dir = layout.abs(repoRoot, RECORDS_REL);
-  let names = [];
-  try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { names = []; }
-  return names.map((n) => readJson(path.join(dir, n)))
-    .filter((r) => r && r.schemaVersion === 1 && r.workflow && r.runId)
-    .sort((a, b) => String(a.startedAt || a.runId).localeCompare(String(b.startedAt || b.runId)));
+  const seen = new Set();
+  const out = [];
+  for (const root of require('./runtree').runRoots(repoRoot)) {
+    const dir = layout.abs(root, RECORDS_REL);
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { names = []; }
+    for (const n of names) {
+      const r = readJson(path.join(dir, n));
+      if (!r || r.schemaVersion !== 1 || !r.workflow || !r.runId || seen.has(`${r.workflow}/${r.runId}`)) continue;
+      seen.add(`${r.workflow}/${r.runId}`);
+      out.push(r);
+    }
+  }
+  return out.sort((a, b) => String(a.startedAt || a.runId).localeCompare(String(b.startedAt || b.runId)));
 }
 
 /**
  * Everything the estimate learns from: the team's committed records, plus
- * this machine's run directories that have no record yet.
+ * this machine's run directories (in the checkout and in its run worktrees)
+ * that have no record yet.
  * Returns { calls: [{workflow, runId, step, role, agent, model, costUsd}],
  *           runs: [{workflow, runId, steps}], records }.
  */
@@ -143,13 +157,19 @@ function collectHistory(repoRoot) {
   const records = readRecords(repoRoot);
   const seen = new Set(records.map((r) => `${r.workflow}/${r.runId}`));
   const sources = records.map((r) => ({ workflow: r.workflow, runId: r.runId, steps: r.steps, calls: r.calls }));
+  // Runs work in worktrees of their own (runtree.js); older ones in the checkout.
+  const roots = require('./runtree').runRoots(repoRoot);
   for (const name of wfMod.listWorkflows(repoRoot)) {
-    let ids = [];
-    try { ids = fs.readdirSync(wfMod.runsDir(repoRoot, name)).filter((d) => wfMod.RUN_ID_RE.test(d)); } catch { ids = []; }
-    for (const id of ids) {
-      if (seen.has(`${name}/${id}`)) continue;
-      const rec = readJson(path.join(wfMod.runsDir(repoRoot, name), id, 'run.json'));
-      if (rec) sources.push({ workflow: name, runId: id, steps: rec.steps, calls: rec.calls });
+    for (const root of roots) {
+      let ids = [];
+      try { ids = fs.readdirSync(wfMod.runsDir(root, name)).filter((d) => wfMod.RUN_ID_RE.test(d)); } catch { ids = []; }
+      for (const id of ids) {
+        if (seen.has(`${name}/${id}`)) continue;
+        const rec = readJson(path.join(wfMod.runsDir(root, name), id, 'run.json'));
+        if (!rec) continue;
+        seen.add(`${name}/${id}`);
+        sources.push({ workflow: name, runId: id, steps: rec.steps, calls: rec.calls });
+      }
     }
   }
   const calls = [];
@@ -255,13 +275,27 @@ function calibrate(history) {
  * The priors the estimate reviewer wrote: { reviewedAt, reviewedThrough,
  * priors: [{agent?|kind?, role, perStart: [lo, hi] (reference model), why}] }.
  */
-function readPriors(repoRoot) {
-  const v = readJson(layout.abs(repoRoot, PRIORS_REL));
-  if (!v || v.schemaVersion !== 1 || !Array.isArray(v.priors)) return { reviewedAt: null, priors: [] };
-  return v;
+/** The newest review's priors, from this checkout or one of its run worktrees, and the root it is in. */
+function newestPriors(repoRoot) {
+  let best = null;
+  for (const root of require('./runtree').runRoots(repoRoot)) {
+    const v = readJson(layout.abs(root, PRIORS_REL));
+    if (!v || v.schemaVersion !== 1 || !Array.isArray(v.priors)) continue;
+    if (!best || String(v.reviewedAt || '') > String(best.v.reviewedAt || '')) best = { v, root };
+  }
+  return best;
 }
 
-function readNotes(repoRoot) { return cfgMod.readTextIfExists(layout.abs(repoRoot, NOTES_REL)); }
+function readPriors(repoRoot) {
+  const best = newestPriors(repoRoot);
+  return best ? best.v : { reviewedAt: null, priors: [] };
+}
+
+/** The notes that go with the newest priors. */
+function readNotes(repoRoot) {
+  const best = newestPriors(repoRoot);
+  return cfgMod.readTextIfExists(layout.abs(best ? best.root : repoRoot, NOTES_REL));
+}
 
 function findPrior(priors, { agent, kind, role }) {
   const list = (priors && priors.priors) || [];

@@ -7,7 +7,8 @@
 
 [source,text]
 ----
-aidev modify workflow <name> --describe "<直したいこと>" [--dry-run] [--json]
+aidev modify workflow <name> --describe "<直したいこと>" [--from-run <run id | last>] [--dry-run] [--json]
+aidev modify workflow <name> --from-run <run id | last> [--dry-run] [--json]
 ----
 
 === 説明
@@ -22,6 +23,10 @@ workflow-creator agent（`aidev.yaml` の `tools.agent`）に、いまの `.aide
 
 いまの YAML が検証を通らない状態でも使えます。そのときは、その誤りも直すよう伝えます。
 
+`--from-run` を付けると、その実行の記録（止まった理由、ステップごとの結果と起動回数、通らなかったステップの確認の出力・確認役の指摘・失敗した件、実行ログの末尾）を渡し、失敗の原因を取り除くように直させます。agent は最終メッセージの最初に原因を `CAUSE: …` の 1 行で書きます。`--describe` を省くと「この実行が失敗した原因を直す」が指示になります（xref:workflows-fix-from-run[止まった実行から直す]）。
+
+書き換えたときは、頼んだこと・`--from-run` の実行の要約・原因・agent の説明・変わったファイルを `.aidev/cache/modify/<name>.json` に残します。次の `aidev submit workflow <name>` が、これを PR 本文に入れます。
+
 `aidev create workflow <name> --describe "…" --force` でも上書きできますが、こちらは今の定義を見ずに、説明だけから書き直します。一部だけ直すときは `modify` を使います。
 
 === オプション
@@ -31,7 +36,10 @@ workflow-creator agent（`aidev.yaml` の `tools.agent`）に、いまの `.aide
 |オプション |説明
 
 |`--describe <text>`
-|必須。直したいことを自然言語で書く
+|直したいことを自然言語で書く。`--from-run` が無ければ必須
+
+|`--from-run <run id \| last>`
+|直す理由になった実行。その記録を agent に渡す。手元と worktree の記録から探す
 
 |`--dry-run`
 |起動する agent、AI ツール、対象のファイル、他の workflow と共有している agent を表示し、何も書かず、agent も起動しない
@@ -50,7 +58,7 @@ workflow-creator agent（`aidev.yaml` の `tools.agent`）に、いまの `.aide
 |書き換えて、検証を通った。`--dry-run`
 
 |1
-|`workflow` 以外の object、名前が無い。workflow が無い。`--describe` が無い。agent が失敗した。書き換えた結果が検証を通らない。agent が何も変えなかった
+|`workflow` 以外の object、名前が無い。workflow が無い。`--describe` も `--from-run` も無い。`--from-run` の実行が無い。agent が失敗した。書き換えた結果が検証を通らない。agent が何も変えなかった
 |===
 
 === 例

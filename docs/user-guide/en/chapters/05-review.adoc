@@ -56,6 +56,7 @@ It arrives as a commit named `aidev: workflow <name>`. **Merging is the approval
 
 ==== Reading order
 
+. **For a change, the "Why this change" and "What changed against the approved workflow" sections of the PR body** — a change made with `aidev modify` says what was asked, which run's failure it fixes (why it stopped, and the failure output as recorded) and the cause the agent found. Below come the steps and fields (`prompt`, `writable`, `until` and so on) that changed against the approved version, and the cost estimate before and after. Check that the change fits the cause and is not only more retries or higher limits.
 . **The "Steps" section of the PR body** — the steps are listed top to bottom in the order they run, each with its agent, where it may write (writes), and that agent's skills, tools and MCP servers. Get the overall picture here first.
 . **`workflow.yaml`** — read the `objective` (what the AI is asked to do), each step's `prompt` (the instruction for that step), `until` (how the end is judged) and the limits.
 . **The agent's `.md` (`.aidev/agents/`)** — check in the frontmatter at the top what the agent can use (`skills`, `tools`, `mcp`), and read in the body how it is told to behave.
@@ -136,7 +137,7 @@ If something is wrong, do not merge; write a comment on the PR. Say which step, 
 [[review-workflow-result]]
 === Workflow result pull requests
 
-It arrives from the branch `aidev/<name>-<yyyymmddHHMM>`. The PR body gives the workflow name, the run id, the starting commit and the cost, and the final report of each agent step (the plan, what was verified, what is left open).
+It arrives from the workflow's branch `aidev/<name>` (`aidev/<name>-<yyyymmddHHMM>` for a run with `--dated`). The PR body gives the workflow name, the run id, the starting commit, the cost, each step's checkpoint commit, and the final report of each agent step (the plan, what was verified, what is left open). The commits are one per step, so the diff can be read step by step. Running the same workflow again adds commits to the same PR and updates its description.
 
 * Does the diff stay inside the steps' `writable`? (Writes are limited automatically, but check.)
 * Do the tests pass? Does `aidev check` in CI pass?

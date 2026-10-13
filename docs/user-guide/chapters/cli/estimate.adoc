@@ -89,8 +89,8 @@ flowchart LR
 
 **記録。** `aidev run workflow` は終わるたびに、`.aidev/estimates/records/<workflow>-<run id>.json` を書きます。中身は、agent step ごとの見積もりの幅と実際の費用、試行回数、件数、agent の起動ごとのモデル・費用・トークン数です。プロンプト、agent の報告、コマンドの出力は入りません。記録は Git にコミットしてチームで共有します。
 
-* workflow に pull-request step があれば、その PR に記録が入ります（その実行の記録と、それまでに作業ツリーに残っていた記録）。
-* pull-request step が無い実行の記録は、作業ツリーに残ります。自分でコミットするか、次に PR を作る実行に任せます。pull-request step の前に確かめる「未コミットの変更が無いこと」は、`.aidev/estimates/` を数えません。
+* 記録は実行の worktree に書きます。workflow に pull-request step があれば、その PR に記録が入ります（その実行の記録と、それまでに worktree に残っていた記録）。
+* pull-request step が無い実行の記録は、worktree に残り、同じブランチで次に PR を作る実行が入れます。見積もりは、手元と各 worktree の記録をまとめて読みます。
 
 **1. 補正（毎回、AI なし）。** 見積もるたびに、記録から次の 2 つを計算します。
 

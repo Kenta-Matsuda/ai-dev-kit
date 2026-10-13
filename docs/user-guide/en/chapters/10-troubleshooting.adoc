@@ -265,18 +265,30 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |An agent with `tools` or `mcp` starts only on Claude Code. Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
 
-|`the working tree has uncommitted changes; commit or stash them first`
-|A workflow with a `pull_request` step runs on a clean working tree.
+|`the worktree of aidev/<name> (…) has uncommitted changes, left by a run that stopped in the middle of a step`
+|The run's worktree holds a stopped run's partial changes. Continue with `--resume last`, or throw them away with the commands shown, then run (xref:workflows-worktree[The run's worktree and branch]).
+
+|`another run (…, process N) is working in …`
+|A run is going in the same worktree. Wait for it to end.
+
+|`aidev/<name> has work that conflicts with …`
+|The branch's earlier work conflicts with the base now. Resolve it with `git merge` in the worktree, or use `--dated` for a branch of its own.
+
+|`the worktree of aidev/<name> (…) does not hold the approved workflow <name>`
+|The branch's definition differs from the approved one. Merge the approved version in the worktree, or run with `--dated`.
+
+|`npm` commands fail with `not found` or `Cannot find module` in the run's worktree
+|The worktree has nothing git ignores (`node_modules` and so on). Start the workflow with a `command: npm ci` step.
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not meet `until` (the tests do not pass, or the checking agent does not pass the work). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. If you can fix the cause by hand, fix it and continue with `aidev run workflow <name> --resume last` (xref:workflows-resume[Continuing a stopped run]). Otherwise make `--task` more specific, or ask the Engineering Manager to revise `prompt`, `until.prompt` or `until.max_retries`.
+|The agent could not meet `until` (the tests do not pass, or the checking agent does not pass the work). The finished steps are in the checkpoints on the branch `aidev/<name>`. If you can fix the cause by hand, fix it in the worktree and continue with `aidev run workflow <name> --resume last` (xref:workflows-resume[Continuing a stopped run]). When the cause is in the definition, have it fixed with `aidev modify workflow <name> --from-run last` (xref:workflows-fix-from-run[Fixing a workflow from a stopped run]).
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
 |A limit was reached. Make `--task` smaller, or ask the Engineering Manager to revise the limits (a PR to the definition).
 
-|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |Normal. Open the PR by hand from the pushed branch.
 
 |`the pull request could not be opened: …`

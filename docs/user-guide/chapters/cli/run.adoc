@@ -7,7 +7,7 @@
 
 [source,text]
 ----
-aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--dated] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
 aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
 ----
 
@@ -15,7 +15,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 
 `.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
 
-手順（`steps`）を順に実行します。`pull_request` のステップがある workflow はきれいな作業ツリーを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチで動きます。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、止まったステップから続けられます（xref:workflows-resume[止まった実行を続ける]）。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
+手順（`steps`）を順に実行します。実行は手元の作業ツリーではなく専用の git worktree（`<AIDEV_HOME>/worktrees/…`）で、workflow ごとのブランチ `aidev/<name>` の上で動きます（`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）。ステップ（`for_each` なら 1 件）が通るたびに、その `writable` の変更をチェックポイントとしてコミットします（xref:workflows-worktree[実行の worktree とブランチ]）。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら worktree の `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、その worktree の最後のチェックポイントから続けられます（xref:workflows-resume[止まった実行を続ける]）。止まった実行から定義を直すには `aidev modify workflow <name> --from-run <run id>` を使います。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
 
 === オプション
 
@@ -36,7 +36,10 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 |実行の全過程とサマリを、このファイルに書く（下の「ログファイル」）。既定では書かない
 
 |`--resume <run id \| last>`
-|止まった実行を、止まったステップから続ける。`last` は最後の実行。終わったステップはやり直さない。`--task`・`--task-file` とは併用できない（指示は最初の実行のもの）
+|止まった実行を、その worktree で、止まったステップの最後のチェックポイントから続ける。`last` は最後の実行。終わったステップはやり直さない。`--task`・`--task-file`・`--dated` とは併用できない（指示とブランチは最初の実行のもの）
+
+|`--dated`
+|workflow のブランチ `aidev/<name>` ではなく、日付付きの新しいブランチ `aidev/<name>-<yyyymmddHHMM>` と、その worktree で実行する
 
 |`--dry-run`
 |承認の状態、関係するファイル、agent と AI ツール、上限、費用の見積もり（楽観〜悲観。内訳は xref:cli-estimate[aidev estimate]）、今回の指示と、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
@@ -52,12 +55,12 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 
 * **始め**: `estimate: $0.65 – $11.00 (optimistic – pessimistic)` の行をログに出します。`aidev estimate workflow --ai` が決めた仕事の大きさが残っていれば、それを使います。`--resume` で続けた実行は、最初の実行の見積もりのままです。
 * **`for_each` の途中**: 3 件終わった時点と、その後 10 件ごとに、1 件あたりの費用と残りの件数にかかる費用の見込み、`limits.max_usd` の残りをログに出します。このままでは予算が足りないと分かった時点で、その旨を 1 回だけ出します。実行は止めません（上限に達すれば止まり、`--resume` で続けられます）。Claude Code 以外の AI ツールは費用を報告しないので、出しません。
-* **終わり**: agent を起動した実行は、見積もりと実際の費用を `.aidev/estimates/records/<name>-<run id>.json` に書きます。pull-request step がある workflow は、その PR のコミットに記録を入れます（それまで作業ツリーに残っていた記録も一緒に）。pull-request step が無ければ作業ツリーに残るので、自分でコミットするか、次に PR を作る実行に任せます。pull-request step の前に確かめる「未コミットの変更が無いこと」は、`.aidev/estimates/` を数えません。
+* **終わり**: agent を起動した実行は、見積もりと実際の費用を worktree の `.aidev/estimates/records/<name>-<run id>.json` に書きます。pull-request step がある workflow は、その PR の最後のコミットに記録を入れます。pull-request step が無ければ worktree に残り、同じブランチで次に PR を作る実行が入れます。`aidev estimate` は、手元と worktree の記録をまとめて読みます。
 * **振り返り**: 前回の振り返りの後に、見積もりの幅から外れたステップが 3 つになると、最後に estimate-reviewer agent を自動で起動し、`.aidev/estimates/priors.json` と `notes.md` を書きます（少し費用がかかります。`aidev.yaml` の `estimates.review: off` で止まります）。振り返りが失敗しても、実行の結果（終了コード）は変わりません。
 
 === ログファイル（`--log`）
 
-実行の記録は、いつも `.aidev/workflows/<name>/runs/<id>/` に分けて残ります（`run.json`、`log.txt`、報告、コマンドの出力）。`--log <file>` を付けると、それに加えて、全過程を 1 つのファイルに順番どおりに書きます。人に渡す、別の場所に保存する、といった用途です。
+実行の記録は、いつも worktree の `.aidev/workflows/<name>/runs/<id>/` に分けて残ります（`run.json`、`log.txt`、報告、コマンドの出力）。`--log <file>` を付けると、それに加えて、全過程を 1 つのファイルに順番どおりに書きます。人に渡す、別の場所に保存する、といった用途です。
 
 [%autowidth.stretch,options="header"]
 |===

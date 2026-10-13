@@ -412,7 +412,7 @@ ADK がコマンドを 1 回実行するステップです。exit 0 以外なら
 |PR とコミットのタイトル。省略すると `aidev: <description、無ければ name>`。
 |===
 
-すべてのステップの `writable` を合わせた範囲の変更だけをコミットし、push して PR を作ります（Azure DevOps）。範囲内に変更が無ければ何もしません。この step がある workflow は、きれいな作業ツリーから `aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。
+各ステップの変更は、ステップが通るたびにチェックポイントとしてコミット済みです。この step は、残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチ（`aidev/<name>`、`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）を push して PR を作ります（Azure DevOps。同じブランチの PR が開いていれば本文を更新）。ブランチに起点からの変更が無ければ何もしません。
 
 [[workflow-reference-limits]]
 === limits

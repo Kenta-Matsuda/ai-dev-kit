@@ -7,7 +7,7 @@ Runs an approved workflow (the definition that is on `origin/main`). Development
 
 [source,text]
 ----
-aidev run workflow <name> [--task "<text>" | --task-file <path>] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--dated] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
 aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
 ----
 
@@ -15,7 +15,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 
 Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
 
-Runs the steps (`steps`) in order. A workflow with a `pull_request` step needs a clean working tree and works on the branch `aidev/<name>-<yyyymmddHHMM>`. Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>` and `AIDEV_WORKFLOW_STEP=<id>`. The hook allows writes only inside that step's `writable`. Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. The final report of each earlier agent step goes into the instructions of the later agent steps. The record is written to `.aidev/workflows/<name>/runs/<id>/` as the run goes (`run.json`, `log.txt`, the reports, the command output). A run that stopped continues from the step it stopped at with `--resume` (xref:workflows-resume[Continuing a stopped run]). See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
+Runs the steps (`steps`) in order. The run does not work in your working tree but in a git worktree of its own (`<AIDEV_HOME>/worktrees/…`), on the workflow's branch `aidev/<name>` (`aidev/<name>-<yyyymmddHHMM>` with `--dated`). Each time a step (one target, for `for_each`) passes, the changes inside its `writable` are committed as a checkpoint (xref:workflows-worktree[The run's worktree and branch]). Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>` and `AIDEV_WORKFLOW_STEP=<id>`. The hook allows writes only inside that step's `writable`. Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. The final report of each earlier agent step goes into the instructions of the later agent steps. The record is written to `.aidev/workflows/<name>/runs/<id>/` in the worktree as the run goes (`run.json`, `log.txt`, the reports, the command output). A run that stopped continues in its worktree from the last checkpoint with `--resume` (xref:workflows-resume[Continuing a stopped run]). To have the definition fixed from a stopped run, use `aidev modify workflow <name> --from-run <run id>`. See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
 
 === Options
 
@@ -36,7 +36,10 @@ Runs the steps (`steps`) in order. A workflow with a `pull_request` step needs a
 |Write the whole run and a summary to this file (see "Log file" below). Nothing is written by default
 
 |`--resume <run id \| last>`
-|Continue a stopped run from the step it stopped at. `last` is the most recent run. Finished steps are not run again. Cannot be combined with `--task` or `--task-file` (the task is the one the run started with)
+|Continue a stopped run in its worktree, from the last checkpoint of the step it stopped at. `last` is the most recent run. Finished steps are not run again. Cannot be combined with `--task`, `--task-file` or `--dated` (the task and the branch are the ones the run started with)
+
+|`--dated`
+|Run on a new dated branch `aidev/<name>-<yyyymmddHHMM>` and a worktree of its own instead of the workflow's branch `aidev/<name>`
 
 |`--dry-run`
 |Show the approval state, the files involved, the agents and AI tools, the limits, a cost estimate (optimistic to pessimistic; the breakdown is xref:cli-estimate[aidev estimate]), the task, and what each step does (where it may write; the agent's skills, tools and MCP servers; `until`); start nothing. Problems that would stop the run before it starts are shown, with exit code 1
@@ -52,12 +55,12 @@ A run gives its estimate first and, when it ends, keeps it next to what it actua
 
 * **At the start**: the log shows a line `estimate: $0.65 – $11.00 (optimistic – pessimistic)`. The work sizes `aidev estimate workflow --ai` decided are used while they are kept. A run continued with `--resume` keeps the estimate of its first start.
 * **During a `for_each`**: after 3 targets, and every 10 after that, the log shows what one target cost, what the remaining targets are likely to cost, and what is left of `limits.max_usd`. As soon as the budget looks too small, it says so, once. The run does not stop for it (it stops at the budget, and `--resume` continues it). Not shown with AI tools other than Claude Code, which report no cost.
-* **At the end**: a run that started an agent writes its estimate and its actual cost to `.aidev/estimates/records/<name>-<run id>.json`. With a pull-request step the record goes into that pull request's commit (with any records left in the working tree before). Without one, it stays in the working tree: commit it yourself, or leave it to the next run that opens a pull request. The "no uncommitted changes" check before a pull-request step does not count `.aidev/estimates/`.
+* **At the end**: a run that started an agent writes its estimate and its actual cost to `.aidev/estimates/records/<name>-<run id>.json` in its worktree. With a pull-request step the record goes into that pull request's last commit. Without one, it stays in the worktree, for the next run on the same branch that opens a pull request. `aidev estimate` reads the records of the checkout and the worktrees together.
 * **Review**: once 3 steps since the last review have cost more or less than their range, the estimate-reviewer agent starts at the end and writes `.aidev/estimates/priors.json` and `notes.md` (this costs a little; `estimates.review: off` in `aidev.yaml` turns it off). A review that fails does not change the run's result (its exit code).
 
 === Log file (`--log`)
 
-A run's record is always kept, in pieces, under `.aidev/workflows/<name>/runs/<id>/` (`run.json`, `log.txt`, the reports, the command output). With `--log <file>`, the whole run is also written in order to one file, to hand to someone or keep elsewhere.
+A run's record is always kept, in pieces, under `.aidev/workflows/<name>/runs/<id>/` in its worktree (`run.json`, `log.txt`, the reports, the command output). With `--log <file>`, the whole run is also written in order to one file, to hand to someone or keep elsewhere.
 
 [%autowidth.stretch,options="header"]
 |===

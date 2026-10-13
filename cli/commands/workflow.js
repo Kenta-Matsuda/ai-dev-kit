@@ -41,6 +41,7 @@ const toolsMod = require('../lib/tools');
 const ado = require('../lib/ado');
 const estimateMod = require('../lib/estimate');
 const ui = require('../lib/ui');
+const runtree = require('../lib/runtree');
 
 const FLAGS = {
   json: 'boolean', force: 'boolean', 'dry-run': 'boolean',
@@ -105,6 +106,9 @@ objective: |
 #             Protected paths (.claude/**, .aidev/policy.yaml, …) cannot be listed.
 # The final report of each agent step is handed to the agent steps after it; a step can also
 # leave files for the later ones in the run's notes directory (its prompt says where).
+# A run works in a git worktree of its own, on the branch aidev/${name}; each step that passes
+# is committed there. What git ignores (node_modules, .env) is not in it: when the checks need
+# it, start with a command step such as "npm ci".
 steps:
   - id: analyze
     description: Survey the code and plan the change   # for the reviewer; optional
@@ -353,19 +357,119 @@ function describeSteps(def, deps) {
   }).join('\n');
 }
 
-function submitDescription(def, deps, files) {
-  const lines = [
-    `# Workflow: ${def.name}`, '', def.description || '', '',
+/**
+ * How a definition differs from the approved one, step by step, in lines for
+ * the reviewer: steps added, removed, moved or changed (and which of their
+ * keys), and the other top-level settings that changed.
+ */
+function definitionChanges(before, after) {
+  const lines = [];
+  const plain = (st) => JSON.parse(JSON.stringify(st));
+  const keyNames = { timeout_ms: 'timeout_minutes', max_retries: 'until.max_retries' };
+  const oldIds = before.steps.map((x) => x.id);
+  const newIds = after.steps.map((x) => x.id);
+  for (const st of after.steps) {
+    const was = before.steps.find((x) => x.id === st.id);
+    if (!was) { lines.push(`- step \`${st.id}\` added (${st.kind}${st.agent ? ` \`${st.agent}\`` : ''}${st.group ? `, in parallel group \`${st.group}\`` : ''})`); continue; }
+    const a = plain(was);
+    const b = plain(st);
+    const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+      .filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
+      .map((k) => keyNames[k] || k);
+    if (keys.length) lines.push(`- step \`${st.id}\` changed: ${[...new Set(keys)].map((k) => `\`${k}\``).join(', ')}`);
+  }
+  for (const id of oldIds) if (!newIds.includes(id)) lines.push(`- step \`${id}\` removed`);
+  const kept = newIds.filter((id) => oldIds.includes(id));
+  if (kept.join(',') !== oldIds.filter((id) => newIds.includes(id)).join(',')) lines.push(`- steps reordered: ${kept.map((x) => `\`${x}\``).join(' → ')}`);
+  for (const [label, get] of [
+    ['objective', (d) => d.objective], ['tool', (d) => d.tool], ['model', (d) => d.model],
+    ['limits', (d) => d.limits], ['agents: (what the workflow gives its agents)', (d) => d.grants],
+  ]) {
+    if (JSON.stringify(get(before)) !== JSON.stringify(get(after))) lines.push(`- ${label} changed`);
+  }
+  if (JSON.stringify(before.limits) !== JSON.stringify(after.limits)) {
+    const l = (x) => `$${x.max_usd}${x.max_minutes ? `, ${x.max_minutes} min` : ', no time limit'}`;
+    lines.push(`  limits: ${l(before.limits)} → ${l(after.limits)}`);
+  }
+  return lines;
+}
+
+/**
+ * The text of a workflow's pull request. Beyond the definition (objective,
+ * steps with what each agent may use, limits, files), a change to an approved
+ * workflow says what changed against it, why (what `aidev modify` was asked,
+ * the run whose failure it fixes and the cause the agent named), and what
+ * the estimate was and is.
+ * extra: { origin: { def } | null, note, estimate: { before, after }, states: { rel: state } }
+ */
+function submitDescription(def, deps, files, extra = {}) {
+  const { origin = null, note = null, estimate = null, states = {} } = extra;
+  const lines = [`# Workflow: ${def.name}`, '', def.description || '', ''];
+  if (note) {
+    lines.push('## Why this change', '');
+    lines.push(`Asked of \`aidev modify\`: ${note.describe}`, '');
+    if (note.fromRun) {
+      const r = note.fromRun;
+      lines.push(`It fixes what stopped run \`${r.runId}\`: ${r.stopReason || 'the run did not finish'}${r.agentRuns ? ` (${r.agentRuns} agent start(s)${r.costUsd != null ? `, $${r.costUsd.toFixed(2)}` : ''})` : ''}.`);
+      if (r.repeated) lines.push('The agent met the same failure again and again; the change is meant to remove its cause, not to allow more retries.');
+      if (r.excerpt) lines.push('', `The failure${r.step ? ` (step \`${r.step}\`)` : ''}, as recorded:`, '', '```text', tail(r.excerpt, 1200), '```');
+      lines.push('');
+    }
+    if (note.cause) lines.push(`**Cause, as the workflow-creator agent found it:** ${note.cause}`, '');
+    if (note.report) lines.push('<details><summary>The agent\'s account of its changes</summary>', '', tail(note.report, 2000), '', '</details>', '');
+    if (note.handEdited) lines.push('_The definition was edited further by hand after `aidev modify`._', '');
+  }
+  if (origin) {
+    const changes = definitionChanges(origin.def, def);
+    lines.push('## What changed against the approved workflow', '', ...(changes.length ? changes : ['- the definition text only (no step or setting changed)']), '');
+  }
+  if (estimate && estimate.after) {
+    const r = (e) => estimateMod.usdRange([e.optimistic, e.pessimistic]);
+    lines.push('## Estimate', '', estimate.before ? `${r(estimate.before)} before → ${r(estimate.after)} now (optimistic – pessimistic, from the recorded runs)` : `${r(estimate.after)} (optimistic – pessimistic)`, '');
+  }
+  lines.push(
     '## Objective', '', def.objective, '',
     '## Steps', '', describeSteps(def, deps), '',
     '## Agents and skills', '',
     ...Object.values(deps.agents).map((a) => `- agent \`${a.name}\` (${a.source === 'pkg' ? a.rel : 'bundled with the kit'})`),
     ...Object.values(deps.skills).map((s) => `- skill \`${s.name}\` (${s.source === 'pkg' ? s.rel : 'bundled with the kit'})`),
     '', `Limits: $${def.limits.max_usd}${def.limits.max_minutes ? `, ${def.limits.max_minutes} min` : ', no time limit'}.`, '',
-    '## Files under review', '', ...files.map((f) => `- \`${f.rel}\``), '',
+    '## Files under review', '', ...files.map((f) => `- \`${f.rel}\`${states[f.rel] === 'missing' ? ' (new)' : states[f.rel] === 'changed' ? ' (changed)' : ''}`), '',
     'Merging this pull request approves the workflow: `aidev run workflow` executes it only while these files match the tracking branch byte for byte.',
-  ];
+  );
   return lines.join('\n');
+}
+
+/** Everything submitDescription can say beyond the definition. Never throws: a part it cannot work out is left out. */
+function submitContext(repoRoot, installRoot, config, def, approval) {
+  const out = { origin: null, note: null, estimate: null, states: Object.fromEntries((approval.files || []).map((f) => [f.rel, f.state])) };
+  const text = cfgMod.readTextIfExists(wfMod.defPath(repoRoot, def.name));
+  let originText = null;
+  try { originText = gitMod.showFile(repoRoot, approval.ref, wfMod.defRel(def.name)); } catch { originText = null; }
+  if (originText != null) {
+    try { out.origin = { def: wfMod.parseDefinitionText(originText, `${approval.ref}:${wfMod.defRel(def.name)}`), hash: wfMod.contentHash(originText) }; } catch { out.origin = null; }
+  }
+  // The note of the last `aidev modify`, when it started from the approved copy (or the workflow is new).
+  const note = cfgMod.readJsonIfExists(layout.abs(repoRoot, modifyNoteRel(def.name)));
+  if (note && typeof note === 'object' && (out.origin ? note.beforeHash === out.origin.hash : true) && text != null) {
+    out.note = { ...note, handEdited: note.afterHash !== wfMod.contentHash(text) };
+  }
+  try {
+    const history = estimateMod.collectHistory(repoRoot);
+    const priors = estimateMod.readPriors(repoRoot);
+    const models = Object.fromEntries(def.agents.map((a) => [a, (def.model !== undefined ? def.model : cfgMod.agentSettings(config, a).model) || null]));
+    const est = (d) => estimateMod.estimateDefinition(d, { history, priors, models });
+    out.estimate = { after: est(def), before: out.origin ? est(out.origin.def) : null };
+  } catch { out.estimate = null; }
+  return out;
+}
+
+/** Azure DevOps takes this many characters of a description; what does not fit is cut where it hurts least. */
+function fitDescription(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.replace(/<details>[\s\S]*?<\/details>\n\n/, '');
+  if (cut.length <= max) return cut;
+  return `${cut.slice(0, max - 60)}\n\n… (cut; the whole text is in the file "aidev submit" wrote)`;
 }
 
 async function submit(ctx) {
@@ -398,6 +502,14 @@ async function submit(ctx) {
   }
 
   ui.heading(`aidev submit workflow ${name}`);
+  // The pull request text, kept as a file too: with generic hosting it is
+  // what the person pastes, and with Azure DevOps the uncut version.
+  const description = submitDescription(def, deps, files, submitContext(repoRoot, installRoot, config, def, approval));
+  const descriptionRel = `${layout.AIDEV_DIR}/cache/submit/${name}.md`;
+  try {
+    fs.mkdirSync(path.dirname(layout.abs(repoRoot, descriptionRel)), { recursive: true });
+    fs.writeFileSync(layout.abs(repoRoot, descriptionRel), `${description}\n`, 'utf8');
+  } catch (e) { ui.warn(`the pull request text could not be written to ${descriptionRel}: ${e.message}`); }
   const co = gitMod.run(['checkout', '-B', branch], { cwd: repoRoot });
   if (!co.ok) throw new AidevError(`could not create branch ${branch}: ${co.stderr}`);
   ui.ok(`on branch ${branch}`);
@@ -429,17 +541,17 @@ async function submit(ctx) {
       pr.attempted = true;
       try {
         const repo = config.hosting.repository;
-        const description = submitDescription(def, deps, files);
+        const sent = fitDescription(description, PR_DESCRIPTION_MAX);
         const open = await ado.listPullRequests(config, repo, { status: 'active', sourceBranch: branch, targetBranch: target });
         if (open.length > 0) {
-          await ado.updatePullRequestDescription(config, repo, open[0].pullRequestId, description);
+          await ado.updatePullRequestDescription(config, repo, open[0].pullRequestId, sent);
           pr = { attempted: true, ok: true, updated: true, pullRequestId: open[0].pullRequestId, url: open[0].url || null };
           ui.ok(`pull request !${pr.pullRequestId} updated`);
         } else {
           const created = await ado.createPullRequest(config, repo, {
             sourceBranch: branch, targetBranch: target,
             title: `aidev: workflow ${name}${def.description ? ` — ${def.description}` : ''}`,
-            description, reviewers: config.sync.pr.reviewers,
+            description: sent, reviewers: config.sync.pr.reviewers,
           });
           pr = { attempted: true, ok: true, created: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null };
           ui.ok(`pull request${pr.pullRequestId ? ` !${pr.pullRequestId}` : ''} created (${branch} → ${target})`);
@@ -450,11 +562,11 @@ async function submit(ctx) {
         ui.dim(`    open it by hand: ${branch} → ${target}`);
       }
     } else {
-      ui.info(`hosting.type is ${config.hosting.type}: open the pull request by hand (${branch} → ${target}).`);
+      ui.info(`hosting.type is ${config.hosting.type}: open the pull request by hand (${branch} → ${target}); its text is in ${descriptionRel}.`);
     }
   }
   ui.dim('    Once it is merged, anyone with the branch fetched can run: aidev run workflow ' + name);
-  if (flags.json) ui.json({ ok: true, name, branch, target, sha, committed, pushed, pr, files: files.map((f) => f.rel) });
+  if (flags.json) ui.json({ ok: true, name, branch, target, sha, committed, pushed, pr, files: files.map((f) => f.rel), description: descriptionRel });
   return EXIT.OK;
 }
 
@@ -634,8 +746,8 @@ function stepPrompt(def, step, index, { task, attempt, previous, hasPr, earlier 
       ? [`- Leave unchanged: ${step.unchanged.join(', ')}. The workflow compares them with how they were when the step started; a change there (an edit, a skipped or deleted test, a loosened setting) fails the step.`]
       : []),
     hasPr
-      ? '- Do not run git commit or git push. The workflow commits the changes and opens the pull request after the steps.'
-      : '- Do not commit. Leave the changes in the working tree for the person who started the workflow.',
+      ? '- Do not run git commit or git push. The workflow commits this step\'s changes when its checks pass, and opens the pull request after the steps.'
+      : '- Do not run git commit or git push. The workflow commits this step\'s changes on its own branch when its checks pass.',
     '- Report in your final message what you did, what you verified and what is left open.', '');
   return lines.join('\n');
 }
@@ -755,7 +867,7 @@ function prDescription({ title, name, hash, runId, baseSha, approval, agentRuns,
     `| base | \`${baseSha}\` |`, `| approved on | ${approval.ref} \`${approval.refSha}\` |`,
     `| agent runs | ${agentRuns} |`, `| reported cost | $${spentUsd.toFixed(4)} |`, '',
     ...(task ? ['## Task', '', task, ''] : []),
-    '## Steps', '', ...results.map((r) => `- ${r.id}: ${r.ok ? 'ok' : 'pending'}${r.attempts > 1 ? ` (${r.attempts} attempts)` : ''}${r.items ? ` — ${r.items.filter((x) => x.ok).length} of ${r.items.length} targets${r.items.some((x) => x.failed) ? `, ${r.items.filter((x) => x.failed).length} failed and left out` : ''}` : ''}`), '',
+    '## Steps', '', ...results.map((r) => `- ${r.id}: ${r.ok ? 'ok' : 'pending'}${r.checkpoint ? ` — checkpoint \`${r.checkpoint.slice(0, 12)}\`` : ''}${r.attempts > 1 ? ` (${r.attempts} attempts)` : ''}${r.items ? ` — ${r.items.filter((x) => x.ok).length} of ${r.items.length} targets${r.items.some((x) => x.failed) ? `, ${r.items.filter((x) => x.failed).length} failed and left out` : ''}` : ''}`), '',
     ...failedTargets(results),
   ].join('\n');
   const foot = '\nReview the diff; the workflow does not merge.';
@@ -781,22 +893,37 @@ function readRunRecord(repoRoot, name, runId) {
   try { return JSON.parse(fs.readFileSync(path.join(wfMod.runsDir(repoRoot, name), runId, 'run.json'), 'utf8')); } catch { return null; }
 }
 
-/** The run `--resume` names: a run id, or "last" for the newest recorded run. */
-function findRun(repoRoot, name, wanted) {
-  const want = String(wanted == null ? '' : wanted).trim();
-  let ids = [];
-  try { ids = fs.readdirSync(wfMod.runsDir(repoRoot, name)).filter((d) => wfMod.RUN_ID_RE.test(d)).sort(); } catch { ids = []; }
-  if (want === 'last') {
-    for (const id of ids.reverse()) {
-      const rec = readRunRecord(repoRoot, name, id);
-      if (rec) return { runId: id, record: rec };
+/**
+ * Every recorded run of a workflow, oldest first: in this checkout (runs
+ * from before worktrees) and in each aidev/ worktree of it.
+ * [{ runId, root, record }]
+ */
+function listRuns(repoRoot, name) {
+  const out = [];
+  for (const root of runtree.runRoots(repoRoot)) {
+    let ids = [];
+    try { ids = fs.readdirSync(wfMod.runsDir(root, name)).filter((d) => wfMod.RUN_ID_RE.test(d)); } catch { ids = []; }
+    for (const id of ids) {
+      if (out.some((r) => r.runId === id)) continue;
+      const record = readRunRecord(root, name, id);
+      if (record) out.push({ runId: id, root, record });
     }
-    throw new AidevError(`workflow ${name} has no recorded run to resume`);
   }
-  if (!wfMod.RUN_ID_RE.test(want)) throw new AidevError(`--resume takes a run id (a directory under ${wfMod.workflowRel(name)}/runs/) or "last"`);
-  const rec = readRunRecord(repoRoot, name, want);
-  if (!rec) throw new AidevError(`no run ${want} of workflow ${name} (expected ${wfMod.runRel(name, want)}/run.json)`);
-  return { runId: want, record: rec };
+  return out.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
+}
+
+/** The run `--resume` (or `--from-run`) names: a run id, or "last" for the newest recorded run. */
+function findRun(repoRoot, name, wanted, flag = '--resume') {
+  const want = String(wanted == null ? '' : wanted).trim();
+  const runs = listRuns(repoRoot, name);
+  if (want === 'last') {
+    if (!runs.length) throw new AidevError(`workflow ${name} has no recorded run`);
+    return runs[runs.length - 1];
+  }
+  if (!wfMod.RUN_ID_RE.test(want)) throw new AidevError(`${flag} takes a run id (a directory under ${wfMod.workflowRel(name)}/runs/ of the run's worktree) or "last"`);
+  const found = runs.find((r) => r.runId === want);
+  if (!found) throw new AidevError(`no run ${want} of workflow ${name} in this checkout or its worktrees`);
+  return found;
 }
 
 function collectTask(flags) {
@@ -978,15 +1105,6 @@ const modelsOf = (launch) => Object.fromEntries(Object.entries(launch).map(([a, 
 const KIT_VERSION = (() => { try { return require('../../package.json').version; } catch { return null; } })();
 
 /**
- * Uncommitted changes, leaving out the estimate records: a run writes its
- * record into the tree, and the next run's pull request commits it.
- */
-function dirtyOutsideEstimates(repoRoot) {
-  const r = gitMod.run(['status', '--porcelain', '--', '.', `:(exclude)${layout.ESTIMATES_REL}`], { cwd: repoRoot });
-  return r.ok ? r.stdout.trim().length > 0 : true;
-}
-
-/**
  * What a run is expected to cost, from the PKG's history, the reviewer's
  * priors and the estimator's last judgment of this definition (if any).
  */
@@ -1000,7 +1118,10 @@ function plannedEstimate(repoRoot, def, hash, launch) {
 }
 
 async function runWorkflow(ctx) {
-  const { repoRoot, installRoot, flags, positionals } = ctx;
+  // The run works in a worktree of its own (runtree.js): `repoRoot` is the
+  // PKG checkout until the worktree is ready, and the worktree after.
+  const { repoRoot: pkgRoot, installRoot, flags, positionals } = ctx;
+  let repoRoot = pkgRoot;
   const name = wfMod.sanitizeName(positionals[1]);
   const config = cfgMod.loadConfig(repoRoot);
   const def = wfMod.loadDefinition(repoRoot, name);
@@ -1015,6 +1136,7 @@ async function runWorkflow(ctx) {
   let prior = null;
   if (flags.resume != null) {
     if (flags.task != null || flags['task-file'] != null) throw new AidevError('--resume continues the run with the task it was started with; do not pass --task');
+    if (flags.dated) throw new AidevError('--resume continues on the branch the run was started on; do not pass --dated');
     prior = findRun(repoRoot, name, flags.resume);
     if (prior.record.done) throw new AidevError(`run ${prior.runId} finished; there is nothing to resume`);
     if (prior.record.hash !== hash) {
@@ -1050,6 +1172,8 @@ async function runWorkflow(ctx) {
       ['limits', limitText],
       ['cost', `${estimateMod.usdRange([guess.optimistic, guess.pessimistic])} (optimistic – pessimistic; "aidev estimate workflow ${name}" for the breakdown)`],
       ['task', task ? tail(task, 200) : '(none)'],
+      ['branch', prior ? `${prior.record.branch || '(none recorded)'} (the run's)` : runtree.branchFor(name, { dated: !!flags.dated })],
+      ['worktree', prior && prior.record.worktree ? prior.record.worktree : `under ${runtree.worktreesDir(pkgRoot)}`],
       ...(prior ? [['resume', `run ${prior.runId}, from step ${resumeAt ? resumeAt.id : '(none left)'}`]] : []),
     ]);
     ui.out('');
@@ -1071,25 +1195,40 @@ async function runWorkflow(ctx) {
   }
   if (problems.length) throw new AidevError(problems.join('\n      '));
 
-  // A pull-request step commits whatever the steps produced; that only makes
-  // sense from a clean tree, on a branch of its own.
-  let branch = null;
-  const startBranch = gitMod.currentBranch(repoRoot);
-  const baseSha = prior ? prior.record.baseSha : gitMod.headSha(repoRoot);
+  // Every run works in a worktree of its own, on the workflow's branch
+  // (aidev/<name>, or a dated one with --dated), from the commit checked out
+  // here: the person's checkout is never touched, uncommitted work in it
+  // does not matter, and what a run leaves stays there for --resume.
+  const baseSha = prior ? prior.record.baseSha : gitMod.headSha(pkgRoot);
+  if (!baseSha) throw new AidevError('this checkout has no commit to start the run from');
+  const branch = prior ? prior.record.branch : runtree.branchFor(name, { dated: !!flags.dated });
+  if (!branch) throw new AidevError(`run ${prior.runId} was not made on a branch of its own (it predates worktree runs); start a new run`);
+  const tree = runtree.prepare(pkgRoot, { branch, base: baseSha, resume: !!prior, writable: def.writable });
+  repoRoot = tree.root;
+  const releaseLock = runtree.lock(repoRoot, { runId: prior ? prior.runId : 'new' });
+  process.once('exit', releaseLock);
+  // The worktree must hold the approved workflow too: it is what the agents
+  // read and what the write guard checks there.
+  {
+    let ok = false;
+    try {
+      const wdef = wfMod.loadDefinition(repoRoot, name);
+      const wtext = cfgMod.readTextIfExists(wfMod.defPath(repoRoot, name));
+      ok = wfMod.contentHash(wtext) === hash
+        && wfMod.approvalStatus(repoRoot, config, wdef, wfMod.resolveDependencies(repoRoot, installRoot, wdef)).approved;
+    } catch { ok = false; }
+    if (!ok) {
+      releaseLock();
+      throw new AidevError(`the worktree of ${branch} (${repoRoot}) does not hold the approved workflow ${name}; merge ${approval.ref} into ${branch} there, or start with --dated`);
+    }
+  }
+  // A resumed step starts again from its last checkpoint: what it had
+  // written but not finished is put back.
   if (prior) {
-    // The tree holds what the finished steps wrote, so it is not clean and
-    // must not be; it only has to be the branch the run was working on.
-    branch = prior.record.branch || null;
-    if (branch && startBranch !== branch) {
-      throw new AidevError(`run ${prior.runId} was working on ${branch}; check it out first (git checkout ${branch})`);
-    }
-  } else if (hasPr) {
-    if (dirtyOutsideEstimates(repoRoot)) {
-      throw new AidevError('the working tree has uncommitted changes; commit or stash them first (the pull-request step commits everything the steps wrote)');
-    }
-    branch = `aidev/${name}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
-    const co = gitMod.run(['checkout', '-b', branch], { cwd: repoRoot });
-    if (!co.ok) throw new AidevError(`could not create branch ${branch}: ${co.stderr}`);
+    try {
+      const undone = restoreWritable(repoRoot, def.writable, {});
+      if (undone.length) ui.dim(`    put back ${undone.length} uncommitted file(s) the stopped step had changed`);
+    } catch (e) { releaseLock(); throw new AidevError(`the worktree ${repoRoot} could not be put back to its last checkpoint: ${e.message}`); }
   }
 
   // The run directory (gitignored): the record and the log are written as the
@@ -1126,7 +1265,8 @@ async function runWorkflow(ctx) {
       ...(task ? ['', 'task:', task] : []), '',
     ].join('\n'));
   }
-  log(`run ${runId}${prior ? ` resumed at step ${resumeAt ? resumeAt.id : '(none left)'}` : ''} on ${branch || startBranch || 'detached HEAD'} at ${baseSha} (approved: ${approval.ref} ${approval.refSha.slice(0, 12)}; ${limitText})`);
+  log(`run ${runId}${prior ? ` resumed at step ${resumeAt ? resumeAt.id : '(none left)'}` : ''} on ${branch} at ${gitMod.headSha(repoRoot)} (base ${baseSha}; approved: ${approval.ref} ${approval.refSha.slice(0, 12)}; ${limitText})`);
+  log(`worktree: ${repoRoot}${tree.created ? ' (made for this run)' : ''}${tree.synced === 'moved' ? `; ${branch} moved to ${baseSha.slice(0, 12)} (its earlier work is merged)` : tree.synced === 'merged' ? `; ${baseSha.slice(0, 12)} merged into ${branch}` : ''}`);
   // The estimate the run is measured against; a resumed run keeps the one it started with.
   const estimate = prior && prior.record.estimate ? prior.record.estimate : planned.compact;
   if (!prior) log(`estimate: ${estimateMod.usdRange([estimate.optimistic, estimate.pessimistic])} (optimistic – pessimistic${estimate.method === 'judgment' ? '; sizes from the last aidev estimate --ai' : ''})`);
@@ -1162,7 +1302,7 @@ async function runWorkflow(ctx) {
     runId, name, hash, approvedRef: approval.ref, approvedSha: approval.refSha,
     startedAt, finishedAt: state.finished ? new Date().toISOString() : null,
     startedBy: process.env.USERNAME || process.env.USER || null, // audit note, not an authentication claim
-    branch, baseSha, task: task || null, steps: results,
+    branch, worktree: repoRoot, baseSha, task: task || null, steps: results,
     done: !!state.done, stopReason: state.finished ? stopReason : null,
     agentRuns: priorRuns + agentRuns, costUsd: priorRuns + agentRuns > 0 ? priorUsd + spentUsd : null, pr, calls, estimate,
     ...(resumes.length ? { resumes } : {}),
@@ -1179,6 +1319,30 @@ async function runWorkflow(ctx) {
   // A resumed run keeps the record it has until its first step here ends:
   // written now, it would forget the steps that already finished.
   if (!prior) saveRecord();
+
+  // A checkpoint: what a step (or one target of it) wrote, committed on the
+  // run's branch as soon as it passed. A resume starts from the last one,
+  // and the branch shows the run step by step. Only the paths the step may
+  // write are staged, so a step running at the same time is never swept in.
+  const checkpoint = (globs, label) => {
+    const paths = dirtyPaths(repoRoot, globs);
+    if (!paths.length) return null;
+    for (let k = 0; k < paths.length; k += 100) {
+      const add = gitMod.run(['add', '-A', '--', ...paths.slice(k, k + 100)], { cwd: repoRoot });
+      if (!add.ok) throw new AidevError(`git add failed: ${add.stderr}`);
+    }
+    if (gitMod.run(['diff', '--cached', '--quiet'], { cwd: repoRoot }).ok) return null;
+    const message = [`aidev(${name}): ${label}`, '', `Aidev-Workflow: ${name}`, `Aidev-Run: ${runId}`, `Aidev-Step: ${label}`].join('\n');
+    const c = gitMod.run(['commit', '-q', '-m', message], { cwd: repoRoot });
+    if (!c.ok) throw new AidevError(`commit failed: ${c.stderr || c.stdout}`);
+    const sha = gitMod.headSha(repoRoot);
+    log(`checkpoint ${sha.slice(0, 12)}: ${label} (${paths.length} file(s))`);
+    return sha;
+  };
+  /** checkpoint() for a step's outcome: the sha (or null), or a reason to stop the run. */
+  const keep = (into, globs, label) => {
+    try { const sha = checkpoint(globs, label); if (sha) into.checkpoint = sha; return null; } catch (e) { return `${label}: the checkpoint could not be committed: ${e.message}`; }
+  };
 
   // What an agent does, on screen and (with --log) in full in the log file.
   // When agents may run at the same time, every screen line says whose it is.
@@ -1403,6 +1567,8 @@ async function runWorkflow(ctx) {
       record.attempts = w.attempts;
       copyWork(record, w);
       if (!w.ok) return `step ${step.id}: ${w.stop || w.fail}`;
+      const notKept = keep(record, step.writable, step.id);
+      if (notKept) return `step ${notKept}`;
       record.ok = true;
       keepReport(step.id, step.agent, w.report);
       if (w.judge != null) keepReport(step.id, step.until.agent, w.judge, true);
@@ -1475,6 +1641,8 @@ async function runWorkflow(ctx) {
         saveRecord();
         return null;
       }
+      const notKept = keep(entry, target.writable, `${step.id} [${value}]`);
+      if (notKept) return `step ${notKept}`;
       entry.ok = true;
       const file = path.join(runDir, 'reports', `${tag}.md`);
       if (artifactsOk && writeArtifact(file, `${w.report}\n`)) entry.report = relOf(file);
@@ -1571,8 +1739,11 @@ async function runWorkflow(ctx) {
       record.attempts = 1;
       // eslint-disable-next-line no-await-in-loop
       const r = await execCommand(step, step.command, step, `${step.id}.1.1`);
-      if (r.code === 0) record.ok = true;
-      else {
+      if (r.code === 0) {
+        const notKept = keep(record, step.writable, step.id);
+        if (notKept) stopReason = `step ${notKept}`;
+        else record.ok = true;
+      } else {
         record.output = tail(r.output, 2000).trim();
         if (r.logRel) record.log = r.logRel;
         stopReason = `step ${step.id}: ${step.command.text} exited ${r.code}`;
@@ -1586,12 +1757,19 @@ async function runWorkflow(ctx) {
         record.sha = committed;
         log(`step ${step.id}: ${committed.slice(0, 12)} was committed in an earlier start of this run`);
       } else {
-        const specs = def.writable.map((g) => `:(glob)${g}`);
-        if (specs.length) {
-          const add = gitMod.run(['add', '-A', '--', ...specs], { cwd: repoRoot });
+        // The steps' work is in the checkpoints already; whatever is left
+        // inside what they may write goes in the last commit. The branch has
+        // something to propose when that, or a checkpoint since the base
+        // (this run's or an earlier run's on the same branch), exists.
+        const leftover = dirtyPaths(repoRoot, def.writable);
+        for (let k = 0; k < leftover.length; k += 100) {
+          const add = gitMod.run(['add', '-A', '--', ...leftover.slice(k, k + 100)], { cwd: repoRoot });
           if (!add.ok) { stopReason = `step ${step.id}: git add failed: ${add.stderr}`; break; }
         }
-        if (gitMod.run(['diff', '--cached', '--quiet'], { cwd: repoRoot }).ok) {
+        if (stopReason) break;
+        const ahead = gitMod.run(['rev-list', '--count', `${baseSha}..HEAD`], { cwd: repoRoot });
+        const aheadCount = ahead.ok ? Number(ahead.stdout) || 0 : 0;
+        if (!leftover.length && aheadCount === 0) {
           log(`step ${step.id}: nothing changed inside what the steps may write; no commit, no pull request`);
           record.ok = true; record.skipped = true;
           saveRecord();
@@ -1612,7 +1790,9 @@ async function runWorkflow(ctx) {
           `workflow: ${name} (${hash})`, `run: ${runId}`, `base: ${baseSha}`, `approved: ${approval.ref} ${approval.refSha}`,
           ...(task ? ['', 'task:', task] : []),
         ].join('\n');
-        const c = gitMod.run(['commit', '-m', body], { cwd: repoRoot });
+        // The last commit carries the run record (and whatever was left), even
+        // when the checkpoints hold all of the work.
+        const c = gitMod.run(['commit', '--allow-empty', '-m', body], { cwd: repoRoot });
         if (!c.ok) { stopReason = `step ${step.id}: commit failed: ${c.stderr || c.stdout}`; break; }
         record.sha = gitMod.headSha(repoRoot);
         log(`step ${step.id}: committed ${record.sha.slice(0, 12)}`);
@@ -1633,11 +1813,20 @@ async function runWorkflow(ctx) {
       if (config.hosting.type === 'azure-devops') {
         try {
           const description = describe(PR_DESCRIPTION_MAX);
-          const created = await ado.createPullRequest(config, config.hosting.repository, {
-            sourceBranch: branch, targetBranch: config.sync.pr.target_branch, title, description, reviewers: config.sync.pr.reviewers,
-          });
-          pr = { ok: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null, branch };
-          log(`step ${step.id}: pull request${pr.pullRequestId ? ` !${pr.pullRequestId}` : ''} created`);
+          // One branch per workflow: a pull request still open for it is
+          // brought up to date (the push above added this run's commits).
+          const open = await ado.listPullRequests(config, config.hosting.repository, { status: 'active', sourceBranch: branch, targetBranch: config.sync.pr.target_branch });
+          if (open.length) {
+            await ado.updatePullRequestDescription(config, config.hosting.repository, open[0].pullRequestId, description);
+            pr = { ok: true, updated: true, pullRequestId: open[0].pullRequestId, url: open[0].url || null, branch };
+            log(`step ${step.id}: pull request !${pr.pullRequestId} updated`);
+          } else {
+            const created = await ado.createPullRequest(config, config.hosting.repository, {
+              sourceBranch: branch, targetBranch: config.sync.pr.target_branch, title, description, reviewers: config.sync.pr.reviewers,
+            });
+            pr = { ok: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null, branch };
+            log(`step ${step.id}: pull request${pr.pullRequestId ? ` !${pr.pullRequestId}` : ''} created`);
+          }
         } catch (e) {
           pr = { ok: false, reason: e.message, branch };
           log(`step ${step.id}: the pull request could not be opened: ${e.message}`);
@@ -1665,11 +1854,12 @@ async function runWorkflow(ctx) {
   if (pr) {
     if (pr.ok) ui.ok(`pull request${pr.pullRequestId ? ` !${pr.pullRequestId}` : ''}${pr.url ? `: ${pr.url}` : ''} — hand it to a reviewer`);
     else ui.info(`branch ${pr.branch} is ready; ${pr.reason}${pr.description ? ` (its text: ${pr.description})` : ''}`);
-  } else if (branch) {
-    ui.dim(`    branch ${branch} (nothing was committed${stopReason ? '; changes, if any, are in the working tree' : ''})`);
   }
+  const checkpoints = results.flatMap((r) => [r.checkpoint, ...((r.items || []).map((x) => x.checkpoint))]).filter(Boolean);
+  ui.dim(`    branch ${branch}${checkpoints.length ? ` (${checkpoints.length} checkpoint commit(s) in this start)` : ''}; worktree ${repoRoot}`);
   if (!done && artifactsOk) ui.dim(`    continue from the step that stopped: aidev run workflow ${name} --resume ${runId}`);
-  ui.dim(`    record: ${WORKFLOWS_DIR}/${name}/runs/${runId}/`);
+  if (!done && artifactsOk) ui.dim(`    or have the workflow fixed from this run: aidev modify workflow ${name} --from-run ${runId}`);
+  ui.dim(`    record: ${path.join(runDir)}`);
   if (recordRel && agentRuns > 0) ui.dim(`    estimate record: ${recordRel} (${hasPr && pr && pr.branch ? 'in the pull request' : 'commit it, or the next workflow pull request takes it'})`);
   // Enough runs outside their estimate: the reviewer looks at why, once, now.
   let review = null;
@@ -1686,8 +1876,76 @@ async function runWorkflow(ctx) {
     fullLog.close();
     ui.dim(`    log: ${fullLog.file}`);
   }
-  if (flags.json) ui.json({ ok: done, ...record, estimateRecord: recordRel, estimateReview: review });
+  releaseLock();
+  if (flags.json) ui.json({ ok: done, ...record, runDir, worktreeSync: tree.synced, estimateRecord: recordRel, estimateReview: review });
   return done ? EXIT.OK : EXIT.GENERAL;
+}
+
+// ------------------------------------------------------------- from a run
+
+/** At most this much of a run goes into the modify prompt. */
+const RUN_DIGEST_MAX = 14000;
+/** Where `modify` leaves what it did for `submit` to put in the pull request. */
+function modifyNoteRel(name) { return `${layout.AIDEV_DIR}/cache/modify/${name}.json`; }
+
+/**
+ * What a recorded run says about why it stopped, for the workflow-creator
+ * and for the pull request of the fix: the stop reason, each step that did
+ * not pass with the end of its failing output (the check's log, the checker's
+ * review, the failed targets), how often the agents were started, and the
+ * end of the run's log. Workflows mostly fail on one error the agent meets
+ * again and again, so the failure itself is what is shown in full.
+ * Returns { text, summary }.
+ */
+function runDigest(found) {
+  const { runId, root, record } = found;
+  const read = (rel, max) => {
+    if (!rel) return null;
+    const t = cfgMod.readTextIfExists(path.join(root, ...String(rel).split('/')));
+    return t == null ? null : tail(t, max).trim();
+  };
+  const steps = Array.isArray(record.steps) ? record.steps : [];
+  const failing = steps.filter((st) => !st.ok || (st.items || []).some((x) => x.failed));
+  const repeated = /the same failure repeated/.test(String(record.stopReason || ''));
+  const starts = (id) => (record.calls || []).filter((c) => c.step === id).length;
+  const lines = [
+    `run ${runId}: ${record.done ? 'finished' : 'stopped'}${record.stopReason ? ` — ${record.stopReason}` : ''}`,
+    `started ${record.startedAt || '?'}; ${record.agentRuns || 0} agent start(s)${record.costUsd != null ? `, $${Number(record.costUsd).toFixed(2)} reported` : ''}`,
+    ...(record.task ? ['', 'task of the run:', tail(String(record.task), 1500)] : []),
+    '', 'steps:',
+    ...steps.map((st) => `- ${st.id}: ${st.ok ? 'passed' : 'did not pass'}${st.attempts ? `, ${st.attempts} attempt(s)` : ''}${starts(st.id) ? `, ${starts(st.id)} agent start(s)` : ''}${st.items ? `, ${st.items.filter((x) => x.ok).length}/${st.items.length} target(s) passed` : ''}`),
+  ];
+  for (const st of failing) {
+    lines.push('', `## step ${st.id}`);
+    if (st.output) lines.push('', 'command output (end):', '```', tail(String(st.output), 2500), '```');
+    const logText = read(st.log, 3000);
+    if (logText) lines.push('', `last check log (${st.log}, end):`, '```', logText, '```');
+    if (st.review) lines.push('', 'what the checking agent said last:', st.review);
+    if (st.result) lines.push('', 'what the step\'s agent reported last:', st.result);
+    const failedItems = (st.items || []).filter((x) => x.failed || (!x.ok && x.reason));
+    for (const x of failedItems.slice(0, 8)) {
+      lines.push('', `target ${x.item}: ${x.reason || 'did not pass'}${x.attempts ? ` (${x.attempts} attempt(s))` : ''}`);
+      const itemLog = read(x.log, 1200);
+      if (itemLog) lines.push('```', itemLog, '```');
+      if (x.review) lines.push(x.review);
+    }
+    if (failedItems.length > 8) lines.push('', `… and ${failedItems.length - 8} more target(s) that failed`);
+  }
+  const runLog = read(`${wfMod.runRel(record.name || '', runId)}/log.txt`, 3000);
+  if (runLog) lines.push('', 'end of the run log:', '```', runLog, '```');
+  let text = lines.join('\n');
+  if (text.length > RUN_DIGEST_MAX) text = `${text.slice(0, RUN_DIGEST_MAX - 1)}…`;
+  const first = failing[0] || null;
+  const excerpt = first ? (first.output || read(first.log, 1500) || first.review || ((first.items || []).find((x) => x.failed) || {}).reason || '') : '';
+  return {
+    text,
+    summary: {
+      runId, hash: record.hash || null, done: !!record.done, stopReason: record.stopReason || null, repeated,
+      step: first ? first.id : null, attempts: first ? first.attempts || null : null,
+      excerpt: tail(String(excerpt || ''), 1500).trim() || null,
+      agentRuns: record.agentRuns || 0, costUsd: record.costUsd == null ? null : Number(record.costUsd),
+    },
+  };
 }
 
 // ----------------------------------------------------------------------- modify
@@ -1756,9 +2014,15 @@ async function modifyWorkflow(ctx) {
   const rel = wfMod.defRel(name);
   const current = cfgMod.readTextIfExists(wfMod.defPath(repoRoot, name));
   if (current == null) throw new AidevError(`no such workflow: ${name} (expected ${rel}); create it with "aidev create workflow ${name} --describe <what you want>"`);
-  if (flags.describe == null || !String(flags.describe).trim()) {
-    throw new AidevError(`aidev modify workflow needs --describe "<what to change>" (to edit by hand, open ${rel})`);
+  const fromRun = flags['from-run'] != null ? findRun(repoRoot, name, flags['from-run'], '--from-run') : null;
+  if (!fromRun && (flags.describe == null || !String(flags.describe).trim())) {
+    throw new AidevError(`aidev modify workflow needs --describe "<what to change>" or --from-run <run id> (to edit by hand, open ${rel})`);
   }
+  const describe = flags.describe != null && String(flags.describe).trim()
+    ? String(flags.describe).trim()
+    : `Fix what made run ${fromRun.runId} fail, so that the next run passes.`;
+  const digest = fromRun ? runDigest(fromRun) : null;
+  const beforeHash = wfMod.contentHash(current);
   const config = cfgMod.loadConfig(repoRoot);
   let def = null;
   let invalid = null;
@@ -1775,7 +2039,18 @@ async function modifyWorkflow(ctx) {
     ...(invalid ? ['', `It does not validate now: ${invalid}`, 'Fix that as well.'] : []),
     'Do not run the workflow. Do not commit.',
     `Write only under ${wfMod.workflowRel(name)}/, ${layout.AGENTS_REL}/ and ${layout.SKILLS_REL}/.`, '',
-    '## What the team wants changed', '', String(flags.describe).trim(), '',
+    '## What the team wants changed', '', describe, '',
+    ...(digest ? [
+      `## The run to learn from: ${fromRun.runId}`, '',
+      ...(digest.summary.hash && digest.summary.hash !== beforeHash ? ['(The workflow has changed since that run; compare before you conclude.)', ''] : []),
+      'Find why it failed, from the record below. Most often an agent met the same error again and again: an instruction it could not meet,',
+      'a check that cannot pass as written, a tool, skill or MCP server it lacks, a writable too narrow for the work, a target list in a',
+      'format the kit refuses, or a setup the worktree does not have (a run works in a fresh git worktree: what git ignores, such as',
+      'node_modules, is not there until a command step installs it). Change the workflow so the next run does not meet it.',
+      'Do not only raise max_retries, timeouts or limits unless the record shows that this is the cause.',
+      'Start your final message with one line: CAUSE: <the cause, in one sentence>. Then list the changes.', '',
+      '```text', digest.text, '```', '',
+    ] : []),
     '## The current workflow.yaml', '', '```yaml', current.trimEnd(), '```', '',
     '## Agents and skills', '',
     '- An agent or skill of this PKG that only this workflow uses may be edited when the change is about what it can do (its skills, tools, mcp) or how it works.',
@@ -1792,10 +2067,11 @@ async function modifyWorkflow(ctx) {
     ui.table([
       ['agent', 'workflow-creator'], ['tool', tool], ['model', settings.model || 'tool default'],
       ['edits', `${rel}${def ? ` (${def.steps.length} step(s))` : ` (does not validate: ${invalid})`}`],
+      ...(digest ? [['from run', `${fromRun.runId}: ${digest.summary.stopReason || 'finished'}`]] : []),
       ['shared', sharedLines.length ? Object.keys(shared).join(', ') : '(none: no other workflow uses this one\'s PKG agents)'],
     ]);
     ui.ok('dry run: the agent was not started.');
-    if (flags.json) ui.json({ ok: true, name, dryRun: true, shared });
+    if (flags.json) ui.json({ ok: true, name, dryRun: true, shared, fromRun: digest ? digest.summary : null });
     return EXIT.OK;
   }
 
@@ -1848,8 +2124,23 @@ async function modifyWorkflow(ctx) {
     ui.dim(`    2. estimate: aidev estimate workflow ${name}`);
     ui.dim(`    3. submit:   aidev submit workflow ${name}     ← the change is approved when its pull request is merged`);
   }
+  // What this modification was for, kept for "aidev submit": its pull
+  // request says why the workflow changed, not only how.
+  let note = null;
+  if (!nothing) {
+    const report = String(res.result || '');
+    const cause = (/^[ \t]*CAUSE:[ \t]*(.+)$/m.exec(report) || [])[1] || null;
+    note = {
+      at: new Date().toISOString(), name, describe, beforeHash,
+      afterHash: wfMod.contentHash(cfgMod.readTextIfExists(wfMod.defPath(repoRoot, name)) || ''),
+      cause: cause ? cause.trim() : null, report: tail(report, 3000).trim(),
+      changed: changes.changed, added: changes.added, removed: changes.removed,
+      fromRun: digest ? digest.summary : null, costUsd: res.costUsd ?? null,
+    };
+    try { cfgMod.writeJsonAtomic(layout.abs(repoRoot, modifyNoteRel(name)), note); } catch (e) { ui.warn(`the note for "aidev submit" could not be written: ${e.message}`); }
+  }
   const ok = !nothing && !problem;
-  if (flags.json) ui.json({ ok, name, ...changes, problem, editedShared, backup, costUsd: res.costUsd ?? null });
+  if (flags.json) ui.json({ ok, name, ...changes, problem, editedShared, backup, costUsd: res.costUsd ?? null, fromRun: digest ? digest.summary : null, cause: note ? note.cause : null });
   return ok ? EXIT.OK : EXIT.GENERAL;
 }
 
@@ -2078,5 +2369,5 @@ function list(ctx) {
 }
 
 module.exports = {
-  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, FLAGS, FLAG_HELP, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, describeSteps, prDescription,
+  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, FLAGS, FLAG_HELP, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, definitionChanges, runDigest, findRun, listRuns, describeSteps, prDescription,
 };

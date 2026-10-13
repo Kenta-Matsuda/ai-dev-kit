@@ -12,7 +12,15 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 
 === 説明
 
-定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・`until`）、agent と skill のファイル、上限と、「マージがこの workflow を承認する」旨が書かれます。
+定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・`until`）、agent と skill のファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。
+
+承認済みの workflow を直した提出では、さらに次が入ります。
+
+* **What changed against the approved workflow**: `origin/main` の版から、追加・削除・並べ替えたステップと、変わったステップの項目（`prompt`、`writable`、`until` など）、`limits` などトップレベルの変更。
+* **Estimate**: 費用の見積もり（楽観〜悲観）の、変更前と変更後。
+* **Why this change**: `aidev modify` で直したとき（その `modify` が承認済みの版から始めたとき）、頼んだこと、`--from-run` の実行の止まった理由と記録された失敗の出力、agent が見つけた原因（`CAUSE:`）、agent の説明。`modify` の後に手で編集していれば、その旨。
+
+本文の全文は `.aidev/cache/submit/<name>.md` にも書きます（`generic` hosting で PR を手で作るときに貼ります）。Azure DevOps の上限（4000 文字）を超えるときは、agent の説明から省きます。
 
 既に `origin/main` と同じなら `already matches origin/main; nothing to submit.` と表示して何もしません。
 

@@ -509,7 +509,11 @@ function run() {
       write(path.join(fx.root, '.aidev', 'workflows', name, 'workflow.yaml'), yamlOf(name, opts));
       approve(fx, `workflow ${name}`);
     };
-    const runsOf = (name) => fs.readdirSync(path.join(fx.root, '.aidev', 'workflows', name, 'runs'));
+    // Runs work in a worktree of their own, on aidev/<name> unless --dated.
+    const runtreeMod = require('../cli/lib/runtree');
+    const wtOf = (branch) => { const w = runtreeMod.listWorktrees(fx.root).find((x) => x.branch === branch); return w ? w.path : null; };
+    const runsDirOf = (name, branch = `aidev/${name}`) => path.join(wtOf(branch), '.aidev', 'workflows', name, 'runs');
+    const runsOf = (name, branch) => fs.readdirSync(runsDirOf(name, branch)).sort();
     // The package's own development agent: the kit ships none.
     write(path.join(fx.root, '.aidev', 'agents', 'coder.md'), '---\nname: coder\ndescription: writes code for tests\n---\n\nYou are the coder.\n');
     try {
@@ -537,15 +541,18 @@ function run() {
         ok(/## Step think \(1\/3\)\n\nthink first/.test(prompts[0]));
         ok(/Write only under: \(nothing — this step writes no files\)/.test(prompts[0]), 'the step\'s own writable is stated');
         ok(!/## Reports from the earlier steps/.test(prompts[0]), 'the first step has nothing to build on');
-        ok(/Do not commit\. Leave the changes/.test(prompts[0]), 'no pull-request step: the tree is left for the person');
+        ok(/Do not run git commit or git push\. The workflow commits this step's changes on its own branch/.test(prompts[0]), 'the kit commits, not the agent');
         ok(/## Step act \(3\/3\)/.test(prompts[1]) && /node --version` must exit 0/.test(prompts[1]));
         ok(/Write only under: src\/\*\*/.test(prompts[1]), prompts[1]);
         ok(/## Reports from the earlier steps[\s\S]*### Step think \(agent coder\)\n\nstub answer/.test(prompts[1]),
           'the next agent step sees the report of the one before');
         eq(JSON.parse(fs.readFileSync(envOut, 'utf8')), { AIDEV_WORKFLOW: 'plain', AIDEV_WORKFLOW_STEP: 'act' },
           'the write guard learns the workflow and the step from the environment');
-        const record = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs', runsOf('plain')[0], 'run.json'), 'utf8'));
-        eq([record.name, record.done, record.approvedRef, record.branch], ['plain', true, 'origin/main', null]);
+        const record = JSON.parse(fs.readFileSync(path.join(runsDirOf('plain'), runsOf('plain')[0], 'run.json'), 'utf8'));
+        eq([record.name, record.done, record.approvedRef, record.branch], ['plain', true, 'origin/main', 'aidev/plain']);
+        eq([j.worktree, record.worktree], [wtOf('aidev/plain'), wtOf('aidev/plain')], 'the run worked in the worktree of its branch');
+        ok(!j.worktree.startsWith(fx.root), 'outside the checkout');
+        eq(git(['rev-parse', '--abbrev-ref', 'HEAD'], fx.root), 'main', 'the checkout was not touched');
         ok(/^sha256:/.test(record.hash));
         eq(record.calls.map((c) => [c.step, c.role, c.agent, c.attempt, c.ok, c.costUsd]), [['think', 'agent', 'coder', 1, true, 0.0123], ['act', 'agent', 'coder', 1, true, 0.0123]],
           'every agent start is recorded with what it cost, for the next estimate');
@@ -561,7 +568,7 @@ function run() {
         ok(/history of this step \(1\)/.test(j.steps[0].basis), j.steps[0].basis);
         eq(j.steps[0].perStart.agent, [0.0062, 0.0246], 'one sample: the observed cost, widened (x0.5, x2)');
         eq([j.optimistic, j.pessimistic], [0.01, 0.12], 'think 0.0062 + act 0.0062 .. think 0.0246 + 4 x act 0.0246');
-        ok(fs.readdirSync(path.join(fx.root, '.aidev', 'workflows', 'plain', 'runs')).length === 1, 'estimate starts no run');
+        eq(runsOf('plain').length, 1, 'estimate starts no run');
         const dry = aidev(fx.root, ['run', 'workflow', 'plain', '--dry-run'], { env: env() });
         ok(/cost\s+\$0\.01 – \$0\.12 \(optimistic – pessimistic/.test(dry.out), dry.out);
       });
@@ -728,33 +735,56 @@ function run() {
         ok(!/Read stub-read/.test(j.out), '--json prints no progress lines');
       });
 
-      test('a pull-request step needs a clean tree, commits only the scope on its own branch and pushes it', () => {
+      test('a run works in its own worktree on aidev/<name>, commits a checkpoint per step, and the pull-request step pushes the branch', () => {
         write(path.join(fx.root, 'tools', 'touch.js'),
-          "require('fs').mkdirSync('src/gen', { recursive: true }); require('fs').writeFileSync('src/gen/out.txt', 'made\\n'); require('fs').writeFileSync('notes.txt', 'outside\\n');\n");
+          "require('fs').mkdirSync('src/gen', { recursive: true }); require('fs').writeFileSync('src/gen/out.txt', (process.env.OUT || 'made') + '\\n'); require('fs').writeFileSync('notes.txt', 'outside\\n');\n");
         define('pr', { steps: [
           '  - id: make', '    command: node tools/touch.js', '    writable: [src/**]',
           '  - id: pr', '    pull_request:', '      title: "aidev: generated"',
         ] });
+        // The person's own uncommitted work is none of the run's business.
         write(path.join(fx.root, 'dirty.txt'), 'x\n');
-        const dirty = aidev(fx.root, ['run', 'workflow', 'pr', '--json'], { env: env() });
-        eq(dirty.code, 1);
-        ok(/uncommitted changes/.test(dirty.out), dirty.out);
-        fs.rmSync(path.join(fx.root, 'dirty.txt'));
         const r = aidev(fx.root, ['run', 'workflow', 'pr', '--task', 'make it', '--json'], { env: env() });
         eq(r.code, 0, r.out);
         const j = lastJson(r.out);
-        ok(/^aidev\/pr-\d{12}$/.test(j.branch), j.branch);
+        eq(j.branch, 'aidev/pr', 'one branch per workflow');
+        const wt = j.worktree;
+        eq(wt, wtOf('aidev/pr'));
+        eq([git(['rev-parse', '--abbrev-ref', 'HEAD'], fx.root), fs.existsSync(path.join(fx.root, 'dirty.txt')), fs.existsSync(path.join(fx.root, 'src', 'gen', 'out.txt'))],
+          ['main', true, false], 'the checkout stays as it was');
         eq(j.pr.ok, false, 'generic hosting: the PR is not created');
         ok(/by hand/.test(j.pr.reason), j.pr.reason);
+        const make = j.steps.find((s) => s.id === 'make');
         const pr = j.steps.find((s) => s.id === 'pr');
-        ok(pr.ok && pr.pushed && pr.sha, JSON.stringify(pr));
-        eq(git(['rev-parse', '--abbrev-ref', 'HEAD'], fx.root), j.branch, 'the run stays on its branch');
-        eq(git(['show', '--stat', '--format=', 'HEAD'], fx.root).includes('src/gen/out.txt'), true, 'the scope was committed');
-        ok(!git(['show', '--stat', '--format=', 'HEAD'], fx.root).includes('notes.txt'), 'a file outside the scope is not committed');
-        ok(git(['log', '-1', '--format=%B'], fx.root).includes('aidev: generated') && git(['log', '-1', '--format=%B'], fx.root).includes('task:'), 'the commit carries the run record');
-        ok(git(['ls-remote', '--heads', 'origin', j.branch], fx.root).includes(j.branch), 'pushed to origin');
-        fs.rmSync(path.join(fx.root, 'notes.txt'), { force: true });
-        git(['checkout', '-q', 'main'], fx.root);
+        ok(make.checkpoint && pr.ok && pr.pushed && pr.sha, JSON.stringify(j.steps));
+        eq(git(['log', '-1', '--format=%s', make.checkpoint], wt), 'aidev(pr): make', 'the step\'s checkpoint');
+        ok(git(['log', '-1', '--format=%B', make.checkpoint], wt).includes(`Aidev-Run: ${j.runId}`), 'it names the run');
+        eq(git(['show', '--name-only', '--format=', make.checkpoint], wt), 'src/gen/out.txt', 'only what the step may write');
+        ok(git(['status', '--porcelain'], wt).includes('notes.txt'), 'a file outside the scope is left uncommitted');
+        ok(git(['log', '-1', '--format=%B'], wt).includes('aidev: generated') && git(['log', '-1', '--format=%B'], wt).includes('task:'), 'the last commit carries the run record');
+        ok(git(['ls-remote', '--heads', 'origin', 'aidev/pr'], fx.root).includes('aidev/pr'), 'pushed to origin');
+        ok(fs.existsSync(path.join(runsDirOf('pr'), j.runId, 'run.json')), 'the record is in the worktree');
+
+        // The next run works on the same branch and worktree, on top of the last.
+        const again = aidev(fx.root, ['run', 'workflow', 'pr', '--json'], { env: env({ OUT: 'made again' }) });
+        eq(again.code, 0, again.out);
+        const j2 = lastJson(again.out);
+        eq([j2.branch, j2.worktree], ['aidev/pr', wt]);
+        ok(git(['merge-base', '--is-ancestor', make.checkpoint, 'HEAD'], wt) === '' , 'the first run\'s checkpoint is still on the branch');
+        eq(fs.readFileSync(path.join(wt, 'src', 'gen', 'out.txt'), 'utf8'), 'made again\n');
+        eq(runsOf('pr').length, 2);
+        // A step's work left uncommitted in the worktree stops a new run: it is a stopped run's, to resume or to throw away.
+        write(path.join(wt, 'src', 'gen', 'out.txt'), 'half done\n');
+        const dirty = aidev(fx.root, ['run', 'workflow', 'pr', '--json'], { env: env() });
+        eq(dirty.code, 1, dirty.out);
+        ok(/has uncommitted changes, left by a run that stopped[\s\S]*--resume last/.test(dirty.out), dirty.out);
+        git(['checkout', '--', 'src/gen/out.txt'], wt);
+        // --dated: a branch and a worktree of its own.
+        const dated = aidev(fx.root, ['run', 'workflow', 'pr', '--dated', '--json'], { env: env() });
+        eq(dated.code, 0, dated.out);
+        const jd = lastJson(dated.out);
+        ok(/^aidev\/pr-\d{12}$/.test(jd.branch) && jd.worktree !== wt && jd.worktree === wtOf(jd.branch), JSON.stringify([jd.branch, jd.worktree]));
+        fs.rmSync(path.join(fx.root, 'dirty.txt'), { force: true });
         // Nothing inside the scope changes on a run whose steps write nothing: no commit, no branch pushed.
         define('quiet', { steps: ['  - id: noop', '    command: node --version', '  - id: pr', '    pull_request: {}'] });
         const none = aidev(fx.root, ['run', 'workflow', 'quiet', '--json'], { env: env() });
@@ -762,7 +792,40 @@ function run() {
         const q = lastJson(none.out);
         eq([q.done, q.pr, q.steps[1].skipped], [true, null, true]);
         ok(!git(['ls-remote', '--heads', 'origin', q.branch], fx.root).includes(q.branch), 'no push without a commit');
-        git(['checkout', '-q', 'main'], fx.root);
+      });
+
+      test('the workflow\'s branch follows the base: moved when merged, merged when ahead; one run per worktree at a time; a removed worktree is made again', () => {
+        const wt = wtOf('aidev/pr');
+        const run = (extra = {}) => aidev(fx.root, ['run', 'workflow', 'pr', '--json'], { env: env(extra) });
+        // A run already going in the worktree keeps the next one out; a lock whose process is gone does not.
+        const lockFile = runtreeMod.lockPath(wt);
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, runId: 'other' }));
+        const busy = run();
+        eq(busy.code, 1, busy.out);
+        ok(/another run \(other, process \d+\) is working in/.test(busy.out), busy.out);
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: 999999999, runId: 'gone' }));
+        eq(run({ OUT: 'after a stale lock' }).code, 0);
+        ok(!fs.existsSync(lockFile), 'the lock is let go when the run ends');
+        // The branch's work was merged: the next run starts from the base again.
+        git(['merge', '-q', '--no-edit', 'aidev/pr'], fx.root);
+        write(path.join(fx.root, 'later.txt'), 'later\n');
+        git(['add', 'later.txt'], fx.root);
+        git(['commit', '-q', '-m', 'later work on main'], fx.root);
+        const moved = lastJson(run({ OUT: 'after the merge' }).out);
+        eq([moved.ok, moved.worktreeSync], [true, 'moved']);
+        ok(fs.existsSync(path.join(wt, 'later.txt')), 'the worktree is at the base');
+        // The branch has work the base does not, and the base moved on: the base is merged in.
+        write(path.join(fx.root, 'later2.txt'), 'later\n');
+        git(['add', 'later2.txt'], fx.root);
+        git(['commit', '-q', '-m', 'more work on main'], fx.root);
+        const merged = lastJson(run({ OUT: 'after a merge of main' }).out);
+        eq([merged.ok, merged.worktreeSync], [true, 'merged']);
+        ok(fs.existsSync(path.join(wt, 'later2.txt')) && git(['log', '--format=%s'], wt).includes(moved.steps[0].checkpoint ? 'aidev(pr): make' : 'aidev(pr)'), 'both lines of work are on the branch');
+        // A worktree removed by hand is made again from the branch.
+        git(['worktree', 'remove', '--force', wt], fx.root);
+        const again = lastJson(run({ OUT: 'in a new worktree' }).out);
+        eq([again.ok, again.worktree, again.worktreeSync], [true, wt, 'current']);
+        ok(git(['log', '--format=%s'], wt).includes('aidev(pr): make'), 'with the branch\'s checkpoints');
       });
 
       test('a step\'s tool is started with only its agent\'s skills, tools and MCP servers', () => {
@@ -865,13 +928,13 @@ function run() {
         eq(dry.code, 0, dry.out);
         ok(/repeats until node --version exits 0 and node check\.js exits 0 \(max 3 retries\) \(in e2e; env: CI=1\)/.test(dry.out), dry.out);
         const r = aidev(fx.root, ['run', 'workflow', 'cmds', '--json'], { env: env() });
-        fs.rmSync(path.join(fx.root, 'e2e', 'seen.flag'), { force: true });
         eq(r.code, 0, r.out);
         const j = lastJson(r.out);
+        fs.rmSync(path.join(j.worktree, 'e2e', 'seen.flag'), { force: true });
         eq([j.done, j.steps[0].attempts], [true, 2]);
         const logRel = `.aidev/workflows/cmds/runs/${j.runId}/logs/fix.1.2.log`;
         eq(j.steps[0].log, logRel, 'the record names the log of the failed check');
-        const logText = fs.readFileSync(path.join(fx.root, logRel), 'utf8');
+        const logText = fs.readFileSync(path.join(j.worktree, logRel), 'utf8');
         ok(/^\$ node check\.js {3}\(in e2e\)\n/.test(logText) && /CI=1 cwd=e2e/.test(logText) && /1 test failed/.test(logText), logText);
         const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
         ok(/`node --version` must exit 0 \(run in e2e\/\), and `node check\.js` must exit 0 \(run in e2e\/\)/.test(prompts[0]), prompts[0]);
@@ -891,7 +954,7 @@ function run() {
         const j1 = lastJson(first.out);
         ok(/same failure repeated/.test(j1.stopReason), j1.stopReason);
         eq([j1.done, j1.agentRuns, j1.steps.map((s) => s.ok)], [false, 3, [true, false]]);
-        const runDir = path.join(fx.root, '.aidev', 'workflows', 'long', 'runs', j1.runId);
+        const runDir = path.join(j1.worktree, '.aidev', 'workflows', 'long', 'runs', j1.runId);
         eq(fs.readFileSync(path.join(runDir, 'reports', 'plan.md'), 'utf8').trim(), 'stub answer', 'each finished step\'s whole report is kept');
         ok(/step act: "node tools\/gate\.js" exited 4/.test(fs.readFileSync(path.join(runDir, 'log.txt'), 'utf8')), 'the log is written as the run goes');
         const before = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
@@ -902,15 +965,19 @@ function run() {
         ok(/takes a run id/.test(aidev(fx.root, ['run', 'workflow', 'long', '--resume', '../x'], { env: env() }).out));
         // What the plan step would have left for the next one, and the fix that lets the check pass.
         write(path.join(runDir, 'notes', 'targets.md'), '- src/a.ts\n');
-        write(path.join(fx.root, 'gate.flag'), '');
+        write(path.join(j1.worktree, 'gate.flag'), '');
+        // What the stopped step had written and not finished is put back on resume.
+        write(path.join(j1.worktree, 'src', 'half-done.ts'), 'x\n');
         reset();
         fs.rmSync(stepsOut, { force: true });
         const dry = aidev(fx.root, ['run', 'workflow', 'long', '--resume', 'last', '--dry-run'], { env: env() });
         ok(/resume\s+run \S+, from step act/.test(dry.out), dry.out);
         const second = aidev(fx.root, ['run', 'workflow', 'long', '--resume', j1.runId, '--json'], { env: env({ STUB_STEPS_OUT: stepsOut }) });
-        fs.rmSync(path.join(fx.root, 'gate.flag'), { force: true });
+        fs.rmSync(path.join(j1.worktree, 'gate.flag'), { force: true });
         eq(second.code, 0, second.out);
         const j2 = lastJson(second.out);
+        eq(j2.worktree, j1.worktree, 'resumed in the run\'s worktree');
+        ok(!fs.existsSync(path.join(j1.worktree, 'src', 'half-done.ts')), 'from the last checkpoint');
         eq([j2.runId, j2.done, j2.task, j2.agentRuns, j2.resumes.length], [j1.runId, true, 'upgrade to 5', 4, 1], 'one run, with the totals of both starts');
         eq(j2.steps.map((s) => [s.id, s.ok]), [['plan', true], ['act', true]]);
         eq(fs.readFileSync(stepsOut, 'utf8').trim().split('\n'), ['act'], 'the finished step is not run again');
@@ -947,12 +1014,14 @@ function run() {
         ok(/What changed in the files git already tracks:[\s\S]*src\/touched\.txt \| 1 \+/.test(prompts[1]), prompts[1]);
         const diffRel = `.aidev/workflows/judged/runs/${j.runId}/diffs/write.1.diff`;
         ok(prompts[1].includes(`The diff itself is in ${diffRel}`), prompts[1]);
-        ok(/^\+changed$/m.test(fs.readFileSync(path.join(fx.root, diffRel), 'utf8')), 'the diff is written for the until agent to read');
+        ok(/^\+changed$/m.test(fs.readFileSync(path.join(j.worktree, diffRel), 'utf8')), 'the diff is written for the until agent to read');
         eq(j.pr.description, `.aidev/workflows/judged/runs/${j.runId}/pull-request.md`, 'generic hosting: the text is kept for a pull request opened by hand');
-        const committed = git(['show', '--name-only', '--format=', 'HEAD'], fx.root).split('\n').filter(Boolean);
+        const committed = git(['show', '--name-only', '--format=', 'HEAD'], j.worktree).split('\n').filter(Boolean);
         ok(committed.includes(`.aidev/estimates/records/judged-${j.runId}.json`), `the estimate record goes with the pull request: ${committed.join(', ')}`);
-        ok(!git(['status', '--porcelain', '--', '.aidev/estimates'], fx.root).trim(), 'the record does not change after the push');
-        const text = fs.readFileSync(path.join(fx.root, j.pr.description), 'utf8');
+        ok(!git(['status', '--porcelain', '--', '.aidev/estimates'], j.worktree).trim(), 'the record does not change after the push');
+        eq(git(['show', '--name-only', '--format=', j.steps[0].checkpoint], j.worktree), 'src/touched.txt', 'the step\'s own checkpoint');
+        const text = fs.readFileSync(path.join(j.worktree, j.pr.description), 'utf8');
+        ok(text.includes(`checkpoint \`${j.steps[0].checkpoint.slice(0, 12)}\``), 'the pull request text names each step\'s checkpoint');
         ok(/## Reports\n\n### write \(agent coder\)\n\nstub answer\n\n### write \(until\) \(agent reviewer\)\n\n[\s\S]*VERDICT: PASS/.test(text), text);
         git(['checkout', '-q', 'main'], fx.root);
 
@@ -977,9 +1046,9 @@ function run() {
         const dry = aidev(fx.root, ['run', 'workflow', 'guarded', '--dry-run'], { env: env() });
         ok(/- must leave unchanged: src\/locked\.txt/.test(dry.out), dry.out);
         const r = aidev(fx.root, ['run', 'workflow', 'guarded', '--json'], { env: env() });
-        git(['checkout', '-q', '--', 'src/locked.txt'], fx.root);
         eq(r.code, 1, r.out);
         const j = lastJson(r.out);
+        git(['checkout', '-q', '--', 'src/locked.txt'], j.worktree);
         ok(/same failure repeated \(1 path\(s\) that must stay unchanged were changed/.test(j.stopReason), j.stopReason);
         eq(j.agentRuns, 2);
         const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
@@ -987,14 +1056,15 @@ function run() {
         ok(/must leave these paths as they were when it started \(src\/locked\.txt\), and they differ now:\n\n```\nsrc\/locked\.txt\n```/.test(prompts[1]), prompts[1]);
 
         // A path that already differed from HEAD when the step started is held to that state, not to HEAD.
+        write(path.join(fx.root, 'tools', 'prechange.js'), "require('fs').writeFileSync('src/locked.txt', 'changed by an earlier step\\n');\n");
         define('kept', { steps: [
+          '  - id: before', '    command: node tools/prechange.js',
           '  - id: fix', '    agent: coder', '    unchanged: [src/locked.txt]', '    prompt: fix it',
           '    until:', '      command: node --version',
         ] });
-        fs.writeFileSync(path.join(fx.root, 'src', 'locked.txt'), 'changed by an earlier step\n');
         const kept = aidev(fx.root, ['run', 'workflow', 'kept', '--json'], { env: env() });
-        git(['checkout', '-q', '--', 'src/locked.txt'], fx.root);
         eq(kept.code, 0, kept.out);
+        eq(fs.readFileSync(path.join(lastJson(kept.out).worktree, 'src', 'locked.txt'), 'utf8'), 'changed by an earlier step\n');
       });
 
       test('a for_each step starts its agent once per target and resumes at the target that stopped', () => {
@@ -1031,11 +1101,11 @@ function run() {
         ok(/`node tools\/screen\.js login` must exit 0/.test(prompts[0]), 'the target is in the check the agent is told about');
         ok(!/### Step write/.test(prompts[1]), 'one target does not get the report of another');
 
-        write(path.join(fx.root, 'orders.flag'), '');
+        write(path.join(j1.worktree, 'orders.flag'), '');
         reset();
         fs.rmSync(stepsOut, { force: true });
         const second = aidev(fx.root, ['run', 'workflow', 'each', '--resume', 'last', '--json'], { env: env({ STUB_STEPS_OUT: stepsOut }) });
-        fs.rmSync(path.join(fx.root, 'orders.flag'), { force: true });
+        fs.rmSync(path.join(j1.worktree, 'orders.flag'), { force: true });
         eq(second.code, 0, second.out);
         const j2 = lastJson(second.out);
         const w2 = j2.steps.find((s) => s.id === 'write');
@@ -1085,8 +1155,10 @@ function run() {
         eq(w.items.map((x) => [x.item, x.ok, !!x.failed]), [['login', true, false], ['bad', false, true], ['settings', true, false]]);
         eq([w.ok, w.failed], [true, 1]);
         ok(/the same failure repeated/.test(w.items[1].reason), w.items[1].reason);
-        const out = (f) => path.join(fx.root, 'src', 'out', f);
+        const out = (f) => path.join(j.worktree, 'src', 'out', f);
         ok(fs.existsSync(out('login.txt')) && fs.existsSync(out('settings.txt')), 'the targets that passed keep their work');
+        eq(w.items.map((x) => !!x.checkpoint), [true, false, true], 'each target that passed is a checkpoint of its own');
+        eq(git(['show', '--name-only', '--format=%s', w.items[2].checkpoint], j.worktree), 'aidev(skip): write [settings]\n\nsrc/out/settings.txt');
         ok(!fs.existsSync(out('bad.txt')), 'the target that failed was undone');
         const text = fs.readFileSync(logFile, 'utf8');
         ok(/^# aidev run workflow skip\n/.test(text) && /limits: +no time limit, \$1/.test(text), text.slice(0, 400));
@@ -1127,14 +1199,15 @@ function run() {
         const starts = spansOf(spans);
         eq(starts.map((x) => x.item).sort(), ['a', 'b', 'bad', 'd', 'e'], 'each start knows its target (AIDEV_WORKFLOW_ITEM)');
         eq(widest(starts), 3, 'three at a time, never more');
-        const out = (f) => path.join(fx.root, 'src', 'out', f);
+        const out = (f) => path.join(lastJson(r.out).worktree, 'src', 'out', f);
         ok(['a', 'b', 'd', 'e'].every((x) => fs.existsSync(out(`${x}.txt`))), 'the targets that passed keep their work');
         ok(!fs.existsSync(out('bad.txt')), 'the failed target was undone, and only it');
         // The guard gives a target its own path, and no other target's.
         const policyMod = require('../cli/lib/policy');
         const at = (item, rel) => policyMod.decide(fx.root, rel, { workflow: 'wide', step: 'write', item, installRoot: KIT_ROOT }).decision;
         eq([at('a', 'src/out/a.txt'), at('a', 'src/out/b.txt'), at(null, 'src/out/a.txt')], ['allow', 'deny', 'deny']);
-        for (const x of ['a', 'b', 'd', 'e']) fs.rmSync(out(`${x}.txt`), { force: true });
+        eq(w.items.filter((x) => x.checkpoint).length, 4, 'targets running at once each commit their own checkpoint');
+        eq(git(['log', '--format=%s', '-4'], lastJson(r.out).worktree).split('\n').sort(), ['aidev(wide): write [a]', 'aidev(wide): write [b]', 'aidev(wide): write [d]', 'aidev(wide): write [e]']);
       });
 
       test('the steps of a parallel group start together, and the run goes on when all have ended', () => {
@@ -1388,7 +1461,9 @@ function run() {
     write(path.join(fx.root, '.aidev', 'agents', 'coder.md'), '---\nname: coder\ndescription: writes code for tests\n---\n\nYou are the coder.\n');
     write(path.join(fx.root, '.aidev', 'workflows', 'learn', 'workflow.yaml'), yamlOf('learn', { cost: 500, steps: ['  - id: work', '    agent: coder', '    prompt: do it'] }));
     approve(fx, 'workflow learn');
-    const recordsDir = path.join(fx.root, '.aidev', 'estimates', 'records');
+    // A run writes its record in its worktree (aidev/learn).
+    const learnTree = () => require('../cli/lib/runtree').listWorktrees(fx.root).find((x) => x.branch === 'aidev/learn').path;
+    const recordsDir = () => path.join(learnTree(), '.aidev', 'estimates', 'records');
     const answer = 'Done.\n```json\n' + JSON.stringify({ priors: [{ agent: 'coder', role: 'agent', model: 'sonnet', perStart: [2, 60], why: 'swings widely' }], notes: '- coder costs swing widely' }) + '\n```';
     try {
       test('every run writes a record of its estimate and its cost; the third run outside its range starts the reviewer', () => {
@@ -1399,9 +1474,9 @@ function run() {
           eq(r.code, 0, r.out);
           return lastJson(r.out);
         });
-        const files = fs.readdirSync(recordsDir).sort();
+        const files = fs.readdirSync(recordsDir()).sort();
         eq(files.length, 3, files.join(', '));
-        const first = JSON.parse(fs.readFileSync(path.join(recordsDir, files[0]), 'utf8'));
+        const first = JSON.parse(fs.readFileSync(path.join(recordsDir(), files[0]), 'utf8'));
         eq([first.workflow, first.done, first.steps[0].costUsd, first.estimate.steps[0].usd], ['learn', true, 5, [0.3, 1]], 'estimated by size M, cost 5');
         eq([first.calls[0].actualModel, first.calls[0].tokens.cacheRead], ['claude-sonnet-5-5', 300], 'the tool reported model and tokens are kept');
         eq(outs[1].estimate.steps[0].usd, [2.5, 10], 'the second run is estimated from the first');
@@ -1411,9 +1486,9 @@ function run() {
         eq(a.slice(a.indexOf('--tools') + 1), ['Read', 'Glob', 'Grep'], 'the reviewer reads and writes nothing itself');
         const prompt = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean).pop();
         ok(/# Agent: estimate-reviewer/.test(prompt) && /step work: agent coder; size M; model claude-sonnet-5-5; estimated \$0\.3–\$1 \(size M\); actual \$5/.test(prompt), prompt.slice(0, 1200));
-        const priors = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'estimates', 'priors.json'), 'utf8'));
+        const priors = JSON.parse(fs.readFileSync(path.join(learnTree(), '.aidev', 'estimates', 'priors.json'), 'utf8'));
         eq([priors.priors, priors.reviewedThrough.length], [[{ agent: 'coder', role: 'agent', perStart: [2, 60], why: 'swings widely' }], 3]);
-        ok(/coder costs swing widely/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'estimates', 'notes.md'), 'utf8')));
+        ok(/coder costs swing widely/.test(fs.readFileSync(path.join(learnTree(), '.aidev', 'estimates', 'notes.md'), 'utf8')));
       });
 
       test('estimate shows the calibration and the priors; --review runs the reviewer on demand; review: off turns it off', () => {
@@ -1490,6 +1565,63 @@ function run() {
         const none = aidev(fx.root, ['modify', 'workflow', 'fix', '--describe', 'x'], { env: env() });
         eq(none.code, 1, none.out);
         ok(/the agent changed nothing/.test(none.out), none.out);
+      });
+
+      test('modify --from-run hands the agent why the run failed, and submit puts the why and the what in the pull request', () => {
+        // A run that fails on one error again and again.
+        write(path.join(fx.root, 'tools', 'fail.js'), "console.log('TypeError: cannot read properties of undefined (reading \\'id\\')'); process.exit(1);\n");
+        const flakyRel = '.aidev/workflows/flaky/workflow.yaml';
+        const flaky = yamlOf('flaky', { steps: ['  - id: build', '    agent: coder', '    prompt: build it', '    until:', '      command: node tools/fail.js', '      max_retries: 2'] });
+        write(path.join(fx.root, ...flakyRel.split('/')), flaky);
+        approve(fx, 'workflow flaky');
+        const run = aidev(fx.root, ['run', 'workflow', 'flaky', '--json'], { env: env() });
+        eq(run.code, 1, run.out);
+        const failed = lastJson(run.out);
+        ok(/same failure repeated/.test(failed.stopReason), failed.stopReason);
+        ok(/aidev modify workflow flaky --from-run /.test(run.out), 'the run says how to have it fixed');
+
+        ok(/--from-run takes a run id/.test(aidev(fx.root, ['modify', 'workflow', 'flaky', '--from-run', '../x']).out));
+        ok(/no run 2020-01-01T00-00-00-000Z of workflow flaky/.test(aidev(fx.root, ['modify', 'workflow', 'flaky', '--from-run', '2020-01-01T00-00-00-000Z']).out));
+        const dry = aidev(fx.root, ['modify', 'workflow', 'flaky', '--from-run', 'last', '--dry-run', '--json'], { env: env() });
+        eq([lastJson(dry.out).fromRun.runId, lastJson(dry.out).fromRun.repeated, lastJson(dry.out).fromRun.step], [failed.runId, true, 'build']);
+
+        fs.rmSync(promptOut, { force: true });
+        const fixed = flaky.replace('prompt: build it', 'prompt: build it; the records have no id until they are saved, so save first');
+        const answer = 'CAUSE: the agent read an id the records do not have before they are saved.\n\n- step build: the prompt says to save first.';
+        const m = aidev(fx.root, ['modify', 'workflow', 'flaky', '--from-run', failed.runId, '--json'],
+          { env: env({ STUB_WRITE_FILE: flakyRel, STUB_WRITE_TEXT: fixed, STUB_ANSWER: answer }) });
+        eq(m.code, 0, m.out);
+        const mj = lastJson(m.out);
+        eq([mj.fromRun.runId, mj.cause], [failed.runId, 'the agent read an id the records do not have before they are saved.']);
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(prompt.includes(`## What the team wants changed\n\nFix what made run ${failed.runId} fail`), 'without --describe the task is the fix');
+        ok(prompt.includes(`## The run to learn from: ${failed.runId}`) && /same error again and again/.test(prompt), 'it is told what to look for');
+        ok(/run \S+: stopped — step build: the same failure repeated/.test(prompt), 'the stop reason');
+        ok(/last check log \([^)]*logs\/build\.\d+\.1\.log, end\):\n```\n\$ node tools\/fail\.js[\s\S]*TypeError: cannot read properties of undefined/.test(prompt), 'the failing check\'s own output');
+        ok(/Start your final message with one line: CAUSE:/.test(prompt));
+        const note = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'cache', 'modify', 'flaky.json'), 'utf8'));
+        eq([note.fromRun.runId, note.fromRun.repeated, note.changed], [failed.runId, true, [flakyRel]]);
+
+        // submit: the pull request says why the workflow changed, from which run, and what changed.
+        const sub = aidev(fx.root, ['submit', 'workflow', 'flaky', '--no-push', '--json'], { env: env() });
+        eq(sub.code, 0, sub.out);
+        const sj = lastJson(sub.out);
+        eq(sj.description, '.aidev/cache/submit/flaky.md');
+        const body = fs.readFileSync(path.join(fx.root, ...sj.description.split('/')), 'utf8');
+        ok(/## Why this change\n\nAsked of `aidev modify`: Fix what made run/.test(body), body);
+        ok(body.includes(`It fixes what stopped run \`${failed.runId}\`: step build: the same failure repeated`), body);
+        ok(/The agent met the same failure again and again/.test(body) && /```text\n[\s\S]*TypeError: cannot read properties/.test(body), 'the failure as recorded');
+        ok(/\*\*Cause, as the workflow-creator agent found it:\*\* the agent read an id/.test(body), 'the cause');
+        ok(/## What changed against the approved workflow\n\n- step `build` changed: `prompt`/.test(body), 'what changed, step by step');
+        ok(/## Estimate\n\n\$[\d.]+ – \$[\d.]+ before → \$[\d.]+ – \$[\d.]+ now/.test(body), 'the estimate before and after');
+        ok(/- `\.aidev\/workflows\/flaky\/workflow\.yaml` \(changed\)/.test(body), 'which files changed');
+        git(['checkout', '-q', 'main'], fx.root);
+
+        // A step-level account of a change, without a modify note.
+        const { definitionChanges } = require('../cli/commands/workflow');
+        const a = wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'x', command: 'npm test' }, { id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }] }, 'wf');
+        const b = wfMod.validateDefinition({ ...GOOD, limits: { max_usd: 3 }, steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['lib/**'], prompt: 'go', until: { command: 'npm test', max_retries: 1 } }, { id: 'y', command: 'npm run lint' }] }, 'wf');
+        eq(definitionChanges(a, b), ['- step `a` changed: `writable`, `until`, `until.max_retries`', '- step `y` added (command)', '- step `x` removed', '- limits changed', '  limits: $1, no time limit → $3, no time limit']);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

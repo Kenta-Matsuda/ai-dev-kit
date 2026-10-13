@@ -257,7 +257,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | 変数 | 読む場所 | 意味 |
 | --- | --- | --- |
 | `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`sync wiki`（publish）、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
-| `AIDEV_HOME` | `home.js` | registryとupdate cacheの場所 |
+| `AIDEV_HOME` | `home.js`、`runtree.js` | registry、update cache、workflow実行のworktree（`worktrees/<PKG>-<hash>/<branch>`）の場所 |
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
