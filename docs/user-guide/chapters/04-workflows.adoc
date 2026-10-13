@@ -139,7 +139,10 @@ limits:                            # 実行を止める条件
 |省略すると `aidev.yaml` の `tools.agent` / `tools.agent_model`（agent ごとの `tools.agents.<name>` があればそれ）に従います。`tool` は `tools.default` にあるものだけです。
 
 |`steps`
-|上から順に実行します。1 つの step は次の 3 種類のどれか 1 つで、種類は `agent`・`command`・`pull_request` のどのキーを持つかで決まります。どの種類にも、レビューする人向けの `description`（任意）を書けます。
+|上から順に実行します。1 つの step は agent step・command step・pull-request step・parallel グループのどれか 1 つで、種類は `agent`・`command`・`pull_request`・`parallel` のどのキーを持つかで決まります。どの種類にも、レビューする人向けの `description`（任意）を書けます。
+
+|`agents`
+|任意。この workflow でだけ agent に足す能力（`skills`・`mcp`・`subagents` は追加、`tools` は置き換え）（xref:workflows-agents-skills[agent と skill]、xref:workflow-reference-agents[agents]）。
 
 |agent step
 |`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで agent を繰り返します（やり直しは `until.max_retries` 回まで）。`timeout_minutes`（agent 1 回の時間の上限）は任意です。
@@ -154,13 +157,16 @@ limits:                            # 実行を止める条件
 |任意。そのステップが変えてはいけないパス（glob）。`writable` の中にあっても書けず、ステップの前後で内容が変わっていれば不合格です（xref:workflows-unchanged[変えてはいけない場所を決める]）。
 
 |`for_each`
-|任意。対象の一覧（`from`）の 1 件ごとに、agent を新しく起動して繰り返します。`max_items` は必須です（xref:workflows-for-each[対象ごとに繰り返す]）。
+|任意。対象の一覧（`from`）の 1 件ごとに、agent を新しく起動して繰り返します。`max_items` は必須です（xref:workflows-for-each[対象ごとに繰り返す]）。`parallel` で同時に動かす件数を決められます（xref:workflows-parallel[並列に動かす]）。
+
+|parallel グループ
+|`parallel:` に並べた agent step を同時に起動し、全部終わってから次へ進みます。`writable` どうしが重なり得ると拒否されます（xref:workflows-parallel[並列に動かす]）。
 
 |command step
 |`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。`cwd`・`env`・`timeout_minutes` は任意です。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
 
 |`pull_request`
-|各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` は任意で、書かないときは `pull_request: {}` と書きます。1 つまでです。
+|各ステップの変更（ステップごとのチェックポイントのコミット）と、残った `writable` の範囲の変更をまとめて push し、PR を作ります。`title` は任意で、書かないときは `pull_request: {}` と書きます。1 つまでです。
 
 |`limits.max_usd`
 |必須。ツールが報告した費用（Claude Code のみ）の合計がこれに達すると、次の agent を起動せず止まります。

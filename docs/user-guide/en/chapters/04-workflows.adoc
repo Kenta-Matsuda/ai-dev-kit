@@ -139,7 +139,10 @@ limits:                            # what stops the run
 |If omitted, `tools.agent` / `tools.agent_model` of `aidev.yaml` apply (or the per-agent `tools.agents.<name>` if present). `tool` must be one of `tools.default`.
 
 |`steps`
-|Run from top to bottom. Each step is exactly one of three kinds, decided by which key it has: `agent`, `command` or `pull_request`. Every kind may have a `description` (optional) for the reviewer.
+|Run from top to bottom. Each step is exactly one of an agent step, a command step, a pull-request step or a parallel group, decided by which key it has: `agent`, `command`, `pull_request` or `parallel`. Every kind may have a `description` (optional) for the reviewer.
+
+|`agents`
+|Optional. What this workflow adds to its agents (`skills`, `mcp` and `subagents` are added; `tools` replaces) (xref:workflows-agents-skills[Agents and skills], xref:workflow-reference-agents[agents]).
 
 |agent step
 |`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated until `until` is met (started again at most `until.max_retries` times). `timeout_minutes` (the time allowed for one start of the agent) is optional.
@@ -154,13 +157,16 @@ limits:                            # what stops the run
 |Optional. Paths (globs) the step must not change. They cannot be written even inside `writable`, and the step fails if their contents differ after it (xref:workflows-unchanged[Naming what must not change]).
 
 |`for_each`
-|Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]).
+|Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]). `parallel` sets how many targets run at once (xref:workflows-parallel[Running agents in parallel]).
+
+|parallel group
+|The agent steps listed under `parallel:` start together; the run goes on when all have ended. Steps whose `writable` may overlap are refused (xref:workflows-parallel[Running agents in parallel]).
 
 |command step
 |`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_minutes` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
 
 |`pull_request`
-|Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` is optional; without it, write `pull_request: {}`. At most one.
+|Pushes the steps' changes (each step's checkpoint commit, plus what is left inside the steps' `writable`) and opens a PR. `title` is optional; without it, write `pull_request: {}`. At most one.
 
 |`limits.max_usd`
 |Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
