@@ -12,7 +12,7 @@ Never write values into files. Set them in your shell profile, as user environme
 |The Azure DevOps PAT. Used by `aidev sync wiki` on the tracking branch and `aidev submit workflow` (opening pull requests). An MCP server the package sets up in `.mcp.json` can use the same variable. The name can be changed with `hosting.auth_env` in `aidev.yaml`.
 
 |`AIDEV_HOME`
-|Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages and the ADK update-check cache.
+|Per-machine working area. Default: `{aidev-home-win}` on Windows, `{aidev-home-posix}` on POSIX. Holds the list of registered packages, the ADK update-check cache and the worktrees workflow runs work in (`worktrees/`).
 
 |`AIDEV_NO_UPDATE_CHECK`
 |When set, the check for a newer ADK is skipped. Set it to `1` in CI.

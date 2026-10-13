@@ -309,7 +309,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |`from`
 |文字列
 |必須
-|対象の一覧のファイル名。その実行の notes ディレクトリ（`.aidev/workflows/<name>/runs/<id>/notes/`）にあり、前のステップが書きます。英数字と `. _ -`、100 文字まで。
+|対象の一覧のファイル名。その実行の notes ディレクトリ（実行の worktree の `.aidev/workflows/<name>/runs/<id>/notes/`）にあり、前のステップが書きます。英数字と `. _ -`、100 文字まで。
 
 |`max_items`
 |整数
@@ -565,7 +565,7 @@ description: リリース前に確認する項目と順番
 [[workflow-reference-records]]
 === 実行記録（`runs/<id>/run.json`）
 
-`aidev run workflow` が実行しながら書きます（gitignore 済み）。見積もり（xref:cli-estimate[aidev estimate]）は、PKG のすべての workflow の `run.json` の `calls` を読みます。
+`aidev run workflow` が、実行の worktree の `.aidev/workflows/<name>/runs/<id>/` に実行しながら書きます（gitignore 済み）。見積もり（xref:cli-estimate[aidev estimate]）・`--resume`・`aidev modify --from-run` は、手元のチェックアウトと各 worktree の `run.json` を合わせて読みます。
 
 [cols="1,4",options="header"]
 |===
@@ -580,11 +580,11 @@ description: リリース前に確認する項目と順番
 |`startedAt`、`finishedAt`、`startedBy`
 |開始・終了の時刻と、実行したユーザー名（記録用）
 
-|`branch`、`baseSha`、`task`
-|動いたブランチ、起点の commit、`--task` の内容
+|`branch`、`worktree`、`baseSha`、`task`
+|動いたブランチ（`aidev/<name>`、`--dated` なら日付付き）、実行の worktree のパス、起点の commit、`--task` の内容
 
 |`steps`
-|ステップごとの `id`、`kind`、`ok`、`attempts`。agent step は最後の結果の要約（`result`）、確認役の報告（`review`）、コマンドの出力のファイル（`log`）。`for_each` は件ごとの `items`（`on_failure: continue` で失敗した件は `failed: true` と `reason`）と、失敗した件の数（`failed`）
+|ステップごとの `id`、`kind`、`ok`、`attempts`、通ったときのチェックポイントのコミット（`checkpoint`）。agent step は最後の結果の要約（`result`）、確認役の報告（`review`）、コマンドの出力のファイル（`log`）。`for_each` は件ごとの `items`（件ごとの `checkpoint`。`on_failure: continue` で失敗した件は `failed: true` と `reason`）と、失敗した件の数（`failed`）
 
 |`calls`
 |agent を起動するたびに 1 件: `step`、`role`（`agent` か、確認役の `until`）、`agent`、`item`（`for_each` の件）、`attempt`、`tool`、`model`、`ok`、`costUsd`、`durationMs`

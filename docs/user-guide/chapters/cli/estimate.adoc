@@ -29,7 +29,7 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 . この PKG の実績から学んだ、仕事の大きさ（下の表）ごとの費用
 . 仕事の大きさの既定の幅。ステップは `M`、確認役は `S`
 
-実績は、チームで共有する記録（`.aidev/estimates/records/`）と、この端末の `runs/<id>/run.json` の `calls` です。実績が 3 件未満のときは幅を広げます（最小の半分〜最大の 2 倍）。10 件以上あるときは、極端な 1 割ずつを除いた幅にします。
+実績は、チームで共有する記録（`.aidev/estimates/records/`）と、この端末の `runs/<id>/run.json`（手元と実行の worktree）の `calls` です。実績が 3 件未満のときは幅を広げます（最小の半分〜最大の 2 倍）。10 件以上あるときは、極端な 1 割ずつを除いた幅にします。
 |===
 
 [cols="1,2,1",options="header"]

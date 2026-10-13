@@ -74,7 +74,7 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |Path |Contents
 
 |`.aidev/cache/`
-|Remote-check cache, the HEAD the hook last saw (`last-head.json`) and the Stop hook counter (`wiki-stop.json`), the temporary worktree of a publish to the tracking branch (`wiki-worktree/`), task files handed to agents
+|Remote-check cache, the HEAD the hook last saw (`last-head.json`) and the Stop hook counter (`wiki-stop.json`), the temporary worktree of a publish to the tracking branch (`wiki-worktree/`), task files handed to agents, the files `aidev modify` replaced and its note (`modify/`), the PR description `aidev submit` wrote (`submit/<name>.md`)
 
 |`.aidev/sync.lock`
 |The lease of a publish to the tracking branch
@@ -83,11 +83,11 @@ Excluded by `.aidev/.gitignore`. If deleted, the next command recreates them.
 |`plan.json` (the batches the hook hands to the session) and the agent's completion reports
 
 |`.aidev/workflows/*/runs/`
-|Workflow run records (`run.json`, `log.txt`, `reports/`, `logs/`, `diffs/`, `notes/`, `pull-request.md`). They contain command output, so they are never committed (xref:workflows-run[Running a workflow])
+|Workflow run records (`run.json`, `log.txt`, `reports/`, `logs/`, `diffs/`, `notes/`, `pull-request.md`), written inside the run's worktree. They contain command output, so they are never committed (xref:workflows-run[Running a workflow])
 |===
 
 Temporary files: `.aidev/policy.candidate.yaml` (removed on approval) and `.aidev/ejected.json` (written by `aidev uninstall --package`, removed by `aidev init`).
 
 === On this machine (AIDEV_HOME)
 
-Holds `registry.json` (the registered packages) and `cache/update-check.json` (the result of the ADK update check). The ADK itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes both. On the machine of someone developing {project-name} itself there is also a `Developer.json` (irrelevant to users).
+Holds `registry.json` (the registered packages), `cache/update-check.json` (the result of the ADK update check) and the worktrees workflow runs work in (`worktrees/<PKG name>-<hash of where the PKG clone is>/<branch>`; xref:workflows-worktree[The run's worktree and branch]). The ADK itself is not in `AIDEV_HOME`; it is the clone you ran the installer from. `aidev uninstall` removes `registry.json` and `cache/`. It leaves `worktrees/`, which may hold work not pushed yet (remove them with `git worktree remove`). On the machine of someone developing {project-name} itself there is also a `Developer.json` (irrelevant to users).

@@ -309,7 +309,7 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |`from`
 |string
 |required
-|The name of the list file. It is in the run's notes directory (`.aidev/workflows/<name>/runs/<id>/notes/`), written by an earlier step. Letters, digits and `. _ -`, up to 100 characters.
+|The name of the list file. It is in the run's notes directory (`.aidev/workflows/<name>/runs/<id>/notes/` in the run's worktree), written by an earlier step. Letters, digits and `. _ -`, up to 100 characters.
 
 |`max_items`
 |integer
@@ -565,7 +565,7 @@ description: What to check before a release, in order
 [[workflow-reference-records]]
 === Run record (`runs/<id>/run.json`)
 
-`aidev run workflow` writes it as the run goes (gitignored). The estimate (xref:cli-estimate[aidev estimate]) reads `calls` from the `run.json` of every workflow in the PKG.
+`aidev run workflow` writes it to `.aidev/workflows/<name>/runs/<id>/` in the run's worktree as the run goes (gitignored). The estimate (xref:cli-estimate[aidev estimate]), `--resume` and `aidev modify --from-run` read the `run.json` files of the checkout and of every run worktree together.
 
 [cols="1,4",options="header"]
 |===
@@ -580,11 +580,11 @@ description: What to check before a release, in order
 |`startedAt`, `finishedAt`, `startedBy`
 |When it started and finished, and the user name that ran it (for the record)
 
-|`branch`, `baseSha`, `task`
-|The branch it ran on, the commit it started from, what `--task` said
+|`branch`, `worktree`, `baseSha`, `task`
+|The branch it ran on (`aidev/<name>`, dated with `--dated`), the path of the run's worktree, the commit it started from, what `--task` said
 
 |`steps`
-|Per step: `id`, `kind`, `ok`, `attempts`. An agent step also has a summary of its last result (`result`), the checking agent's report (`review`), the command output file (`log`); a `for_each` step has `items` per target (a target that failed under `on_failure: continue` has `failed: true` and `reason`) and the number that failed (`failed`)
+|Per step: `id`, `kind`, `ok`, `attempts`, and the checkpoint commit made when it passed (`checkpoint`). An agent step also has a summary of its last result (`result`), the checking agent's report (`review`), the command output file (`log`); a `for_each` step has `items` per target (each with its own `checkpoint`; a target that failed under `on_failure: continue` has `failed: true` and `reason`) and the number that failed (`failed`)
 
 |`calls`
 |One entry per agent start: `step`, `role` (`agent`, or `until` for the checking agent), `agent`, `item` (the `for_each` target), `attempt`, `tool`, `model`, `ok`, `costUsd`, `durationMs`

@@ -116,7 +116,7 @@ aidev sync wiki   # Wiki を HEAD に追従させ、別コミットとして積�
 
 ## PR とマージ
 
-- ブランチは `aidev/<workflow>-<yyyymmddHHMM>`（aidev run workflow）、`aidev/workflow-<name>`（aidev submit workflow）、`aidev/wiki-<sha>`（aidev sync wiki）、または `feature/<name>`
+- ブランチは `aidev/<workflow>`（aidev run workflow。専用の worktree で動き、ステップごとにコミットする。`--dated` なら `aidev/<workflow>-<yyyymmddHHMM>`）、`aidev/workflow-<name>`（aidev submit workflow）、`aidev/wiki-<sha>`（aidev sync wiki）、または `feature/<name>`
 - **自動マージは禁止**です。PR は人間がマージします
 - aidev が生成するもの（Wiki ページ・Wiki コミット・PR）の内容はユーザーがレビューします。kit はマージしません
 - PR を作る前に品質ゲートを通します

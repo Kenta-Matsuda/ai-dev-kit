@@ -131,6 +131,8 @@ test-writer via claude [pkg]
   limits    45 min, $5
   cost      $0.80 – $5.40 (optimistic – pessimistic; "aidev estimate workflow write-tests" for the breakdown)
   task      src/services/order.ts
+  branch    aidev/write-tests
+  worktree  under ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d
 
     1. survey: agent test-investigator — 既存テストの書き方を調べ、足りないテストを洗い出す
        - writes: nothing

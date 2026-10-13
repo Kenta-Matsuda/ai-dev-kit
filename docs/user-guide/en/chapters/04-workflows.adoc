@@ -228,7 +228,7 @@ The whole output of every command is kept under `logs/` in the run record. When 
 Each agent step starts as a new process. The conversation of an earlier step is gone. There are two ways to pass results on.
 
 * **The final report** — the ADK puts the final report of each earlier agent step into the instructions of the later agent steps (the last 6000 characters of a long report). In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
-* **The notes directory** — have a long or exact result, such as a plan or a list of target files, written to a file. The place is `.aidev/workflows/<name>/runs/<id>/notes/`, one per run; the ADK puts it into the instructions of every agent step. A step with `writable: []` can write there too. A checking agent only reads it. Nothing in it is committed.
+* **The notes directory** — have a long or exact result, such as a plan or a list of target files, written to a file. The place is `.aidev/workflows/<name>/runs/<id>/notes/` in the run's worktree, one per run; the ADK puts it into the instructions of every agent step. A step with `writable: []` can write there too. A checking agent only reads it. Nothing in it is committed.
 
 [source,yaml]
 ----
@@ -566,7 +566,7 @@ This is what happens during a run.
 |Item |What it is
 
 |Where the worktree is
-|`<AIDEV_HOME>/worktrees/<PKG name>-<hash>/<branch name with / as ->` (`~/.local/share/ai-dev-kit/…` on Linux, `%LOCALAPPDATA%\ai-dev-kit\…` on Windows). It is outside the PKG, so tests and linters run in the PKG do not pick up a second copy of the sources.
+|`<AIDEV_HOME>/worktrees/<PKG name>-<hash>/<branch name with / as ->` (`~/.local/share/ai-dev-kit/…` on Linux, `%LOCALAPPDATA%\ai-dev-kit\…` on Windows). The hash is made from **where the PKG clone is (its absolute path)**, only so that two clones of one PKG on a machine do not share a directory. It has nothing to do with the workflow's content and does not change when the workflow is fixed. Later runs find the worktree by its branch name (`git worktree list`), not by the path. It is outside the PKG, so tests and linters run in the PKG do not pick up a second copy of the sources.
 
 |Branch
 |`aidev/<name>`. The first time, it starts at the commit checked out now. With `--dated`, each run gets a new `aidev/<name>-<yyyymmddHHMM>` and a worktree of its own.
@@ -751,7 +751,7 @@ Start from the problem you see.
 
 |It stops at the cost or time limit
 |`limits.max_usd`, `limits.max_minutes`
-|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json`) and the estimate of `aidev estimate workflow <name>`.
+|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json` in the run's worktree) and the estimate of `aidev estimate workflow <name>`.
 |===
 
 Agents and skills are shared by every workflow that uses them. **Changing an agent's .md also changes how the other workflows that use that agent behave.** To change only one workflow, make a separate agent (`aidev create agent <new-name>`).

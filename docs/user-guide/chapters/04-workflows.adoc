@@ -228,7 +228,7 @@ limits:                            # 実行を止める条件
 各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。結果を渡す方法は 2 つあります。
 
 * **最終報告** — 前の agent step の最終報告を、ADK が後の agent step の指示に入れます（長い報告は末尾 6000 文字）。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
-* **notes ディレクトリ** — 計画や対象ファイルの一覧のように、長いものや正確に渡したいものは file に書かせます。場所は実行ごとの `.aidev/workflows/<name>/runs/<id>/notes/` で、ADK が各 agent step の指示に入れます。`writable: []` のステップも書けます。確認役の agent は読むだけです。コミットはされません。
+* **notes ディレクトリ** — 計画や対象ファイルの一覧のように、長いものや正確に渡したいものは file に書かせます。場所は実行ごとの `.aidev/workflows/<name>/runs/<id>/notes/`（実行の worktree の中）で、ADK が各 agent step の指示に入れます。`writable: []` のステップも書けます。確認役の agent は読むだけです。コミットはされません。
 
 [source,yaml]
 ----
@@ -566,7 +566,7 @@ aidev run workflow write-tests
 |項目 |内容
 
 |worktree の場所
-|`<AIDEV_HOME>/worktrees/<PKG 名>-<ハッシュ>/<ブランチ名の / を - にしたもの>`（Linux なら `~/.local/share/ai-dev-kit/…`、Windows なら `%LOCALAPPDATA%\ai-dev-kit\…`）。PKG の外に置くので、PKG で動かすテストやリンターが 2 つ目のソースを拾いません。
+|`<AIDEV_HOME>/worktrees/<PKG 名>-<ハッシュ>/<ブランチ名の / を - にしたもの>`（Linux なら `~/.local/share/ai-dev-kit/…`、Windows なら `%LOCALAPPDATA%\ai-dev-kit\…`）。ハッシュは **PKG のクローンの場所（絶対パス）** から作るもので、同じ端末に同じ PKG のクローンが複数あっても置き場所がぶつからないようにするためだけのものです。workflow の内容とは関係なく、workflow を直しても変わりません。2 回目以降の実行は、場所ではなくブランチ名（`git worktree list`）で worktree を探します。PKG の外に置くので、PKG で動かすテストやリンターが 2 つ目のソースを拾いません。
 
 |ブランチ
 |`aidev/<name>`。初回は、今チェックアウトしているコミットから作ります。`--dated` なら実行ごとに `aidev/<name>-<yyyymmddHHMM>` と、その worktree を新しく作ります。
@@ -751,7 +751,7 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 
 |費用や時間の上限で止まる
 |`limits.max_usd`、`limits.max_minutes`
-|実行の記録（`.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間、`aidev estimate workflow <name>` の見積もりを見て決めます。
+|実行の記録（実行の worktree の `.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間、`aidev estimate workflow <name>` の見積もりを見て決めます。
 |===
 
 agent・skill は、それを使うすべての workflow で共有されています。**agent.md を直すと、その agent を使う他の workflow の動きも変わります。** 1 つの workflow だけ変えたいときは、agent を分けます（`aidev create agent <新しい名前>`）。

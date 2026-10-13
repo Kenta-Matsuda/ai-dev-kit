@@ -29,7 +29,7 @@ A run costs the number of agent starts times what one start costs, added up. The
 . what a work size (table below) costs in this PKG, learned from its runs
 . the default range of the work size: `M` for a step, `S` for a checking agent
 
-What things cost before comes from the records the team shares (`.aidev/estimates/records/`) and from `calls` in this machine's `runs/<id>/run.json`. With fewer than 3 the range is widened (half the lowest to twice the highest). With 10 or more, the most extreme tenth at each end is left out.
+What things cost before comes from the records the team shares (`.aidev/estimates/records/`) and from `calls` in this machine's `runs/<id>/run.json` (in the checkout and the run worktrees). With fewer than 3 the range is widened (half the lowest to twice the highest). With 10 or more, the most extreme tenth at each end is left out.
 |===
 
 [cols="1,2,1",options="header"]

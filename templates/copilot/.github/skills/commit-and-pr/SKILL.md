@@ -15,7 +15,7 @@ CIを赤いまま放置する文化を作ります。
 
 | 用途 | 形式 |
 | --- | --- |
-| workflow の実行（`aidev run workflow`） | `aidev/<workflow>-<yyyymmddHHMM>` |
+| workflow の実行（`aidev run workflow`） | `aidev/<workflow>`（workflow ごとに 1 つ。`--dated` なら `aidev/<workflow>-<yyyymmddHHMM>`） |
 | workflow の提出（`aidev submit workflow`） | `aidev/workflow-<name>` |
 | 通常の機能開発 | `feature/<name>` |
 | 修正 | `fix/<name>` |
