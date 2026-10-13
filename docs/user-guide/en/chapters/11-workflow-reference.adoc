@@ -11,7 +11,7 @@ This chapter describes every field of a workflow and of the agents and skills it
 |File |What it holds |Who refers to it
 
 |`.aidev/workflows/<name>/workflow.yaml`
-|The order of the steps and each step's limits (where it may write, when it is done, ceilings)
+|The order of the steps and each step's limits (where it may write, when it is done, ceilings). What this workflow adds to its agents (`agents:`)
 |`aidev run workflow <name>`
 
 |`.aidev/agents/<name>.md`
@@ -20,7 +20,7 @@ This chapter describes every field of a workflow and of the agents and skills it
 
 |`.aidev/skills/<name>/SKILL.md`
 |A procedure
-|An agent's frontmatter `skills:`
+|An agent's frontmatter `skills:`, a workflow's `agents.<agent>.skills`
 |===
 
 .A workflow names agents in its steps; an agent names skills
@@ -31,6 +31,8 @@ flowchart LR
   W -- "steps[].until.agent" --> R["agents/#60;checker#62;.md"]
   A -- "frontmatter skills" --> S["skills/#60;name#62;/SKILL.md"]
   A -- "frontmatter mcp" --> M["server in .mcp.json"]
+  W -- "agents.#60;name#62;.skills" --> S
+  W -- "agents.#60;name#62;.mcp" --> M
 ----
 
 Agents and skills are looked up in the PKG's `.aidev/` first, then among those bundled with ADK. With the same name, the PKG's wins.
@@ -48,6 +50,11 @@ objective: |                       # required
   Add Playwright tests for the screens named in the task.
 tool: claude                       # optional
 model: sonnet                      # optional
+agents:                            # optional. What this workflow adds to an agent
+  e2e-writer:
+    skills: [test-and-verify]      # added to the frontmatter's skills
+    mcp: [playwright]              # added to the frontmatter's mcp
+    tools: [Read, Grep, Edit]      # used instead of the frontmatter's tools
 
 steps:                             # required; run top to bottom
   - id: plan                       # an agent step
@@ -118,16 +125,70 @@ A field that is not in the tables below is refused by validation (`unknown key �
 |optional
 |The model name (`sonnet` and so on). `""` passes no model and leaves it to the AI tool. When omitted: `tools.agents.<agent>.model`, then `tools.agent_model` in `aidev.yaml`. Letters, digits and `. _ - : / @ [ ]`, up to 200 characters.
 
+|`agents`
+|mapping
+|optional
+|What this workflow adds to its agents. The keys are names of agents the steps use (`agent:` or `until.agent:`) (xref:workflow-reference-agents[agents]).
+
 |`steps`
 |list
 |required
-|The steps, at least one, run top to bottom. Each step is exactly one of an agent step, a command step or a pull-request step, decided by which key it has: `agent`, `command` or `pull_request` (the sections below). A step with two of them is refused.
+|The steps, at least one, run top to bottom. Each step is exactly one of an agent step, a command step, a pull-request step or a parallel group, decided by which key it has: `agent`, `command`, `pull_request` or `parallel` (the sections below). A step with two of them is refused.
 
 |`limits`
 |mapping
 |required
 |What stops the run. Holds `max_usd` (required) and `max_minutes` (optional) only (xref:workflow-reference-limits[limits]).
 |===
+
+[[workflow-reference-agents]]
+=== agents
+
+The skills, MCP servers and built-in tools an agent can use are normally written in its frontmatter (xref:workflow-reference-agent[Agent definition]). `agents:` is where workflow.yaml adds what an agent should have **only in this workflow**. The same agent can run with different capabilities in another workflow.
+
+[source,yaml]
+----
+agents:
+  ticket-reader:
+    skills: [ticket-format]        # added to the frontmatter's skills
+    mcp: [azure-devops]            # added to the frontmatter's mcp
+  test-writer:
+    tools: [Read, Grep, Glob, Edit, Write]   # used instead of the frontmatter's tools
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`agents.<agent>`
+|mapping
+|optional
+|`<agent>` is the name of an agent a step's `agent:` or `until.agent:` uses, or of a subagent in its `subagents`. Any other name is refused (`no step names agent …`). Holds `skills`, `mcp`, `tools` and `subagents` only.
+
+|`agents.<agent>.skills`
+|list
+|optional
+|Skills **added** to the frontmatter's `skills`. Looked up in the PKG, then among those bundled with ADK; one found in neither stops validation (`<workflow.yaml>: agents.<agent>: skill … is neither in …`).
+
+|`agents.<agent>.mcp`
+|list
+|optional
+|MCP servers (keys of the PKG's `.mcp.json`) **added** to the frontmatter's `mcp`. A name not in `.mcp.json` stops the workflow before it starts.
+
+|`agents.<agent>.tools`
+|list
+|optional
+|The built-in tools the agent can use in this workflow. When written, it is used **instead of** the frontmatter's `tools` (not added to it). When omitted, the frontmatter's `tools` apply. An empty list is refused.
+
+|`agents.<agent>.subagents`
+|list
+|optional
+|Subagents the agent may start, **added** to the frontmatter's `subagents` (xref:workflows-subagents[Naming the subagents an agent may start]). The subagents named here may be keys of `agents:` too.
+|===
+
+* What is added is treated like the frontmatter's capabilities: Claude Code is started with only those, and the hook refuses any other tool. An agent with `tools` or `mcp` runs only on Claude Code.
+* workflow.yaml is what gets approved, so changing `agents:` makes the workflow unapproved again. Put it in a PR with `aidev submit workflow` and have it reviewed.
+* A step cannot carry `skills`, `mcp` or `tools` (`a step does not carry …`). For different capabilities per step, use a different agent.
 
 [[workflow-reference-agent-step]]
 === Agent step
@@ -259,11 +320,44 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |`stop` or `continue`
 |optional
 |What happens when a target fails. `stop` (the default) stops there. `continue` puts back the files inside `writable` that changed during that target and starts the next one. The run still stops when every target fails or a cost or time limit is reached (xref:workflows-unattended[Running a large job without anyone stepping in]).
+
+|`parallel`
+|integer
+|optional (default 1)
+|How many targets run at once. 1 to 16. From 2 up, every `writable` path of the step must contain `{item}` (`e2e/tests/{item}.spec.ts` and so on) (xref:workflows-parallel[Running agents in parallel]).
 |===
 
 The list has one target per line. Blank lines and lines starting with `#` are skipped, a leading `- ` or `* ` is removed, and a repeated line counts once. A target is one word of letters, digits and `. _ / @ -` (up to 200 characters, not starting with `-`, no `..`).
 
-`{item}` can be written only in the `prompt` (where it is required), `until.command` and `until.prompt` of a step with `for_each`. Anywhere else, validation refuses it.
+`{item}` can be written only in the `prompt` (where it is required), `writable`, `until.command` and `until.prompt` of a step with `for_each`. Anywhere else, validation refuses it. In `writable`, `{item}` becomes the target's name, and that target's agent may write only there. A path with `{item}` starts with a fixed directory (`{item}/x.ts` is refused). The pull-request step commits the whole directory before `{item}` (`e2e/tests/**` for `e2e/tests/{item}.spec.ts`).
+
+[[workflow-reference-parallel]]
+=== Parallel group
+
+A step that runs agent steps at the same time (xref:workflows-parallel[Running agents in parallel]).
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`id`
+|string
+|optional
+|The group's name. The same rules as a step id, and it may not repeat one.
+
+|`description`
+|string
+|optional
+|For the reviewer.
+
+|`parallel`
+|list
+|required
+|The agent steps that run at once (2 to 16). Each has the fields of an agent step; one without `id` is named `<group id>-1` and so on. Command steps, pull-request steps and groups cannot be listed.
+|===
+
+* In `run.json`, `--resume` and the estimate, the steps of a group are steps of their own.
+* Validation refuses steps whose `writable` may overlap, or a `writable` that may overlap another step's `unchanged`.
 
 [[workflow-reference-command-step]]
 === Command step
@@ -378,7 +472,7 @@ model: inherit
 |`skills`
 |list (`[a, b]` or `a, b`)
 |optional
-|Skills whose body goes into its instructions. Looked up in the PKG, then in ADK; a skill found in neither stops the workflow at validation.
+|Skills whose body goes into its instructions. Looked up in the PKG, then in ADK; a skill found in neither stops the workflow at validation. A workflow's `agents:` can add more for that workflow only (xref:workflow-reference-agents[agents]).
 
 |`tools`
 |list
@@ -390,10 +484,15 @@ model: inherit
 |optional
 |The MCP servers it may use (keys of the PKG's `.mcp.json`). When omitted, no MCP server is given. A name missing from `.mcp.json` stops the workflow before it starts.
 
+|`subagents`
+|list
+|optional
+|The subagents this agent may start with the `Agent` tool (names of `.aidev/agents/<name>.md`). When written, no other can be started; when omitted, whatever the AI tool offers can. With `tools`, include `Agent`. A subagent's `tools` and `mcp` must be within this agent's, and a subagent cannot have `subagents` of its own (xref:workflows-subagents[Naming the subagents an agent may start]).
+
 |`model`
 |string
 |optional
-|Write `inherit`. It is not used when a workflow starts the agent; the workflow's `model` and `aidev.yaml` decide.
+|Write `inherit`. It is not used when a workflow starts the agent; the workflow's `model` and `aidev.yaml` decide. A subagent runs on its parent agent's model.
 |===
 
 * An agent with `tools` or `mcp` runs only with Claude Code (other AI tools cannot be limited to them, so the run stops before it starts).

@@ -154,7 +154,7 @@ When `--dry-run` finds a problem that would stop the run before it starts (witho
 [source,text]
 ----
 ✗ agent ticket-reader uses the MCP server ado, which .mcp.json does not register
-✗ agent test-writer lists tools in its frontmatter, and GitHub Copilot CLI cannot be limited to them; run it with claude
+✗ agent test-writer is given tools (in its frontmatter or the workflow's agents:), and GitHub Copilot CLI cannot be limited to them; run it with claude
 ✗ dry run: the workflow is approved but would be refused (see above).
 ----
 

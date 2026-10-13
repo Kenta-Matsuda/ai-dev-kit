@@ -36,11 +36,12 @@ description: <いつ起動されるかが読み取れる1〜2文>
 skills: [<prompt に本文を入れる skill>]   # 無ければ []
 tools: <必要最小限のツール>
 mcp: [<使う MCP server>]                 # PKG の .mcp.json のキー。無ければ []
+subagents: [<起動してよいサブエージェント>]  # 任意。書けばこれ以外は起動できない（tools に Agent が要る）
 model: inherit
 ---
 ```
 
-`skills`・`tools`・`mcp` はこのエージェントの**能力**です。workflow から起動されると、kit は
+`skills`・`tools`・`mcp`・`subagents` はこのエージェントの**能力**です。サブエージェントの `tools`・`mcp` は、このエージェントの範囲を超えられません。workflow から起動されると、kit は
 `skills` の本文を指示に入れ、Claude Code を `tools` と `mcp` にあるものだけで起動します。
 書き込める場所（制約）は agent ではなく、workflow の各ステップの `writable` が決めます。
 

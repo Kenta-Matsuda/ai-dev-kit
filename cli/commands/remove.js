@@ -20,18 +20,27 @@ const KINDS = ['workflow', 'agent', 'skill'];
 const FLAGS = { json: 'boolean', 'dry-run': 'boolean' };
 const FLAG_HELP = { json: 'machine-readable output', 'dry-run': 'show what would be deleted; delete nothing' };
 
-/** Workflows in this PKG whose steps name the agent, or whose agents list the skill. */
+/**
+ * Workflows in this PKG whose steps name the agent (or whose agents may start
+ * it as a subagent), or whose agents and subagents list the skill.
+ */
 function referencing(repoRoot, installRoot, kind, name) {
   const out = [];
   for (const wf of wfMod.listWorkflows(repoRoot)) {
     let def;
     try { def = wfMod.loadDefinition(repoRoot, wf); } catch { continue; }
+    const own = (n) => {
+      const a = wfMod.resolveAgent(repoRoot, installRoot, n);
+      return a && a.capabilities ? a.capabilities : { skills: [], subagents: [] };
+    };
+    const subagents = [...new Set(def.agents.flatMap((a) => own(a).subagents)
+      .concat(Object.values(def.grants).flatMap((g) => g.subagents)))];
     if (kind === 'agent') {
-      if (def.agents.includes(name)) out.push(wf);
+      if (def.agents.includes(name) || subagents.includes(name)) out.push(wf);
       continue;
     }
-    const lists = def.agents.map((a) => wfMod.resolveAgent(repoRoot, installRoot, a))
-      .filter((a) => a && a.capabilities).map((a) => a.capabilities.skills);
+    const lists = [...def.agents, ...subagents].map((a) => own(a).skills)
+      .concat(Object.values(def.grants).map((g) => g.skills));
     if (lists.some((l) => l.includes(name))) out.push(wf);
   }
   return out;

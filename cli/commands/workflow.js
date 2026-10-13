@@ -19,7 +19,8 @@
  * and the write guard checks it again on every write (lib/policy.js rule 6),
  * with the running step's `writable` as the only source of PKG write access.
  * Each agent step's tool is started with only the tools and MCP servers its
- * agent's frontmatter grants, and the guard refuses any other tool call.
+ * agent's frontmatter grants (plus what the workflow's `agents:` assigns to
+ * it), and the guard refuses any other tool call.
  *
  * Safety valves are mandatory, not defaults to taste: a time ceiling, a
  * bounded retry count per step, a required USD budget, a same-failure stop,
@@ -88,9 +89,18 @@ objective: |
 # tool: claude
 # model: sonnet
 
+# Optional: what this workflow adds to the agents its steps name, on top of each agent's
+# frontmatter. skills and mcp are added to the frontmatter's; tools, when given, replaces it.
+# agents:
+#   my-agent:
+#     skills: [test-and-verify]
+#     mcp: [tickets]             # keys of this PKG's .mcp.json
+#     tools: [Read, Grep, Edit, Agent]
+#     subagents: [my-scout]      # the only subagents it may start (.aidev/agents/my-scout.md)
+
 # The steps run top to bottom. Each agent step names:
 #   agent     who does it: .aidev/agents/<name>.md in this PKG (aidev create agent <name>),
-#             then the kit's. The agent's frontmatter says what it can use (skills, tools, mcp).
+#             then the kit's. Its frontmatter (and agents: above) says what it can use.
 #   writable  what this step may change. Everything else stays read-only; [] changes nothing.
 #             Protected paths (.claude/**, .aidev/policy.yaml, …) cannot be listed.
 # The final report of each agent step is handed to the agent steps after it; a step can also
@@ -112,6 +122,8 @@ steps:
     #   from: targets.txt      #   a file an earlier step wrote in the run's notes directory, one target per line
     #   max_items: 200         #   required; at most ${wfMod.LIMITS.maxItems}. Write {item} in prompt (and until) for the target
     #   on_failure: continue   #   optional: undo a target that fails and go on to the next (default: stop)
+    #   parallel: 4            #   optional: targets at once (at most ${wfMod.LIMITS.maxParallel}); every writable path
+    #                          #   must then name its target, e.g. writable: [e2e/tests/{item}.spec.ts]
     until:                   # repeat the step until it is done:
       command: npm test        #   this exits 0 (no shell: no quotes, pipes or variables).
                                #   A list runs in order: [npm ci, npm run build, npx playwright test]
@@ -121,6 +133,10 @@ steps:
       # agent: my-reviewer    #   and, optional, this agent answers VERDICT: PASS (it writes nothing)
       # prompt: Check that the change follows the plan and the tests cover it.
       max_retries: 3           #   start the agent again at most this often when the check fails (at most ${wfMod.LIMITS.maxRetries})
+  # - id: build                # optional: a parallel group, agent steps that start together;
+  #   parallel:                #   the run goes on when all have ended. Their writable paths must not meet.
+  #     - { id: api, agent: my-agent, writable: [api/**], prompt: Build the API. }
+  #     - { id: web, agent: my-agent, writable: [web/**], prompt: Build the screens. }
   - id: pr
     pull_request:              # commit what the steps may write, push, open the PR (azure-devops)
       title: Make the change     #   optional
@@ -138,6 +154,7 @@ description: <when this agent is started and what it does>
 skills: [test-and-verify]    # inlined into its prompt; .aidev/skills/<name>/SKILL.md or the kit's
 tools: Read, Grep, Glob, Edit, Write   # the only built-in tools it gets (omit for the tool's default set)
 mcp: []                      # MCP servers from the PKG's .mcp.json it may use; none when omitted
+subagents: []                # the only agents it may start with the Agent tool (omit: whatever the tool offers)
 model: inherit
 ---`;
 
@@ -167,7 +184,7 @@ function catalogue(repoRoot, installRoot) {
   try { pkgSkills = fs.readdirSync(layout.abs(repoRoot, layout.SKILLS_REL), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { pkgSkills = []; }
   for (const s of pkgSkills) lines.push(`- ${s} (this PKG)`);
   lines.push('', '## The schema (a template; only these keys exist)', '', '```yaml', TEMPLATE_YAML('example').trim(), '```');
-  lines.push('', '## What an agent can use: its frontmatter (not the workflow)', '', '```markdown', AGENT_FRONTMATTER_EXAMPLE, '```');
+  lines.push('', '## What an agent can use: its frontmatter, plus what the workflow\'s agents: adds for that workflow', '', '```markdown', AGENT_FRONTMATTER_EXAMPLE, '```');
   return lines.join('\n');
 }
 
@@ -246,7 +263,39 @@ async function newWorkflow(ctx) {
 // ----------------------------------------------------------------------- submit
 
 const codeList = (xs) => (xs.length ? xs.map((x) => `\`${x}\``).join(', ') : '(none)');
-const grants = (cap) => `skills: ${codeList(cap.skills)}; tools: ${cap.tools ? codeList(cap.tools) : 'the tool\'s default set'}; mcp: ${codeList(cap.mcp)}`;
+const grants = (cap) => `skills: ${codeList(cap.skills)}; tools: ${cap.tools ? codeList(cap.tools) : 'the tool\'s default set'}; mcp: ${codeList(cap.mcp)}`
+  + (cap.subagents && cap.subagents.length ? `; subagents: ${codeList(cap.subagents)}` : '');
+
+/**
+ * The subagents an agent may start, as Claude Code's --agents takes them:
+ * each one's definition (its body and skills), on the step agent's model, and
+ * nothing beyond its own grants. A subagent lives in its parent's session, so
+ * what the parent was not given does not exist for it either; what the
+ * parent has and the subagent does not is taken away (disallowedTools, with
+ * server-level MCP specs), or, when the parent has the tool's whole default
+ * set, the subagent's own list is its allow-list.
+ */
+function subagentSpecs(agent, deps) {
+  const out = {};
+  for (const [sn, sub] of Object.entries(agent.subagentDefs || {})) {
+    const pc = agent.capabilities;
+    const sc = sub.capabilities;
+    const spec = {
+      description: sub.description || `the ${sn} agent`,
+      prompt: wfMod.definitionForPrompt(sub, sc.skills.map((k) => deps.skills[k])),
+      model: 'inherit',
+    };
+    const dropMcp = pc.mcp.filter((m) => !sc.mcp.includes(m)).map((m) => `mcp__${m}`);
+    if (sc.tools && !pc.tools) {
+      spec.tools = [...sc.tools, ...sc.mcp.map((m) => `mcp__${m}`)];
+    } else {
+      const dropTools = sc.tools && pc.tools ? pc.tools.filter((t) => !sc.tools.includes(t)) : [];
+      if (dropTools.length || dropMcp.length) spec.disallowedTools = [...dropTools, ...dropMcp];
+    }
+    out[sn] = spec;
+  }
+  return out;
+}
 
 /** An `until` in words: "`npm test` exits 0 and agent `x` answers PASS". */
 function untilText(until) {
@@ -281,7 +330,14 @@ function describeSteps(def, deps) {
         `   - ${grants(deps.agents[s.agent].capabilities)}`,
       ];
       if (s.unchanged.length) lines.push(`   - must leave unchanged: ${codeList(s.unchanged)}`);
-      if (s.for_each) lines.push(`   - once per target listed in the run's notes file \`${s.for_each.from}\` (at most ${s.for_each.max_items})`);
+      if (s.for_each) lines.push(`   - once per target listed in the run's notes file \`${s.for_each.from}\` (at most ${s.for_each.max_items}${s.for_each.parallel > 1 ? `, ${s.for_each.parallel} at a time` : ''})`);
+      if (s.group) {
+        const others = def.steps.filter((o) => o.group === s.group && o.id !== s.id).map((o) => o.id);
+        lines.push(`   - runs at the same time as ${codeList(others)} (parallel group \`${s.group}\`)`);
+      }
+      for (const [sn, sub] of Object.entries(deps.agents[s.agent].subagentDefs || {})) {
+        lines.push(`   - may start subagent \`${sn}\` (${grants(sub.capabilities)})`);
+      }
       if (s.until) {
         lines.push(`   - repeats until ${untilText(s.until)} (max ${s.max_retries} retries)${runsWith(s.until)}`);
         if (s.until.agent) {
@@ -886,13 +942,31 @@ function launchPlan(repoRoot, config, def, deps) {
     const cap = agent.capabilities;
     const enforce = !!toolsMod.getTool(tool).capabilities;
     let mcpServers = {};
-    if (!enforce && (cap.tools || cap.mcp.length)) {
-      problems.push(`agent ${a} lists ${cap.tools ? 'tools' : 'mcp'} in its frontmatter, and ${toolsMod.getTool(tool).label} cannot be limited to them; run it with claude`);
+    if (!enforce && (cap.tools || cap.mcp.length || cap.subagents.length)) {
+      const what = cap.tools ? 'tools' : cap.mcp.length ? 'mcp' : 'subagents';
+      problems.push(`agent ${a} is given ${what} (in its frontmatter or the workflow's agents:), and ${toolsMod.getTool(tool).label} cannot be limited to them; run it with claude`);
     }
     try { mcpServers = wfMod.mcpServersFor(repoRoot, agent); } catch (e) { problems.push(e.message); }
     launch[a] = { tool, model, enforce, mcpServers };
   }
+  // Which subagent an agent starts is checked by the guard, so the PKG's hook
+  // must be sent Agent calls (a .claude/settings.json from before 4.2.0 is not).
+  const naming = def.agents.filter((a) => deps.agents[a].capabilities.subagents.length && launch[a].enforce);
+  if (naming.length && !guardSeesAgentCalls(repoRoot)) {
+    problems.push(`agent ${naming.join(', ')} names subagents, but .claude/settings.json does not send Agent calls to "aidev hook guard-write"; run "aidev sync tools" and commit it`);
+  }
   return { launch, problems };
+}
+
+/** Does the PKG's Claude Code config run the write guard on Agent calls? */
+function guardSeesAgentCalls(repoRoot) {
+  let doc;
+  try { doc = JSON.parse(cfgMod.readTextIfExists(path.join(repoRoot, '.claude', 'settings.json')) || 'null'); } catch { return false; }
+  const entries = (doc && doc.hooks && Array.isArray(doc.hooks.PreToolUse)) ? doc.hooks.PreToolUse : [];
+  return entries.some((e) => {
+    if (!e || !Array.isArray(e.hooks) || !e.hooks.some((h) => h && /aidev hook guard-write/.test(String(h.command || '')))) return false;
+    try { return new RegExp(`^(?:${e.matcher || '.*'})$`).test('Agent'); } catch { return false; }
+  });
 }
 
 /** Only Claude Code reports what a start cost; with another tool limits.max_usd cannot stop a run. */
@@ -1107,8 +1181,12 @@ async function runWorkflow(ctx) {
   if (!prior) saveRecord();
 
   // What an agent does, on screen and (with --log) in full in the log file.
-  const screen = flags.json ? null : agentMod.progressReporter({ repoRoot });
+  // When agents may run at the same time, every screen line says whose it is.
+  const concurrent = def.groups.length > 0 || def.steps.some((s) => s.for_each && s.for_each.parallel > 1);
+  const sharedScreen = flags.json ? null : agentMod.progressReporter({ repoRoot });
   const progressFor = (tag) => {
+    const screen = flags.json ? null
+      : concurrent ? agentMod.progressReporter({ repoRoot, write: (text) => ui.dim(`    ${tag} ${text}`) }) : sharedScreen;
     const toFile = fullLog ? agentMod.progressReporter({ repoRoot, write: (text) => fullLog.write(`  ${tag} ${text}`), maxChars: Infinity }) : null;
     if (!screen && !toFile) return null;
     return (p) => { if (screen) screen(p); if (toFile) toFile(p); };
@@ -1145,7 +1223,14 @@ async function runWorkflow(ctx) {
     const agent = deps.agents[agentName];
     const skills = wfMod.agentSkills(deps, agentName);
     const refs = agentMod.resolveReferences(repoRoot, config);
-    const prompt = promptText + (refs.text ? `\n${refs.text}\n` : '');
+    const subs = Object.entries(agent.subagentDefs || {});
+    // The agent is told which subagents exist; the tool is given only those
+    // (below) and the guard refuses any other.
+    const subText = subs.length
+      ? ['', '## Subagents', '', 'You may start these subagents with the Agent tool (subagent_type), and no others. They can run at the same time when you start several in one message.',
+        ...subs.map(([sn, sub]) => `- ${sn}: ${sub.description || '(no description)'}`), ''].join('\n')
+      : '';
+    const prompt = promptText + subText + (refs.text ? `\n${refs.text}\n` : '');
     agentRuns++;
     log(`step ${step.id}: ${what} ${agentName} via ${tool}${model ? ` (${model})` : ''} attempt ${attempt} (budget ${agentMod.formatDuration(timeoutMs)})`);
     // The agent's MCP servers go to the tool in a file of their own, outside
@@ -1157,12 +1242,19 @@ async function runWorkflow(ctx) {
       const mcpConfigFile = path.join(mcpDir, 'mcp.json');
       fs.writeFileSync(mcpConfigFile, JSON.stringify({ mcpServers }, null, 2), { encoding: 'utf8', mode: 0o600 });
       capabilities = { tools: agent.capabilities.tools, mcp: agent.capabilities.mcp, mcpConfigFile };
+      if (subs.length) {
+        const agentsFile = path.join(mcpDir, 'agents.json');
+        fs.writeFileSync(agentsFile, JSON.stringify(subagentSpecs(agent, deps), null, 2), { encoding: 'utf8', mode: 0o600 });
+        capabilities.agentsFile = agentsFile;
+      }
     }
     let res;
     try {
       res = await agentMod.runAgent({
         repoRoot, installRoot, tool, agent: agentName, definition: wfMod.definitionForPrompt(agent, skills),
-        prompt, model, timeoutMs, env: { ...env, [wfMod.ENV_STEP]: stepId }, label: `wf-${name}-${stepId.replace(':', '-')}`, capabilities,
+        prompt, model, timeoutMs, env: { ...env, [wfMod.ENV_STEP]: stepId, ...(item != null ? { [wfMod.ENV_ITEM]: item } : {}) },
+        // Unique per start: agents of one step may run at the same time.
+        label: `wf-${name}-${stepId.replace(':', '-')}-${agentRuns}`, capabilities,
         onProgress: progressFor(`${stepId}${item ? ` [${item}]` : ''} #${attempt}`),
       });
     } finally {
@@ -1282,6 +1374,143 @@ async function runWorkflow(ctx) {
     for (const k of ['result', 'review', 'log']) if (w[k] != null) to[k] = w[k];
   };
 
+  // A stop that steps running at the same time must see: they finish the
+  // target in hand and start no other.
+  let halt = null;
+
+  // The reports of a step an earlier start of this run finished, read back
+  // so the steps after it still build on them.
+  const loadReports = (step) => {
+    if (step.kind !== 'agent') return;
+    const own = cfgMod.readTextIfExists(reportFile(step.id));
+    if (own != null) earlier.push({ id: step.id, agent: step.agent, report: own.trimEnd(), file: relOf(reportFile(step.id)) });
+    const judged = step.until && step.until.agent ? cfgMod.readTextIfExists(reportFile(step.id, true)) : null;
+    if (judged != null) earlier.push({ id: `${step.id} (until)`, agent: step.until.agent, report: judged.trimEnd(), file: relOf(reportFile(step.id, true)) });
+  };
+
+  /**
+   * One agent step to its end, its outcome in `record`. Returns why the run
+   * must stop, or null. A for_each step takes its targets `for_each.parallel`
+   * at a time (each target writes only paths named after it, so they never
+   * meet in the working tree).
+   */
+  const runAgentStep = async (step, i, before, record) => {
+    const resumed = before && prior.record.stopReason ? String(prior.record.stopReason) : null;
+    let baseline = null;
+    try { baseline = baselineOf(step); } catch (e) { return `step ${step.id}: ${e.message}`; }
+    if (!step.for_each) {
+      const w = await runWork({ step, index: i, tag: step.id, resumed, baseline });
+      record.attempts = w.attempts;
+      copyWork(record, w);
+      if (!w.ok) return `step ${step.id}: ${w.stop || w.fail}`;
+      record.ok = true;
+      keepReport(step.id, step.agent, w.report);
+      if (w.judge != null) keepReport(step.id, step.until.agent, w.judge, true);
+      return null;
+    }
+    // One start of the agent per target. The list is read here, by the
+    // kit, from the notes an earlier step left; a target an earlier start
+    // of this run finished is not done again.
+    const listRel = `${relOf(notesDir)}/${step.for_each.from}`;
+    const listText = cfgMod.readTextIfExists(path.join(notesDir, step.for_each.from));
+    if (listText == null) return `step ${step.id}: ${listRel} does not exist (an earlier step writes the targets there, one per line)`;
+    let items;
+    try { items = wfMod.parseItems(listText, step.for_each); } catch (e) { return `step ${step.id}: ${e.message}`; }
+    // A target that finished — or, with on_failure: continue, failed and
+    // was undone — in an earlier start of this run is not done again.
+    const goOn = step.for_each.on_failure === 'continue';
+    const finished = new Map(((before && before.items) || []).filter((x) => x.ok || x.failed).map((x) => [x.item, x]));
+    const stoppedAt = ((before && before.items) || []).find((x) => !x.ok && !x.failed);
+    record.items = [];
+    // What the targets cost so far, to project the rest (log only).
+    const targetCosts = [];
+    let warnedBudget = false;
+    const project = (value) => {
+      if (!reportsCost(launch)) return;
+      targetCosts.push(calls.filter((c) => c.step === step.id && c.item === value).reduce((a, c) => a + (Number(c.costUsd) || 0), 0));
+      const left = items.filter((x) => !finished.has(x)).length;
+      const p = estimateMod.projectRemaining(targetCosts, left);
+      if (!p) return;
+      const budgetLeft = def.limits.max_usd - spentUsd;
+      if (targetCosts.length === 3 || targetCosts.length % 10 === 0) {
+        log(`step ${step.id}: ${targetCosts.length} of ${left} target(s) done at about $${p.perTarget.toFixed(2)} each; the rest would take about $${p.remaining.toFixed(2)} (budget left $${budgetLeft.toFixed(2)})`);
+      }
+      if (!warnedBudget && p.remaining > budgetLeft) {
+        warnedBudget = true;
+        log(`step ${step.id}: at this rate limits.max_usd runs out before the last target (about $${p.remaining.toFixed(2)} needed, $${budgetLeft.toFixed(2)} left); the run stops at the budget and can be resumed`);
+      }
+    };
+    const width = step.for_each.parallel;
+    log(`step ${step.id}: ${items.length} target(s) from ${listRel}${finished.size ? ` (${items.filter((x) => finished.has(x)).length} handled earlier)` : ''}${width > 1 ? `, ${width} at a time` : ''}${goOn ? '; a target that fails is undone and the next one starts' : ''}`);
+    let stop = null;
+    // One target: start its agent until its checks pass. Returns why the step stops, or null.
+    const runTarget = async (k) => {
+      const value = items[k];
+      const entry = { item: value, ok: false, attempts: 0 };
+      record.items.push(entry);
+      const tag = `${step.id}.t${k + 1}`;
+      const target = wfMod.forItem(step, value);
+      // What this target may write looked like this before it: a target
+      // that fails under on_failure: continue is put back to it.
+      let snapshot = null;
+      if (goOn) { try { snapshot = snapshotWritable(repoRoot, target.writable); } catch (e) { return `step ${step.id}: ${e.message}`; } }
+      const w = await runWork({
+        step: target, index: i, tag, baseline,
+        item: { value, n: k + 1, of: items.length },
+        resumed: resumed && stoppedAt && stoppedAt.item === value ? resumed : null,
+      });
+      entry.attempts = w.attempts;
+      record.attempts += w.attempts;
+      copyWork(entry, w);
+      if (!w.ok) {
+        const why = w.stop || w.fail;
+        // A limit (budget, time) stops the run whatever on_failure says.
+        if (!goOn || w.limit) return `step ${step.id}: target ${value}: ${why}`;
+        let undone;
+        try { undone = restoreWritable(repoRoot, target.writable, snapshot); } catch (e) { return `step ${step.id}: target ${value} failed and its changes could not be undone: ${e.message}`; }
+        entry.failed = true;
+        entry.reason = why;
+        log(`step ${step.id}: target ${value} failed (${why}); ${undone.length} changed file(s) undone, going on`);
+        project(value);
+        saveRecord();
+        return null;
+      }
+      entry.ok = true;
+      const file = path.join(runDir, 'reports', `${tag}.md`);
+      if (artifactsOk && writeArtifact(file, `${w.report}\n`)) entry.report = relOf(file);
+      project(value);
+      saveRecord();
+      return null;
+    };
+    // `width` workers take the targets in order; a stop (this step's, or
+    // another step's of the same group) lets the ones in hand finish.
+    let next = 0;
+    const worker = async () => {
+      while (!stop && !halt && next < items.length) {
+        const k = next++;
+        const value = items[k];
+        if (finished.has(value)) { record.items.push(finished.get(value)); continue; }
+        if (Date.now() > deadline) { stop = stop || `time limit (${maxMinutes} min) reached before target ${value} of step ${step.id}`; break; }
+        // eslint-disable-next-line no-await-in-loop
+        const why = await runTarget(k);
+        if (why && !stop) stop = why;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(width, items.length)) }, worker));
+    // Targets finish out of order when several run at once; the record keeps the list's.
+    record.items.sort((a, b) => items.indexOf(a.item) - items.indexOf(b.item));
+    if (stop) return stop;
+    if (halt) return null;
+    const failedItems = record.items.filter((x) => x.failed);
+    if (record.items.length && failedItems.length === record.items.length) {
+      return `step ${step.id}: every target failed (the first: ${failedItems[0].item}: ${failedItems[0].reason})`;
+    }
+    record.ok = true;
+    if (failedItems.length) record.failed = failedItems.length;
+    keepReport(step.id, step.agent, itemsReport(record.items, listRel));
+    return null;
+  };
+
   for (let i = 0; i < def.steps.length && !stopReason; i++) {
     const step = def.steps[i];
     // A step an earlier start of this run finished is not run again; its
@@ -1289,12 +1518,7 @@ async function runWorkflow(ctx) {
     const before = priorSteps.get(step.id);
     if (before && before.ok) {
       results.push(before);
-      if (step.kind === 'agent') {
-        const own = cfgMod.readTextIfExists(reportFile(step.id));
-        if (own != null) earlier.push({ id: step.id, agent: step.agent, report: own.trimEnd(), file: relOf(reportFile(step.id)) });
-        const judged = step.until && step.until.agent ? cfgMod.readTextIfExists(reportFile(step.id, true)) : null;
-        if (judged != null) earlier.push({ id: `${step.id} (until)`, agent: step.until.agent, report: judged.trimEnd(), file: relOf(reportFile(step.id, true)) });
-      }
+      loadReports(step);
       log(`step ${step.id}: finished in an earlier start of this run; skipped`);
       continue;
     }
@@ -1302,106 +1526,47 @@ async function runWorkflow(ctx) {
     results.push(record);
     if (Date.now() > deadline) { stopReason = `time limit (${maxMinutes} min) reached before step ${step.id}`; break; }
 
-    if (step.kind === 'agent') {
-      const resumed = before && prior.record.stopReason ? String(prior.record.stopReason) : null;
-      let baseline = null;
-      try { baseline = baselineOf(step); } catch (e) { stopReason = `step ${step.id}: ${e.message}`; break; }
-      if (!step.for_each) {
-        // eslint-disable-next-line no-await-in-loop
-        const w = await runWork({ step, index: i, tag: step.id, resumed, baseline });
-        record.attempts = w.attempts;
-        copyWork(record, w);
-        if (w.ok) {
-          record.ok = true;
-          keepReport(step.id, step.agent, w.report);
-          if (w.judge != null) keepReport(step.id, step.until.agent, w.judge, true);
+    if (step.kind === 'agent' && step.group) {
+      // A parallel group: its steps start together and the run goes on when
+      // all of them have ended. A step of it that an earlier start of this
+      // run finished is not run again (the loop above skipped it).
+      const members = [];
+      for (let j = i; j < def.steps.length && def.steps[j].group === step.group; j++) members.push(j);
+      const todo = members.filter((j) => !(priorSteps.get(def.steps[j].id) || {}).ok);
+      const records = new Map([[i, record]]);
+      for (const j of members) {
+        if (j === i) continue;
+        if (todo.includes(j)) {
+          const r = { id: def.steps[j].id, kind: 'agent', ok: false, attempts: 0 };
+          results.push(r);
+          records.set(j, r);
         } else {
-          stopReason = `step ${step.id}: ${w.stop || w.fail}`;
-        }
-      } else {
-        // One start of the agent per target. The list is read here, by the
-        // kit, from the notes an earlier step left; a target an earlier start
-        // of this run finished is not done again.
-        const listRel = `${relOf(notesDir)}/${step.for_each.from}`;
-        const listText = cfgMod.readTextIfExists(path.join(notesDir, step.for_each.from));
-        let items = null;
-        if (listText == null) stopReason = `step ${step.id}: ${listRel} does not exist (an earlier step writes the targets there, one per line)`;
-        else { try { items = wfMod.parseItems(listText, step.for_each); } catch (e) { stopReason = `step ${step.id}: ${e.message}`; } }
-        if (!items) break;
-        // A target that finished — or, with on_failure: continue, failed and
-        // was undone — in an earlier start of this run is not done again.
-        const goOn = step.for_each.on_failure === 'continue';
-        const finished = new Map(((before && before.items) || []).filter((x) => x.ok || x.failed).map((x) => [x.item, x]));
-        const stoppedAt = ((before && before.items) || []).find((x) => !x.ok && !x.failed);
-        record.items = [];
-        // What the targets cost so far, to project the rest (log only).
-        const targetCosts = [];
-        let warnedBudget = false;
-        const project = (value) => {
-          if (!reportsCost(launch)) return;
-          targetCosts.push(calls.filter((c) => c.step === step.id && c.item === value).reduce((a, c) => a + (Number(c.costUsd) || 0), 0));
-          const left = items.filter((x) => !finished.has(x)).length;
-          const p = estimateMod.projectRemaining(targetCosts, left);
-          if (!p) return;
-          const budgetLeft = def.limits.max_usd - spentUsd;
-          if (targetCosts.length === 3 || targetCosts.length % 10 === 0) {
-            log(`step ${step.id}: ${targetCosts.length} of ${left} target(s) done at about $${p.perTarget.toFixed(2)} each; the rest would take about $${p.remaining.toFixed(2)} (budget left $${budgetLeft.toFixed(2)})`);
-          }
-          if (!warnedBudget && p.remaining > budgetLeft) {
-            warnedBudget = true;
-            log(`step ${step.id}: at this rate limits.max_usd runs out before the last target (about $${p.remaining.toFixed(2)} needed, $${budgetLeft.toFixed(2)} left); the run stops at the budget and can be resumed`);
-          }
-        };
-        log(`step ${step.id}: ${items.length} target(s) from ${listRel}${finished.size ? ` (${items.filter((x) => finished.has(x)).length} handled earlier)` : ''}${goOn ? '; a target that fails is undone and the next one starts' : ''}`);
-        for (let k = 0; k < items.length; k++) {
-          const value = items[k];
-          if (finished.has(value)) { record.items.push(finished.get(value)); continue; }
-          if (Date.now() > deadline) { stopReason = `time limit (${maxMinutes} min) reached before target ${value} of step ${step.id}`; break; }
-          const entry = { item: value, ok: false, attempts: 0 };
-          record.items.push(entry);
-          const tag = `${step.id}.t${k + 1}`;
-          // What the step may write looked like this before the target: a
-          // target that fails under on_failure: continue is put back to it.
-          let snapshot = null;
-          if (goOn) { try { snapshot = snapshotWritable(repoRoot, step.writable); } catch (e) { stopReason = `step ${step.id}: ${e.message}`; break; } }
-          // eslint-disable-next-line no-await-in-loop
-          const w = await runWork({
-            step: wfMod.forItem(step, value), index: i, tag, baseline,
-            item: { value, n: k + 1, of: items.length },
-            resumed: resumed && stoppedAt && stoppedAt.item === value ? resumed : null,
-          });
-          entry.attempts = w.attempts;
-          record.attempts += w.attempts;
-          copyWork(entry, w);
-          if (!w.ok) {
-            const why = w.stop || w.fail;
-            // A limit (budget, time) stops the run whatever on_failure says.
-            if (!goOn || w.limit) { stopReason = `step ${step.id}: target ${value}: ${why}`; break; }
-            let undone;
-            try { undone = restoreWritable(repoRoot, step.writable, snapshot); } catch (e) { stopReason = `step ${step.id}: target ${value} failed and its changes could not be undone: ${e.message}`; break; }
-            entry.failed = true;
-            entry.reason = why;
-            log(`step ${step.id}: target ${value} failed (${why}); ${undone.length} changed file(s) undone, going on`);
-            project(value);
-            saveRecord();
-            continue;
-          }
-          entry.ok = true;
-          const file = path.join(runDir, 'reports', `${tag}.md`);
-          if (artifactsOk && writeArtifact(file, `${w.report}\n`)) entry.report = relOf(file);
-          project(value);
-          saveRecord();
-        }
-        const failedItems = record.items.filter((x) => x.failed);
-        if (!stopReason && record.items.length && failedItems.length === record.items.length) {
-          stopReason = `step ${step.id}: every target failed (the first: ${failedItems[0].item}: ${failedItems[0].reason})`;
-        }
-        if (!stopReason) {
-          record.ok = true;
-          if (failedItems.length) record.failed = failedItems.length;
-          keepReport(step.id, step.agent, itemsReport(record.items, listRel));
+          results.push(priorSteps.get(def.steps[j].id));
+          loadReports(def.steps[j]);
         }
       }
+      log(`group ${step.group}: ${todo.map((j) => def.steps[j].id).join(', ')} at the same time`);
+      const reportsFrom = earlier.length;
+      // eslint-disable-next-line no-await-in-loop
+      const stops = await Promise.all(todo.map((j) => runAgentStep(def.steps[j], j, priorSteps.get(def.steps[j].id), records.get(j)).then((why) => {
+        // A step of the group that stops lets the others finish what they
+        // are doing, but they start no new target.
+        if (why && !halt) halt = why;
+        return why;
+      })));
+      // The group's reports in the order of the definition, not of finishing.
+      const order = (e) => members.findIndex((j) => e.id === def.steps[j].id || e.id === `${def.steps[j].id} (until)`) * 2 + (/ \(until\)$/.test(e.id) ? 1 : 0);
+      earlier.splice(reportsFrom, earlier.length - reportsFrom, ...earlier.slice(reportsFrom).sort((x, y) => order(x) - order(y)));
+      const why = stops.find(Boolean);
+      if (why) stopReason = why;
+      i = members[members.length - 1];
+      saveRecord();
+      continue;
+    }
+    if (step.kind === 'agent') {
+      // eslint-disable-next-line no-await-in-loop
+      const why = await runAgentStep(step, i, before, record);
+      if (why) stopReason = why;
     } else if (step.kind === 'command') {
       record.attempts = 1;
       // eslint-disable-next-line no-await-in-loop

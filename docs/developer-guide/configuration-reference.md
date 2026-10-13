@@ -262,6 +262,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
 | `AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` | `policy.js`（`decide` / `decideToolUse`の既定値）、`hook.js` | `aidev run workflow`がagent stepごとに子processの環境に入れるworkflow名とstep id。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）ならそのstepの`writable`への書込と、そのagentのfrontmatterが許すtool / MCP toolだけを許可する。人が設定するものではない |
+| `AIDEV_WORKFLOW_ITEM` | `policy.js`（`decide` / `decideToolUse`の既定値） | `for_each`のstepで、runnerがその起動の対象を入れる。guardはstepの`writable`の`{item}`をこれで置き換える（無い・`ITEM_RE`に合わなければ`{item}`を含むpathは書けない）。人が設定するものではない |
 | `AIDEV_WORKFLOW_RUN` | `policy.js`（`decide`の既定値） | 同じくrunnerが入れるrun id。承認済みworkflowのagent step（確認役を除く）に、そのrunの`runs/<id>/notes/`への書込を許可する（rule `workflow-notes`）。run idの形でない値は何も許可しない |
 | `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
 | `AIDEV_DEBUG` | `aidev.js` | internal errorのstack traceを表示 |

@@ -54,6 +54,10 @@ main { flex: 1; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(
 .node.agent { border-left-color: var(--agent); }
 .node.command { border-left-color: var(--cmd); }
 .node.pull-request { border-left-color: var(--pr); }
+.node.parallel { border-left-color: var(--agent); border-left-style: double; border-left-width: 6px; }
+.lanes { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.lane { flex: 1 1 140px; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--agent-bg); font-size: 13px; }
+.lane .row { flex-wrap: wrap; }
 .node.terminal { cursor: default; border-left-color: var(--muted); background: var(--soft); }
 .node.terminal:hover { border-color: var(--line); border-left-color: var(--muted); }
 .node .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -175,7 +179,7 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
 
   const banner = (msg, kind = 'bad') => { const b = $('#banner'); b.className = msg ? kind : ''; b.textContent = msg || ''; };
   const steps = () => (raw && Array.isArray(raw.steps) ? raw.steps : []);
-  const kindOf = (s) => (s && s.agent != null ? 'agent' : s && s.command != null ? 'command' : s && 'pull_request' in s ? 'pull-request' : 'unknown');
+  const kindOf = (s) => (s && s.agent != null ? 'agent' : s && s.command != null ? 'command' : s && 'pull_request' in s ? 'pull-request' : s && s.parallel != null ? 'parallel' : 'unknown');
   const list = (v) => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]);
   const usd = (x) => `$${Number(x).toFixed(2)}`;
 
@@ -228,7 +232,7 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
 
   function link(at) {
     const add = (k) => h('button', { class: 'small', title: `insert ${k} step here`, onclick: (e) => { e.stopPropagation(); insert(at, k); } }, `+ ${k}`);
-    return h('div', { class: 'link' }, h('div', { class: 'add' }, add('agent'), add('command'), steps().some((s) => kindOf(s) === 'pull-request') ? null : add('pull_request')), h('span', { class: 'arrow' }));
+    return h('div', { class: 'link' }, h('div', { class: 'add' }, add('agent'), add('parallel'), add('command'), steps().some((s) => kindOf(s) === 'pull-request') ? null : add('pull_request')), h('span', { class: 'arrow' }));
   }
 
   function renderFlow() {
@@ -244,13 +248,13 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
         h('button', { class: 'small', title: 'move up', disabled: i === 0, onclick: (e) => { e.stopPropagation(); move(i, -1); } }, '↑'),
         h('button', { class: 'small', title: 'move down', disabled: i === steps().length - 1, onclick: (e) => { e.stopPropagation(); move(i, 1); } }, '↓'),
         h('button', { class: 'small', title: 'delete step', onclick: (e) => { e.stopPropagation(); remove(i); } }, '✕'));
-      node.append(act, h('div', { class: 'kind', text: k === 'pull-request' ? 'pull request' : `${k} step` }), h('div', { class: 'title', text: s.id || `step-${i + 1}` }));
+      node.append(act, h('div', { class: 'kind', text: k === 'pull-request' ? 'pull request' : k === 'parallel' ? 'parallel group (agent steps at the same time)' : `${k} step` }), h('div', { class: 'title', text: s.id || `step-${i + 1}` }));
       if (s.description) node.append(h('div', { class: 'sub', text: s.description }));
       if (k === 'agent') {
         node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'agent' }), h('code', { text: s.agent })));
         node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'writes' }), ...chips(s.writable)));
         if (list(s.unchanged).length) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'keeps' }), ...chips(s.unchanged, 'keep')));
-        if (s.for_each) node.append(h('div', { class: 'row' }, h('span', { class: 'each', text: `for each line of ${s.for_each.from} (≤ ${s.for_each.max_items}${s.for_each.on_failure === 'continue' ? ', a failure is undone and skipped' : ''})` })));
+        if (s.for_each) node.append(h('div', { class: 'row' }, h('span', { class: 'each', text: `for each line of ${s.for_each.from} (≤ ${s.for_each.max_items}${s.for_each.parallel > 1 ? `, ${s.for_each.parallel} at a time` : ''}${s.for_each.on_failure === 'continue' ? ', a failure is undone and skipped' : ''})` })));
         if (s.until) {
           const u = s.until;
           const parts = [];
@@ -263,10 +267,19 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
       } else if (k === 'command') {
         node.append(h('div', { class: 'row' }, h('code', { text: `$ ${s.command}` })));
         if (list(s.writable).length) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'commits' }), ...chips(s.writable)));
+      } else if (k === 'parallel') {
+        // The steps of the group, side by side: they start together.
+        node.append(h('div', { class: 'lanes' }, ...list(s.parallel).map((m, j) => h('div', { class: 'lane' },
+          h('div', { class: 'title', text: (m && m.id) || `${s.id || 'group'}-${j + 1}` }),
+          h('div', { class: 'row' }, h('span', { class: 'label', text: 'agent' }), h('code', { text: (m && m.agent) || '?' })),
+          h('div', { class: 'row' }, h('span', { class: 'label', text: 'writes' }), ...chips(m && m.writable))))));
       } else if (k === 'pull-request') {
         node.append(h('div', { class: 'sub', text: `commit what the steps may write, push, open the pull request${s.pull_request && s.pull_request.title ? `: “${s.pull_request.title}”` : ''}` }));
       }
-      const est = check && check.estimate && check.estimate.steps && check.estimate.steps.find((x) => x.id === s.id);
+      // A group costs what its steps cost together.
+      const ests = check && check.estimate && check.estimate.steps ? check.estimate.steps : [];
+      const parts = k === 'parallel' ? ests.filter((x) => list(s.parallel).some((m) => m && m.id === x.id)) : ests.filter((x) => x.id === s.id);
+      const est = parts.length ? { usd: [parts.reduce((t, x) => t + (x.usd ? x.usd[0] : 0), 0), parts.reduce((t, x) => t + (x.usd ? x.usd[1] : 0), 0)] } : null;
       if (est && est.usd && est.usd[1] > 0) node.append(h('div', { class: 'row' }, h('span', { class: 'label', text: 'cost' }), `${usd(est.usd[0])} – ${usd(est.usd[1])}`));
       flow.append(node);
     });
@@ -319,7 +332,7 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
     const k = kindOf(s);
     const out = [text1(s, 'id', 'id', 'lowercase letters, digits and dashes'), text1(s, 'description', 'description', 'for the reviewer; the agent does not see it')];
     if (k === 'agent') {
-      out.push(agentPick(s, 'agent', 'agent', 'what it can do (tools, MCP, skills) is in the agent’s own file'));
+      out.push(agentPick(s, 'agent', 'agent', 'what it can do (tools, MCP, skills) is in the agent’s own file, plus what the workflow’s top-level agents: assigns to it'));
       out.push(area(s, 'prompt', 'prompt', s.for_each ? 'write {item} where the target goes' : 'what this step asks of the agent', 'prompt'));
       out.push(globs(s, 'writable', 'writable', 'paths this step may write, one glob per line; empty writes nothing', true));
       out.push(globs(s, 'unchanged', 'unchanged', 'paths it must leave as they are, even inside writable (the tests an upgrade must not weaken)'));
@@ -327,6 +340,7 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
       const fe = h('fieldset', {}, h('legend', {}, 'for_each'), toggle('run once per target', !!s.for_each, (on) => { if (on) s.for_each = { from: 'targets.txt', max_items: 20 }; else delete s.for_each; if (on && !String(s.prompt || '').includes('{item}')) s.prompt = `${s.prompt || ''}\nTarget: {item}`.trim(); changed(); renderTab(); }));
       if (s.for_each) {
         fe.append(h('div', { class: 'two' }, text1(s.for_each, 'from', 'from', 'a file in the run’s notes, one target per line'), number(s.for_each, 'max_items', 'max_items', `at most ${st ? st.limits.maxItems : 10000}`)));
+        fe.append(number(s.for_each, 'parallel', 'parallel', `targets at the same time (default 1, at most ${st ? st.limits.maxParallel : 16}); every writable path must name {item}`));
         fe.append(field('on_failure', h('select', { onchange: (e) => { setOrDrop(s.for_each, 'on_failure', e.target.value === 'stop' ? null : e.target.value); changed(); } },
           h('option', { value: 'stop', selected: s.for_each.on_failure !== 'continue' }, 'stop — the first failure stops the run'),
           h('option', { value: 'continue', selected: s.for_each.on_failure === 'continue' }, 'continue — undo the failed target, go on'))));
@@ -349,6 +363,15 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
       out.push(h('div', { class: 'two' }, text1(s, 'cwd', 'cwd', 'directory to run in'), number(s, 'timeout_minutes', 'timeout_minutes', 'at most 240', 'any')));
       out.push(envField(s, 'env', 'env'));
       out.push(globs(s, 'writable', 'writable', 'files it makes that the pull request should commit'));
+    } else if (k === 'parallel') {
+      if (!Array.isArray(s.parallel)) s.parallel = [];
+      out.push(h('p', { class: 'muted', text: 'These agent steps start together and the run goes on when all have ended. Their writable paths must not meet.' }));
+      s.parallel.forEach((m, j) => {
+        const box = h('fieldset', {}, h('legend', {}, (m && m.id) || `step ${j + 1}`), ...stepForm(m),
+          h('button', { class: 'small', disabled: s.parallel.length <= 2, onclick: () => { s.parallel.splice(j, 1); changed(); renderTab(); } }, 'remove from the group'));
+        out.push(box);
+      });
+      out.push(h('button', { class: 'small', onclick: () => { s.parallel.push(newAgentStep()); changed(); renderTab(); } }, '+ agent step in the group'));
     } else if (k === 'pull-request') {
       if (s.pull_request == null || typeof s.pull_request !== 'object') s.pull_request = {};
       out.push(text1(s.pull_request, 'title', 'title', 'default: aidev: <description of the workflow>'));
@@ -433,12 +456,31 @@ table.est td, table.est th { border-bottom: 1px solid var(--line); padding: 4px 
 
   // --------------------------------------------------------------- actions
   function select(i) { sel = i; tab = 'step'; render(); }
-  function insert(at, kind) {
-    const ids = new Set(steps().map((s) => s.id));
+  // A step id not used yet, also inside parallel groups.
+  function freshId() {
+    const ids = new Set(steps().flatMap((s) => [s.id, ...list(s.parallel).map((m) => m && m.id)]));
     let n = steps().length + 1; let id = `step-${n}`;
     while (ids.has(id)) id = `step-${++n}`;
+    ids.add(id);
+    return id;
+  }
+  function newAgentStep(writable = []) {
     const agent = st && st.agents.find((a) => a.source === 'pkg');
-    const s = kind === 'agent' ? { id, agent: agent ? agent.name : 'my-agent', writable: [], prompt: 'Describe the work.' }
+    return { id: freshId(), agent: agent ? agent.name : 'my-agent', writable, prompt: 'Describe the work.' };
+  }
+  function insert(at, kind) {
+    if (kind === 'parallel') {
+      const g = { id: freshId(), parallel: [] };
+      if (!Array.isArray(raw.steps)) raw.steps = [];
+      raw.steps.splice(at, 0, g);
+      // One at a time: each new id must see the one before.
+      g.parallel.push(newAgentStep(['src/a/**']));
+      g.parallel.push(newAgentStep(['src/b/**']));
+      sel = at; tab = 'step'; changed();
+      return;
+    }
+    const id = freshId();
+    const s = kind === 'agent' ? { ...newAgentStep(), id }
       : kind === 'command' ? { id, command: 'npm run lint' } : { id: 'pr', pull_request: {} };
     if (!Array.isArray(raw.steps)) raw.steps = [];
     raw.steps.splice(at, 0, s);

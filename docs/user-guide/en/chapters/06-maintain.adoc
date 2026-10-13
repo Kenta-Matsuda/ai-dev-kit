@@ -41,6 +41,43 @@ When a newer ADK exists, running any `aidev` command shows this. Developers see 
     Run "aidev sync tools --package <name>" for each when convenient; it merges the new templates with your edits.
 ----
 
+[[maintain-workflow-v2]]
+==== Rewriting a 2.0.0 workflow.yaml
+
+A workflow.yaml written for ADK 2.0.0 is refused by the current ADK's validation (`cost is not a workflow key; the budget is limits.max_usd now` and so on). `scripts/convert-workflow-v2.ps1` in the ADK clone rewrites it in the current syntax.
+
+[source,powershell]
+----
+# Every .aidev/workflows/*/workflow.yaml in the PKG. -WhatIf shows the result without writing
+powershell -ExecutionPolicy Bypass -File <ADK clone>\scripts\convert-workflow-v2.ps1 -Path <PKG clone> -WhatIf
+powershell -ExecutionPolicy Bypass -File <ADK clone>\scripts\convert-workflow-v2.ps1 -Path <PKG clone>
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|2.0.0 |Now
+
+|`cost: { max_usd: N }`
+|`limits.max_usd: N`
+
+|`limits.max_minutes` omitted (60 minutes in 2.0.0)
+|`limits.max_minutes: 60` is added (not with `-NoTimeLimit`)
+
+|A step's `timeout_ms: N`
+|`timeout_minutes: N / 60000`
+
+|A step's `max_retries: N`
+|`until.max_retries: N`
+
+|`kind: pull-request` and `title: T`
+|`pull_request: { title: T }`
+|===
+
+* Only the fields above change. Comments and every other line stay. A file already in the current syntax is left alone, so running it twice gives the same result.
+* The result is checked with `node` and the ADK's validation before it is written. A file that does not pass is not written (`-Force` writes it).
+* `-OutFile <path>` (with one input file) writes elsewhere; `-Backup` keeps the original as `workflow.yaml.v2.bak`.
+* A rewritten workflow is unapproved again. Check the diff and put it in a PR with `aidev submit workflow <name>`.
+
 [[maintain-sync-tools]]
 === Applying new templates
 

@@ -41,6 +41,43 @@
     Run "aidev sync tools --package <name>" for each when convenient; it merges the new templates with your edits.
 ----
 
+[[maintain-workflow-v2]]
+==== 2.0.0 の workflow.yaml の書き換え
+
+ADK 2.0.0 向けに書いた workflow.yaml は、今の ADK では検証で拒否されます（`cost is not a workflow key; the budget is limits.max_usd now` など）。ADK の clone にある `scripts/convert-workflow-v2.ps1` で、今の書き方に書き換えます。
+
+[source,powershell]
+----
+# PKG の .aidev/workflows/*/workflow.yaml をすべて。-WhatIf なら書かずに結果を表示する
+powershell -ExecutionPolicy Bypass -File <ADK の clone>\scripts\convert-workflow-v2.ps1 -Path <PKG の clone> -WhatIf
+powershell -ExecutionPolicy Bypass -File <ADK の clone>\scripts\convert-workflow-v2.ps1 -Path <PKG の clone>
+----
+
+[%autowidth.stretch,options="header"]
+|===
+|2.0.0 |今
+
+|`cost: { max_usd: N }`
+|`limits.max_usd: N`
+
+|`limits.max_minutes` を省略（2.0.0 では 60 分）
+|`limits.max_minutes: 60` を書き足す（`-NoTimeLimit` なら書き足さない）
+
+|ステップの `timeout_ms: N`
+|`timeout_minutes: N / 60000`
+
+|ステップの `max_retries: N`
+|`until.max_retries: N`
+
+|`kind: pull-request` と `title: T`
+|`pull_request: { title: T }`
+|===
+
+* 変えるのは上の項目だけです。コメントや他の行はそのまま残ります。今の書き方のファイルは変えないので、2 回実行しても同じです。
+* 書き換えた結果は、`node` と ADK の検証で確かめてから書きます。検証を通らないファイルは書きません（`-Force` で書きます）。
+* `-OutFile <path>`（入力が 1 ファイルのとき）で別のファイルに、`-Backup` で元を `workflow.yaml.v2.bak` に残します。
+* 書き換えた workflow は承認前に戻ります。差分を確かめ、`aidev submit workflow <name>` で PR にします。
+
 [[maintain-sync-tools]]
 === テンプレートの取り込み
 
