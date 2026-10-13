@@ -215,11 +215,11 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 .aidev/sync.lock  .aidev/materialized.json  .aidev/.gitignore  .aidev/ejected.json
 ```
 
-候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使います。`aidev.yaml`から`read_only` / `writable`を変える設定項目は現在ありません。teamが広げるときは`.aidev/policy.yaml`を直接編集してcommitします（`--approve`は候補fileを読まず生成し直すので、手編集は候補ではなくpolicy本体に行う）。`reconfigure --approve`は生成し直した既定に戻すため、手で足した`writable`は消えます。
+候補生成（`permission.buildCandidate`）は`ALWAYS_PROTECTED` + `secrets_paths`を`protected`にし、他は`DEFAULT_POLICY_SCOPES`をそのまま使います。`aidev.yaml`から`read_only` / `writable`を変える設定項目は現在ありません。teamが広げるときは`.aidev/policy.yaml`を直接編集してcommitします（`--approve`は候補fileを読まず生成し直すので、手編集は候補ではなくpolicy本体に行う）。`aidev create policy --approve`は生成し直した既定に戻すため、手で足した`writable`は消えます。
 
 ### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。stepの種類は`agent` / `command` / `pull_request`のどのkeyを持つかで決まります（1つだけ）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`）、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`、`max_retries`（0〜10、既定3））、`timeout_minutes`。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`pull_request`（mapping。`title`だけ。空か`{}`なら既定のtitle）。旧`kind: pull-request`、stepの`title`、stepの`max_retries`は移動先を示すerrorです。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`agents`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。`agents`は`{<agent>: {skills, mcp, tools, subagents}}`のmappingで、そのworkflowの実行でだけagent（stepか`until.agent`が名指すもの、およびそのsubagent）に能力を足します（`skills` / `mcp` / `subagents`はfrontmatterに足し、`tools`は与えればfrontmatterの値を置き換える。どのstepも名指さないagentはerror）。stepの種類は`agent` / `command` / `pull_request` / `parallel`のどのkeyを持つかで決まります（1つだけ）。`parallel`はgroupで、`id`、`description`、`parallel`（同時に起動する2つ以上のagent stepのlist。各stepの`writable`は交わってはならず、groupの中にcommand / pull-request stepは置けない）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`、`parallel`（同時に動かす対象の数。既定1、最大16。2以上ならすべての`writable`が`{item}`を含む））、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`、`max_retries`（0〜10、既定3））、`timeout_minutes`。`for_each`のstepでは`prompt`に`{item}`が必須で、`writable`・`until`にも`{item}`（対象）を書ける（`writable`では`{item}`の前に固定のdirectoryが要る）。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`pull_request`（mapping。`title`だけ。空か`{}`なら既定のtitle）。旧`kind: pull-request`、stepの`title`、stepの`max_retries`は移動先を示すerrorです。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
 
 ### agentのfrontmatter（`.aidev/agents/<name>.md`、kit同梱agent）
 
@@ -232,16 +232,17 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 | `skills` | `[]` | promptに本文を差し込むskill（`.aidev/skills/<name>/SKILL.md` → kit同梱） |
 | `tools` | toolの既定の全部 | 渡す組み込みtool（`Read`、`Grep`、`Bash`…）。claudeでは`--tools`、guard-writeが第2段 |
 | `mcp` | 無し | 使えるMCP server（PKGの`.mcp.json`の`mcpServers`のkey）。claudeでは一時`--mcp-config` + `--strict-mcp-config` + `--allowedTools mcp__<server>` |
+| `subagents` | `[]`（toolが提供するものは何でも） | `Agent`（`Task`）toolで起動してよいagentの名前。claudeでは`--agents <一時file>`で定義を渡し、guard-writeが`subagent_type`を検査する |
 | `model` | — | `inherit`など |
 
-`tools`か`mcp`を持つagentは、adapterが`capabilities`を持つtool（claude）でしか起動しません。
+workflowの`agents:`はこれらにそのworkflowの実行でだけ足します（`tools`は置き換え）。`tools`・`mcp`・`subagents`のどれかを（frontmatterかworkflowの`agents:`で）持つagentは、adapterが`capabilities`を持つtool（claude）でしか起動しません。
 
 globの意味（`paths.js`）: `*`は1 segment内、`?`は1文字、`**`は0個以上のsegment、`a/**`は`a`自身も一致。`..`は照合前に字句的に解決し、Windowsの`\`は`/`へ畳みます。
 
 ## model解決の優先順位
 
 ```text
-CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agent`で省略）:
+CLI起動agent（sync wiki / run workflow。sync wikiは`--no-agent`で省略）:
   tool:  --agent-tool / workflow.yaml tool  >  tools.agents.<name>.tool  >  tools.agent  >  tools.default[0]
   model: --agent-model / workflow.yaml model  >  tools.agents.<name>.model  >  tools.agent_model  >  DEFAULTS（sonnet）
   空文字 → model flag を渡さずtool側の解決に任せる
@@ -261,7 +262,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
-| `AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` | `policy.js`（`decide` / `decideToolUse`の既定値）、`hook.js` | `aidev run workflow`がagent stepごとに子processの環境に入れるworkflow名とstep id。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）ならそのstepの`writable`への書込と、そのagentのfrontmatterが許すtool / MCP toolだけを許可する。人が設定するものではない |
+| `AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` | `policy.js`（`decide` / `decideToolUse`の既定値）、`hook.js` | `aidev run workflow`がagent stepごとに子processの環境に入れるworkflow名とstep id。hookがそれを継承し、そのworkflowが承認済み（`origin/<tracking_branch>`と同一）ならそのstepの`writable`への書込と、そのagentのfrontmatterとworkflowの`agents:`が許すtool / MCP tool / subagentだけを許可する。人が設定するものではない |
 | `AIDEV_WORKFLOW_ITEM` | `policy.js`（`decide` / `decideToolUse`の既定値） | `for_each`のstepで、runnerがその起動の対象を入れる。guardはstepの`writable`の`{item}`をこれで置き換える（無い・`ITEM_RE`に合わなければ`{item}`を含むpathは書けない）。人が設定するものではない |
 | `AIDEV_WORKFLOW_RUN` | `policy.js`（`decide`の既定値） | 同じくrunnerが入れるrun id。承認済みworkflowのagent step（確認役を除く）に、そのrunの`runs/<id>/notes/`への書込を許可する（rule `workflow-notes`）。run idの形でない値は何も許可しない |
 | `AIDEV_KIT_DEVELOPER` | `home.js` | `1`でこの端末をkit開発者端末として扱う（`AIDEV_HOME/developer.json`と同じ。self-evolution用） |
@@ -278,9 +279,9 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 
 | file | 書き手 | 形 |
 | --- | --- | --- |
-| `.aidev/materialized.json` | `init`、`apply` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
+| `.aidev/materialized.json` | `init`、`sync tools` | `{schemaVersion: 4, kitCommit, kitVersion, tools, appliedAt, files: {rel: {kit: "sha256:…", file: "sha256:…"}}, conflicts: [rel]}`（schema 3以前の`files: {rel: "sha256:…"}`も読める） |
 | `.aidev/ejected.json` | `uninstall --package` | `{schemaVersion: 1, ejectedAt, ejectedBy, kitCommit, removed[], hooksRemoved[], note}` |
-| `.aidev/policy.candidate.yaml` | `init`、`permission configure/reconfigure` | policy v1のYAML |
+| `.aidev/policy.candidate.yaml` | `init`、`create policy`（`--approve`なし） | policy v1のYAML |
 | `.aidev/sync.lock` | `sync wiki`（publish中は保持、ERROR状態の構造更新中は一時） | publish lease（`architecture.md` §5） |
 | `.aidev/cache/remote-check.json` | `state.resolveRemoteSha` | `{branch, sha, reason, checkedAt}` |
 | `.aidev/cache/last-head.json` | `hook session-start` / `after-bash` | `{sha, at}`。after-bashがHEADの変化を検出する基準 |
@@ -293,13 +294,17 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `.aidev/cache/wiki-worktree/` | `sync wiki`（publish） | HEADのdetached worktree。成功時と`--abort`で削除、失敗時は残す |
 | `.aidev/knowledge/.cache/agent-task-*.json` | `agent.prepareTask` | 大きいplan（`schemaVersion: 2`） |
 | `.aidev/knowledge/.cache/done/*.json` | knowledge-builder | 完了報告`{target, targetSha, pages, note?}` |
+| `.aidev/cache/modify/<name>.json` | `modify workflow`（変更があったとき） | `{at, name, describe, beforeHash, afterHash, cause, report（末尾3000文字）, changed, added, removed, fromRun, costUsd}`。`submit`のPR本文の「Why this change」が読む |
+| `.aidev/cache/modify/<name>-<stamp>/` | `modify workflow` | 変わった・消えたfile（`.aidev/workflows/<name>/`・`.aidev/agents/`・`.aidev/skills/`）の変更前の内容（`<rel>`のまま） |
+| `.aidev/cache/submit/<name>.md` | `submit workflow` | PR本文の全文（Azure DevOpsへは4000文字に収めて送る） |
+| `<AIDEV_HOME>/worktrees/<pkg>-<hash>/<branch>` | `run workflow`（`runtree.prepare`） | workflow実行のgit worktree（`<hash>`はcloneのreal pathのsha256先頭8桁、`<branch>`は`/`を`-`にしたbranch名）。run後も残し、`--resume`が続ける |
 | `.aidev/workflows/<name>/workflow.yaml` | `create workflow`（template / `--describe`でworkflow-creator） | 定義。`submit`がPRにし、`origin/<tracking_branch>`との一致が承認 |
 | `.aidev/estimates/records/<workflow>-<runId>.json` | `run workflow`の終わり（agentを起動したrunだけ）と、pull-request stepのcommit直前 | `{schemaVersion: 1, workflow, runId, hash, kitVersion, startedAt, done, costUsd, estimate, steps: [{id, kind, ok, attempts, starts, costUsd, items?, failed?}], calls: [{step, role, agent, item?, attempt, tool, model, actualModel?, ok, costUsd, durationMs, tokens?}]}`。commitしてteamで共有（gitignoreしない）。pull-request stepが`.aidev/estimates/`ごとstageする |
 | `.aidev/estimates/priors.json` | `estimate-reviewer`の答えをCLIが検査して書く | `{schemaVersion: 1, reviewedAt, reviewedThrough: ["<wf>/<runId>"], costUsd, priors: [{agent | kind, role, perStart: [lo, hi]（sonnet換算のUSD）, why}]}` |
 | `.aidev/estimates/notes.md` | 同上 | reviewerの注意書き（Markdown）。cost-estimatorのpromptに入る |
 | `.aidev/estimates/judgments/<name>.json` | `estimate workflow --ai`（答えが読めたとき） | `{schemaVersion: 1, hash, steps: [{id, size, checkSize, kind}]}`。`hash`が今の定義の`contentHash`と同じ間だけ使う |
 | `AIDEV_HOME/cache/evolve/estimates-<yyyymmdd>/`、`estimates-<yyyymmdd>-input/<pkg>/` | `npm run evolve -- estimates` | kit checkoutのworktree（branch `aidev/evolve-estimates-<yyyymmdd>`）と、PKGごとのrecordのcopy |
-| `.aidev/workflows/<name>/runs/<id>/`（実行のworktreeの中） | `workflow run` | `log.txt`、`run.json`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`（`cli-reference.md`の`run`） |
+| `.aidev/workflows/<name>/runs/<id>/`（実行のworktreeの中） | `run workflow` | `log.txt`、`run.json`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`（`cli-reference.md`の`run`） |
 | `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall --package`（書く）。`list packages`、`update`、`doctor`、`--package`（読む） | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |
 

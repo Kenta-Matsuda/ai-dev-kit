@@ -20,9 +20,10 @@ The left of the page draws the steps from top to bottom:
 * an agent step: the agent, where it may write (`writable`), what it must leave as it is (`unchanged`), `for_each`, and the `until` check (commands and checking agent). With retries, an arrow on the right shows the loop and how often (`retry ≤ n`)
 * a command step: the command it runs
 * a pull-request step: the pull request title
+* a parallel group: the agent steps that run at the same time, side by side (agent and where each may write). Selecting the group shows each step's form
 * the estimated cost of each step
 
-Select a step to change it on the **Step** tab on the right. Hover between two steps for buttons that insert a step (agent, command, pull_request). The buttons at the top right of a step move it up or down or delete it.
+Select a step to change it on the **Step** tab on the right. Hover between two steps for buttons that insert a step (agent, parallel, command, pull_request). The buttons at the top right of a step move it up or down or delete it.
 
 [cols="1,3",options="header"]
 |===

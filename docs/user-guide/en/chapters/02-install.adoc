@@ -84,7 +84,7 @@ aidev uninstall --dry-run   # see what would be removed
 aidev uninstall --yes
 ----
 
-This removes the launcher and `AIDEV_HOME`. The ADK clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
+This removes the launcher, and `registry.json` and `cache/` in `AIDEV_HOME` (the worktrees of workflow runs are left). The ADK clone and the files inside packages stay, and the command shows how to remove each of them (xref:cli-uninstall[aidev uninstall]).
 
 === Related information
 

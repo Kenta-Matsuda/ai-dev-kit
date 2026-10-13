@@ -7,7 +7,8 @@
  *              it, so a run builds on what the last one left and its pull
  *              request is updated rather than duplicated. `--dated` makes a
  *              fresh `aidev/<workflow>-<yyyymmddHHMM>` instead.
- *   worktree   `<AIDEV_HOME>/worktrees/<pkg>/<branch with / as ->`, made
+ *   worktree   `<AIDEV_HOME>/worktrees/<pkg>-<hash>/<branch with / as ->` (<hash>:
+ *              8 hex of the clone's real path, so two clones never share one), made
  *              from the branch (or from the base when the branch is new) and
  *              kept after the run: the run's record, notes and reports live
  *              in it, and `--resume` continues there.

@@ -85,11 +85,11 @@ The definition lives in two places.
 |The survey step writes nothing. The implementation step writes only `tests/**`
 
 |The agent's frontmatter (**capabilities**)
-|The skills, tools and MCP servers that agent can use
+|The skills, tools, MCP servers and subagents that agent can use
 |test-writer has the test-and-verify instructions and uses only Read, Edit and Write
 |===
 
-When you want the same agent to have different permissions for different jobs, split it into separate agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance). No key in a workflow overrides an agent's capabilities.
+When you want the same agent to have different permissions for different jobs, split it into separate agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance). To add capabilities in one workflow only, write them in that workflow.yaml's `agents:` (`skills`, `mcp` and `subagents` are added; `tools` replaces; xref:workflows-agents-skills[Agents and skills]).
 
 Edit the template to fit the PKG. Most of the time you change each step's `writable` (where that step may write) and `until.command` (this PKG's test command).
 
@@ -273,7 +273,7 @@ Split a job with many targets, such as writing tests screen by screen or migrati
 ----
 
 * The ADK reads the list. One line is one target; blank lines and lines starting with `#` are skipped. A line that appears twice is one target.
-* `{item}` can be written in `prompt`, `until.command` and `until.prompt`. It is required in `prompt`.
+* `{item}` can be written in `prompt`, `writable`, `until.command` and `until.prompt`. It is required in `prompt`, and cannot be written in `unchanged`. In `writable`, the target's agent can write only that target's paths (xref:workflows-parallel[Running agents in parallel]).
 * The agent is started anew for each target. `until` and its retries apply per target. The time and cost limits count for the whole run.
 * When one target fails, the run stops there. The targets that passed stay as they are, and `--resume` continues from the target that stopped (xref:workflows-resume[Continuing a stopped run]).
 * With `on_failure: continue` under `for_each`, the changes of a target that fails are undone and the next target starts. What is undone is the files inside the step's `writable` that changed during that target. The failed targets and why are listed in `run.json`, in the report to the later steps and in the PR body. When every target fails, the run stops. Reaching the cost or time limit stops the run even with `continue`.
@@ -402,7 +402,7 @@ These still need a person:
 
 * When the machine running it stops (sleep, restart, network loss), the run stops. `aidev run workflow <name> --resume last` continues and skips the targets already handled.
 * A passing failure of the AI tool (overload, rate limit) counts as that target failing (with `on_failure: continue`, it is undone and the run goes on).
-* Targets are handled one at a time, never in parallel.
+* By default, targets are handled one at a time. `for_each.parallel` runs several at once (xref:workflows-parallel[Running agents in parallel]).
 * The changes become one PR. When thousands of changes are too many to review in one PR, split the list and run it several times.
 
 [[workflows-until-agent]]
@@ -435,7 +435,7 @@ One attempt goes in this order:
 
 About the checking agent:
 
-* **It writes nothing.** The step's `writable` does not apply to it. What it can use (skills, tools, MCP servers) is its own frontmatter; give it read-only tools such as `tools: Read, Grep, Glob`.
+* **It writes nothing.** The step's `writable` does not apply to it. What it can use (skills, tools, MCP servers) is its own frontmatter plus what the workflow's `agents:` gives it; give it read-only tools such as `tools: Read, Grep, Glob`.
 * The ADK puts the pass/fail format (the `VERDICT:` line) into its instructions. You do not need to write it in the agent's body or in `until.prompt`.
 * Write in `until.prompt` exactly what to check. A vague check makes the same remark repeat and stop the run, or uses up `until.max_retries`.
 * Its starts count toward the retries (`until.max_retries`), the cost limit and the time limit. An attempt starts two agents, so allow for that in `limits.max_usd`.
@@ -464,7 +464,7 @@ aidev submit workflow write-tests
 ----
 
 * It validates the definition, commits `workflow.yaml` and the agents and skills in the PKG it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes and opens a PR (Azure DevOps). With `generic` hosting it pushes, and you open the PR by hand. With `--no-push` it does not push either.
-* The PR body gives the objective, what each step does (order, agent, where it may write, that agent's skills, tools and MCP servers), the files involved and the limits, and says that merging approves this workflow.
+* The PR body gives the objective, what each step does (order, agent, where it may write, that agent's skills, tools and MCP servers, the subagents it may start, `until`, parallel groups), the files involved (new or changed) and the limits, and says that merging approves this workflow. For a change to an approved workflow it also gives what changed against the approved version (What changed against the approved workflow), the cost estimate before and after (Estimate) and, for a change made with `aidev modify`, why (Why this change). The whole text is also kept in `.aidev/cache/submit/<name>.md` (xref:cli-submit[aidev submit]).
 * If it already matches `main`, it prints `already matches origin/main; nothing to submit.` and stops.
 
 Add required reviewers for `.aidev/workflows/**`, `.aidev/agents/**` and `.aidev/skills/**` in the branch policy. Who approved is recorded by the PR's reviewers and git's author.
@@ -533,21 +533,24 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 ----
 aidev run workflow write-tests
     [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests at 9f8e7d6… (base 9f8e7d6…; approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
-    [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:12:03.115Z] worktree: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests (made for this run)
+    [2026-09-23T01:12:03.140Z] estimate: $0.80 – $5.40 (optimistic – pessimistic)
+    [2026-09-23T01:12:03.201Z] step survey: agent test-investigator via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
     [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:25:02.417Z] step write: agent finished in 8m 21s ($0.9811)
-    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1
+    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1 in 16s
     [2026-09-23T01:25:19.010Z] step write: agent test-writer via claude (sonnet) attempt 2 (budget 19m 44s)
     [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
-    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
+    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0 in 13s
+    [2026-09-23T01:32:01.240Z] checkpoint 4b3a2c1d0e9f: write (3 file(s))
     [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
     [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests
     [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
-    branch aidev/write-tests (2 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
+    branch aidev/write-tests (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
     record: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests/.aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z
 ----
 
@@ -557,7 +560,7 @@ This is what happens during a run.
 * There is one branch per workflow (`aidev/<name>`); every run uses the same branch and worktree. Only when you want a dated branch of its own (`aidev/<name>-<yyyymmddHHMM>`), pass `--dated`.
 * The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
 * Each time a step (one target, for `for_each`) passes, the changes inside its `writable` are **committed as a checkpoint** (`aidev(<name>): <step>`). A stopped run continues from the last checkpoint.
-* Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
+* Claude Code is started with only the `tools` and `mcp` given by the agent's frontmatter and the workflow's `agents:` (named `subagents` are handed over with `--agents`). Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
 * The final report of each earlier agent step goes into the instructions of the later agent steps. The files in the notes directory can be read too (xref:workflows-handoff[Passing results between steps]).
 * If `until` is not met, the same agent is started again with the result attached (the command's output, or the checking agent's report). If the same result appears twice in a row, the run stops.
 * When a command takes longer than 15 seconds, one line with the elapsed time is shown every 15 seconds.
@@ -835,7 +838,7 @@ Once merged, the new definition is approved. Until then your local change exists
 
 An agent is a role definition handed to the AI tool (Markdown); a skill is a set of instructions. A workflow's steps reference agents by name, and an agent references the skills it uses by name.
 
-The ADK ships **machinery** only: the workflow runner and its validation, the approval check, the write limits, and four agents — workflow-creator (writes workflows), agents-creator (writes agents), knowledge-builder (writes the Wiki) and permission-setting (drafts the policy candidate).
+The ADK ships **machinery** only: the workflow runner and its validation, the approval check, the write limits, and four agents — workflow-creator (writes workflows), agents-creator (writes agents), knowledge-builder (writes the Wiki) and permission-setting (drafts the policy candidate). The CLI also has agents for estimates (cost-estimator, estimate-reviewer); they are not placed in the PKG, and the CLI starts them for `aidev estimate` and at the end of a run (xref:cli-estimate[aidev estimate]).
 
 The development work itself — workflows that implement, write tests or write out conventions, and their agents — belongs to the **package**. The ADK does not bundle any. The Engineering Manager creates them with `aidev create workflow <name> --describe "<what you want>"`. MCP servers (reading Azure DevOps Work Items, for instance) are also the package's own, in its `.mcp.json`; the ADK neither ships nor starts them.
 
@@ -855,6 +858,7 @@ description: Writes tests in the existing style. Started by the write-tests work
 skills: [test-and-verify]            # skills whose text goes into its instructions; [] when none
 tools: Read, Grep, Glob, Edit, Write # the built-in tools it can use; omitted = the tool's default (all)
 mcp: []                              # MCP servers it can use (keys of the PKG's .mcp.json); omitted = none
+subagents: []                        # subagents it may start; omitted = whatever the AI tool offers
 model: inherit
 ---
 ----
@@ -871,13 +875,16 @@ model: inherit
 
 |`mcp`
 |The MCP servers it can use. Write names registered in the PKG's `.mcp.json`. Servers not listed are not given. A name not in `.mcp.json` stops the workflow before it starts.
+
+|`subagents`
+|The subagents it may start with the `Agent` tool (names of `.aidev/agents/<name>.md`). When written, no other can be started (xref:workflows-subagents[Naming the subagents an agent may start]).
 |===
 
 * An agent with `tools` or `mcp` runs only on Claude Code, because Copilot CLI and the others cannot limit the tools they are given.
 * Do not give `Bash` to an agent that touches an external system. With `Bash` it can reach outside without going through MCP, and limiting `mcp` means nothing. Tests are run by the ADK through `until`, not by the agent.
 * Give work with different permissions to different agents (a read-only `ticket-reader` and a `ticket-updater` that updates, for instance).
 
-To add a skill or an MCP server in one workflow only, write it in that workflow.yaml's `agents:` rather than the agent's frontmatter. `skills` and `mcp` are added to the frontmatter's; `tools` is used instead of the frontmatter's (xref:workflow-reference-agents[agents]).
+To add a skill or an MCP server in one workflow only, write it in that workflow.yaml's `agents:` rather than the agent's frontmatter. `skills`, `mcp` and `subagents` are added to the frontmatter's; `tools` is used instead of the frontmatter's (xref:workflow-reference-agents[agents]).
 
 [source,yaml]
 ----

@@ -57,9 +57,9 @@ It arrives as a commit named `aidev: workflow <name>`. **Merging is the approval
 ==== Reading order
 
 . **For a change, the "Why this change" and "What changed against the approved workflow" sections of the PR body** — a change made with `aidev modify` says what was asked, which run's failure it fixes (why it stopped, and the failure output as recorded) and the cause the agent found. Below come the steps and fields (`prompt`, `writable`, `until` and so on) that changed against the approved version, and the cost estimate before and after. Check that the change fits the cause and is not only more retries or higher limits.
-. **The "Steps" section of the PR body** — the steps are listed top to bottom in the order they run, each with its agent, where it may write (writes), and that agent's skills, tools and MCP servers. Get the overall picture here first.
+. **The "Steps" section of the PR body** — the steps are listed top to bottom in the order they run, each with its agent, where it may write (writes), that agent's skills, tools and MCP servers, the subagents it may start (may start subagent), how it ends (repeats until / checked by) and its parallel group (runs at the same time as). Get the overall picture here first.
 . **`workflow.yaml`** — read the `objective` (what the AI is asked to do), each step's `prompt` (the instruction for that step), `until` (how the end is judged) and the limits.
-. **The agent's `.md` (`.aidev/agents/`)** — check in the frontmatter at the top what the agent can use (`skills`, `tools`, `mcp`), and read in the body how it is told to behave.
+. **The agent's `.md` (`.aidev/agents/`)** — check in the frontmatter at the top what the agent can use (`skills`, `tools`, `mcp`, `subagents`; the workflow's `agents:` may add to them), and read in the body how it is told to behave.
 . **The skill's `SKILL.md` (`.aidev/skills/`)** — the procedure handed to the agent.
 
 **Do not stop at the YAML.** Most of what the AI is actually told is in the agent and skill bodies.

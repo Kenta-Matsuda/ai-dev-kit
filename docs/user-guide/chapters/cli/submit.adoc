@@ -12,7 +12,7 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 
 === 説明
 
-定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・`until`）、agent と skill のファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。
+定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・起動できるサブエージェント、`for_each` の対象と同時実行数、同時に走る並列グループ、`until`）、agent と skill のファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。
 
 承認済みの workflow を直した提出では、さらに次が入ります。
 

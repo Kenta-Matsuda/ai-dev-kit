@@ -202,7 +202,7 @@
 
 |`aidev run workflow` 中に `… is not among the tools of agent <name> (…)` +
 `… is not among the MCP servers of agent <name> (…)`
-|agent の frontmatter の `tools`・`mcp` に無いツールを使おうとしました。必要なら Engineering Manager が agent の定義を直して提出し直します。権限の違う仕事なら、別の agent にします。
+|agent の frontmatter か workflow の `agents:` で与えていないツールを使おうとしました。必要なら Engineering Manager がそのどちらかを直して提出し直します。権限の違う仕事なら、別の agent にします。
 
 |`aidev run workflow` 中に `… workflow <name> is not approved: …`
 |実行中に定義が変わったか、`origin/main` が動きました。実行を止め、`git fetch origin` と `aidev list workflows` で状態を確かめます。
@@ -243,7 +243,7 @@
 |`aidev list workflows` が `invalid: …`
 |`workflow.yaml` が検証を通りません。表示された項目（`objective` が無い、agent step に `writable` が無い、`limits.max_usd` が無い、知らない項目がある、上限超過、`until` が文字列（`until:` の下に `command:` を書く）、`until.command` に引用符やパイプ、`protected` のパスなど）を直します。
 
-|`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
+|`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
 |agent 名の誤りか、PKG 固有の agent が未コミットです。名前を直すか、`.aidev/agents/<name>.md` を同じ PR に入れます。
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
@@ -258,6 +258,9 @@
 
 |`subagent <name> may use …, which its parent <agent> may not`
 |サブエージェントの `tools`・`mcp` が親の agent より広いです。サブエージェントの frontmatter を狭めるか、親に足します。
+
+|`<agent> may start only the subagents <a>, <b> (not <type>)`（hook が拒否）
+|workflow の step の agent が、`subagents` にないサブエージェントを起動しようとしました。必要なら agent の frontmatter か workflow の `agents:` の `subagents` に足し、workflow を提出し直します（xref:workflows-subagents[サブエージェントを指定する]）。
 
 |`steps <a> and <b> run at the same time but may write the same paths`
 |parallel グループのステップの `writable` が重なり得ます。ステップごとに別のディレクトリにします（xref:workflows-parallel[並列に動かす]）。

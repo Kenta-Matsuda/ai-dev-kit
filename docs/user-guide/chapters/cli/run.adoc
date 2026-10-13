@@ -15,7 +15,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 
 `.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
 
-手順（`steps`）を順に実行します。実行は手元の作業ツリーではなく専用の git worktree（`<AIDEV_HOME>/worktrees/…`）で、workflow ごとのブランチ `aidev/<name>` の上で動きます（`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）。ステップ（`for_each` なら 1 件）が通るたびに、その `writable` の変更をチェックポイントとしてコミットします（xref:workflows-worktree[実行の worktree とブランチ]）。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>` と `AIDEV_WORKFLOW_STEP=<id>` を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら worktree の `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、その worktree の最後のチェックポイントから続けられます（xref:workflows-resume[止まった実行を続ける]）。止まった実行から定義を直すには `aidev modify workflow <name> --from-run <run id>` を使います。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
+手順（`steps`）を順に実行します。実行は手元の作業ツリーではなく専用の git worktree（`<AIDEV_HOME>/worktrees/…`）で、workflow ごとのブランチ `aidev/<name>` の上で動きます（`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）。ステップ（`for_each` なら 1 件）が通るたびに、その `writable` の変更をチェックポイントとしてコミットします（xref:workflows-worktree[実行の worktree とブランチ]）。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>`、`AIDEV_WORKFLOW_STEP=<id>`、`AIDEV_WORKFLOW_RUN=<run id>`（`for_each` なら `AIDEV_WORKFLOW_ITEM=<件>` も）を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば `--agents` で渡します）。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら worktree の `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、その worktree の最後のチェックポイントから続けられます（xref:workflows-resume[止まった実行を続ける]）。止まった実行から定義を直すには `aidev modify workflow <name> --from-run <run id>` を使います。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
 
 === オプション
 
@@ -102,7 +102,7 @@ aidev run workflow e2e-tests --task "注文画面" --log ~/aidev-logs/e2e-tests.
 |すべての step を終えた。`--dry-run` で承認済みで、起動前に止まる問題が無かった
 
 |1
-|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools` や `mcp` を書いた agent を Claude Code 以外で起動しようとした。`pull_request` のステップがあるのに作業ツリーが汚れている。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、その実行のブランチに居ない
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools`・`mcp`・`subagents` を持つ agent を Claude Code 以外で起動しようとした。実行の worktree の `writable` の範囲に未コミットの変更がある。同じ worktree で別の実行が動いている。ブランチ `aidev/<name>` と起点が衝突した。worktree の定義が承認済みでない。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、チェックポイントのコミットの失敗、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、worktree で動く前の版で始めた実行。`--resume` と `--task`・`--dated` を一緒に指定した
 |===
 
 === 例
@@ -151,7 +151,8 @@ test-writer via claude [pkg]
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
-    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+    branch aidev/write-tests (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
+    record: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests/.aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z
 ----
 
 `--dry-run` で、起動前に止まる問題が見つかったとき（`--dry-run` なしで実行しても、同じ理由で何も始めずに止まります）:

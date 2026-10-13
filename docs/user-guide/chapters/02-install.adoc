@@ -84,7 +84,7 @@ aidev uninstall --dry-run   # 消すものを確認する
 aidev uninstall --yes
 ----
 
-起動スクリプトと `AIDEV_HOME` を消します。ADK の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
+起動スクリプトと、`AIDEV_HOME` の `registry.json`・`cache/` を消します（workflow の実行の worktree は残します）。ADK の clone と PKG の中のファイルは残し、それぞれを消すコマンドを表示します（xref:cli-uninstall[aidev uninstall]）。
 
 === 関連情報
 

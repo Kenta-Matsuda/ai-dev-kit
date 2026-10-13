@@ -20,9 +20,10 @@ aidev edit workflow <name> [--port <n>] [--no-open] [--json]
 * agent step: agent、書ける場所（`writable`）、変えてはいけない場所（`unchanged`）、`for_each`、`until` の判定（コマンドと確認役）。やり直しがあれば、右側に繰り返しの矢印と回数（`retry ≤ n`）
 * command step: 実行するコマンド
 * pull-request step: PR のタイトル
+* parallel グループ: 同時に動く agent step を横に並べて表示（agent と書ける場所）。グループを選ぶと、各ステップのフォームが並ぶ
 * ステップごとの費用の見積もり
 
-ステップを選ぶと、右の **Step** タブでその項目を直せます。ステップの間にマウスを置くと、ステップを足すボタン（agent・command・pull_request）が出ます。各ステップの右上のボタンで、順番を入れ替えたり消したりできます。
+ステップを選ぶと、右の **Step** タブでその項目を直せます。ステップの間にマウスを置くと、ステップを足すボタン（agent・parallel・command・pull_request）が出ます。各ステップの右上のボタンで、順番を入れ替えたり消したりできます。
 
 [cols="1,3",options="header"]
 |===

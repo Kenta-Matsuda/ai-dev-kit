@@ -23,7 +23,7 @@ aidev list packages [--json]
 |The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. The ADK bundles no workflows, so only this PKG's workflows are listed
 
 |`agents`
-|The PKG's `.aidev/agents/` and the agents bundled with the ADK. Name, origin (`this PKG` / `ADK`), description. `⚠` is added when `name` in the frontmatter differs from the file name
+|The PKG's `.aidev/agents/` and the agents bundled with the ADK. Name, origin (`this PKG` / `kit`), description. `⚠` is added when `name` in the frontmatter differs from the file name
 
 |`skills`
 |The PKG's `.aidev/skills/` and the skills bundled with the ADK. Name, origin, description

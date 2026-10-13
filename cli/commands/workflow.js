@@ -1,14 +1,17 @@
 'use strict';
 /**
- * The workflow implementation behind `aidev create workflow`, `aidev submit
- * workflow`, `aidev run workflow` and `aidev list workflows` (the verb
- * modules in this directory are thin wrappers over the functions exported
- * here). Three roles meet here:
+ * The workflow implementation behind `aidev create workflow`, `aidev modify
+ * workflow`, `aidev estimate workflow`, `aidev submit workflow`, `aidev run
+ * workflow` and `aidev list workflows` (the verb modules in this directory
+ * are thin wrappers over the functions exported here; `aidev edit workflow`
+ * is lib/editor.js). Three roles meet here:
  *
  *   kit developers   own everything that executes — this runner, the step
- *                    kinds, the bundled workflows, agents and skills
+ *                    kinds, the bundled agents and skills (the kit ships no
+ *                    workflows)
  *   a PKG lead       writes what the AI is asked to do, as YAML, and gets it
- *                    reviewed into origin/<tracking_branch> (`new`, `submit`)
+ *                    reviewed into origin/<tracking_branch> (`create`,
+ *                    `modify`, `submit`)
  *   a PKG member     runs it (`run`) and hands the resulting pull request to
  *                    a reviewer
  *
@@ -22,9 +25,13 @@
  * agent's frontmatter grants (plus what the workflow's `agents:` assigns to
  * it), and the guard refuses any other tool call.
  *
- * Safety valves are mandatory, not defaults to taste: a time ceiling, a
- * bounded retry count per step, a required USD budget, a same-failure stop,
- * and commands that run without a shell.
+ * Safety valves are mandatory, not defaults to taste: a required USD budget
+ * (limits.max_usd), a time limit on each agent start (timeout_minutes,
+ * 30 by default, at most LIMITS.maxTimeoutMinutes; a command may set one
+ * too), a bounded retry count
+ * per step, a same-failure stop, and commands that run without a shell. A
+ * run as a whole has no time ceiling: limits.max_minutes is the team's
+ * choice, required only when an agent runs on a tool that reports no cost.
  */
 
 const fs = require('fs');
@@ -42,27 +49,6 @@ const ado = require('../lib/ado');
 const estimateMod = require('../lib/estimate');
 const ui = require('../lib/ui');
 const runtree = require('../lib/runtree');
-
-const FLAGS = {
-  json: 'boolean', force: 'boolean', 'dry-run': 'boolean',
-  from: 'string', describe: 'string',
-  task: 'string', 'task-file': 'string', 'max-minutes': 'string', resume: 'string', log: 'string',
-  'no-push': 'boolean',
-};
-
-const FLAG_HELP = {
-  json: 'machine-readable output',
-  force: 'new: overwrite an existing workflow directory',
-  'dry-run': 'new/submit/run: show what would happen; start nothing, write nothing',
-  from: 'new: copy a workflow bundled with the kit (see "aidev list workflows")',
-  describe: 'new: describe the workflow in plain language; the workflow-creator agent writes the YAML',
-  task: 'run: instructions for this run, handed to every agent step as data',
-  'task-file': 'run: read --task from a file',
-  'max-minutes': 'run: a time limit for this run (below limits.max_minutes when the workflow sets one)',
-  log: 'run: also write the whole run — every line, every tool call, each agent\'s report, command output — and a summary to this file',
-  resume: 'run: continue a stopped run from the step it stopped at (a run id, or "last")',
-  'no-push': 'submit: commit on the local branch only; do not push or open a pull request',
-};
 
 const WORKFLOWS_DIR = layout.WORKFLOWS_REL;
 
@@ -110,6 +96,9 @@ objective: |
 # is committed there. What git ignores (node_modules, .env) is not in it: when the checks need
 # it, start with a command step such as "npm ci".
 steps:
+  # - id: deps                 # optional: a command step runs one command line (no shell) once;
+  #   command: npm ci          #   the run stops unless it exits 0. cwd, env and timeout_minutes
+  #                            #   work as in until below; writable: which of its outputs the PR commits
   - id: analyze
     description: Survey the code and plan the change   # for the reviewer; optional
     agent: my-agent
@@ -2369,5 +2358,5 @@ function list(ctx) {
 }
 
 module.exports = {
-  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, FLAGS, FLAG_HELP, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, definitionChanges, runDigest, findRun, listRuns, describeSteps, prDescription,
+  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, definitionChanges, runDigest, findRun, listRuns, describeSteps, prDescription,
 };

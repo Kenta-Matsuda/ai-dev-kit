@@ -1,23 +1,27 @@
 <!-- ai-dev-kit template for OpenAI Codex CLI (kit: templates/codex/AGENTS.md).
      Maintained by the kit maintainers alongside the Claude Code templates; not yet
-     verified against the real tool. Hook-based policy enforcement exists for Claude Code only. -->
+     verified against the real tool. The hooks that enforce the write policy ship for this tool too
+     (.codex/hooks.json), but only Claude Code has been verified. -->
 
 # AGENTS.md — ai-dev-kit
 
 このリポジトリは **ai-dev-kit で AI 実行環境を整えた PKG** です。あなた（AI コーディングツール）はこの PKG の
 clone の中で作業します。`aidev` CLI が hooks・権限・LLM Wiki を管理しています。
 
-> このファイルは ai-dev-kit が配布する静的ファイルです。`aidev update` が新しい版に置き換えます。
-> PKG 固有の指示は `aidev.yaml` と `.aidev/` に置き、このファイルは直接編集しないでください
-> （編集は `aidev check` が drift として検出します）。改善は ai-dev-kit への PR として提案してください。
+> このファイルは ai-dev-kit が配布するテンプレートです。`aidev update` は kit 本体だけを更新し、
+> PKG への取り込みは `aidev sync tools` が行います（kit の新しい版を 3-way merge し、チームの編集は残る）。
+> チームの編集は drift ではありません（`aidev check` が exit 2 にするのは未解消の conflict など、マージ前に人が見るべき状態だけ）。
+> PKG 固有の指示は `aidev.yaml` と `.aidev/` に置き、汎用の改善は ai-dev-kit への PR として提案してください。
 
 ---
 
 ## 最初に読むもの
 
 セッション開始時に SessionStart hook が `[ai-dev-kit] head=<sha7>  knowledge=<sha7>  tracking=<sha7>` の 1 行を表示します。
-まずそれを読んでください。`head` は現在のブランチの HEAD、`knowledge` は Wiki が説明しているコミット、
-`tracking` は追跡ブランチです。`knowledge` が `head` と違えば Wiki は遅れています。
+まずそれを読んでください。`head` は現在のブランチの HEAD、`knowledge` は Wiki を最後に生成したコミット、
+`tracking` は追跡ブランチです。Wiki が遅れているかは SHA の比較ではなく、Wiki の生成対象の一覧（inventory）と
+HEAD のツリーの比較で判定され、2 行目に出ます（`⚠️ … run "aidev sync wiki"`）。`knowledge` が `head` と違っても、
+Wiki コミットや生成対象外の変更だけなら遅れではありません。
 
 - `.aidev/knowledge/index.md` — この PKG の LLM Wiki の入口（**ソースを読む前にここを引く**）
 - `.aidev/knowledge/overview.md` — リポジトリの地図（目的・構成・ビルド/テスト方法・主要モジュール）
@@ -91,7 +95,9 @@ Wiki の構造を HEAD に合わせ、本文の生成を求めてきます。
 **他の作業より先に**、次の順で進めます（`knowledge-update` Skill）。
 
 1. `.aidev/knowledge/.cache/plan.json` を読む（`batches[]`・`generationTargets`・`targetSha`・`reportDir`）
-2. batch ごとにカスタムエージェント `knowledge-builder`（`.codex/agents/`）を spawn し、plan のパスと batch 番号を渡す
+2. batch ごとにサブエージェントを spawn し、plan のパスと batch 番号を渡す。kit は Codex 用の `knowledge-builder` 定義を配布しません。
+   `.claude/agents/knowledge-builder.md` があればその内容を指示として渡し、無ければサブエージェントを使わず `aidev sync wiki` を実行します
+   （CLI が定義付きで knowledge-builder を起動し、報告の取り込みとコミットまで行うので、3 は不要）
 3. 全 batch が報告したら `aidev sync wiki --no-agent` を実行する。CLI が報告を取り込み、
    `.aidev/knowledge/` を `aidev: update Wiki for <sha12>` として別コミットに積む
 

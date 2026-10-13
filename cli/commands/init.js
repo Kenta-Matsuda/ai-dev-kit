@@ -13,10 +13,9 @@
  *     git. For them init asks nothing: it verifies the materialised files,
  *     registers the clone on this machine and reports what to do next.
  *
- * The Wiki is part of the setup: the first init builds it (asking first when
- * a terminal is attached, since it costs time and tokens), and a later init
- * continues an unfinished build. The policy is placed only after a human
- * approved it.
+ * The Wiki is not built here: init only reports its state and names the
+ * command that builds or continues it (`aidev sync wiki`). The policy is
+ * placed only after a human approved it.
  */
 
 const fs = require('fs');
@@ -405,7 +404,7 @@ async function run(ctx) {
   }
 
   // --- 9. Wiki: reported, not built --------------------------------------------
-  // Building the Wiki is a long agent run with its own command (`aidev update
+  // Building the Wiki is a long agent run with its own command (`aidev sync
   // wiki`), its own exit codes and its own resume. init only says where things
   // stand, so "init failed" always means the setup failed.
   let manifest = null;

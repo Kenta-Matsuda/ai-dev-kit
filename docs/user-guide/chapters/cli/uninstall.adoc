@@ -32,7 +32,7 @@ installer が置いたものを消します。①起動スクリプト（Windows
 
 `--package` には xref:cli-list[`aidev list packages`] に出る名前か、PKG のパスを渡します（PKG の中なら `.`）。
 
-順に、①`.claude/settings.json` から `aidev hook` の 4 つの hook を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ ADK が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md`、他のツールの分）を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
+順に、①`.claude/settings.json` から `aidev hook` の 5 つの hook（session-start、guard-write、quality-gate、after-bash、session-stop）を外し、②`.aidev/policy.yaml`、`.aidev/materialized.json`、`.aidev/cache/` などの管理ファイルを消し、③`--keep-assets` が無ければ ADK が置いたツール設定ファイル（`.claude/**`、`CLAUDE.md`、他のツールの分）を消し、④`.aidev/ejected.json` を書いて端末の登録から外します。
 
 残すもの: PKG のファイル、`.aidev/knowledge/`（Wiki）、`aidev.yaml`、`.aidev/workflows/`。
 

@@ -10,7 +10,7 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのstepの`writable`を含む）、agentの能力（frontmatterの`skills` / `tools` / `mcp`）、workflow（YAML定義、origin一致による承認、runner、専用worktreeとstepごとのcheckpoint。同梱workflowは無い）、MCP、update、self-evolution |
+| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのstepの`writable`を含む）、agentの能力（frontmatterの`skills` / `tools` / `mcp` / `subagents`と、workflowの`agents:`による追加）、workflow（YAML定義、origin一致による承認、runner、専用worktreeとstepごとのcheckpoint。同梱workflowは無い）、MCP、update、self-evolution |
 | [cli-reference.md](cli-reference.md) | 全command・subcommand・option・終了code。`aidev <cmd> --help`と一致させる |
 | [configuration-reference.md](configuration-reference.md) | `aidev.yaml` schema v2（`validateConfig` / `DEFAULTS`）、`.aidev/policy.yaml`、`DEFAULT_POLICY_SCOPES`、workflow.yaml、model解決、環境変数、CLIが書く各fileの形 |
 | [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未実装の台帳、既知の不整合、保守時の完了条件 |
@@ -24,7 +24,7 @@
 3. **生成物の読者を混ぜない。** `.aidev/knowledge/`は対象PKGをAIへ説明する派生情報であり、本kitの保守資料ではない。
 4. **認証情報を例へ埋め込まない。** 例では環境変数名（`hosting.auth_env`）だけを示す。`validateConfig`はtokenらしき値を拒否する。
 5. **安全機構を過大評価しない。** hooksは補助防御であり、最小権限のtoken、`aidev check`を必須にしたCI、branch policy、人間レビューが最終防御となる。
-6. **撤去した語彙を持ち込まない。** wrapper repository、`src/` submodule、`.aidev-lock`、`aidev kit apply`、`aidev plan`、`aidev task`、work lease、`submoduleSha` / `remoteSha`、`pending-refresh.json`、`self_evolution`設定、`aidev sync`、`aidev knowledge build` / `status`、`--resume` / `--to` / `--check-only`（2026-09-22に`aidev sync wiki`と`aidev check`へ統合）は現在のcodeに存在しない。codeのcommentに残っている箇所は`implementation-status.md`の「既知の不整合」に列挙している。2026-09-23以降は`aidev status` / `knowledge update` / `permission` / `workflow`（command名として）/ `aidev agent`も撤去済み（動詞先行: `check` / `update kit|wiki` / `configure policy` / `show policy` / `create|submit|run|list|remove … workflow`）。
+6. **撤去した語彙を持ち込まない。** wrapper repository、`src/` submodule、`.aidev-lock`、`aidev kit apply`、`aidev plan`、`aidev task`、work lease、`submoduleSha` / `remoteSha`、`pending-refresh.json`、`self_evolution`設定、`aidev sync`、`aidev knowledge build` / `status`、`--resume` / `--to` / `--check-only`（2026-09-22に`aidev sync wiki`と`aidev check`へ統合）は現在のcodeに存在しない。codeのcommentに残っている箇所は`implementation-status.md`の「既知の不整合」に列挙している。2026-09-23以降は`aidev status` / `knowledge update` / `permission` / `workflow`（command名として）/ `aidev agent`も撤去済み（動詞先行: `check` / `sync tools|wiki` / `update`（kit本体だけ）/ `create policy` / `run|estimate|create|modify|edit|submit|list|remove … workflow`）。
 
 ## ソース上の主な正本
 
@@ -36,24 +36,23 @@
 | `aidev.yaml` / policy schema、既定値 | `cli/lib/config.js` |
 | 初期化 | `cli/commands/init.js` |
 | AI tool adapter（registry、binary解決、argv、結果のparse） | `cli/lib/tools.js` |
-| tool configの適用・検査 | `cli/lib/assets.js`、`cli/commands/apply.js`、`templates/<tool>/` |
+| tool configの適用・検査 | `cli/lib/assets.js`、`cli/commands/sync.js`、`templates/<tool>/` |
 | self-update | `cli/commands/update.js` |
 | Wiki整合判定（head / knowledge / tracking） | `cli/lib/state.js`、`cli/lib/inventory.js`（`compareWithTree`）、`cli/lib/git.js` |
 | Wiki manifest / inventory / 完了報告 / clean-tree検査 | `cli/lib/inventory.js` |
 | evidence scope | `cli/lib/knowledge-scope.js` |
 | agent起動（batch、prompt、launcher） | `cli/lib/agent.js` |
-| workflow（定義の検証、agent / skillの解決、origin一致による承認、runner、`create --describe` / `submit` / `run` / `list`） | `cli/lib/workflow.js`、`cli/commands/workflow.js` |
+| workflow（定義の検証、agent / skillの解決、origin一致による承認、runner、`create --describe` / `modify` / `estimate` / `submit` / `run` / `list`） | `cli/lib/workflow.js`、`cli/commands/workflow.js`（動詞moduleは`create.js` / `modify.js` / `edit.js` / `estimate.js` / `submit.js` / `run.js` / `list.js` / `remove.js`） |
 | workflow実行のworktreeとbranch（`aidev/<name>`、checkpoint、lock、`runRoots`） | `cli/lib/runtree.js`、`cli/commands/workflow.js`（`runWorkflow`） |
 | `modify --from-run`（`runDigest`）とsubmitのPR本文（`definitionChanges`、`submitContext`） | `cli/commands/workflow.js` |
 | `sync wiki`（構造、prose、commit、plan.json） | `cli/commands/knowledge.js` |
 | publish（worktree、`aidev/wiki-<sha12>`、PR） | `cli/commands/knowledge.js`（`publish`）、`cli/lib/ado.js` |
 | publish lease | `cli/lib/leases.js` |
-| policy評価（agent単位の許可を含む） | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
+| policy評価（workflow stepのagent / subagentのtool許可を含む） | `cli/lib/policy.js`、`cli/lib/paths.js`、`cli/commands/permission.js` |
 | hooks（after-bash / session-stopを含む）とtool adapter | `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json` |
 | workflow | `cli/commands/workflow.js` |
 | self-evolution（kit開発者向け。CLI外） | `scripts/evolve.js`（`npm run evolve`）、`cli/agents/evolution.md`、`cli/commands/hook.js`（`session-stop`） |
 | uninstall（端末 / `--package`で旧eject / `--all`） | `cli/commands/uninstall.js`、`cli/lib/eject.js` |
-| uninstall | `cli/commands/uninstall.js` |
 | 同梱Agents / Skills | `templates/claude/.claude/agents/`、`templates/claude/.claude/skills/`（他toolの形式は`templates/copilot/`、`templates/codex/`、`templates/kiro/`に手で同期） |
 | installer | `scripts/install.ps1`、`scripts/install.sh` |
 | pipeline例 | `pipelines/` |

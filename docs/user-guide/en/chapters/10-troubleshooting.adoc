@@ -202,7 +202,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 
 |During `aidev run workflow`: `… is not among the tools of agent <name> (…)` +
 `… is not among the MCP servers of agent <name> (…)`
-|The agent tried to use a tool not in the `tools` or `mcp` of its frontmatter. If it is needed, the Engineering Manager fixes the agent definition and submits again. If the work needs different permissions, use a different agent.
+|The agent tried to use a tool its frontmatter and the workflow's `agents:` do not give it. If it is needed, the Engineering Manager fixes one of them and submits again. If the work needs different permissions, use a different agent.
 
 |During `aidev run workflow`: `… workflow <name> is not approved: …`
 |The definition changed during the run, or `origin/main` moved. Stop the run and check the state with `git fetch origin` and `aidev list workflows`.
@@ -243,7 +243,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |`aidev list workflows` shows `invalid: …`
 |`workflow.yaml` does not validate. Fix the items shown (no `objective`, an agent step without `writable`, no `limits.max_usd`, an unknown key, a limit exceeded, `until` written as a string (put `command:` under `until:`), quotes or pipes in `until.command`, a `protected` path, and so on).
 
-|`agent <name> is neither in .aidev/agents/ nor bundled with the ADK`
+|`agent <name> is neither in .aidev/agents/ nor bundled with the kit`
 |The agent name is wrong, or a PKG-local agent is not committed. Fix the name, or put `.aidev/agents/<name>.md` in the same PR.
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register` +
@@ -255,6 +255,9 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 
 |`subagent <name> may use …, which its parent <agent> may not`
 |The subagent's `tools` or `mcp` go beyond its parent agent's. Narrow the subagent's frontmatter, or give the parent more.
+
+|`<agent> may start only the subagents <a>, <b> (not <type>)` (denied by the hook)
+|A workflow step's agent tried to start a subagent not in its `subagents`. If it needs one, add it to `subagents` in the agent's frontmatter or the workflow's `agents:`, and submit the workflow again (xref:workflows-subagents[Naming the subagents an agent may start]).
 
 |`steps <a> and <b> run at the same time but may write the same paths`
 |The `writable` of two steps of a parallel group may overlap. Give each its own directory (xref:workflows-parallel[Running agents in parallel]).

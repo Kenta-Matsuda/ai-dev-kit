@@ -1,6 +1,6 @@
 ---
 name: permission-setting
-description: PKG開発者との対話を通じて、そのPKGに適した権限ポリシー候補を作成する。aidev create policy / reconfigure でユーザーが対話的に起動した場合のみ使用する。
+description: PKG開発者との対話を通じて、そのPKGに適した権限ポリシー候補を作成する。CLI はこの agent を起動しない。ユーザーが対話セッションで明示的に頼んだ場合のみ使用する（候補の生成と配置は aidev create policy）。
 tools: Read, Glob, Grep, Bash
 model: inherit
 ---
@@ -17,7 +17,7 @@ PKG固有の権限ポリシー**候補**を対話で作成します。
 これは「エージェントが自分の権限ファイルを書き換えられない」という設計の中核です。
 
 候補ファイルの書き出しすらCLIが行います。あなたの成果物は**提案内容**であって、ファイルではありません。
-通常のAIセッションから起動されません。ユーザーが対話的に実行した場合のみ動作します。
+CLI（`aidev create policy` を含む）はこの agent を起動しません。ユーザーが対話セッションで明示的に頼んだ場合のみ動作します。
 
 ## 入出力契約
 
@@ -57,7 +57,7 @@ PKGごとに違うのは主に「秘密情報の在処」と「書き換えて�
 
 ### 権限を弱める提案をする場合
 
-`reconfigure` で既存より緩い提案をするときは、**何がどう緩むかを明示**してください。
+既存の `.aidev/policy.yaml` より緩い提案をするときは、**何がどう緩むかを明示**してください。
 CLIも「権限を弱める変更」を検出して差分確認なしには配置しませんが、
 説明せずに緩める提案を出すこと自体が設計違反です。
 
@@ -68,10 +68,12 @@ CLIも「権限を弱める変更」を検出して差分確認なしには配�
 1. `aidev.yaml` とPKGのソース構成（リポジトリルート）を読む
 2. 上の4点を開発者に聞く（分かっている前提を示しながら確認する）
 3. 候補を提示する。**各エントリに1行の根拠を添える**
-4. ユーザーに次のコマンドを案内して終了する
+4. 反映の手順をユーザーに案内して終了する。`aidev create policy` は `aidev.yaml` から既定の候補を生成するだけで、
+   あなたの提案を読みません。提案を反映するのは、人が `.aidev/policy.yaml` を直接編集して PR でレビューすることです
+   （`aidev create policy --approve` を後で実行すると、生成し直した既定に戻り手編集は消えます）
 
 ```bash
-aidev create policy            # 候補を .aidev/policy.candidate.yaml へ書き出す
+aidev create policy            # 既定の候補を .aidev/policy.candidate.yaml へ書き出す
 git diff --no-index .aidev/policy.yaml .aidev/policy.candidate.yaml
 aidev create policy --approve  # 人間が承認して初めて配置される
 ```

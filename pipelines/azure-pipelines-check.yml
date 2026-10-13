@@ -58,7 +58,7 @@ steps:
       AIDEV_NO_UPDATE_CHECK: '1'
 
   # The gate. Exit codes are the contract:
-  #   0 ok · 2 tool config drift · 3 policy · 4 Wiki missing or broken
+  #   0 ok · 1 aidev.yaml or a workflow invalid · 2 tool config drift · 3 policy · 4 Wiki missing or broken
   - script: |
       set -euo pipefail
       node "$(Pipeline.Workspace)/ai-dev-kit/cli/bin/aidev.js" check

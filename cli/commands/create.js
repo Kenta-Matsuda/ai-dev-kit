@@ -37,6 +37,7 @@ description: <when this agent is started and what it does, in one or two sentenc
 skills: []
 tools: Read, Glob, Grep, Write, Edit, Bash
 mcp: []
+subagents: []
 model: inherit
 ---
 
@@ -50,7 +51,7 @@ model: inherit
 | --- | --- |
 | 入力 | prompt の「Objective」と「Task for this run」、\`.aidev/knowledge/\` |
 | 出力 | 作業ツリー上の変更と final message の報告 |
-| 必要権限 | 書けるのは workflow のステップの \`writable\` だけ（hook が強制する）。使えるのは frontmatter の \`tools\` と \`mcp\` だけ |
+| 必要権限 | 書けるのは workflow のステップの \`writable\` だけ（hook が強制する）。使えるのは frontmatter の \`tools\`・\`mcp\`・\`subagents\` と、workflow の \`agents:\` がこの agent に足すものだけ |
 | 前提 | 承認済み workflow から起動されている |
 
 ## 手順
@@ -88,8 +89,9 @@ async function describeAgent(ctx, name, rel) {
   const existing = toolsMod.listBundledAgents(installRoot).map((a) => `- ${a.name} (kit): ${a.description}`);
   const prompt = [
     `# Create the agent "${name}"`, '',
-    `Write ${rel}: frontmatter (name: ${name}, description, skills, tools, mcp, model: inherit) and the body with 入出力契約, 手順 and 停止条件.`,
-    'skills, tools and mcp are what the agent can use and nothing more: list only what its work needs (tools: the built-in tools it gets; mcp: servers from the PKG\'s .mcp.json, [] when none).',
+    `Write ${rel}: frontmatter (name: ${name}, description, skills, tools, mcp, subagents, model: inherit) and the body with 入出力契約, 手順 and 停止条件.`,
+    'skills, tools, mcp and subagents are what the agent can use and nothing more: list only what its work needs (tools: the built-in tools it gets; mcp: servers from the PKG\'s .mcp.json, [] when none; subagents: the agents it may start with the Agent tool, [] when none).',
+    'A workflow can add to them for its own runs in its top-level agents: (agents: { <agent>: { skills, mcp, tools, subagents } }).',
     'Do not run it. Do not commit. Do not write anywhere else.', '',
     '## What the team wants', '', String(flags.describe).trim(), '',
     '## Agents that already exist (do not duplicate one)', '', ...existing, '',

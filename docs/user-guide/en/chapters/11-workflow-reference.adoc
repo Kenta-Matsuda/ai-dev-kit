@@ -15,7 +15,7 @@ This chapter describes every field of a workflow and of the agents and skills it
 |`aidev run workflow <name>`
 
 |`.aidev/agents/<name>.md`
-|An agent's role (the body) and what it can use (`skills`, `tools`, `mcp` in its frontmatter)
+|An agent's role (the body) and what it can use (`skills`, `tools`, `mcp`, `subagents` in its frontmatter)
 |A step's `agent:` and `until.agent:`
 
 |`.aidev/skills/<name>/SKILL.md`
@@ -33,6 +33,8 @@ flowchart LR
   A -- "frontmatter mcp" --> M["server in .mcp.json"]
   W -- "agents.#60;name#62;.skills" --> S
   W -- "agents.#60;name#62;.mcp" --> M
+  A -- "frontmatter subagents" --> SA["agents/#60;subagent#62;.md"]
+  W -- "agents.#60;name#62;.subagents" --> SA
 ----
 
 Agents and skills are looked up in the PKG's `.aidev/` first, then among those bundled with ADK. With the same name, the PKG's wins.
@@ -188,7 +190,7 @@ agents:
 
 * What is added is treated like the frontmatter's capabilities: Claude Code is started with only those, and the hook refuses any other tool. An agent with `tools` or `mcp` runs only on Claude Code.
 * workflow.yaml is what gets approved, so changing `agents:` makes the workflow unapproved again. Put it in a PR with `aidev submit workflow` and have it reviewed.
-* A step cannot carry `skills`, `mcp` or `tools` (`a step does not carry …`). For different capabilities per step, use a different agent.
+* A step cannot carry `skills`, `mcp`, `tools` or `subagents` (`a step does not carry …`). For different capabilities per step, use a different agent.
 
 [[workflow-reference-agent-step]]
 === Agent step
@@ -497,7 +499,7 @@ model: inherit
 
 * An agent with `tools` or `mcp` runs only with Claude Code (other AI tools cannot be limited to them, so the run stops before it starts).
 * Do not give `Bash` to an agent that touches an external system. With `Bash` it can go out without MCP, however `mcp` is limited.
-* No field gives one agent different permissions per job. Work that needs different permissions gets a separate agent.
+* Capabilities can be added per workflow with `agents:`, but no field changes them per step. Work in one workflow that needs different permissions gets a separate agent.
 * Changing an agent changes every workflow that uses it.
 
 ADK puts the body at the head of an agent step's instructions and adds the following after it. The body does not need to repeat them.

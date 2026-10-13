@@ -24,8 +24,8 @@
 `AIDEV_KIRO_BIN`
 |同じく GitHub Copilot CLI（`copilot`）、OpenAI Codex CLI（`codex`）、Kiro CLI（`kiro-cli`）の実行ファイルを直接指定します。
 
-|`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`
-|`aidev run workflow` が agent を起動するときに、その子プロセスにだけ設定する workflow 名と、いま動いているステップの `id`。hook はこれで、その workflow が承認済みかを確かめ、そのステップの `writable` への書き込みと、その agent に許したツール・MCP server だけを許可します。自分で設定しないでください。
+|`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` / `AIDEV_WORKFLOW_RUN` / `AIDEV_WORKFLOW_ITEM`
+|`aidev run workflow` が agent を起動するときに、その子プロセスにだけ設定する workflow 名、いま動いているステップの `id`、実行の id（notes ディレクトリの場所）、`for_each` の件（`writable` の `{item}`）。hook はこれで、その workflow が承認済みかを確かめ、そのステップの `writable` と notes への書き込みと、その agent に許したツール・MCP server・サブエージェントだけを許可します。自分で設定しないでください。
 
 |`AIDEV_DEBUG`
 |設定すると内部エラーの stack trace を表示します。

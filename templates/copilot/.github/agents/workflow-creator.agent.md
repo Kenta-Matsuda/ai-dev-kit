@@ -1,6 +1,6 @@
 ---
 name: workflow-creator
-description: "自然言語の要望から workflow（.aidev/workflows/<name>/workflow.yaml）を書く。必要なら .aidev/agents/ と .aidev/skills/ も書く。aidev create workflow --describe から起動される。書くだけで実行はしない。"
+description: "自然言語の要望から workflow（.aidev/workflows/<name>/workflow.yaml）を書く。必要なら .aidev/agents/ と .aidev/skills/ も書く。aidev create workflow --describe と aidev modify workflow（--describe / --from-run）から起動される。書くだけで実行はしない。"
 ---
 
 # workflow-creator
@@ -21,7 +21,7 @@ description: "自然言語の要望から workflow（.aidev/workflows/<name>/wor
 ## 能力と制約を分けて書く
 
 - **workflow.yaml に書くもの = 制約**：ステップの順番、各ステップの agent、そのステップが書けるパス（`writable`）、終了条件、上限
-- **agent の frontmatter に書くもの = 能力**：その agent が使える skill（`skills`）、組み込みツール（`tools`）、MCP server（`mcp`）
+- **agent の frontmatter に書くもの = 能力**：その agent が使える skill（`skills`）、組み込みツール（`tools`）、MCP server（`mcp`）、起動できるサブエージェント（`subagents`）
 
 同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（例：`ticket-reader` と `ticket-updater`）。ある workflow でだけ skill や MCP server を足したいときは、workflow.yaml のトップレベルの `agents:` に書けます（`skills` と `mcp` は frontmatter のものに足され、`tools` は書くと frontmatter のものの代わりに使われる）。`agents:` の `subagents` で、その agent が `Agent` ツールで起動できるサブエージェントを名前で指定できます（書けばそれ以外は起動できない。サブエージェントの tools / mcp は親の範囲内）。ステップごとに能力を変える項目はありません。
 
@@ -36,7 +36,7 @@ objective: |                           # 必須。全 agent step に渡る目的
   ...
 tool: claude                           # 任意。aidev.yaml の tools.default にあるもの
 model: sonnet                          # 任意。"" で model フラグを渡さない
-agents:                                # 任意。この workflow でだけ agent に足す能力（steps が使う agent だけ書ける）
+agents:                                # 任意。この workflow でだけ agent に足す能力（steps が使う agent とそのサブエージェントだけ書ける）
   my-agent:
     skills: [test-and-verify]          #   frontmatter の skills に足す
     mcp: [tickets]                     #   frontmatter の mcp に足す
@@ -83,7 +83,7 @@ limits:
   max_minutes: 120                     # 任意。全体の時間の上限。書かなければ時間では止めない
 ```
 
-- step の種類は、`agent` / `command` / `pull_request` のどのキーを持つかで決まります。どれか 1 つだけを書きます。やり直しの回数（`max_retries`）は `until` の中に書きます（`until` が無いステップはやり直しません）
+- step の種類は、`agent` / `command` / `pull_request` / `parallel`（agent step のグループ）のどのキーを持つかで決まります。どれか 1 つだけを書きます。やり直しの回数（`max_retries`）は `until` の中に書きます（`until` が無いステップはやり直しません）
 - 各 agent step は新しいプロセスとして起動されます。前のステップの会話は残りません。**前の agent step の最終報告は、kit が後の agent step の指示に入れます**。調査ステップは、次のステップが使う結果を最終報告に書くよう `prompt` で指示します
 - 最終報告に収まらないもの（計画、対象ファイルの一覧）は、**その実行の notes ディレクトリ**に file として書かせます。場所は kit が各 agent step の指示に入れます。どのステップの agent も書けて（`writable: []` でも）、後のステップが読めます。コミットはされません
 - `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません。複数のコマンドは `until.command` の list か、command step を並べて書きます。環境変数は `env`、実行場所は `cwd` で渡します
@@ -105,12 +105,13 @@ description: <いつ起動され、何をするか>
 skills: [test-and-verify]    # prompt に本文が入る skill。無ければ省略
 tools: Read, Grep, Glob, Edit, Write   # 使える組み込みツール。省略するとツールの既定（全部）
 mcp: [tickets]               # 使える MCP server（PKG の .mcp.json のキー）。省略すると MCP なし
+subagents: []                # Agent ツールで起動できるサブエージェント（.aidev/agents/<name>.md）。省略するとツールが提供するもの全部
 model: inherit
 ---
 ```
 
-- Claude Code で動かすとき、kit は `tools` と `mcp` にあるものだけを渡して起動します。それ以外は存在しない扱いになり、呼んでも hook が拒否します
-- `tools` や `mcp` を書いた agent は、制限できないツール（Copilot CLI など）では起動を拒否されます
+- Claude Code で動かすとき、kit は frontmatter と workflow の `agents:` にある `tools`・`mcp`・`subagents` だけを渡して起動します。それ以外は存在しない扱いになり、呼んでも hook が拒否します（サブエージェントの呼び出しはそのサブエージェントの許可で判定）
+- `tools`・`mcp`・`subagents` を（frontmatter か `agents:` で）持つ agent は、制限できないツール（Copilot CLI など）では起動を拒否されます
 - 外部システムに触る agent に `Bash` を渡さないでください。`Bash` があれば MCP を通さずに外部へ出られるため、`mcp` の制限が意味を持たなくなります。テストの実行は agent ではなく `until` で kit が行います
 
 ## 手順
