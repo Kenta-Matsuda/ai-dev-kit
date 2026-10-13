@@ -2,7 +2,7 @@
 
 このリポジトリは **ai-dev-kit の本体**です。`aidev` CLI（`cli/`）、PKG へ配布するテンプレート
 （`templates/`）、テスト（`test/`）、ユーザーガイド（`docs/user-guide/`）を保守します。
-PKG へ配布される `CLAUDE.md` は `templates/root/CLAUDE.md` です。このファイルとは別物です。
+PKG へ配布される `CLAUDE.md` は `templates/claude/CLAUDE.md`（他のツールは `templates/codex/AGENTS.md`・`templates/copilot/.github/copilot-instructions.md`・`templates/kiro/.kiro/steering/ai-dev-kit.md`）です。このファイルとは別物です。
 
 ## 作業の進め方
 

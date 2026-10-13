@@ -33,8 +33,9 @@ git clone <kit-url> ~/ai-dev-kit
 
 ```bash
 cd <pkg>
-aidev init                              # 4 つの質問に答え、LLM Wiki を生成する（Enter で既定値。止まったら再実行。agent のツールが無いと本文未生成で exit 1）
-aidev create policy --approve    # init で policy を置かなかった場合
+aidev init                              # 4 つの質問に答える（Enter で既定値）。Wiki は生成せず状態を報告するだけで、終了コードは Wiki に依存しない
+aidev create policy --approve           # init で policy を置かなかった場合
+aidev sync wiki --no-commit             # LLM Wiki を生成する（時間がかかる。止まったら再実行で続きから）
 aidev check                             # 0 なら整合
 git add aidev.yaml .aidev .claude CLAUDE.md
 git commit -m "chore: adopt ai-dev-kit"
@@ -58,7 +59,7 @@ claude
 - `aidev sync wiki` — 手動で Wiki を HEAD に追従させ、別コミットとして積む。`main` 上では一時 worktree で更新し `aidev/wiki-<sha12>` の PR を作る
 - `aidev update` — kit 本体（CLI とテンプレート）を更新
 - `aidev sync tools` — 新しいテンプレートを PKG に取り込む（編集済みはマージ。差分をコミット）
-- `aidev check` — CI 用。0=ok / 2=drift / 3=権限 / 4=Wiki
+- `aidev check` — CI 用。0=ok / 1=設定・workflow / 2=drift / 3=権限 / 4=Wiki
 
 ## ドキュメント
 
@@ -71,9 +72,9 @@ npm run docs:build     # build/docs/ai-dev-kit-user-guide.html（日本語）と
 
 - 導入担当者の手順、メンバーの手順、日常の使い方、LLM Wiki、権限、自動化、トラブルシューティング
 - `aidev.yaml` リファレンス、環境変数、PKG 内のファイル
-- `aidev init` / `check` / `doctor [<package>]` / `run|estimate|create|modify|edit|submit|list|remove … workflow` / `create agent|skill|policy` / `sync tools|wiki [<package>]` / `update` / `uninstall [<package>] [--all]`。詳細は `docs/developer-guide/cli-reference.md`
+- `aidev init` / `check` / `doctor` / `run|estimate|create|modify|edit|submit|list|remove … workflow` / `create agent|skill|policy` / `sync tools|wiki` / `update` / `uninstall [--all]`。PKG に作用するコマンドは `--package <name|path>`（`-p`）で対象を指定できる。詳細は `docs/developer-guide/cli-reference.md`
 
-CI の例は `pipelines/azure-pipelines-check.yml`（PR ごとの `aidev check`）と `pipelines/azure-pipelines-wiki.yml`（夜間に `main` で `aidev sync wiki --branch`。agent のツールと認証情報が必要）です。
+CI の例は `pipelines/azure-pipelines-check.yml`（PR ごとの `aidev check`）と `pipelines/azure-pipelines-wiki.yml`（夜間に `main` で `aidev check --no-remote` で状態を報告し、`aidev sync wiki --branch` で `aidev/wiki-<sha12>` の PR を作る。agent のツールと認証情報が必要）です。
 
 kit 自体の設計と保守は [docs/developer-guide/](docs/developer-guide/README.md) を参照してください。
 

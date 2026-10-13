@@ -7,7 +7,7 @@
 * **policy**（`.aidev/policy.yaml`）— どの agent も対話セッションも常に書ける場所と、常に書けない場所。人間が CLI で置き、PR でレビューします。
 * **workflow のステップの `writable`** — 承認済みの workflow を `aidev run workflow` で実行している間だけ、いま動いているステップの agent が追加で書ける場所。PKG のソースを AI が書けるのはこれだけです。
 
-workflow のステップの agent は、書ける場所に加えて、**使えるツールと MCP server** も制限されます（xref:permissions-agent-tools[workflow のステップで使えるツール]）。
+workflow のステップの agent は、書ける場所に加えて、**使えるツール・MCP server・サブエージェント** も制限されます（xref:permissions-agent-tools[workflow のステップで使えるツール]）。
 
 AI ツールの hook が毎回の書き込みを検査します。token はファイルに書かず、環境変数だけで渡します。
 
@@ -76,7 +76,7 @@ flowchart TD
 
 |PreToolUse（Write / Edit / Bash など）
 |`aidev hook guard-write`
-|書き込み先を policy といま動いている workflow ステップの `writable` で判定し、拒否なら理由を返します。policy が読めないときも拒否します。workflow のステップの中では、その agent に許していないツールの呼び出しも拒否します。Claude Code では MCP ツールの呼び出しもここを通ります。
+|書き込み先を policy といま動いている workflow ステップの `writable` で判定し、拒否なら理由を返します。policy が読めないときも拒否します。workflow のステップの中では、その agent に許していないツールの呼び出しと、許していないサブエージェントの起動も拒否します。Claude Code では MCP ツールの呼び出しとサブエージェントの起動（`Agent`・`Task`）もここを通ります。
 
 |PostToolUse（Write / Edit）
 |`aidev hook quality-gate`
@@ -97,7 +97,7 @@ flowchart TD
 ----
 ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the writable of an approved workflow step. …
 ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but the writable of step write (tests/**) does not cover this path. …
-ai-dev-kit: mcp__ado__update_work_item is not among the MCP servers of agent ticket-reader (none); the agent's frontmatter grants them
+ai-dev-kit: mcp__ado__update_work_item is not among the MCP servers of agent ticket-reader (none); the agent's frontmatter and the workflow's agents: grant them
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync wiki" …
 ----
@@ -122,19 +122,19 @@ steps:
     prompt: …
 ----
 
-この範囲は `aidev run workflow <name>` が起動した agent にだけ効きます。`aidev` が起動時に workflow 名とステップの `id` を子プロセスの環境変数 `AIDEV_WORKFLOW`・`AIDEV_WORKFLOW_STEP` に入れ、hook がそれを見て「その workflow が今も `origin/main` と同じか」「パスがそのステップの範囲内か」を判定します。人が `claude` で対話中に同じ agent を呼んでも、この範囲は効きません。
+この範囲は `aidev run workflow <name>` が起動した agent にだけ効きます。`aidev` が起動時に workflow 名とステップの `id` を子プロセスの環境変数 `AIDEV_WORKFLOW`・`AIDEV_WORKFLOW_STEP`（と、実行の id の `AIDEV_WORKFLOW_RUN`、`for_each` の件の `AIDEV_WORKFLOW_ITEM`）に入れ、hook がそれを見て「その workflow が今も `origin/main` と同じか」「パスがそのステップの範囲内か」を判定します。人が `claude` で対話中に同じ agent を呼んでも、この範囲は効きません。
 
 すべての agent と対話セッションにいつでも開きたい場合だけ、policy の `writable` に足します。`protected` と `secrets_paths` はどちらの方法でも書けません。policy の変更は PR でレビューし、必要な期間だけ広げることを勧めます。
 
 [[permissions-agent-tools]]
 === workflow のステップで使えるツール
 
-workflow のステップの agent が使えるツールは、その agent の frontmatter の `tools`（組み込みツール）と `mcp`（MCP server）で決まります（xref:workflows-agents-skills[agent と skill]）。workflow 側で広げることはできません。権限の違う仕事は、別の agent にします。
+workflow のステップの agent が使えるツールは、その agent の frontmatter の `tools`（組み込みツール）・`mcp`（MCP server）・`subagents`（起動できるサブエージェント）と、workflow.yaml の `agents:` が足したもの（`tools` は置き換え）で決まります（xref:workflows-agents-skills[agent と skill]、xref:workflow-reference-agents[agents]）。ステップごとには変えられません。権限の違う仕事は、別の agent にします。
 
 Claude Code では、2 段で守ります。
 
-. `aidev run workflow` は、agent の `tools` にあるツールと、`mcp` にある server だけを渡して Claude Code を起動します。`mcp` を書かない agent には MCP server を 1 つも渡しません。PKG の `.mcp.json` や個人の設定にある他の server は読み込まれません。
-. `guard-write` hook は、workflow のステップの中で、その agent に許していないツールや MCP ツールの呼び出しを拒否します。workflow の外の MCP の呼び出しには何も答えず、許可するかは Claude Code 自身の設定に任せます。
+. `aidev run workflow` は、その agent に許した `tools` のツールと `mcp` の server だけを渡して Claude Code を起動します。`subagents` があれば、その定義を `--agents` で渡します（親の agent に無いツールは渡りません）。`mcp` を書かない agent には MCP server を 1 つも渡しません。PKG の `.mcp.json` や個人の設定にある他の server は読み込まれません。
+. `guard-write` hook は、workflow のステップの中で、その agent に許していないツールや MCP ツールの呼び出しを拒否します。`subagents` を指定した agent が、それ以外のサブエージェントを起動することも拒否し、サブエージェントの中の呼び出しはそのサブエージェントに許したものだけを許可します。workflow の外の MCP の呼び出しには何も答えず、許可するかは Claude Code 自身の設定に任せます。
 
 `tools` や `mcp` を書いた agent は、Claude Code でしか起動しません。GitHub Copilot CLI、OpenAI Codex CLI、Kiro CLI は渡すツールを絞れないため、workflow は何も始めずに止まります。
 
@@ -169,7 +169,7 @@ policy は AI が作れません。 Engineering Manager が CLI で置きます�
 
 === 禁止事項
 
-* `.claude/**`、`CLAUDE.md` の ADK 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、ADK 全体の改善は ADK への PR にする）
+* `.claude/**`、`CLAUDE.md`、`.mcp.json` の ADK 由来の部分を黙って書き換えない（チームの変更は PR でレビューし、ADK 全体の改善は ADK への PR にする）
 * `.aidev/policy.yaml` は人間だけが編集し、変更は PR でレビューする（AI には編集させない）
 * workflow のステップの `writable` に `**` や設定・CI のパスを書かない。そのステップの仕事に必要な範囲だけにする
 * agent の `tools` と `mcp` は、その仕事に必要な分だけにする

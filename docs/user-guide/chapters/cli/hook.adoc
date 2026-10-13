@@ -28,7 +28,7 @@ ADK が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 |`guard-write`
 |書き込みの前
-|書き込み先のパスを policy で判定し、`allow` / `deny` と理由を返す。判定できないときは `deny`。`aidev run workflow` のステップの中では、いま動いているステップの `writable` で判定し、その agent の frontmatter（`tools`・`mcp`）に無いツールの呼び出しも `deny` にする。Claude Code では MCP ツールの呼び出しでも呼ばれる。workflow の外の MCP の呼び出しには何も返さない（許可するかは AI ツール自身の設定が決める）
+|書き込み先のパスを policy で判定し、`allow` / `deny` と理由を返す。判定できないときは `deny`。`aidev run workflow` のステップの中では、いま動いているステップの `writable` で判定し、その agent の frontmatter と workflow の `agents:` で許していないツールの呼び出しも `deny` にする。`subagents` を指定した agent が、それ以外のサブエージェントを起動する（`Agent`・`Task` の `subagent_type`）ことも `deny` にし、サブエージェントの中の呼び出しはそのサブエージェントの権限で判定する。Claude Code では MCP ツールとサブエージェントの起動でも呼ばれる。workflow の外の MCP の呼び出しには何も返さない（許可するかは AI ツール自身の設定が決める）
 
 |`quality-gate`
 |ファイル編集の後
@@ -53,7 +53,7 @@ ADK が置く hook 設定から AI ツールが起動します。stdin で hook 
 
 |Claude Code
 |`.claude/settings.json`
-|実機で検証済み。`guard-write` は `PreToolUse` で、ファイルを書くツール・`Bash`・MCP ツール（`mcp__` で始まる名前）の前に呼ばれる。`after-bash` は `PostToolUse` の `Bash` matcher から呼ばれる
+|実機で検証済み。`guard-write` は `PreToolUse` で、ファイルを書くツール・`Bash`・サブエージェントの起動（`Agent`・`Task`）・MCP ツール（`mcp__` で始まる名前）の前に呼ばれる。`after-bash` は `PostToolUse` の `Bash` matcher から呼ばれる
 
 |GitHub Copilot CLI
 |`.github/hooks/aidev.json`

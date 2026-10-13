@@ -14,7 +14,7 @@ aidev remove skill <name> [--dry-run] [--json]
 
 === Description
 
-`workflow` deletes `.aidev/workflows/<name>/` including its run records (`runs/`). `agent` deletes `.aidev/agents/<name>.md`, and `skill` deletes `.aidev/skills/<name>/`. If a step of any workflow under `.aidev/workflows/` uses that agent, or an agent of such a step lists that skill in its frontmatter `skills`, the command refuses and names the workflow. Remove the reference and submit first. Agents and skills bundled with the ADK cannot be deleted.
+`workflow` deletes `.aidev/workflows/<name>/` (with any run records left in the checkout's `runs/`; the records in the run's worktree and the branch `aidev/<name>` stay). `agent` deletes `.aidev/agents/<name>.md`, and `skill` deletes `.aidev/skills/<name>/`. If any workflow under `.aidev/workflows/` uses that agent (a step's `agent` or `until.agent`, or as a subagent through frontmatter `subagents` or `agents.<agent>.subagents`), or an agent or subagent of such a workflow lists that skill in its frontmatter `skills` or in `agents.<agent>.skills`, the command refuses and names the workflow. Remove the reference and submit first. Agents and skills bundled with the ADK cannot be deleted.
 
 The deletion is a change to the working tree. Commit it and open a PR; the merge delivers it to the team.
 

@@ -20,7 +20,7 @@
    ├─ .gitignore                  CLIが書く。runtime stateをgitから外す
    ├─ policy.yaml                 承認済みpolicy（CLIだけが配置）
    ├─ policy.candidate.yaml       承認待ちの候補（一時）
-   ├─ materialized.json           適用したtemplateとfileのhash record、未解消conflict（applyのmerge基準）
+   ├─ materialized.json           適用したtemplateとfileのhash record、未解消conflict（sync toolsのmerge基準）
    ├─ ejected.json                aidev uninstall --package の marker（通常は存在しない）
    ├─ knowledge/                  LLM Wiki（manifest.json, inventory/, index.md, overview.md, pages）
    │  └─ .cache/                  plan.json（hook経路のbatch計画）、agent task、完了報告 done/（ignored）
@@ -31,10 +31,11 @@
    ├─ skills/<name>/SKILL.md      PKG固有のskill（同上）
    ├─ sync.lock                   publish lease（ignored）
    └─ cache/                      remote-check.json, last-head.json, wiki-stop.json, wiki-worktree/,
-                                  agents/（prompt file）, evolution/<session>.md（kit開発者端末の振り返り）（ignored）
+                                  agents/（prompt file）, modify/<name>.json（modify workflowの記録）, modify/<name>-<stamp>/（modifyが変えたfileの元の内容）,
+                                  submit/<name>.md（submitのPR本文全文）, evolution/<session>.md（kit開発者端末の振り返り）（ignored）
 ```
 
-`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`apply`、`sync wiki`（worktree内でも）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
+`.aidev/.gitignore`の内容は`layout.AIDEV_GITIGNORE`で固定です（`cache/`、`sync.lock`、`knowledge/.cache/`、`workflows/*/runs/`）。`init`、`sync tools`、`sync wiki`（worktree内でも）が`ensureAidevGitignore`で書き、内容が違えば上書きします。
 
 path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml`、`.aidev/**`、全toolの`TOOL_CONFIG_GLOBS`: `.claude/**`、`CLAUDE.md`、`.mcp.json`、`.github/copilot-instructions.md`、`.github/agents/**`、`.github/skills/**`、`.github/hooks/**`、`AGENTS.md`、`.codex/**`、`.kiro/steering/**`、`.kiro/agents/**`）に一致するpathはWikiのgeneration targetにもevidenceにもならず、PostToolUseのquality gateも走りません。`git.findRepoRoot`は`aidev.yaml`または`.aidev/`を持つdirectoryまで上へ辿り、無ければgit top-levelへfallbackします。
 
@@ -46,7 +47,7 @@ path名の正本は`cli/lib/layout.js`です。`KIT_MANAGED_GLOBS`（`aidev.yaml
 | launcher | `scripts/install.ps1`が`%LOCALAPPDATA%\ai-dev-kit\bin\aidev.cmd` / `.ps1`、`scripts/install.sh`が`~/.local/bin/aidev`を作る（`AIDEV_BIN_DIR`で変更可） |
 | `AIDEV_HOME` | 既定はWindows `%LOCALAPPDATA%\ai-dev-kit`、POSIX `$XDG_DATA_HOME/ai-dev-kit`（未設定なら`~/.local/share/ai-dev-kit`）。`registry.json`、`cache/update-check.json`、kit開発者端末では`developer.json`と`cache/evolve/`（§13）を置く |
 
-`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`apply`が登録し、`eject`が削除します。`uninstall`は`registry.json`と`cache/`ごと消します（PKG側には触れず、kit所有fileを消す`git rm`を表示するだけ）。`update`はここに載っているcloneのうちlockの`kitCommit`が現在のkitと違うものを「`aidev sync tools`が必要」として一覧します（適用はしません）。
+`registry.json`（`{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}`）は`init`と`sync tools`が登録し、`uninstall --package`（`cli/lib/eject.js`）が削除します。`uninstall`は`registry.json`と`cache/`ごと消します（PKG側には触れず、kit所有fileを消す`git rm`を表示するだけ）。`update`はここに載っているcloneのうちlockの`kitCommit`が現在のkitと違うものを「`aidev sync tools`が必要」として一覧します（適用はしません）。
 
 ## 2. tool configのtemplate、apply、記録
 
@@ -102,7 +103,7 @@ schema 3以前の`files: { rel: "sha256:…" }`は`kit: null, file: <hash>`と�
 | `noLock` | 記録が無い | exit 2 |
 | `conflicts` | lockの`conflicts`に載っている、またはmarkerがあるfile | exit 2 |
 | `hooksMissing` | `.claude/settings.json`にtemplateの`aidev hook …`の一部が無い（claudeのみ） | exit 2 |
-| `missing` | 記録にあるがdiskに無い | 情報（`apply`が復元） |
+| `missing` | 記録にあるがdiskに無い | 情報（`sync tools`が復元） |
 | `customised` | pristineでないfile（teamの編集） | 情報 |
 | `outdated` | lockの`kitCommit`が現在のkitと違う | 情報（「`aidev sync tools`で取り込める」） |
 
@@ -113,8 +114,8 @@ teamの編集はdriftではありません。`check`が止めるのは「merge�
 | 層 | 実体 | 位置付け |
 | --- | --- | --- |
 | 静的deny / ask | `.claude/settings.json` | Claude Code側の第一防御。`Edit(.claude/**)`等をdeny、`git push`・`aidev create policy`・`aidev uninstall`をask |
-| 実行時guard | `aidev hook guard-write` | path、policy、承認済みworkflowの実行中stepの`writable`（`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`）、整合性、leaseを評価して`permissionDecision`を返す。workflow step内ではagentのfrontmatterが許していないtool / MCP toolの呼び出しもdeny（`policy.decideToolUse`） |
-| 起動時の能力制限 | `aidev run workflow`のclaude argv | agent step毎に`--mcp-config <一時file> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--agents <一時file>`（agentの`subagents`の定義）、`--tools <list>`でagentのfrontmatter（`tools` / `mcp`）にあるものだけを渡す（§9） |
+| 実行時guard | `aidev hook guard-write` | path、policy、承認済みworkflowの実行中stepの`writable`（`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP`）、整合性、leaseを評価して`permissionDecision`を返す。workflow step内ではagentのfrontmatterとworkflowの`agents:`が許していないtool / MCP toolの呼び出しもdeny（`policy.decideToolUse`）。subagentからの呼び出し（hook入力の`agent_id`と`agent_type`）はそのsubagentの許可で判定し、`Agent` / `Task`の呼び出しは`subagent_type`が許可された`subagents`にあるかを見る |
+| 起動時の能力制限 | `aidev run workflow`のclaude argv | agent step毎に`--mcp-config <一時file> --strict-mcp-config`、`--allowedTools mcp__<server>,…`、`--agents <一時file>`（agentの`subagents`の定義）、`--tools <list>`でagentのfrontmatterとworkflowの`agents:`（`tools` / `mcp` / `subagents`）にあるものだけを渡す（§9） |
 | 制御面の検査 | `aidev check`（exit 2）+ branch policy | hooksを消した編集と未解消のconflict markerをmerge前に止める（teamの他の編集は止めない） |
 | 行動指示 | `CLAUDE.md`、Agents / Skills | 補助。強制境界ではない |
 | 認証scope | tokenの権限 | server側で最も強い強制力 |
@@ -187,7 +188,7 @@ Wikiは**今のbranchのHEAD**を説明します。`state.computeState(repoRoot,
 
 | 条件 | severity | message要旨 |
 | --- | --- | --- |
-| manifestが無い | ERROR | Wiki未生成。`aidev init`（または`sync wiki`） |
+| manifestが無い | ERROR | Wiki未生成。`aidev sync wiki` |
 | HEADが解決できない | ERROR | commitが無い |
 | manifestに有効な`knowledgeSha`が無い | ERROR | manifest破損 |
 | HEADのtreeを列挙できない | ERROR | 比較不能 |
@@ -313,7 +314,7 @@ hookはこのfileの`batches`数とともに「batch *i*ごとにknowledge-build
 
 ### commit
 
-prose完了（`remaining === 0`かつagent失敗なし）で、`commit`が要求されていれば`commitWiki(root, targetSha)`: `git add -A -- .aidev/knowledge .aidev/.gitignore` → stageが空なら`committed: false` → `git commit -m "aidev: update Wiki for <sha12>"`（本文に「Generated by ai-dev-kit; review it like any other change in this pull request.」）。source commitはdeveloperの、Wiki commitはkitのもので、同じbranch・同じPRに並びます。`--no-commit`（`init`もこれ）は作業treeに残します。prose未完了ならcommitせずexit 1で、同じcommandがcheckpointから続きます。
+prose完了（`remaining === 0`かつagent失敗なし）で、`commit`が要求されていれば`commitWiki(root, targetSha)`: `git add -A -- .aidev/knowledge .aidev/.gitignore` → stageが空なら`committed: false` → `git commit -m "aidev: update Wiki for <sha12>"`（本文に「Generated by ai-dev-kit; review it like any other change in this pull request.」）。source commitはdeveloperの、Wiki commitはkitのもので、同じbranch・同じPRに並びます。`--no-commit`は作業treeに残します（`init`が初回の生成に案内するのもこれ）。prose未完了ならcommitせずexit 1で、同じcommandがcheckpointから続きます。
 
 ### 結果の判定
 
@@ -333,8 +334,8 @@ partial / noProgress / checkpointInvalidはClaudeの最終回答の要約（制�
   - 起動は`tools.spawnSpec(resolved, argv)`が返す`{bin, args, options}`で行う（`runAgent`・`checkVersion`・workflowの`runCommand`が共用）。`.cmd`/`.bat`はcommand全体を1本の文字列に組み立てて`windowsVerbatimArguments`で渡す。通常のargvで渡すと、空白を含むscript path（`C:\Program Files\nodejs\npm.cmd`）にNodeが付けた引用符を`/s`が剥がし、`C:\Program`を実行しようとして失敗する
   - `.cmd`/`.bat`へ渡す引数は`quoteCmdArg`が二重引用符で囲み、cmd.exeのmeta文字を`^`でescapeする。escapeは1重（2重にすると`%*`をそのまま転送するshimでは動くが、`"%~1"==...`のように引数を調べるshimが構文errorになる）。二重引用符か改行を含む引数はshimを変化なしに通せないので例外にする。kitが組み立てる引数には含まれず、promptはstdinかfileで渡す
 - `tools.checkVersion`: `<bin> --version`。`minVersion`があるtool（claude: 2.1.259）はそれ未満で起動しない。無いtoolは起動できれば通す
-- claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`。`runAgent({ capabilities: {tools, mcp, mcpConfigFile} })`のときは`--mcp-config <mcpConfigFile> --strict-mcp-config`、`mcp`があれば`--allowedTools mcp__<server>,…`、`tools`があれば最後に`--tools <list…>`を足す（Claude Code 2.1.280で確認: `--tools`は他の組み込みtoolを隠し、`--strict-mcp-config`は`--mcp-config`のserverだけを読む）。adapterの`capabilities: true`はclaudeだけで、それ以外のadapterに`capabilities`を渡すと`buildArgv`が例外を投げ、`runAgent`は`ok: false`を返す。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
-- `runAgent`は`env`をそのまま子processに渡す。workflow runnerは`AIDEV_WORKFLOW=<name>`と`AIDEV_WORKFLOW_STEP=<step id>`を足して起動し、toolが起動するhookがそれを継承してguard-writeがそのstepの`writable`とagentの能力を適用する
+- claudeのargvは`-p --input-format text [--agent <name>] [--model <m>] --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`。`runAgent({ capabilities: {tools, mcp, mcpConfigFile, agentsFile} })`のときは`--mcp-config <mcpConfigFile> --strict-mcp-config`、`mcp`があれば`--allowedTools mcp__<server>,…`、`agentsFile`（subagentの定義）があれば`--agents <file>`、`tools`があれば最後に`--tools <list…>`を足す（Claude Code 2.1.280で確認: `--tools`は他の組み込みtoolを隠し、`--strict-mcp-config`は`--mcp-config`のserverだけを読む）。adapterの`capabilities: true`はclaudeだけで、それ以外のadapterに`capabilities`を渡すと`buildArgv`が例外を投げ、`runAgent`は`ok: false`を返す。promptはargvでなくstdinへ書く（Windowsのshell分割対策）。`--model`はmodelがnullのとき省略し、tool側の解決に任せる。`runAgent({ definition })`でagent定義を渡すと`--agent`を付けず、定義本文をpromptの先頭に置く（PKG外で動く`evolution` agent用）。`extraArgv`はそのまま末尾に足す
+- `runAgent`は`env`をそのまま子processに渡す。workflow runnerは`AIDEV_WORKFLOW=<name>`、`AIDEV_WORKFLOW_STEP=<step id>`、`AIDEV_WORKFLOW_RUN=<run id>`（`for_each`の件では`AIDEV_WORKFLOW_ITEM=<item>`も）を足して起動し、toolが起動するhookがそれを継承してguard-writeがそのstepの`writable`とagentの能力を適用する
 - `prompt: 'file'`のtool（copilot / codex / kiro）はpromptを`.aidev/cache/agents/<tool>-<label>-<pid>-<time>.md`へ書き、argvには`filePointerPrompt(rel)`の1文だけを載せる。`namedAgents: false`のtool（codex）はそのfileの先頭に同梱agent定義の本文を置く。argv: copilot `-p <pointer> --allow-all-tools [--agent <name>] [--model <m>]`、codex `exec --sandbox workspace-write [--model <m>] <pointer>`、kiro `chat --no-interactive --trust-all-tools [--agent <name>] [--model <m>] <pointer>`。claude以外は実機未検証（`verified: false`）で、`aidev run workflow --dry-run`がcommand lineを表示する
 - 結果はadapterの`parse()`が`{ok, result, costUsd, sessionId, permissionDenials, reason}`へ正規化する。claudeはstream-jsonの最後の`type: "result"` record（`--output-format json`と同じ形）を契約とし、無ければ失敗。他はexit codeとstdout本文
 - 進捗: adapterに`progress(line)`があるtool（claude）はstdoutを行ごとに読み、`{kind: tool|text|error, nested}`のeventを`onProgress({elapsedMs, event})`へ流す。`nested`はsubagent内（`parent_tool_use_id`あり）。15秒eventが無いときだけ`{event: null, quietMs}`を送る。`progress`が無いtoolは従来どおり15秒ごとの`{event: null}`。人向けの描画は`agent.progressReporter({repoRoot, status})`（1 eventにつき`m:ss`付き1行、subagentは字下げ）で、`create --describe`・`run workflow`・Wiki buildが共用する
@@ -363,7 +364,7 @@ workflow runnerのagent stepは、`agent.resolveReferences(repoRoot, config)`が
     （--no-commit なら作業treeに残す）
 ```
 
-呼び出し元は3つです。`aidev sync wiki`（人間、CI）、`aidev init`（`commit: false`）、hook（`updateInPlace`を`--no-agent --json`相当で。§8）。
+呼び出し元は2つです。`aidev sync wiki`（人間、CI）、hook（`updateInPlace`を`--no-agent --json`相当で。§8）。`aidev init`はWikiを生成せず、状態を報告して`aidev sync wiki --no-commit`を案内するだけです。
 
 ### publish経路（tracking branch上、`--branch`）
 
@@ -396,7 +397,7 @@ protected branchには直接commitできないので、`update()`はcheckoutのb
 | --- | --- |
 | feature branchでのcommit | after-bash hookが構造を更新し、subagentがprose、`--no-agent`がcommit（§8）。手動なら`sync wiki` |
 | tracking branchへのmerge（Wiki commitを含む） | inventoryがHEADと一致するのでno-op |
-| tracking branchへのmerge（Wikiなし） | `check`がWARN。夜間pipelineまたは手動の`knowledge update --branch`が`aidev/wiki-<sha12>`のPRを作る |
+| tracking branchへのmerge（Wikiなし） | `check`がWARN。夜間pipelineまたは手動の`aidev sync wiki --branch`が`aidev/wiki-<sha12>`のPRを作る |
 | force-push / rebase / squash / 旧commitがGC済み | inventory blobとHEAD treeを比較するため影響なし |
 | renameのみ | 同一blobで`renamed`、prose再生成なし。hook経路ではhookがそのままcommit |
 | generation target外のsource変更 | evidence fingerprint差分で全target再queue |
@@ -437,7 +438,7 @@ protected branchには直接commitできないので、`update()`はcheckoutのb
 | tool | 設定file | event名 | subagent内でhook | 備考 |
 | --- | --- | --- | --- | --- |
 | `claude` | `.claude/settings.json` | SessionStart / PreToolUse / PostToolUse / Stop | 動く | 実機検証済み。`hookSpecificOutput`形式、`stop_hook_active` |
-| `copilot` | `.github/hooks/aidev.json` | sessionStart / preToolUse / postToolUse / agentStop | 動かない | `additionalContext` / `permissionDecision`をtop levelに置く。knowledge-builderは`.github/agents/`の定義で`.aidev/knowledge/**`に限定。未検証 |
+| `copilot` | `.github/hooks/aidev.json` | sessionStart / preToolUse / postToolUse / agentStop | 動かない | `additionalContext` / `permissionDecision`をtop levelに置く。knowledge-builderは`.github/agents/`の定義（frontmatterはname / descriptionだけで、toolやpathの制限は持たない。書き込みの制限はguard-writeのpolicy評価）。未検証 |
 | `codex` | `.codex/hooks.json` | SessionStart / PreToolUse / PostToolUse / Stop | 動く | claudeと同じ形。projectが`~/.codex/config.toml`で`trust_level = "trusted"`である必要。未検証 |
 | `kiro` | `.kiro/agents/aidev.json` | agentSpawn / preToolUse / postToolUse / stop | 動かない | hooksはagent定義内なので`kiro-cli chat --agent aidev`で起動。`agentSpawn`のstdoutはraw textとしてcontextになるが`postToolUse`のstdoutは捨てられるため、指示はStop hookが担う。deny時はexit 2。`stop_hook_active`が無いのでkitのstop guardを使う。未検証 |
 
@@ -471,7 +472,7 @@ guard-writeはfail-closedです。payloadがJSONでない、policyが読めな�
 
 `def.agents`はstepと`until`が名指すagentの一覧（重複なし）で、YAMLには書きません。
 
-`until.command`と`command`は空白で分割してshellなしで実行します（`|&;<>`$"'\`を含むと拒否）。実行fileの解決は`tools.resolveCommand`（Windowsでは`where.exe`で`.cmd` shimを`cmd.exe /d /s /c`経由にする。`npm test`が動く理由）。shellが無い分を補うのが`cwd`（PKG内のdirectory。絶対pathと`..`はerror）、`env`（固定値のmapping。reviewされるYAMLの一部なので秘密を書く場所ではない。`AIDEV_*`はerror）、`timeout_ms`（command 1つの上限。≤3600000）、`until.command`のlist（`&&`の代わり）です。実行は`runCommand`（`spawn`、非同期）で、stdout / stderrを届いた順に`runs/<id>/logs/<step>.<attempt>.<n>.log`へ全文書き、memoryには末尾64KiBだけ持ちます。時間切れはWindowsで`taskkill /T /F`、それ以外はSIGTERM→5秒後SIGKILLで、exit codeは124扱い。人向け出力では15秒ごとに経過を1行出します。
+`until.command`と`command`は空白で分割してshellなしで実行します（`|&;<>`$"'\`を含むと拒否）。実行fileの解決は`tools.resolveCommand`（Windowsでは`where.exe`で`.cmd` shimを`cmd.exe /d /s /c`経由にする。`npm test`が動く理由）。shellが無い分を補うのが`cwd`（PKG内のdirectory。絶対pathと`..`はerror）、`env`（固定値のmapping。reviewされるYAMLの一部なので秘密を書く場所ではない。`AIDEV_*`はerror）、`timeout_minutes`（command 1つの上限。0 < n ≤ 240分）、`until.command`のlist（`&&`の代わり）です。実行は`runCommand`（`spawn`、非同期）で、stdout / stderrを届いた順に`runs/<id>/logs/<step>.<attempt>.<n>.log`へ全文書き、memoryには末尾64KiBだけ持ちます。時間切れはWindowsで`taskkill /T /F`、それ以外はSIGTERM→5秒後SIGKILLで、exit codeは124扱い。人向け出力では15秒ごとに経過を1行出します。
 
 agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `.aidev/agents/<name>.md`・`.aidev/skills/<name>/SKILL.md`（PKG）→ `templates/claude/.claude/agents/`・`.claude/skills/`（kit checkout）。agentのfrontmatterが能力を持ちます（`agentCapabilities`）:
 
@@ -494,7 +495,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 
 - `create agent <name>` / `create skill <name>`: `.aidev/agents/<name>.md` / `.aidev/skills/<name>/SKILL.md`のtemplateを書く。agentのtemplateのfrontmatterは`name`・`description`・`skills: []`・`tools`・`mcp: []`・`model: inherit`。agentの`--describe`は`agents-creator`を起動し、書いたあとfrontmatterの`name`と`capabilityError`を検証する
 - `list agents` / `list skills`: PKG（`.aidev/`）とkit同梱を出所付きで一覧（同名はPKG優先）
-- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。stepが名指すagent、およびそのagentがfrontmatterの`skills`に挙げるskillと、workflowの`agents.<agent>.skills`が挙げるskillは拒否する
+- `remove workflow|agent|skill <name>`: fileを削除する（workflowは`runs/`ごと）。stepまたは`until.agent`が名指すagent、それらがsubagentとして起動できるagent（frontmatterの`subagents`とworkflowの`agents.<agent>.subagents`）、およびそれらのagent・subagentがfrontmatterの`skills`に挙げるskillと、workflowの`agents.<agent>.skills`が挙げるskillは拒否する（`remove.referencing`）
 
 - `create workflow <name>`: template YAMLを書く（agentは`my-agent`のplaceholder）。`--describe "<text>"`は`workflow-creator` agent（`tools.agent`）に、参照できるagent / skillの一覧とschemaのtemplateを添えてYAMLを書かせる。足りないagent / skillはworkflow-creatorが`agents-creator`をsubagentで起動して`.aidev/agents/`・`.aidev/skills/`に書く。MCPが要るときはworkflow-creatorが`.mcp.json`（PKG所有）への追加案をfinal messageに書き、人が足す。終了後に`loadDefinition` + `resolveDependencies`で検証して結果を表示する。`create policy [--approve] [--force]`は`permission.configure`（policy候補の生成と配置）
 - `submit workflow <name>`: 検証 → `aidev/workflow-<name>`へ`checkout -B` → `reviewedFiles`だけを`aidev: workflow <name>`でcommit → `push --set-upstream` → `azure-devops`ならPR作成（同じsource branchのactive PRがあれば本文更新）。PR本文（`submitDescription`）は`submitContext`が集めたもので増える: `approval.ref`の版の定義との差（`definitionChanges`: 追加・削除・並べ替えたstep、変わったstepのkey、`objective`・`tool`・`model`・`limits`・`agents:`の変更）、`estimateDefinition`の変更前後、fileごとの`new` / `changed`、そして`.aidev/cache/modify/<name>.json`の`beforeHash`が承認済みの版の`contentHash`と同じなら「Why this change」（頼んだこと、`fromRun`の停止理由と記録された失敗の出力、`CAUSE`、agentの説明。`afterHash`が今と違えば手で編集した旨）。全文を`.aidev/cache/submit/<name>.md`に書き、Azure DevOpsへは`fitDescription`で4000文字に収めて送る（agentの説明から落とす）。`generic`は手動。`--no-push`
@@ -502,7 +503,7 @@ agentとskillは名前で解決します（`resolveAgent` / `resolveSkill`）: `
 - `modify workflow <name> --describe "<text>" | --from-run <run id|last>`: 既存のworkflowをworkflow-creatorにその場で直させる。`--from-run`は`findRun`で見つけたrunの`runDigest`（停止理由、stepごとの結果と起動回数、通らなかったstepの`output`・`log`の末尾・`review`・失敗した件、`log.txt`の末尾。14000文字まで）をpromptの「The run to learn from」に入れ、「同じエラーの繰り返しの原因を取り除く。retryや上限を上げるだけにしない。最終messageを`CAUSE:`の1行で始める」と伝える（`--describe`は省略可）。変更があれば`.aidev/cache/modify/<name>.json`（`describe`・`beforeHash` / `afterHash`・`cause`・report末尾3000文字・変わったfile・`fromRun`の要約）を書き、`submit`のPR本文が使う。promptは今のYAML全文・変更の指示・`catalogue`で、「指示に関係しない部分は変えない」「他のworkflowも名指すPKG agent（`sharedAgents`）は編集せず、agents-creatorに新しいagentを書かせてstepから参照する」を伝える。起動前後に`.aidev/workflows/<name>/`（`runs/`除く）・`.aidev/agents/`・`.aidev/skills/`を読み比べ（`definitionFiles` / `fileChanges`）、変わった・消えたfileの元の内容を`.aidev/cache/modify/<name>-<stamp>/`に残す。結果は`create`と同じく`loadDefinition` + `resolveDependencies`で検証し、変更なし・検証失敗はexit 1。`create workflow --describe --force`は今の定義を渡さずに書き直す
 - `estimate workflow <name> [--ai] [--review]`: 下の「費用の見積もり」と「見積もりの学習」
 - `edit workflow <name>`: 下の「workflow editor」
-- `list workflows`: 各workflowの`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`と、同梱workflowの一覧。`--json`の行は`writable`（全stepの和集合）を持つ
+- `list workflows`: 各workflowの`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`（同梱workflowは無い）。`--json`は`{workflows: [{name, description, status, steps, writable}], ref}`で、`writable`は全stepの和集合
 
 ### runnerの動作
 
@@ -522,7 +523,7 @@ agent stepの1回分の仕事（agentの起動 → `unchanged`の検査 → `unt
 
 `unchanged`: step開始時に`changedState`（`git status --porcelain -z --untracked-files=all -- <unchanged>`に出るpathごとの内容のsha256、無ければ`deleted`）を取り、`runs/<id>/unchanged/<step>.json`に書きます（resumeではそのfileを使うので、基準は最初の開始時のまま）。agentが終わるたび、および`until`が通った後に取り直し、基準と違うpathがあれば不合格（`kind: 'unchanged'`）として`until`の失敗と同じ経路に乗せます: 変わったpathをpromptの「Previous attempt」に入れて再試行し、同じpathが続けば同一失敗で停止。HEADとの差ではなく開始時との差なので、先のstepが変えたfileを後のstepで固定できます。gitignoreされたfileは`git status`に出ないので比べません。file単位の検査で、`writable`に残したfileの中の変更（新しいtestの`skip`、`package.json`の`scripts`）は見えません。
 
-`for_each`: step開始時にkitが`runs/<id>/notes/<from>`を読み、`parseItems`で対象にします（1行1件。空行・`#`行・先頭の`- ` / `* `を除き、重複は1件）。1件は`^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$`で`..`のsegmentを含まないこと。合わない行、`max_items`超過、fileが無い、のどれかならagentを起動せず停止します（対象はcommandのargvに1要素として入るので、optionに見える文字列や上のdirectoryを指す文字列を通さない。shellが無いことと合わせて注入の経路を作らない）。対象ごとに`forItem`が`prompt`・`until.commands`（textとargvの各要素）・`until.prompt`の`{item}`を置き換えたstepを作り、`runWork`を直列に呼びます。guardに渡すstep idは対象によらず`<id>`（`writable` / `unchanged`はstepのもの）。promptには「Your target: <item> (k of n)」を足し、他の対象の報告は渡しません。1件が不合格なら、`on_failure: stop`ではそこで停止（`step <id>: target <item>: …`）。`continue`では、件の開始時に`snapshotWritable`（stepの`writable`の中でHEADと違うfileの内容）を取っておき、失敗したら`restoreWritable`でその状態に戻し（snapshotにあるfileはその内容に、無いfileはHEADへ`git checkout`、HEADに無ければ削除。内容が同じfileは触らない）、`items[]`に`failed: true, reason`を残して次の件へ進む。agentの起動失敗（toolの異常終了・timeout）も件の失敗として扱うが、費用・時間の上限（`startAgent`の`limit: true`）は`continue`でも停止。全件が失敗したらstepは不合格。`run.json`のstepは`items: [{item, ok, attempts, result?, review?, log?, report?}]`を持ち、1件終わるたびに保存します。file名のtagは`<step>.t<k>`（`logs/<step>.t<k>.<attempt>.<n>.log`、`reports/<step>.t<k>.md`）。全件が通ると、件ごとの結果と報告の冒頭300文字をまとめた1つの報告を`reports/<step>.md`に書き、後のstepに渡します。`--resume`は一覧を読み直し、前回`ok`だった対象（名前で照合）を飛ばします。並列実行はありません。後のstepへの報告は`itemsReport`（件数、失敗した件と理由、50件以下なら件ごとの報告の冒頭）で、PR本文には「Targets left out」（20件まで）を足す。`--resume`は`ok`と`failed`の件を飛ばす。
+`for_each`: step開始時にkitが`runs/<id>/notes/<from>`を読み、`parseItems`で対象にします（1行1件。空行・`#`行・先頭の`- ` / `* `を除き、重複は1件）。1件は`^[A-Za-z0-9._@][A-Za-z0-9._/@-]{0,199}$`で`..`のsegmentを含まないこと。合わない行、`max_items`超過、fileが無い、のどれかならagentを起動せず停止します（対象はcommandのargvに1要素として入るので、optionに見える文字列や上のdirectoryを指す文字列を通さない。shellが無いことと合わせて注入の経路を作らない）。対象ごとに`forItem`が`prompt`・`until.commands`（textとargvの各要素）・`until.prompt`の`{item}`を置き換えたstepを作り、`runWork`を呼びます。`for_each.parallel`（既定1、最大16）が1より大きければ、その数のworkerが一覧の順に対象を取って同時に動かし（各対象は自分の名前の付いたpathだけを書くので作業treeで交わらない）、1件の停止は手元の件を終えさせてから止まり、`items[]`は一覧の順に並べ直します。guardに渡すstep idは対象によらず`<id>`（`writable` / `unchanged`はstepのもの）。promptには「Your target: <item> (k of n)」を足し、他の対象の報告は渡しません。1件が不合格なら、`on_failure: stop`ではそこで停止（`step <id>: target <item>: …`）。`continue`では、件の開始時に`snapshotWritable`（stepの`writable`の中でHEADと違うfileの内容）を取っておき、失敗したら`restoreWritable`でその状態に戻し（snapshotにあるfileはその内容に、無いfileはHEADへ`git checkout`、HEADに無ければ削除。内容が同じfileは触らない）、`items[]`に`failed: true, reason`を残して次の件へ進む。agentの起動失敗（toolの異常終了・timeout）も件の失敗として扱うが、費用・時間の上限（`startAgent`の`limit: true`）は`continue`でも停止。全件が失敗したらstepは不合格。`run.json`のstepは`items: [{item, ok, attempts, result?, review?, log?, report?}]`を持ち、1件終わるたびに保存します。file名のtagは`<step>.t<k>`（`logs/<step>.t<k>.<attempt>.<n>.log`、`reports/<step>.t<k>.md`）。全件が通ると、件ごとの結果と報告の冒頭300文字をまとめた1つの報告を`reports/<step>.md`に書き、後のstepに渡します。`--resume`は一覧を読み直し、前回`ok`または`failed`だった対象（名前で照合）を飛ばします。後のstepへの報告は`itemsReport`（件数、失敗した件と理由、50件以下なら件ごとの報告の冒頭）で、PR本文には「Targets left out」（20件まで）を足す。
 
 run directory（`runs/<id>/`、gitignore）は起動直後に作り、実行しながら書きます（終了時にまとめて書くと、中断した実行の記録が残らず、再開もできないため）。
 
@@ -536,7 +537,7 @@ run directory（`runs/<id>/`、gitignore）は起動直後に作り、実行し�
 | `notes/` | agent stepが書く | stepの間の受け渡し。`promptHead`が場所と今あるfile名（50件まで）を全agent stepに伝える。step自身の`writable`とは別に書ける（§3の第6段）。確認役は読むだけ |
 | `pull-request.md` | pull-request stepがpushした後 | `prDescription`の全文（run記録・task・step一覧・各agent stepの最終報告）。Azure DevOpsへ送る本文は同じ関数を4000文字（Azure DevOpsの上限）に収めたもので、報告を均等に縮める |
 
-`--resume <run id|last>`（`findRun`。PKGのcheckoutと`runtree.runRoots`の各worktreeの`runs/`を探す）: `run.json`が`done: false`で、`hash`が今の`workflow.yaml`と同じで、記録に`branch`があるときだけ続けます。worktreeは記録のbranchのもの（消えていればbranchから作り直す）を使い、`def.writable`の中の未commitの変更を`restoreWritable(…, {})`でHEAD（最後のcheckpoint）に戻してから始めます。承認判定は通常どおり行います。`ok`のstepは実行せず結果をそのまま引き継ぎ、agent stepなら`reports/`から報告を読み戻して`earlier`に積みます。最初の未完了stepは1回目の試行からやり直し（toolの会話は引き継がない）、agent stepならpromptの「This run was resumed」に前回の`stopReason`を入れます。完了済みstepの変更はcheckpointにあります。`limits.max_minutes`と`cost.max_usd`はその起動で数え直します（上限で止まった実行を続けられるようにするため。続けるのは人の判断）。`run.json`の`agentRuns` / `costUsd`は合計です。pull-request stepがcommit後のpushで止まっていた場合は、記録の`sha`が今のHEADと同じならcommitを作り直さずpushから続けます。
+`--resume <run id|last>`（`findRun`。PKGのcheckoutと`runtree.runRoots`の各worktreeの`runs/`を探す）: `run.json`が`done: false`で、`hash`が今の`workflow.yaml`と同じで、記録に`branch`があるときだけ続けます。worktreeは記録のbranchのもの（消えていればbranchから作り直す）を使い、`def.writable`の中の未commitの変更を`restoreWritable(…, {})`でHEAD（最後のcheckpoint）に戻してから始めます。承認判定は通常どおり行います。`ok`のstepは実行せず結果をそのまま引き継ぎ、agent stepなら`reports/`から報告を読み戻して`earlier`に積みます。最初の未完了stepは1回目の試行からやり直し（toolの会話は引き継がない）、agent stepならpromptの「This run was resumed」に前回の`stopReason`を入れます。完了済みstepの変更はcheckpointにあります。`limits.max_minutes`と`limits.max_usd`はその起動で数え直します（上限で止まった実行を続けられるようにするため。続けるのは人の判断）。`run.json`の`agentRuns` / `costUsd`は合計です。pull-request stepがcommit後のpushで止まっていた場合は、記録の`sha`が今のHEADと同じならcommitを作り直さずpushから続けます。
 
 ### `--log <file>`
 
@@ -594,7 +595,7 @@ recordはcommitしてチームで共有します（gitignoreしない）。recor
 
 **for_eachの途中の予測。** `reportsCost`のとき、targetが終わるたび（成功・失敗とも）にそのtargetの`calls`の費用を積み、3件目と10件ごとに`projectRemaining`（平均 × 残りの件数）を「1件あたり・残りの見込み・予算の残り」としてlogに出し、見込みが予算の残りを超えた時点で1回だけ警告します。止めはしません。
 
-安全弁: `limits.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0なので、そのときは`limits.max_minutes`か`--max-minutes`が必須）、`until.max_retries`（≤10）、`max_items`（≤10000）、`timeout_minutes`（≤240。hangを止める）、任意の`limits.max_minutes`（天井なし。D20）、同一失敗検知、shellなしcommand、実行中stepの`writable`のみ書込可（hookが強制）、agentのfrontmatterにあるtool / MCP serverだけ（claudeは起動flagとhookの2段）。tokenはclaudeが報告した値を`calls[].tokens`に記録するだけで、上限には使いません。
+安全弁: `limits.max_usd`必須（報告された`costUsd`の合計がこれに達したら次のagentを起動しない。claude以外は0なので、そのときは`limits.max_minutes`か`--max-minutes`が必須）、`until.max_retries`（≤10）、`max_items`（≤10000）、`timeout_minutes`（≤240。hangを止める）、任意の`limits.max_minutes`（天井なし。D20）、同一失敗検知、shellなしcommand、実行中stepの`writable`のみ書込可（hookが強制）、agentのfrontmatterとworkflowの`agents:`にあるtool / MCP server / subagentだけ（subagentはそれ自身の許可。claudeは起動flagとhookの2段）。tokenはclaudeが報告した値を`calls[].tokens`に記録するだけで、上限には使いません。
 
 ### workflow editor（`aidev edit workflow`、D23）
 
@@ -620,7 +621,7 @@ kitはworkflow・開発用agent・MCP serverを配布しません（framework-on
 
 kitはMCP serverを起動しません（旧`aidev mcp azure-devops`と`templates/claude/.mcp.json`は2026-09-23に撤去）。`.mcp.json`はPKGの所有で、PKGが必要なserver（Azure DevOpsなど）を書き、認証情報は環境変数で渡します。kitのhostingとの通信（Wiki publishのPR、workflowのPR）は`cli/lib/ado.js`が直接REST APIで行い、MCPに依存しません。
 
-workflowのagent stepが使えるMCP serverは、agentのfrontmatterの`mcp`に挙げた`.mcp.json`のserverだけです（§9）。runnerはそのserverの定義だけを一時fileに写してclaudeに`--strict-mcp-config`で渡すので、`.mcp.json`の他のserverや利用者個人の設定のserverは読まれません。`mcp`の無いagentにはserverを1つも渡しません。guard-writeは`mcp__.*`にもmatchし、workflow step内で許されていないMCP toolをdenyします。`Bash`を持つagentはMCPを通さずに外部へ出られるため、外部systemに触るagentには`Bash`を渡さない方針です（testは`until`でkitが実行する）。
+workflowのagent stepが使えるMCP serverは、agentのfrontmatterの`mcp`とworkflowの`agents.<agent>.mcp`に挙げた`.mcp.json`のserverだけです（§9）。runnerはそのserverの定義だけを一時fileに写してclaudeに`--strict-mcp-config`で渡すので、`.mcp.json`の他のserverや利用者個人の設定のserverは読まれません。`mcp`の無いagentにはserverを1つも渡しません。guard-writeは`mcp__.*`にもmatchし、workflow step内で許されていないMCP toolをdenyします。`Bash`を持つagentはMCPを通さずに外部へ出られるため、外部systemに触るagentには`Bash`を渡さない方針です（testは`until`でkitが実行する）。
 
 ## 11. update と version通知
 
@@ -659,9 +660,9 @@ CLI起動agent（aidev sync wiki, aidev run workflow）:
 ## 14. source references
 
 - 配置: `cli/lib/layout.js`（`TOOL_CONFIG_GLOBS`を含む）、`cli/lib/home.js`
-- tool adapter: `cli/lib/tools.js`、`cli/commands/agent.js`
+- tool adapter: `cli/lib/tools.js`（adapter）、`cli/lib/agent.js`（launcher）
 - self-evolution: `scripts/evolve.js`（`npm run evolve`。CLI commandではない）、`scripts/estimate-backtest.js`（`npm run estimate:backtest`）、`cli/agents/evolution.md`、`cli/commands/hook.js`（`sessionStop`）、`cli/lib/home.js`（developer marker）
-- tool config: `cli/lib/assets.js`（`templates/<tool>/`のtreeを`applyTemplates`で適用。3-way merge、conflict marker、lock schema 4、`inspectConfig`）、`cli/commands/apply.js`
+- tool config: `cli/lib/assets.js`（`templates/<tool>/`のtreeを`applyTemplates`で適用。3-way merge、conflict marker、lock schema 4、`inspectConfig`）、`cli/commands/sync.js`
 - config / policy: `cli/lib/config.js`、`cli/lib/policy.js`、`cli/lib/paths.js`
 - state（head / knowledge / tracking、inventoryとHEADの比較）: `cli/lib/state.js`、`cli/lib/inventory.js`（`compareWithTree`、`dirtyTargets`）、`cli/lib/git.js`
 - lease: `cli/lib/leases.js`

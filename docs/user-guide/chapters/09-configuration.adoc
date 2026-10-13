@@ -122,7 +122,7 @@ references:                     # agent に読ませる既存の文書（テキ�
 
 |`references.<topic>`
 |無し
-|`aidev run workflow` が agent に「参照文書」として渡す、既存の文書のパス（ファイルかディレクトリ。PKG ルート基準）。`conventions` は `write-conventions` workflow の `convention-builder` が、`testing` は `write-tests` workflow の `test-writer` が先に読みます。agent は文書を重要な情報源として扱いますが、古い可能性があるものとしてコードで検証し、食い違いを報告します。**Excel・Word・PDF はそのまま渡せません。** AI ツールはテキストしか読めないため、Markdown か CSV に書き出してコミットし、そのファイルを書きます（`.xlsx` などを書くと `aidev` が設定エラーにします）。
+|`aidev run workflow` が agent に「参照文書」として渡す、既存の文書のパス（ファイルかディレクトリ。PKG ルート基準）。トピック名（`conventions`、`testing` など）は自由に決められ、すべての agent step にトピックごとの一覧が渡ります。agent は文書を重要な情報源として扱いますが、古い可能性があるものとしてコードで検証し、食い違いを報告します。**Excel・Word・PDF はそのまま渡せません。** AI ツールはテキストしか読めないため、Markdown か CSV に書き出してコミットし、そのファイルを書きます（`.xlsx` などを書くと `aidev` が設定エラーにします）。
 |===
 
 === 既定のままでよい項目

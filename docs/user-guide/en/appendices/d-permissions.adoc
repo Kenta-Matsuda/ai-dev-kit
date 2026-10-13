@@ -7,7 +7,7 @@
 * **The policy** (`.aidev/policy.yaml`) — the places every agent and every interactive session can always write, and the places nobody can ever write. Humans place it with the CLI and review it in a PR.
 * **The `writable` of a workflow step** — the extra places the agent of the step now running may write, only while `aidev run workflow` runs an approved workflow. This is the only way the AI writes PKG source.
 
-Besides where it may write, the agent of a workflow step is also limited in **the tools and MCP servers it can use** (xref:permissions-agent-tools[Tools a workflow step can use]).
+Besides where it may write, the agent of a workflow step is also limited in **the tools, MCP servers and subagents it can use** (xref:permissions-agent-tools[Tools a workflow step can use]).
 
 A hook of the AI tool checks every write. Tokens are never written to files; they are passed only through environment variables.
 
@@ -76,7 +76,7 @@ The distributed hook configuration (`.claude/settings.json` for Claude Code, `.g
 
 |PreToolUse (Write / Edit / Bash, …)
 |`aidev hook guard-write`
-|Checks the target path against the policy and the `writable` of the workflow step now running, and returns the reason when it denies. Also denies when the policy cannot be read. Inside a workflow step it also denies calls to tools that agent was not given. In Claude Code, MCP tool calls go through it too.
+|Checks the target path against the policy and the `writable` of the workflow step now running, and returns the reason when it denies. Also denies when the policy cannot be read. Inside a workflow step it also denies calls to tools that agent was not given, and starting subagents it was not given. In Claude Code, MCP tool calls and subagent starts (`Agent`, `Task`) go through it too.
 
 |PostToolUse (Write / Edit)
 |`aidev hook quality-gate`
@@ -97,7 +97,7 @@ When a write is denied, the AI receives a reason like these.
 ----
 ai-dev-kit: "src/api/auth.ts" is read-only (**). this session was not started by "aidev run workflow"; PKG source is written only inside the writable of an approved workflow step. …
 ai-dev-kit: "src/api/auth.ts" is read-only (**). workflow write-tests is approved but the writable of step write (tests/**) does not cover this path. …
-ai-dev-kit: mcp__ado__update_work_item is not among the MCP servers of agent ticket-reader (none); the agent's frontmatter grants them
+ai-dev-kit: mcp__ado__update_work_item is not among the MCP servers of agent ticket-reader (none); the agent's frontmatter and the workflow's agents: grant them
 ai-dev-kit: ".claude/settings.json" is protected (.claude/**). …
 ai-dev-kit: Wiki consistency error (…) All writes are blocked; run "aidev sync wiki" …
 ----
@@ -122,19 +122,19 @@ steps:
     prompt: …
 ----
 
-This range applies only to the agent started by `aidev run workflow <name>`. At start, `aidev` puts the workflow name and the step's `id` into the environment variables `AIDEV_WORKFLOW` and `AIDEV_WORKFLOW_STEP` of the child process. The hook reads them and checks that the workflow is still identical to `origin/main` and that the path is inside that step's range. When a human calls the same agent from an interactive `claude` session, the range does not apply.
+This range applies only to the agent started by `aidev run workflow <name>`. At start, `aidev` puts the workflow name and the step's `id` into the environment variables `AIDEV_WORKFLOW` and `AIDEV_WORKFLOW_STEP` of the child process (with the run id in `AIDEV_WORKFLOW_RUN`, and a `for_each` target in `AIDEV_WORKFLOW_ITEM`). The hook reads them and checks that the workflow is still identical to `origin/main` and that the path is inside that step's range. When a human calls the same agent from an interactive `claude` session, the range does not apply.
 
 Add paths to the policy's `writable` only when every agent and every interactive session should be able to write them at any time. `protected` paths and `secrets_paths` cannot be opened either way. Review policy changes in a PR and widen them only for as long as needed.
 
 [[permissions-agent-tools]]
 === Tools a workflow step can use
 
-The tools the agent of a workflow step can use are set by `tools` (built-in tools) and `mcp` (MCP servers) in that agent's frontmatter (xref:workflows-agents-skills[Agents and skills]). A workflow cannot widen them. Give work with different permissions to a different agent.
+The tools the agent of a workflow step can use are set by `tools` (built-in tools), `mcp` (MCP servers) and `subagents` (subagents it may start) in that agent's frontmatter, together with what the workflow.yaml's `agents:` adds (`tools` there replaces) (xref:workflows-agents-skills[Agents and skills], xref:workflow-reference-agents[agents]). They cannot change per step. Give work with different permissions to a different agent.
 
 In Claude Code this is enforced in two layers.
 
-. `aidev run workflow` starts Claude Code with only the tools in the agent's `tools` and the servers in its `mcp`. An agent without `mcp` gets no MCP server at all. Other servers in the PKG's `.mcp.json` or in personal settings are not loaded.
-. The `guard-write` hook denies, inside a workflow step, calls to tools and MCP tools that agent was not given. It gives no answer for MCP calls outside a workflow, and leaves the decision to Claude Code's own settings.
+. `aidev run workflow` starts Claude Code with only the `tools` and `mcp` servers that agent was given. Named `subagents` are handed over with `--agents` (never with a tool the parent agent lacks). An agent without `mcp` gets no MCP server at all. Other servers in the PKG's `.mcp.json` or in personal settings are not loaded.
+. The `guard-write` hook denies, inside a workflow step, calls to tools and MCP tools that agent was not given. An agent with `subagents` cannot start any other subagent, and calls made inside a subagent are allowed only within that subagent's grants. It gives no answer for MCP calls outside a workflow, and leaves the decision to Claude Code's own settings.
 
 An agent with `tools` or `mcp` starts only on Claude Code. GitHub Copilot CLI, OpenAI Codex CLI and Kiro CLI cannot limit the tools they are given, so the workflow stops without starting anything.
 

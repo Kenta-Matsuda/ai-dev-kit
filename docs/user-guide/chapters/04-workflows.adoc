@@ -85,11 +85,11 @@ aidev create workflow write-tests --describe "指定した対象のテストを�
 |調査ステップは何も書けない。実装ステップは `tests/**` だけ書ける
 
 |agent の frontmatter（**能力**）
-|その agent が使える skill・ツール・MCP server
+|その agent が使える skill・ツール・MCP server・サブエージェント
 |test-writer は test-and-verify の手順を持ち、Read・Edit・Write だけを使う
 |===
 
-同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。workflow 側で agent の能力を上書きする項目はありません。
+同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。ある workflow でだけ能力を足したいときは、workflow.yaml の `agents:` に書きます（`skills`・`mcp`・`subagents` は追加、`tools` は置き換え。xref:workflows-agents-skills[agent と skill]）。
 
 雛形を PKG に合わせて編集します。多くの場合、変えるのは各ステップの `writable`（そのステップが書いてよい場所）と `until.command`（この PKG のテストコマンド）です。
 
@@ -273,7 +273,7 @@ limits:                            # 実行を止める条件
 ----
 
 * 一覧は ADK が読みます。1 行が 1 件で、空行と `#` で始まる行は飛ばします。同じ行が 2 回あれば 1 件です。
-* `{item}` は `prompt`、`until.command`、`until.prompt` に書けます。`prompt` には必須です。
+* `{item}` は `prompt`、`writable`、`until.command`、`until.prompt` に書けます。`prompt` には必須です。`unchanged` には書けません。`writable` に書くと、その件の agent はその件のパスにだけ書けます（xref:workflows-parallel[並列に動かす]）。
 * 1 件ごとに agent を新しく起動します。`until` とやり直しの回数も 1 件ごとです。時間と費用の上限は実行全体で数えます。
 * 1 件が失敗すると、そこで止まります。通った件はそのまま残り、`--resume` は止まった件から続けます（xref:workflows-resume[止まった実行を続ける]）。
 * `for_each` に `on_failure: continue` を書くと、失敗した件の変更を戻して次の件へ進みます。戻すのは、そのステップの `writable` の中で、その件の間に変わったファイルです。失敗した件と理由は `run.json`、後のステップへの報告、PR 本文に並びます。全件が失敗したときは止まります。費用と時間の上限に達したときは、`continue` でも止まります。
@@ -402,7 +402,7 @@ limits:
 
 * 実行する端末が止まる（スリープ、再起動、ネットワーク断）と、実行も止まります。`aidev run workflow <name> --resume last` で、終わった件を飛ばして続けます。
 * AI ツールの一時的な失敗（混雑、レート制限）も、その件の失敗として数えます（`on_failure: continue` なら戻して先へ進みます）。
-* 件は 1 件ずつ順に処理します。並列には動きません。
+* 件は既定では 1 件ずつ順に処理します。`for_each.parallel` で同時に動かせます（xref:workflows-parallel[並列に動かす]）。
 * 変更は 1 つの PR になります。数千件の変更を 1 つの PR でレビューするのが難しいときは、一覧を分けて何回かに分けて実行します。
 
 [[workflows-until-agent]]
@@ -435,7 +435,7 @@ limits:
 
 確認役の agent について:
 
-* **何も書けません。** ステップの `writable` は確認役には効きません。確認役が使える skill・ツール・MCP server は、その agent の frontmatter で決まります（`tools: Read, Grep, Glob` など、読むだけのものにします）。
+* **何も書けません。** ステップの `writable` は確認役には効きません。確認役が使える skill・ツール・MCP server は、その agent の frontmatter と workflow の `agents:` で決まります（`tools: Read, Grep, Glob` など、読むだけのものにします）。
 * 合格・不合格の書き方（`VERDICT:` の行）は ADK が指示に入れます。agent の本文や `until.prompt` に書く必要はありません。
 * `until.prompt` には、何を確認するかを具体的に書きます。観点が曖昧だと、同じ指摘が繰り返されて止まるか、`until.max_retries` を使い切ります。
 * 確認役の起動も、やり直しの回数（`until.max_retries`）、費用の上限、時間の上限に数えます。1 回の試行で agent が 2 回起動するので、`limits.max_usd` はその分を見込みます。
@@ -464,7 +464,7 @@ aidev submit workflow write-tests
 ----
 
 * 定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent・skill を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps）。`generic` hosting では push まで行い、PR は手で作ります。`--no-push` なら push もしません。
-* PR 本文には目的、ステップごとの内容（順番・agent・書ける場所・その agent の skill・ツール・MCP server）、関係するファイル、上限と、「マージがこの workflow を承認する」旨が書かれます。
+* PR 本文には目的、ステップごとの内容（順番・agent・書ける場所・その agent の skill・ツール・MCP server・起動できるサブエージェント・`until`・parallel グループ）、関係するファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。承認済みの workflow を直した提出では、承認済みの版との差分（What changed against the approved workflow）、費用の見積もりの前後（Estimate）、`aidev modify` で直したときはその理由（Why this change）も入ります。本文の全文は `.aidev/cache/submit/<name>.md` にも残ります（xref:cli-submit[aidev submit]）。
 * 既に `main` と同じなら `already matches origin/main; nothing to submit.` と表示して終わります。
 
 `.aidev/workflows/**`・`.aidev/agents/**`・`.aidev/skills/**` には branch policy で必須レビュアーを付けてください。誰が承認したかは PR のレビュアーと git の author が記録します。
@@ -533,21 +533,24 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 ----
 aidev run workflow write-tests
     [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests at 9f8e7d6… (base 9f8e7d6…; approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
-    [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
+    [2026-09-23T01:12:03.115Z] worktree: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests (made for this run)
+    [2026-09-23T01:12:03.140Z] estimate: $0.80 – $5.40 (optimistic – pessimistic)
+    [2026-09-23T01:12:03.201Z] step survey: agent test-investigator via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
     [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:25:02.417Z] step write: agent finished in 8m 21s ($0.9811)
-    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1
+    [2026-09-23T01:25:19.006Z] step write: "npm test" exited 1 in 16s
     [2026-09-23T01:25:19.010Z] step write: agent test-writer via claude (sonnet) attempt 2 (budget 19m 44s)
     [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
-    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
+    [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0 in 13s
+    [2026-09-23T01:32:01.240Z] checkpoint 4b3a2c1d0e9f: write (3 file(s))
     [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
     [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests
     [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
-    branch aidev/write-tests (2 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
+    branch aidev/write-tests (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
     record: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests/.aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z
 ----
 
@@ -557,7 +560,7 @@ aidev run workflow write-tests
 * ブランチは workflow ごとに 1 つ（`aidev/<name>`）で、実行のたびに同じブランチ・同じ worktree を使います。日付付きのブランチ（`aidev/<name>-<yyyymmddHHMM>`）に分けたいときだけ `--dated` を付けます。
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
 * ステップ（`for_each` なら 1 件）が通るたびに、そのステップの `writable` の変更を **チェックポイントとしてコミット** します（`aidev(<name>): <step>`）。止まった実行は、最後のチェックポイントから続けられます。
-* Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
+* Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば、その定義を `--agents` で渡します）。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
@@ -835,7 +838,7 @@ aidev submit workflow write-tests
 
 agent は AI ツールに渡す役割の定義（Markdown）、skill は手順書です。workflow のステップは agent を名前で参照し、agent は自分が使う skill を名前で参照します。
 
-ADK が同梱するのは **仕組み** だけです。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）の 4 つです。
+ADK が同梱するのは **仕組み** だけです。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）の 4 つです。ほかに、見積もりのために CLI が使う agent（cost-estimator、estimate-reviewer）があります。これは PKG に置かれず、`aidev estimate` と実行の終わりに CLI が起動します（xref:cli-estimate[aidev estimate]）。
 
 開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。ADK は同梱しません。 Engineering Manager が `aidev create workflow <name> --describe "<やりたいこと>"` で作ります。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。ADK はそれを配布も起動もしません。
 
@@ -855,6 +858,7 @@ description: 既存の書き方に合わせてテストを書く。write-tests w
 skills: [test-and-verify]            # 指示に本文が入る skill。無ければ []
 tools: Read, Grep, Glob, Edit, Write # 使える組み込みツール。省略するとツールの既定（全部）
 mcp: []                              # 使える MCP server（PKG の .mcp.json のキー）。省略すると無し
+subagents: []                        # 起動できるサブエージェント。省略すると AI ツールが用意するもの
 model: inherit
 ---
 ----
@@ -871,13 +875,16 @@ model: inherit
 
 |`mcp`
 |使える MCP server。PKG の `.mcp.json` に登録された名前を書きます。ここに無い server は渡されません。`.mcp.json` に無い名前を書くと、workflow は起動前に止まります。
+
+|`subagents`
+|`Agent` ツールで起動できるサブエージェント（`.aidev/agents/<name>.md` の名前）。書けばこれ以外は起動できません（xref:workflows-subagents[サブエージェントを指定する]）。
 |===
 
 * `tools` や `mcp` を書いた agent は、Claude Code でしか動きません。Copilot CLI などは、渡すツールを絞れないためです。
 * 外部システムに触る agent には `Bash` を渡さないでください。`Bash` があれば MCP を通さずに外部へ出られるので、`mcp` で絞っても意味がなくなります。テストの実行は agent ではなく、`until` で ADK が行います。
 * 権限の違う仕事は、別の agent にします（読むだけの `ticket-reader` と、更新する `ticket-updater` など）。
 
-ある workflow でだけ skill や MCP server を足したいときは、agent の frontmatter ではなく workflow.yaml の `agents:` に書きます。`skills` と `mcp` は frontmatter のものに足され、`tools` は frontmatter のものの代わりに使われます（xref:workflow-reference-agents[agents]）。
+ある workflow でだけ skill や MCP server を足したいときは、agent の frontmatter ではなく workflow.yaml の `agents:` に書きます。`skills`・`mcp`・`subagents` は frontmatter のものに足され、`tools` は frontmatter のものの代わりに使われます（xref:workflow-reference-agents[agents]）。
 
 [source,yaml]
 ----

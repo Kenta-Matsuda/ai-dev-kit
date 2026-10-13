@@ -14,7 +14,7 @@ aidev remove skill <name> [--dry-run] [--json]
 
 === 説明
 
-`workflow` は `.aidev/workflows/<name>/` を実行記録（`runs/`）ごと削除します。`agent` は `.aidev/agents/<name>.md`、`skill` は `.aidev/skills/<name>/` を削除します。`.aidev/workflows/` のどれかの workflow のステップがその agent を使っていれば、またはそのステップの agent が frontmatter の `skills` にその skill を挙げていれば、workflow 名を挙げて拒否します。先に参照を外して提出してください。ADK 同梱の agent・skill は削除できません。
+`workflow` は `.aidev/workflows/<name>/` を削除します（手元に残っていた実行記録 `runs/` も。実行の worktree にある記録と、ブランチ `aidev/<name>` は残ります）。`agent` は `.aidev/agents/<name>.md`、`skill` は `.aidev/skills/<name>/` を削除します。`.aidev/workflows/` のどれかの workflow がその agent を使っていれば（ステップの `agent`・`until.agent`、またはサブエージェントとして frontmatter の `subagents` か `agents.<agent>.subagents`）、またはその workflow の agent・サブエージェントが frontmatter の `skills` か `agents.<agent>.skills` にその skill を挙げていれば、workflow 名を挙げて拒否します。先に参照を外して提出してください。ADK 同梱の agent・skill は削除できません。
 
 削除は作業ツリーへの変更です。コミットして PR にし、マージでチームに届きます。
 

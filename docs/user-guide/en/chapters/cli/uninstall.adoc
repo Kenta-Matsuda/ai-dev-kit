@@ -32,7 +32,7 @@ To install again, run the installer from an ADK clone (xref:install[Installing a
 
 `--package` takes a name shown by xref:cli-list[`aidev list packages`] or a path to a PKG (`.` inside the PKG).
 
-In order: ① removes the four `aidev hook` entries from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the ADK placed (`.claude/**`, `CLAUDE.md`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
+In order: ① removes the five `aidev hook` entries (session-start, guard-write, quality-gate, after-bash, session-stop) from `.claude/settings.json`, ② deletes the management files (`.aidev/policy.yaml`, `.aidev/materialized.json`, `.aidev/cache/` and so on), ③ unless `--keep-assets` is given, deletes the tool configuration files the ADK placed (`.claude/**`, `CLAUDE.md`, and those of the other tools), ④ writes `.aidev/ejected.json` and unregisters the clone on this machine.
 
 Kept: your package files, `.aidev/knowledge/` (the Wiki), `aidev.yaml`, `.aidev/workflows/`.
 

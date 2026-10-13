@@ -23,7 +23,7 @@ aidev list packages [--json]
 |`.aidev/workflows/` の各 workflow の状態（`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`）と説明。ADK は workflow を同梱しないので、並ぶのはこの PKG の workflow だけ
 
 |`agents`
-|PKG の `.aidev/agents/` と ADK 同梱の agent。名前、由来（`this PKG` / `ADK`）、説明。frontmatter の `name` がファイル名と違えば `⚠` を添える
+|PKG の `.aidev/agents/` と ADK 同梱の agent。名前、由来（`this PKG` / `kit`）、説明。frontmatter の `name` がファイル名と違えば `⚠` を添える
 
 |`skills`
 |PKG の `.aidev/skills/` と ADK 同梱の skill。名前、由来、説明

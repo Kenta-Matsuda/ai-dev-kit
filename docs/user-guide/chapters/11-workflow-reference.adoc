@@ -15,7 +15,7 @@ workflow と、それが使う agent・skill の書き方を、項目ごとに�
 |`aidev run workflow <name>`
 
 |`.aidev/agents/<name>.md`
-|agent の役割（本文）と能力（frontmatter の `skills`・`tools`・`mcp`）
+|agent の役割（本文）と能力（frontmatter の `skills`・`tools`・`mcp`・`subagents`）
 |workflow のステップの `agent:`、`until.agent:`
 
 |`.aidev/skills/<name>/SKILL.md`
@@ -33,6 +33,8 @@ flowchart LR
   A -- "frontmatter mcp" --> M[".mcp.json の server"]
   W -- "agents.#60;name#62;.skills" --> S
   W -- "agents.#60;name#62;.mcp" --> M
+  A -- "frontmatter subagents" --> SA["agents/#60;subagent#62;.md"]
+  W -- "agents.#60;name#62;.subagents" --> SA
 ----
 
 agent と skill は、PKG の `.aidev/` を先に探し、無ければ ADK 同梱のものを使います。同名なら PKG のものが優先です。
@@ -188,7 +190,7 @@ agents:
 
 * 足した能力も frontmatter の能力と同じに扱われます。Claude Code はそれだけを渡して起動し、hook もそれ以外のツールを拒否します。`tools` か `mcp` を持つ agent は Claude Code でだけ動きます。
 * workflow.yaml は承認の対象なので、`agents:` を変えると workflow は承認前に戻ります。`aidev submit workflow` で PR にし、レビューを受けます。
-* ステップに `skills`・`mcp`・`tools` は書けません（`a step does not carry …`）。ステップごとに能力を変えたいときは、別の agent にします。
+* ステップに `skills`・`mcp`・`tools`・`subagents` は書けません（`a step does not carry …`）。ステップごとに能力を変えたいときは、別の agent にします。
 
 [[workflow-reference-agent-step]]
 === agent step
@@ -497,7 +499,7 @@ model: inherit
 
 * `tools` か `mcp` を書いた agent は、Claude Code でだけ動きます（他の AI ツールは渡すツールを絞れないため、起動前に止まります）。
 * 外部システムに触る agent に `Bash` を渡さないでください。`mcp` で絞っても、`Bash` があれば MCP を通さずに外へ出られます。
-* 同じ agent に仕事ごとに違う権限を持たせる項目はありません。権限が違う仕事は agent を分けます。
+* 能力は workflow ごとに `agents:` で足せますが、ステップごとに変える項目はありません。同じ workflow の中で権限が違う仕事は agent を分けます。
 * agent を直すと、その agent を使うすべての workflow が変わります。
 
 本文は、ADK が agent step の指示の先頭に入れます。その後ろに、ADK が次のものを足します。本文に同じことを書く必要はありません。

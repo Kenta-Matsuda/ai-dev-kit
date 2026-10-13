@@ -30,6 +30,8 @@ npm run docs:build    # 生成
 npm run docs:check    # 生成 + 検証
 ----
 
+`node scripts/build-docs.js --check --lang ja` は 1 つの言語だけを生成します。
+
 `docs:check` は、include 先が存在すること、ID が重複しないこと、`xref:` の参照先があること、`TODO` が残っていないこと、必須の章 ID がそろっていること、HTML が外部 stylesheet / script に依存しないことを両言語で検証します。
 
 === 執筆規約
