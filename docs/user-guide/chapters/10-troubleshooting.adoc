@@ -253,6 +253,18 @@
 |`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |`tools` や `mcp` を書いた agent は Claude Code でしか起動しません。`aidev.yaml` の `tools.agent`（または workflow の `tool`）を `claude` にします。
 
+|`agent <name> names subagents, but .claude/settings.json does not send Agent calls to "aidev hook guard-write"`
+|PKG の `.claude/settings.json` が、サブエージェントの起動を hook で確かめる前のものです。`aidev sync tools` で更新してコミットします（xref:workflows-subagents[サブエージェントを指定する]）。
+
+|`subagent <name> may use …, which its parent <agent> may not`
+|サブエージェントの `tools`・`mcp` が親の agent より広いです。サブエージェントの frontmatter を狭めるか、親に足します。
+
+|`steps <a> and <b> run at the same time but may write the same paths`
+|parallel グループのステップの `writable` が重なり得ます。ステップごとに別のディレクトリにします（xref:workflows-parallel[並列に動かす]）。
+
+|`for_each.parallel needs every writable path to name the target as {item}`
+|件を同時に動かすには、`writable` を件ごとのパス（`e2e/tests/{item}.spec.ts` など）で書きます。
+
 |`the working tree has uncommitted changes; commit or stash them first`
 |`pull_request` のステップがある workflow は、きれいな作業ツリーで実行します。
 

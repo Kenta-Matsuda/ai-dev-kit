@@ -187,7 +187,7 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **理由**: 数百〜数千件のE2E作成や大規模なversion upのように、実行したら終わるまで人が介入しない使い方では、60分の天井は「人が`--resume`する」ことを前提にしてしまいます。暴走の害は費用であり、それは`max_usd`で止まります。hangは`timeout_minutes`が止めます。1件の失敗で全体が止まると、数千件の仕事は終わりません。`cost`と`limits`が別keyなのは「実行を止める条件」が2か所に分かれて読みにくく、msの数値は桁を読み違えます。
 
-**却下した代替案**: PKGごとの天井を`aidev.yaml`で上げる案（`proposals/2026-10-01-workflow-long-running.md`の提案4。天井を設定する場所が増えるだけで、無人実行の判断はworkflowのreviewで足りる）。失敗した件を戻さずに残す案（失敗したテストがPRに入りCIを壊す）。並列実行（同じ作業treeを共有するため、件ごとのworktreeが先に要る）。
+**却下した代替案**: PKGごとの天井を`aidev.yaml`で上げる案（`proposals/2026-10-01-workflow-long-running.md`の提案4。天井を設定する場所が増えるだけで、無人実行の判断はworkflowのreviewで足りる）。失敗した件を戻さずに残す案（失敗したテストがPRに入りCIを壊す）。並列実行（同じ作業treeを共有するため、件ごとのworktreeが先に要る。→ D25で、書く場所が重ならない形に限って採用）。
 
 ### D21: stepの種類はkeyで決め、やり直しは`until`に属する
 
@@ -220,6 +220,16 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 **理由**: 同じagentを、あるworkflowでだけ特定のMCP server（Azure DevOps）やskill（そのworkflow固有の手順書）付きで使いたい場面があり、frontmatterに足すとそのagentを使う全workflowに能力が広がります。workflowごとにagentを複製すると、本文の重複と修正漏れが増えます。D18が懸念した「reviewerがagentのfileだけでは実際の権限を読めない」点は、workflow.yamlが承認の対象（PRの差分に入る）であることと、submitのPR本文・`--dry-run`が各stepの実際の能力を出すことで補います。`tools`だけ置き換えにするのは、frontmatterが`tools`を書かない（既定の全部）agentに足すと何も変わらず、workflowで絞る手段にならないためです。
 
 **却下した代替案**: stepごとの`skills` / `mcp` / `tools`（同じagentがstepで権限を変え、guardとreviewの単位がagentからstepに増える。権限が違うなら別agent、のままにする）。`tools`も和集合にする案（上記。既定の全部を持つagentを絞れない）。workflowが能力を減らす`deny`の類（frontmatterとworkflowの両方を読まないと結果が分からない。`tools`の置き換えで足りる）。
+
+### D25: subagentは名前で許し、並列実行は同じ作業treeで「書く場所が重ならない」ことを条件にする
+
+**判断**: agentは`subagents: [<name>]`（frontmatterかworkflowの`agents:`）で、`Agent` toolで起動してよいsubagentを名前で指定できます。指定したagentは、そのsubagentの定義（PKGか同梱のagent file）を`--agents`でその実行だけに渡され、guard-writeが`Agent` / `Task`の`subagent_type`と、subagent内の呼び出し（hook入力の`agent_id` / `agent_type`）をそのsubagentのgrantで判定します。subagentの`tools` / `mcp`は親の範囲内に限り、subagentは`subagents`を持てません。指定しないagentは従来どおりです。並列実行は2つです: `for_each.parallel: N`（対象をN件ずつ同時に。`writable`の全pathに`{item}`を要求し、guardは`AIDEV_WORKFLOW_ITEM`でその対象のpathだけを許す）と、`parallel:` group（agent stepを同時に起動し、全部終わってから次へ。member同士の`writable`、`writable`と他memberの`unchanged`が重なり得る定義は拒否）。どちらも同じ作業tree・同じbranchで動きます（2026-10-13）。
+
+**理由**: subagentを名前で縛れないと、reviewerはagentのfileを読んでも、実行中にどの定義・どの権限のagentが動くかが分かりません（Claude Codeの組み込みgeneral-purposeは親と同じtoolを持つ）。subagentは親のsessionの中で動くので、親より広い権限は起動flagでもhookでも実現できず、書けても嘘になります。並列実行をworktreeで分ける案はD20で見送った理由（`node_modules`などgitignoreされた環境が無い、成果の合流でconflictする）が残るため、同じtreeのまま「同時に動くagentが同じfileを書けない」ことを定義の検証と書込ごとのguardで保証する形にしました。`{item}`を含むpathなら対象ごとの`writable`が構造上重ならず、`on_failure: continue`の戻しも他の対象に触れません。
+
+**却下した代替案**: 件ごと・stepごとのgit worktree（上記。依存のinstallと合流の設計が先に要る）。`writable`の重なりを実行後のdiffで検出する案（壊れた後に分かる。書込時に止める方がよい）。subagentの権限を親と無関係に与える案（親のsessionの`--tools` / `--strict-mcp-config`の外のものは存在しない）。stepや`until`ごとのsubagent指定（権限の単位をagentに保つ。D18 / D24）。
+
+**論点**: guard-writeのmatcherは書込・`Bash`・MCP・`Agent`だけなので、subagentの`Read` / `Grep`などはhookで見ず、`--agents`の`tools` / `disallowedTools`と親の`--tools`で絞ります。`--agents`のsubagentに`mcp__<server>`をallowする書き方は実機で未確認です。同時に動く`until.command`（同じport・DBを使うtest）はkitでは調停しません。費用の上限は同時に動く数だけ超え得ます。
 
 ## 未決の論点
 

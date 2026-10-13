@@ -275,6 +275,57 @@ limits:                            # 実行を止める条件
 
 1 件に書けるのは、英数字と `. _ / @ -` だけの 1 語です（200 文字まで）。空白、先頭の `-`、`..` を含む行があると、ADK は agent を起動する前に止まります。件はコマンドの引数になるので、オプションや別の場所を指す文字列を受け付けないためです。一覧を書くステップの `prompt` に、この書き方を書いておきます。
 
+[[workflows-parallel]]
+==== 並列に動かす
+
+agent を同時に動かす書き方は 2 つあります。どちらも同じ作業ツリーで動くので、**同時に動く agent が同じファイルを書けない** ことを、ADK が検証と hook で確かめます。
+
+**対象ごとの繰り返しを並列にする**（`for_each.parallel`）。`writable` のパスをすべて `{item}` を含む形で書きます。各件の agent は自分の件のパスにしか書けず、`on_failure: continue` で戻すのもその件のパスだけです。
+
+[source,yaml]
+----
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/{item}.spec.ts]   # 件ごとのパス。parallel には必須
+    for_each:
+      from: targets.txt
+      max_items: 200
+      parallel: 4                          # 同時に 4 件まで（最大 16。既定 1）
+      on_failure: continue
+    prompt: 画面 {item} の IT テストを e2e/tests/{item}.spec.ts に書く。
+    until:
+      command: npx playwright test tests/{item}.spec.ts
+      cwd: e2e
+----
+
+**違うステップを同時に動かす**（`parallel:` グループ）。グループに並べた agent step が一緒に始まり、すべて終わってから次のステップへ進みます。
+
+[source,yaml]
+----
+  - id: build
+    description: API と画面を同時に作る
+    parallel:
+      - id: api
+        agent: api-writer
+        writable: [api/**]
+        prompt: 計画どおりに API を実装する。
+      - id: web
+        agent: web-writer
+        writable: [web/**]
+        prompt: 計画どおりに画面を実装する。
+  - id: integrate
+    agent: integrator
+    writable: [api/**, web/**]
+    prompt: 2 つをつなぐ。
+----
+
+* グループに入れられるのは agent step だけです（2〜16 個）。各ステップは `for_each` や `until` を持てます。
+* グループのステップどうしで、`writable` が重なり得るとき、また一方の `writable` が他方の `unchanged` と重なり得るときは、検証で拒否されます。重なりは固定部分（`*` や `{item}` より前）で判定するので、`src/**` と `src/a.ts` は重なり、`src/a.ts` と `src/b.ts` は重なりません。
+* グループのステップは互いの報告を読めません。後のステップには全員の報告が渡ります。
+* 1 つが失敗しても、動いている他のステップは終わるまで動きます（新しい件は始めません）。その後、実行は止まります。`--resume` は終わっていないステップだけをやり直します。
+* `until.command` も同時に動きます。同じポートやファイルを使うテストは、同時に動かすと互いに邪魔をします。
+* 費用の上限は、同時に動く agent の数だけ超えることがあります（上限に達した時点で動いている agent は止めないため）。
+
 [[workflows-unchanged]]
 ==== 変えてはいけない場所を決める
 
@@ -774,6 +825,24 @@ agents:
     skills: [ticket-format]
     mcp: [azure-devops]
 ----
+
+[[workflows-subagents]]
+==== サブエージェントを指定する
+
+agent に `Agent` ツールがあれば、agent は作業の一部をサブエージェントに任せられます（同時に複数動かすこともできます）。`subagents` を書くと、その agent が起動できるサブエージェントを **名前で指定** できます。agent の frontmatter に書くか、workflow.yaml の `agents:` に書きます。
+
+[source,yaml]
+----
+agents:
+  lead:
+    subagents: [scout, reviewer]     # .aidev/agents/scout.md、reviewer.md
+----
+
+* サブエージェントの定義は普通の agent と同じファイル（`.aidev/agents/<name>.md`）です。ADK はその本文と skill を、その実行のサブエージェントとして Claude Code に渡します（`--agents`）。
+* `subagents` を書いた agent は、そこにあるサブエージェントしか起動できません（Claude Code の組み込みの general-purpose なども hook が拒否します）。書かなければ、今までどおり Claude Code が用意するものを使えます。
+* サブエージェントは自分の `tools`・`mcp` だけを使えます。親の agent に無いツールや MCP server は持てません（検証で拒否されます）。書ける場所は親のステップの `writable` です。
+* `subagents` を書いた agent は Claude Code でだけ動きます。PKG の `.claude/settings.json` が古い（hook が `Agent` を見ない）と、起動前に止まります。`aidev sync tools` で更新してコミットします。
+* サブエージェントの定義ファイルも承認の対象です。`aidev submit workflow` で一緒に PR に入ります。
 
 一覧は `aidev list agents` / `aidev list skills`、削除は `aidev remove agent|skill <name>`（workflow から参照されているものは拒否）です。どれも `aidev submit workflow` で workflow と一緒に PR に入り、レビューされ、`main` にあるものだけが workflow から使われます。
 

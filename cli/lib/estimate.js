@@ -331,7 +331,7 @@ function stepShapes(def, models = {}) {
  * or a kept judgment, or null; `budget` is limits.max_usd; `reportsCost` is
  * false when the tool reports no cost (then the budget cannot stop the run).
  */
-function estimateShapes(name, shapes, { history, ai = null, budget, reportsCost = true, calibration = null, priors = null }) {
+function estimateShapes(name, shapes, { history, ai = null, budget, reportsCost = true, calibration = null, priors = null, wide = 1 }) {
   const cal = calibration || calibrate(history);
   const byId = new Map(((ai && ai.steps) || []).map((s) => [s.id, s]));
   const k = cal.widen;
@@ -393,8 +393,9 @@ function estimateShapes(name, shapes, { history, ai = null, budget, reportsCost 
     });
   }
   // The runner starts no agent once the reported cost reaches the budget; the
-  // start already running can carry it past by its own cost.
-  const cap = reportsCost ? budget + largestStart : null;
+  // starts already running can carry it past by their own cost — one, or as
+  // many as run at once (a parallel group, for_each.parallel).
+  const cap = reportsCost ? budget + largestStart * Math.max(1, wide) : null;
   const capped = (x) => (cap == null ? x : Math.min(x, cap));
   return {
     name,
@@ -414,7 +415,9 @@ function estimateShapes(name, shapes, { history, ai = null, budget, reportsCost 
 
 /** Estimate a validated definition; `models` maps each agent to the model it runs on. */
 function estimateDefinition(def, { history, ai = null, reportsCost = true, models = {}, calibration = null, priors = null }) {
-  return estimateShapes(def.name, stepShapes(def, models), { history, ai, budget: def.limits.max_usd, reportsCost, calibration, priors });
+  // The most agents the runner may start at once.
+  const wide = Math.max(1, ...(def.groups || []).map((g) => g.members.length), ...def.steps.map((s) => (s.for_each && s.for_each.parallel) || 1));
+  return estimateShapes(def.name, stepShapes(def, models), { history, ai, budget: def.limits.max_usd, reportsCost, calibration, priors, wide });
 }
 
 /** What a run keeps of its estimate in run.json and its record. */

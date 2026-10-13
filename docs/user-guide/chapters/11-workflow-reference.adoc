@@ -133,7 +133,7 @@ limits:
 |`steps`
 |list
 |必須
-|ステップの list。1 つ以上。上から順に実行します。1 つのステップは agent step・command step・pull-request step のどれか 1 つで、`agent`・`command`・`pull_request` のどのキーを持つかで決まります（下の節）。2 つ以上持つと検証で拒否されます。
+|ステップの list。1 つ以上。上から順に実行します。1 つのステップは agent step・command step・pull-request step・parallel グループのどれか 1 つで、`agent`・`command`・`pull_request`・`parallel` のどのキーを持つかで決まります（下の節）。2 つ以上持つと検証で拒否されます。
 
 |`limits`
 |mapping
@@ -163,7 +163,7 @@ agents:
 |`agents.<agent>`
 |mapping
 |任意
-|`<agent>` は steps の `agent:` か `until.agent:` が使う agent の名前です。どのステップも使わない名前は、検証で拒否されます（`no step names agent …`）。持てるのは `skills`・`mcp`・`tools` だけです。
+|`<agent>` は steps の `agent:` か `until.agent:` が使う agent、またはその `subagents` に挙げたサブエージェントの名前です。それ以外の名前は検証で拒否されます（`no step names agent …`）。持てるのは `skills`・`mcp`・`tools`・`subagents` だけです。
 
 |`agents.<agent>.skills`
 |list
@@ -179,6 +179,11 @@ agents:
 |list
 |任意
 |この workflow で使える組み込みツール。書くと frontmatter の `tools` の **代わりに** これを使います（足すのではありません）。省略すると frontmatter の `tools` に従います。空の list は書けません。
+
+|`agents.<agent>.subagents`
+|list
+|任意
+|frontmatter の `subagents` に **足す**、その agent が起動できるサブエージェント（xref:workflows-subagents[サブエージェントを指定する]）。ここに挙げたサブエージェントの名前も `agents:` のキーに書けます。
 |===
 
 * 足した能力も frontmatter の能力と同じに扱われます。Claude Code はそれだけを渡して起動し、hook もそれ以外のツールを拒否します。`tools` か `mcp` を持つ agent は Claude Code でだけ動きます。
@@ -315,11 +320,44 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |`stop` か `continue`
 |任意
 |1 件が失敗したとき。`stop`（既定）はそこで止まります。`continue` はその件の間に `writable` の中で変わったファイルを元に戻し、次の件へ進みます。全件が失敗したとき、費用・時間の上限に達したときは止まります（xref:workflows-unattended[人が介入せずに大きな仕事を走らせる]）。
+
+|`parallel`
+|整数
+|任意（既定 1）
+|同時に動かす件数。1〜16。2 以上のときは、ステップの `writable` のパスをすべて `{item}` を含む形（`e2e/tests/{item}.spec.ts` など）で書きます（xref:workflows-parallel[並列に動かす]）。
 |===
 
 一覧は 1 行 1 件です。空行と `#` で始まる行は飛ばし、行頭の `- ` と `* ` は取り除き、同じ行は 1 件にします。1 件は英数字と `. _ / @ -` の 1 語（200 文字まで、先頭は `-` 以外、`..` を含まない）です。
 
-`{item}` は、`for_each` のあるステップの `prompt`（必須）、`until.command`、`until.prompt` にだけ書けます。それ以外の場所に書くと検証で拒否されます。
+`{item}` は、`for_each` のあるステップの `prompt`（必須）、`writable`、`until.command`、`until.prompt` にだけ書けます。それ以外の場所に書くと検証で拒否されます。`writable` の `{item}` はその件の名前に置き換わり、その件の agent はそのパスにだけ書けます。`{item}` を含むパスは固定のディレクトリで始めます（`{item}/x.ts` は書けません）。pull-request step がコミットするのは、`{item}` より前のディレクトリ全体（`e2e/tests/{item}.spec.ts` なら `e2e/tests/**`）です。
+
+[[workflow-reference-parallel]]
+=== parallel グループ
+
+agent step を同時に動かすステップです（xref:workflows-parallel[並列に動かす]）。
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`id`
+|文字列
+|任意
+|グループの名前。ステップ id と同じ規則で、ステップ id と重複できません。
+
+|`description`
+|文字列
+|任意
+|レビュアー向けの説明。
+
+|`parallel`
+|list
+|必須
+|同時に動かす agent step（2〜16 個）。各要素は agent step と同じ項目を持ちます。`id` を省くと `<グループの id>-1` のように付きます。command step・pull-request step・グループは入れられません。
+|===
+
+* グループのステップは、`run.json`・`--resume`・見積もりでは普通のステップとして 1 つずつ扱われます。
+* `writable` どうし、`writable` と他のステップの `unchanged` が重なり得ると検証で拒否されます。
 
 [[workflow-reference-command-step]]
 === command step
@@ -446,10 +484,15 @@ model: inherit
 |任意
 |使える MCP server（PKG の `.mcp.json` のキー）。省略すると MCP server を渡しません。`.mcp.json` に無い名前があると、workflow は起動前に止まります。
 
+|`subagents`
+|list
+|任意
+|この agent が `Agent` ツールで起動できるサブエージェント（`.aidev/agents/<name>.md` の名前）。書くとこれ以外は起動できません。省略すると AI ツールが用意するものを使えます。`tools` を書くなら `Agent` を含めます。サブエージェントの `tools`・`mcp` はこの agent の範囲内でなければならず、サブエージェント自身は `subagents` を持てません（xref:workflows-subagents[サブエージェントを指定する]）。
+
 |`model`
 |文字列
 |任意
-|`inherit` にします。workflow から起動するときは使われず、workflow の `model` と `aidev.yaml` の設定に従います。
+|`inherit` にします。workflow から起動するときは使われず、workflow の `model` と `aidev.yaml` の設定に従います。サブエージェントは親の agent と同じモデルで動きます。
 |===
 
 * `tools` か `mcp` を書いた agent は、Claude Code でだけ動きます（他の AI ツールは渡すツールを絞れないため、起動前に止まります）。

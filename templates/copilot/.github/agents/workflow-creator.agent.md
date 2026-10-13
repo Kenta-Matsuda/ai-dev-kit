@@ -23,7 +23,7 @@ description: "自然言語の要望から workflow（.aidev/workflows/<name>/wor
 - **workflow.yaml に書くもの = 制約**：ステップの順番、各ステップの agent、そのステップが書けるパス（`writable`）、終了条件、上限
 - **agent の frontmatter に書くもの = 能力**：その agent が使える skill（`skills`）、組み込みツール（`tools`）、MCP server（`mcp`）
 
-同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（例：`ticket-reader` と `ticket-updater`）。ある workflow でだけ skill や MCP server を足したいときは、workflow.yaml のトップレベルの `agents:` に書けます（`skills` と `mcp` は frontmatter のものに足され、`tools` は書くと frontmatter のものの代わりに使われる）。ステップごとに能力を変える項目はありません。
+同じ agent に仕事ごとに違う権限を持たせたいときは、agent を分けます（例：`ticket-reader` と `ticket-updater`）。ある workflow でだけ skill や MCP server を足したいときは、workflow.yaml のトップレベルの `agents:` に書けます（`skills` と `mcp` は frontmatter のものに足され、`tools` は書くと frontmatter のものの代わりに使われる）。`agents:` の `subagents` で、その agent が `Agent` ツールで起動できるサブエージェントを名前で指定できます（書けばそれ以外は起動できない。サブエージェントの tools / mcp は親の範囲内）。ステップごとに能力を変える項目はありません。
 
 ## workflow.yaml の書き方
 
@@ -41,6 +41,7 @@ agents:                                # 任意。この workflow でだけ agen
     skills: [test-and-verify]          #   frontmatter の skills に足す
     mcp: [tickets]                     #   frontmatter の mcp に足す
     # tools: [Read, Grep]              #   書くと frontmatter の tools の代わりに使う
+    # subagents: [my-scout]            #   起動できるサブエージェント（.aidev/agents/my-scout.md）。tools を書くなら Agent も
 steps:                                 # 上から順に実行する
   - id: analyze                        # ^[a-z0-9][a-z0-9-]{0,31}$
     description: <レビュアー向けの説明>  # 任意。PR 本文と --dry-run に出る
@@ -55,6 +56,7 @@ steps:                                 # 上から順に実行する
       from: targets.txt                #   前のステップが notes ディレクトリに書いた一覧（1 行 1 件）
       max_items: 20                    #   必須。上限 10000
       on_failure: continue             #   任意。stop（既定）: 1 件の失敗で止まる。continue: 失敗した件の変更を戻して次の件へ
+      # parallel: 4                    #   任意。同時に動かす件数（上限 16）。2 以上なら writable を件ごとのパスで書く: [tests/e2e/{item}.spec.ts]
     prompt: 画面 {item} の IT テストを書く。   # for_each のステップは {item} が必須（until にも書ける）
     until:                             # 終了条件。満たすまで agent を繰り返す（command と agent のどちらか、または両方）
       command: npx playwright test     #   exit 0 になること。順に実行するなら list: [npm ci, npx playwright test]
@@ -69,6 +71,10 @@ steps:                                 # 上から順に実行する
     command: npm run lint              # command step: 1 回実行。exit 0 以外で workflow 失敗
     # cwd / env / timeout_minutes      # 任意。until と同じ意味
     # writable: [gen/**]               # 任意。コマンドが作るファイルのうち PR に入れるもの
+  # - id: build                      # 任意。parallel グループ: agent step を同時に起動し、全部終わってから次へ
+  #   parallel:                      #   2〜16 個。writable どうしが重なると検証で拒否される
+  #     - { id: api, agent: api-writer, writable: [api/**], prompt: ... }
+  #     - { id: web, agent: web-writer, writable: [web/**], prompt: ... }
   - id: pr
     pull_request:                      # 各ステップの writable の変更を commit → push → PR。最大 1 つ
       title: "..."                     #   任意（書かなければ pull_request: {}）
@@ -82,7 +88,8 @@ limits:
 - 最終報告に収まらないもの（計画、対象ファイルの一覧）は、**その実行の notes ディレクトリ**に file として書かせます。場所は kit が各 agent step の指示に入れます。どのステップの agent も書けて（`writable: []` でも）、後のステップが読めます。コミットはされません
 - `until.command` と `command` は shell を通しません。引用符・パイプ・リダイレクト・変数は使えません。複数のコマンドは `until.command` の list か、command step を並べて書きます。環境変数は `env`、実行場所は `cwd` で渡します
 - `until.command` が失敗すると、出力の末尾と、全文を書いた log file の場所が agent に渡ります
-- **対象が多い仕事は `for_each` で 1 件ずつにします**（画面ごとのテスト、module ごとの移行）。一覧は前のステップに notes ディレクトリの file へ 1 行 1 件で書かせます。1 件は英数字と `. _ / @ -` だけの 1 語です（空白、先頭の `-`、`..` があると kit が止めます）。`until` は 1 件ごとに判定するので、その件だけを確かめるコマンドにします（`npx playwright test {item}` など）
+- **対象が多い仕事は `for_each` で 1 件ずつにします**（画面ごとのテスト、module ごとの移行）。一覧は前のステップに notes ディレクトリの file へ 1 行 1 件で書かせます。1 件は英数字と `. _ / @ -` だけの 1 語です（空白、先頭の `-`、`..` があると kit が止めます）。`until` は 1 件ごとに判定するので、その件だけを確かめるコマンドにします（`npx playwright test {item}` など）。件が独立したファイルを書くなら `for_each.parallel` で同時に動かせます（`writable` を `tests/e2e/{item}.spec.ts` のように件ごとのパスで書く。同じポートやデータを使うテストは同時に動かさない）
+- **互いに独立した作業は `parallel:` グループで同時に動かせます**（API と画面など）。`writable` が重ならないようにディレクトリを分けます。後のステップに渡る報告を前提にする作業は、グループに入れず順番に並べます
 - **通すために判定を弱められる file は `unchanged` に書きます**。バージョンアップなら既存のテスト（`tests/**`）、テストを書くステップなら test runner の設定（`playwright.config.ts`）です。`until.command` は `package.json` の script ではなく、test runner を直接呼びます（`package.json` が `writable` だと script を書き換えられるため）。file の一部だけの変更（`test.skip` の追加など）は検査できないので、`until.agent` の `until.prompt` に「skip や空のテストが無いこと」と書きます
 - 途中で止まった実行は `aidev run workflow <name> --resume last` で、止まったステップから続けられます。終わったステップはやり直さないので、ステップは「終わったら結果が作業ツリーか notes に残る」単位に分けます
 - `until.agent` はレビューで判定する終了条件です。確認の観点を `until.prompt` に具体的に書きます。不合格ならその報告を添えてステップの agent がやり直します。コマンドで判定できることは `until.command` に書き、agent には判断が要ることだけを確認させます

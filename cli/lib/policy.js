@@ -57,6 +57,7 @@ function decide(repoRoot, targetPath, {
   workflow = process.env.AIDEV_WORKFLOW || null,
   step = process.env.AIDEV_WORKFLOW_STEP || null,
   run = process.env.AIDEV_WORKFLOW_RUN || null,
+  item = process.env.AIDEV_WORKFLOW_ITEM || null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
@@ -132,7 +133,7 @@ function decide(repoRoot, targetPath, {
   if (workflow) {
     const wfMod = require('./workflow');
     const wf = wfMod.inspect(repoRoot, installRoot, config, workflow);
-    const access = wf.approval.approved && step ? wfMod.stepAccess(wf.def, wf.deps, step) : null;
+    const access = wf.approval.approved && step ? wfMod.stepAccess(wf.def, wf.deps, step, { item }) : null;
     if (!wf.approval.approved) {
       scopeHint = `workflow ${workflow} is not approved: ${wf.approval.reason}`;
     } else if (!access) {
@@ -244,11 +245,19 @@ function tokenize(segment) {
  * servers; this is the second line, for a tool that ignores or changes those
  * launch flags. Fails closed: a run whose workflow cannot be read or is no
  * longer approved may call nothing through this hook.
+ *
+ * `subagent` is the agent type of a subagent making the call (null: the
+ * step's agent itself); it is held to its own grants. `toolInput` is the
+ * call's arguments: an Agent call may only start a subagent the step's agent
+ * names (`subagent_type`), when it names any.
  */
 function decideToolUse(repoRoot, toolName, {
   config = null,
   workflow = process.env.AIDEV_WORKFLOW || null,
   step = process.env.AIDEV_WORKFLOW_STEP || null,
+  item = process.env.AIDEV_WORKFLOW_ITEM || null,
+  subagent = null,
+  toolInput = null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   if (!workflow) return null;
@@ -257,16 +266,29 @@ function decideToolUse(repoRoot, toolName, {
   if (!wf.approval.approved) {
     return deny(`workflow ${workflow} is not approved: ${wf.approval.reason}`, { rule: 'workflow-tool', workflow, tool: toolName });
   }
-  const access = step ? wfMod.stepAccess(wf.def, wf.deps, step) : null;
+  const access = step ? wfMod.stepAccess(wf.def, wf.deps, step, { item, subagent }) : null;
   if (!access) {
     return deny(`workflow ${workflow} has no step ${step || '(none named)'}`, { rule: 'workflow-tool', workflow, tool: toolName });
   }
-  if (wfMod.toolGranted(access, toolName)) return null;
-  const what = String(toolName).startsWith('mcp__')
-    ? `the MCP servers of agent ${access.agent} (${access.mcp.join(', ') || 'none'})`
-    : `the tools of agent ${access.agent} (${(access.tools || []).join(', ')})`;
-  return deny(`${toolName} is not among ${what}; the agent's frontmatter grants them`,
-    { rule: 'workflow-tool', workflow, step, tool: toolName });
+  if (access.refused) {
+    return deny(`${access.refused}; it may call nothing`, { rule: 'workflow-subagent', workflow, step, tool: toolName, subagent });
+  }
+  const who = access.subagent ? `subagent ${access.subagent} of agent ${access.agent}` : `agent ${access.agent}`;
+  if (!wfMod.toolGranted(access, toolName)) {
+    const what = String(toolName).startsWith('mcp__')
+      ? `the MCP servers of ${who} (${access.mcp.join(', ') || 'none'})`
+      : `the tools of ${who} (${(access.tools || []).join(', ')})`;
+    return deny(`${toolName} is not among ${what}; the agent's frontmatter and the workflow's agents: grant them`,
+      { rule: 'workflow-tool', workflow, step, tool: toolName });
+  }
+  if (/^(Agent|Task)$/.test(String(toolName))) {
+    const type = toolInput && typeof toolInput === 'object' ? toolInput.subagent_type : null;
+    if (!wfMod.subagentGranted(access, type)) {
+      return deny(`${who} may start only the subagents ${access.subagents.join(', ')} (not ${type || 'one without a subagent_type'})`,
+        { rule: 'workflow-subagent', workflow, step, tool: toolName, subagent: type || null });
+    }
+  }
+  return null;
 }
 
 /** Decide a batch of paths; the first denial wins. */

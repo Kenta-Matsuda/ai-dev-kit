@@ -51,6 +51,10 @@ const argv = process.argv.slice(2);
 if (process.env.STUB_ARGV_OUT) fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.stringify(argv, null, 2));
 const mcpAt = argv.indexOf('--mcp-config');
 if (mcpAt >= 0 && process.env.STUB_MCP_OUT) fs.writeFileSync(process.env.STUB_MCP_OUT, fs.readFileSync(argv[mcpAt + 1]));
+const agentsAt = argv.indexOf('--agents');
+if (agentsAt >= 0 && process.env.STUB_AGENTS_OUT) fs.writeFileSync(process.env.STUB_AGENTS_OUT, fs.readFileSync(argv[agentsAt + 1]));
+// STUB_SPANS_OUT: one line per start (step, target, start and end time); STUB_SLEEP_MS keeps each start busy that long.
+const startedAt = Date.now();
 if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null }));
 if (process.env.STUB_STEPS_OUT) fs.appendFileSync(process.env.STUB_STEPS_OUT, (process.env.AIDEV_WORKFLOW_STEP || '') + '\\n');
 // An until agent (step "<id>:until") answers the next verdict from STUB_VERDICTS (a JSON list).
@@ -78,6 +82,13 @@ process.stdin.on('end', () => {
   }
   if (process.env.STUB_PROMPT_OUT) fs.appendFileSync(process.env.STUB_PROMPT_OUT, stdin + '\\n=====\\n');
   if (process.env.STUB_MODE === 'fail') { process.stderr.write('stub: refused\\n'); process.exit(2); }
+  // STUB_SLEEP_FOR ("left:900,right:100") overrides STUB_SLEEP_MS for the named steps.
+  const own = new Map(String(process.env.STUB_SLEEP_FOR || '').split(',').filter(Boolean).map((x) => x.split(':')));
+  const busy = Number(own.has(step) ? own.get(step) : process.env.STUB_SLEEP_MS || 0);
+  if (busy) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, busy);
+  if (process.env.STUB_SPANS_OUT) {
+    fs.appendFileSync(process.env.STUB_SPANS_OUT, JSON.stringify({ step, item: process.env.AIDEV_WORKFLOW_ITEM || null, start: startedAt, end: Date.now() }) + '\\n');
+  }
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { content: [
     { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: process.cwd() + '/stub-read.md' } }] } }) + '\\n');
@@ -137,7 +148,7 @@ function run() {
     const each = wfMod.validateDefinition(withStep({
       prompt: 'test {item}', unchanged: ['tests/**'], for_each: { from: 'targets.txt', max_items: 5 }, until: { command: 'npx playwright test {item}' },
     }), 'wf').steps[0];
-    eq([each.unchanged, each.for_each], [['tests/**'], { from: 'targets.txt', max_items: 5, on_failure: 'stop' }]);
+    eq([each.unchanged, each.for_each], [['tests/**'], { from: 'targets.txt', max_items: 5, on_failure: 'stop', parallel: 1 }]);
     const one = wfMod.forItem(each, 'e2e/login.spec.ts');
     eq([one.prompt, one.until.commands[0].argv], ['test e2e/login.spec.ts', ['npx', 'playwright', 'test', 'e2e/login.spec.ts']], '{item} is the target, one argv entry');
     eq(wfMod.parseItems('# screens\n\n- login\n* orders/list\nlogin\n  @scope/pkg  \n', each.for_each), ['login', 'orders/list', '@scope/pkg'],
@@ -206,7 +217,8 @@ function run() {
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt', max_items: 10001 } }), 'wf'), /above the hard ceiling of 10000/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: 'targets.txt', max_items: 5, on_failure: 'skip' } }), 'wf'), /on_failure is stop or continue/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { from: '../targets.txt', max_items: 5 } }), 'wf'), /name of a file in the run's notes directory/);
-    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { ...FE, parallel: 2 } }), 'wf'), /for_each: unknown key parallel/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { ...FE, parallel: 2 } }), 'wf'), /for_each\.parallel needs every writable path to name the target as \{item\}/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'do {item}', for_each: { ...FE, parallel: 17 } }), 'wf'), /above the hard ceiling of 16/);
     throws(() => wfMod.validateDefinition(withStep({ prompt: 'do it', for_each: FE }), 'wf'), /prompt must name its target as \{item\}/);
     throws(() => wfMod.validateDefinition(withStep({ until: { command: 'npm test {item}' } }), 'wf'), /\{item\} needs for_each/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test {item}' }] }, 'wf'), /belongs to an agent step with for_each/);
@@ -217,7 +229,7 @@ function run() {
       throws(() => wfMod.parseItems(`ok\n${bad}\n`, FE), /line 2: .* is not a target/);
     }
     throws(() => wfMod.parseItems('a\nb\nc\nd\ne\nf\n', FE), /lists 6 targets, above for_each\.max_items \(5\)/);
-    throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command or pull_request/);
+    throws(() => wfMod.validateDefinition(withStep({ command: 'npm test' }), 'wf'), /exactly one of agent, command, pull_request or parallel/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ kind: 'pull-request' }] }, 'wf'), /pull_request: \{ title: \.\.\. \} now/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: null, title: 'x' }] }, 'wf'), /title of a pull request is written inside it/);
     throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ pull_request: 'yes' }] }, 'wf'), /pull_request is a mapping/);
@@ -243,9 +255,9 @@ function run() {
   });
 
   test('an agent\'s frontmatter says what it can use: skills, tools and MCP servers', () => {
-    eq(wfMod.agentCapabilities({}), { skills: [], tools: null, mcp: [] }, 'nothing listed: no skills, the default tools, no MCP');
-    eq(wfMod.agentCapabilities({ skills: '[a, b]', tools: 'Read, Grep', mcp: '[tickets]' }),
-      { skills: ['a', 'b'], tools: ['Read', 'Grep'], mcp: ['tickets'] });
+    eq(wfMod.agentCapabilities({}), { skills: [], tools: null, mcp: [], subagents: [] }, 'nothing listed: no skills, the default tools, no MCP, any subagent');
+    eq(wfMod.agentCapabilities({ skills: '[a, b]', tools: 'Read, Grep', mcp: '[tickets]', subagents: '[explorer]' }),
+      { skills: ['a', 'b'], tools: ['Read', 'Grep'], mcp: ['tickets'], subagents: ['explorer'] });
     eq(wfMod.agentCapabilities({ tools: '[]', mcp: '' }).tools, null, 'an empty tools list means the default set');
     throws(() => wfMod.agentCapabilities({ tools: 'Read, rm -rf' }), /not a tool name/);
     throws(() => wfMod.agentCapabilities({ mcp: '[a__b]' }), /not an MCP server name/);
@@ -258,9 +270,9 @@ function run() {
 
   test('a workflow\'s agents: assigns skills, MCP servers and tools to the agents its steps name', () => {
     const def = wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { skills: ['a', 'a'], mcp: 'tickets', tools: ['Read', 'Edit'] } } }, 'wf');
-    eq(def.grants, { 'issue-to-pr': { skills: ['a'], mcp: ['tickets'], tools: ['Read', 'Edit'] } }, 'one name is a list of one; duplicates dropped');
+    eq(def.grants, { 'issue-to-pr': { skills: ['a'], mcp: ['tickets'], tools: ['Read', 'Edit'], subagents: [] } }, 'one name is a list of one; duplicates dropped');
     eq(wfMod.validateDefinition(GOOD, 'wf').grants, {}, 'no agents: assigns nothing');
-    eq(wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': null } }, 'wf').grants['issue-to-pr'], { skills: [], mcp: [], tools: null });
+    eq(wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': null } }, 'wf').grants['issue-to-pr'], { skills: [], mcp: [], tools: null, subagents: [] });
     throws(() => wfMod.validateDefinition({ ...GOOD, agents: ['x'] }, 'wf'), /agents is a mapping of agent name/);
     throws(() => wfMod.validateDefinition({ ...GOOD, agents: { other: { skills: ['a'] } } }, 'wf'), /agents\.other: no step names agent other/);
     throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { model: 'x' } } }, 'wf'), /agents\.issue-to-pr: unknown key model/);
@@ -273,9 +285,75 @@ function run() {
     eq(Object.keys(wfMod.validateDefinition({ ...judged, agents: { reviewer: { mcp: ['tickets'] } } }, 'wf').grants), ['reviewer']);
     // skills and mcp are added to the frontmatter's; tools replaces its list.
     const own = { skills: ['s1'], tools: null, mcp: ['m1'] };
-    eq(wfMod.mergeCapabilities(own, { skills: ['s1', 's2'], mcp: ['m2'], tools: null }), { skills: ['s1', 's2'], tools: null, mcp: ['m1', 'm2'] });
-    eq(wfMod.mergeCapabilities({ ...own, tools: ['Read', 'Bash'] }, { skills: [], mcp: [], tools: ['Read'] }).tools, ['Read']);
-    eq(wfMod.mergeCapabilities(own, undefined), own);
+    eq(wfMod.mergeCapabilities(own, { skills: ['s1', 's2'], mcp: ['m2'], tools: null, subagents: ['x'] }), { skills: ['s1', 's2'], tools: null, mcp: ['m1', 'm2'], subagents: ['x'] });
+    eq(wfMod.mergeCapabilities({ ...own, tools: ['Read', 'Bash'] }, { skills: [], mcp: [], tools: ['Read'], subagents: [] }).tools, ['Read']);
+    eq(wfMod.mergeCapabilities(own, undefined), { ...own, subagents: [] });
+  });
+
+  test('a parallel group runs agent steps at once; their writable paths may not meet', () => {
+    const A = { id: 'api', agent: 'api-writer', writable: ['api/**'], prompt: 'p' };
+    const W = { id: 'web', agent: 'web-writer', writable: ['web/**'], unchanged: ['api/openapi.yaml'], prompt: 'p' };
+    const d = wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'build', description: 'both sides', parallel: [A, { ...W, unchanged: [] }] }, { command: 'npm test' }] }, 'wf');
+    eq(d.steps.map((s) => [s.id, s.group || null]), [['api', 'build'], ['web', 'build'], ['step-2', null]], 'members are steps of their own, marked with the group');
+    eq(d.groups, [{ id: 'build', description: 'both sides', members: ['api', 'web'] }]);
+    eq(d.agents, ['api-writer', 'web-writer']);
+    eq(d.writable, ['api/**', 'web/**']);
+    const group = (members) => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'g', parallel: members }] }, 'wf');
+    throws(() => group([A, { ...W, writable: ['api/v2/**'] }]), /steps api and web run at the same time but may write the same paths \(api\/\*\* and api\/v2\/\*\*\)/);
+    throws(() => group([{ ...A, writable: ['api/**', 'shared/a.ts'] }, W]), /web must leave unchanged|may write api\/\*\*, which step web must leave unchanged/);
+    eq(group([{ ...A, writable: ['shared/a.ts'] }, { ...W, writable: ['shared/b.ts'], unchanged: [] }]).steps.length, 2, 'two different files of one directory');
+    throws(() => group([A]), /at least two agent steps/);
+    throws(() => group([A, { id: 'lint', command: 'npm run lint' }]), /parallel\[1\]: a parallel group holds agent steps only/);
+    throws(() => group([A, { id: 'inner', parallel: [W, W] }]), /holds agent steps only/);
+    throws(() => group(Array.from({ length: 17 }, (_, k) => ({ ...A, id: `a${k}`, writable: [`d${k}/**`] }))), /above the ceiling of 16/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'api', parallel: [A, { ...W, unchanged: [] }] }] }, 'wf'), /duplicate step id api/);
+    eq(group([{ ...A, id: undefined }, { ...W, id: undefined, unchanged: [] }]).steps.map((s) => s.id), ['g-1', 'g-2'], 'members without an id are named after the group');
+    // The overlap test errs towards "they might".
+    eq([['src/**', 'src/a.ts'], ['src/a.ts', 'src/b.ts'], ['api/**', 'web/**'], ['a/*.ts', 'a/b/**'], ['e2e/{item}.ts', 'e2e/x.ts'], ['a/b.ts', 'a/b.ts']]
+      .map(([x, y]) => wfMod.mayOverlap(x, y)), [true, false, false, true, true, true]);
+  });
+
+  test('for_each.parallel runs targets at once; each one writes only paths named after it', () => {
+    const FE = { from: 'targets.txt', max_items: 50, parallel: 4 };
+    const d = wfMod.validateDefinition(withStep({ prompt: 'test {item}', writable: ['e2e/tests/{item}.spec.ts'], for_each: FE }), 'wf');
+    eq(d.steps[0].for_each.parallel, 4);
+    eq(d.writable, ['e2e/tests/**'], 'the pull request takes the directory every target writes in');
+    eq(wfMod.forItem(d.steps[0], 'login/form').writable, ['e2e/tests/login/form.spec.ts']);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'test {item}', writable: ['e2e/tests/{item}.spec.ts', 'e2e/index.ts'], for_each: FE }), 'wf'),
+      /for_each\.parallel needs every writable path to name the target/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'test {item}', writable: ['{item}/x.ts'], for_each: FE }), 'wf'), /must start with a fixed directory before \{item\}/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'go', writable: ['e2e/{item}.ts'] }), 'wf'), /\{item\} needs for_each/);
+    throws(() => wfMod.validateDefinition(withStep({ prompt: 'test {item}', writable: ['e2e/{item}.ts'], unchanged: ['cfg/{item}'], for_each: FE }), 'wf'), /unchanged cannot name \{item\}/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ command: 'npm test', writable: ['out/{item}'] }] }, 'wf'), /belongs to an agent step with for_each/);
+    // The guard: {item} is the target the runner named, and nothing without one.
+    const deps = { agents: { 'issue-to-pr': { capabilities: { skills: [], tools: null, mcp: [], subagents: [] } } } };
+    eq(wfMod.stepAccess(d, deps, 'a', { item: 'login' }).writable, ['e2e/tests/login.spec.ts']);
+    eq(wfMod.stepAccess(d, deps, 'a').writable, [], 'no target: none of its paths');
+    eq(wfMod.stepAccess(d, deps, 'a', { item: '../x' }).writable, [], 'not a target');
+  });
+
+  test('subagents: an agent names the ones it may start, and the guard holds each to its own grants', () => {
+    const def = wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { subagents: ['scout'] }, scout: { mcp: ['tickets'] } } }, 'wf');
+    eq(def.grants.scout.mcp, ['tickets'], 'a subagent named in agents: can be given things too');
+    throws(() => wfMod.validateDefinition({ ...GOOD, agents: { 'issue-to-pr': { subagents: ['issue-to-pr'] } } }, 'wf'), /cannot be its own subagent/);
+    throws(() => wfMod.validateDefinition(withStep({ subagents: ['x'] }), 'wf'), /a step does not carry subagents/);
+    const deps = { agents: { 'issue-to-pr': {
+      capabilities: { skills: [], tools: ['Read', 'Grep', 'Agent'], mcp: ['tickets'], subagents: ['scout'] },
+      subagentDefs: { scout: { capabilities: { skills: [], tools: ['Read'], mcp: [], subagents: [] } } },
+    } } };
+    const main = wfMod.stepAccess(def, deps, 'a');
+    eq([wfMod.subagentGranted(main, 'scout'), wfMod.subagentGranted(main, 'general-purpose'), wfMod.subagentGranted(main, undefined)], [true, false, false]);
+    eq(wfMod.toolGranted(main, 'mcp__tickets__get'), true);
+    const scout = wfMod.stepAccess(def, deps, 'a', { subagent: 'scout' });
+    eq(['Read', 'Grep', 'mcp__tickets__get', 'Agent'].map((t) => wfMod.toolGranted(scout, t)), [true, false, false, false], 'the subagent has its own, smaller grant');
+    eq(scout.writable, ['src/**'], 'and writes where its step may');
+    const other = wfMod.stepAccess(def, deps, 'a', { subagent: 'general-purpose' });
+    ok(/not one agent issue-to-pr may start/.test(other.refused), other.refused);
+    eq(wfMod.toolGranted(other, 'Read'), false, 'a subagent the agent may not start may call nothing');
+    // An agent that names no subagents: any, sharing its grants (as before).
+    const open = { agents: { 'issue-to-pr': { capabilities: { skills: [], tools: null, mcp: [], subagents: [] }, subagentDefs: {} } } };
+    const free = wfMod.stepAccess(wfMod.validateDefinition(GOOD, 'wf'), open, 'a', { subagent: 'Explore' });
+    eq([wfMod.subagentGranted(free, 'Explore'), wfMod.toolGranted(free, 'Bash'), !!free.refused], [true, true, false]);
   });
 
   test('an until agent writes nothing and uses its own grants; its verdict is the last VERDICT line', () => {
@@ -1022,6 +1100,135 @@ function run() {
         const all = aidev(fx.root, ['run', 'workflow', 'skipall', '--json'], { env: env({ STUB_ITEM_DIR: 'src/out' }) });
         eq(all.code, 1, all.out);
         ok(/every target failed \(the first: bad:/.test(lastJson(all.out).stopReason), lastJson(all.out).stopReason);
+      });
+
+      // Spans of the agent starts a run made: [{ step, item, start, end }].
+      const spansOf = (file) => fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      // The most starts that were running at one moment.
+      const widest = (spans) => Math.max(...spans.map((a) => spans.filter((b) => b.start < a.end && a.start < b.end).length));
+
+      test('for_each.parallel runs its targets at once, each under its own writable; a failed one is undone alone', () => {
+        const spans = path.join(tmp, 'spans.txt');
+        fs.rmSync(spans, { force: true });
+        define('wide', { minutes: null, steps: [
+          '  - id: plan', '    command: node tools/list.js wide a,b,bad,d,e',
+          '  - id: write', '    agent: coder', '    prompt: Write the test for {item}.', '    writable: [src/out/{item}.txt]',
+          '    for_each:', '      from: targets.txt', '      max_items: 10', '      on_failure: continue', '      parallel: 3',
+          '    until:', '      command: node tools/check.js {item}', '      max_retries: 0',
+        ] });
+        reset();
+        const dry = aidev(fx.root, ['run', 'workflow', 'wide', '--dry-run'], { env: env() });
+        ok(/at most 10, 3 at a time/.test(dry.out), dry.out);
+        const r = aidev(fx.root, ['run', 'workflow', 'wide', '--json'], { env: env({ STUB_ITEM_DIR: 'src/out', STUB_SPANS_OUT: spans, STUB_SLEEP_MS: '400', STUB_ENV_OUT: '' }) });
+        eq(r.code, 0, r.out);
+        const w = lastJson(r.out).steps.find((x) => x.id === 'write');
+        eq(w.items.map((x) => [x.item, x.ok, !!x.failed]), [['a', true, false], ['b', true, false], ['bad', false, true], ['d', true, false], ['e', true, false]],
+          'the record keeps the list\'s order');
+        const starts = spansOf(spans);
+        eq(starts.map((x) => x.item).sort(), ['a', 'b', 'bad', 'd', 'e'], 'each start knows its target (AIDEV_WORKFLOW_ITEM)');
+        eq(widest(starts), 3, 'three at a time, never more');
+        const out = (f) => path.join(fx.root, 'src', 'out', f);
+        ok(['a', 'b', 'd', 'e'].every((x) => fs.existsSync(out(`${x}.txt`))), 'the targets that passed keep their work');
+        ok(!fs.existsSync(out('bad.txt')), 'the failed target was undone, and only it');
+        // The guard gives a target its own path, and no other target's.
+        const policyMod = require('../cli/lib/policy');
+        const at = (item, rel) => policyMod.decide(fx.root, rel, { workflow: 'wide', step: 'write', item, installRoot: KIT_ROOT }).decision;
+        eq([at('a', 'src/out/a.txt'), at('a', 'src/out/b.txt'), at(null, 'src/out/a.txt')], ['allow', 'deny', 'deny']);
+        for (const x of ['a', 'b', 'd', 'e']) fs.rmSync(out(`${x}.txt`), { force: true });
+      });
+
+      test('the steps of a parallel group start together, and the run goes on when all have ended', () => {
+        const spans = path.join(tmp, 'spans.txt');
+        fs.rmSync(spans, { force: true });
+        define('group', { minutes: null, steps: [
+          '  - id: both', '    parallel:',
+          '      - id: left', '        agent: coder', '        writable: [src/left/**]', '        prompt: the left side',
+          '      - id: right', '        agent: coder', '        writable: [src/right/**]', '        prompt: the right side',
+          '  - id: after', '    agent: coder', '    writable: []', '    prompt: look at both',
+        ] });
+        reset();
+        const dry = aidev(fx.root, ['run', 'workflow', 'group', '--dry-run'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/runs at the same time as right \(parallel group both\)/.test(dry.out), dry.out);
+        // left takes longer, so right finishes first.
+        const r = aidev(fx.root, ['run', 'workflow', 'group', '--json'], { env: env({ STUB_SPANS_OUT: spans, STUB_SLEEP_MS: '300', STUB_SLEEP_FOR: 'left:900' }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq(j.steps.map((x) => [x.id, x.ok]), [['left', true], ['right', true], ['after', true]]);
+        const starts = spansOf(spans);
+        const by = (id) => starts.find((x) => x.step === id);
+        ok(by('left').start < by('right').end && by('right').start < by('left').end, 'left and right overlapped');
+        ok(by('after').start >= Math.max(by('left').end, by('right').end), 'after started once both had ended');
+        const last = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean).pop();
+        ok(by('right').end < by('left').end, 'right finished first');
+        ok(/## Reports from the earlier steps[\s\S]*left[\s\S]*right/.test(last), 'the step after the group reads both reports, in the order of the definition');
+        // A group step that stops lets the other finish, and the run stops after the group.
+        fs.rmSync(spans, { force: true });
+        const bad = aidev(fx.root, ['run', 'workflow', 'group', '--json'], { env: env({ STUB_SPANS_OUT: spans, STUB_MODE: 'fail' }) });
+        eq(bad.code, 1, bad.out);
+        const b = lastJson(bad.out);
+        ok(/^step (left|right): /.test(b.stopReason), b.stopReason);
+        eq(b.steps.map((x) => x.id), ['left', 'right'], 'after never started');
+      });
+
+      test('subagents an agent may start reach the tool as --agents, and the guard refuses any other', () => {
+        const agentsOut = path.join(tmp, 'agents.json');
+        fs.rmSync(agentsOut, { force: true });
+        write(path.join(fx.root, '.aidev', 'agents', 'lead.md'), '---\nname: lead\ndescription: leads\ntools: Read, Grep, Agent\nmcp: [tickets]\n---\n\nYou lead.\n');
+        write(path.join(fx.root, '.aidev', 'agents', 'scout.md'), '---\nname: scout\ndescription: looks around\nskills: [code-review]\ntools: Read\n---\n\nYou scout.\n');
+        define('subs', {
+          extra: ['agents:', '  lead:', '    subagents: [scout]'],
+          steps: ['  - id: look', '    agent: lead', '    writable: []', '    prompt: find out'],
+        });
+        reset();
+        // The PKG's hook must see Agent calls; this fixture's settings.json predates that.
+        const settingsFile = path.join(fx.root, '.claude', 'settings.json');
+        const settings = fs.readFileSync(settingsFile, 'utf8');
+        const stale = aidev(fx.root, ['run', 'workflow', 'subs', '--dry-run'], { env: env() });
+        eq(stale.code, 1, stale.out);
+        ok(/agent lead names subagents, but \.claude\/settings\.json does not send Agent calls/.test(stale.out), stale.out);
+        write(settingsFile, settings.replace('"Write|Edit|MultiEdit|Bash"', '"Write|Edit|MultiEdit|Bash|Agent|Task"'));
+        const dry = aidev(fx.root, ['run', 'workflow', 'subs', '--dry-run'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/subagents: scout/.test(dry.out) && /may start subagent scout \(skills: code-review; tools: Read; mcp: \(none\)\)/.test(dry.out), dry.out);
+        const r = aidev(fx.root, ['run', 'workflow', 'subs', '--json'], { env: env({ STUB_AGENTS_OUT: agentsOut }) });
+        eq(r.code, 0, r.out);
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        ok(a.indexOf('--agents') >= 0 && a.indexOf('--agents') < a.indexOf('--tools'), a.join(' '));
+        ok(!a[a.indexOf('--agents') + 1].startsWith(fx.root) && !fs.existsSync(a[a.indexOf('--agents') + 1]), 'outside the repository, removed after');
+        const spec = JSON.parse(fs.readFileSync(agentsOut, 'utf8'));
+        eq(Object.keys(spec), ['scout']);
+        eq([spec.scout.description, spec.scout.model, spec.scout.disallowedTools], ['looks around', 'inherit', ['Grep', 'Agent', 'mcp__tickets']],
+          'what the parent has and the subagent does not is taken away');
+        ok(/You scout\.[\s\S]*## Skill: code-review/.test(spec.scout.prompt), 'its body and skills');
+        ok(/## Subagents\n\nYou may start these subagents[^\n]*\n- scout: looks around/.test(fs.readFileSync(promptOut, 'utf8')), 'the agent is told which');
+        // The hook, as Claude Code calls it: an Agent call names its subagent; a subagent's own calls name it (agent_id, agent_type).
+        const hook = (input) => {
+          const f = path.join(tmp, 'hook-input.json');
+          fs.writeFileSync(f, JSON.stringify(input));
+          return aidev(fx.root, ['hook', 'guard-write', '--input', f], { env: { AIDEV_WORKFLOW: 'subs', AIDEV_WORKFLOW_STEP: 'look' } });
+        };
+        const denied = (res) => /"permissionDecision": ?"deny"/.test(res.out);
+        ok(denied(hook({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', prompt: 'x' } })), 'a subagent it does not name');
+        const okAgent = hook({ tool_name: 'Agent', tool_input: { subagent_type: 'scout', prompt: 'x' } });
+        eq([okAgent.code, denied(okAgent)], [0, false], okAgent.out);
+        ok(denied(hook({ tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'x1', agent_type: 'scout' })), 'Bash is not among the scout\'s tools');
+        ok(denied(hook({ tool_name: 'mcp__tickets__get', tool_input: {}, agent_id: 'x1', agent_type: 'scout' })), 'nor the tickets server');
+        ok(!denied(hook({ tool_name: 'mcp__tickets__get', tool_input: {} })), 'which its parent may use');
+        ok(denied(hook({ tool_name: 'Write', tool_input: { file_path: 'src/x.ts', content: '' }, agent_id: 'x2', agent_type: 'Explore' })), 'a subagent it may not start may do nothing');
+        // A subagent may not have what its parent lacks.
+        write(path.join(fx.root, '.aidev', 'agents', 'digger.md'), '---\nname: digger\ndescription: digs\ntools: Read, Bash\n---\n\nYou dig.\n');
+        define('subs-wide', {
+          extra: ['agents:', '  lead:', '    subagents: [digger]'],
+          steps: ['  - id: look', '    agent: lead', '    writable: []', '    prompt: find out'],
+        });
+        const wide = aidev(fx.root, ['run', 'workflow', 'subs-wide', '--dry-run'], { env: env() });
+        eq(wide.code, 1, wide.out);
+        ok(/subagent digger may use Bash, which its parent lead may not/.test(wide.out), wide.out);
+        const rm = aidev(fx.root, ['remove', 'agent', 'scout']);
+        eq(rm.code, 1, rm.out);
+        ok(/subs/.test(rm.out) && fs.existsSync(path.join(fx.root, '.aidev', 'agents', 'scout.md')), 'a subagent a workflow uses is not removed: ' + rm.out);
+        write(settingsFile, settings);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

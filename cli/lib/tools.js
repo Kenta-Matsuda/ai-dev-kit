@@ -238,6 +238,9 @@ const REGISTRY = Object.freeze({
         // call. The variadic --tools goes last.
         argv.push('--mcp-config', capabilities.mcpConfigFile, '--strict-mcp-config');
         if (capabilities.mcp.length) argv.push('--allowedTools', capabilities.mcp.map((s) => `mcp__${s}`).join(','));
+        // The subagents the agent may start, defined for this session only
+        // (with -p, --agents takes a file).
+        if (capabilities.agentsFile) argv.push('--agents', capabilities.agentsFile);
         if (capabilities.tools) argv.push('--tools', ...capabilities.tools);
       }
       return argv;

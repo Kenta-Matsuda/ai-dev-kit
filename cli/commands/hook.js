@@ -135,16 +135,22 @@ function guardWrite(ctx, input, adapter) {
   }
 
   // Inside a workflow run, the step's agent may call only what its
-  // frontmatter grants (tools, MCP servers). Outside one this says nothing.
+  // frontmatter and the workflow's agents: grant (tools, MCP servers,
+  // subagents). Outside one this says nothing.
   const { tool } = toolCall(input);
   if (process.env.AIDEV_WORKFLOW) {
     let wfConfig;
     try { wfConfig = cfgMod.loadConfig(repoRoot, { required: false }); } catch (e) {
       return emitDecision(adapter, false, `ai-dev-kit: configuration could not be read (${e.message}); tool call blocked.`);
     }
-    const t = policyMod.decideToolUse(repoRoot, tool, { config: wfConfig });
+    // Claude Code names the subagent a call comes from (agent_type, with
+    // agent_id only inside a subagent); such a call is held to its grants.
+    const subagent = input.agent_id && input.agent_type ? String(input.agent_type) : null;
+    const t = policyMod.decideToolUse(repoRoot, tool, { config: wfConfig, subagent, toolInput: toolCall(input).args });
     if (t) return emitDecision(adapter, false, `ai-dev-kit: ${t.reason}`);
   }
+  // Starting a subagent writes nothing; its own calls come through here.
+  if (/^(Agent|Task)$/.test(tool)) return EXIT.OK;
   // An MCP call writes no file this guard can see. Answering "allow" would
   // approve it on the person's behalf, so the tool's own permissions decide.
   if (/^mcp__/.test(tool)) return EXIT.OK;

@@ -275,6 +275,57 @@ Split a job with many targets, such as writing tests screen by screen or migrati
 
 A target is one word made of letters, digits and `. _ / @ -` (up to 200 characters). If a line contains a space, starts with `-` or contains `..`, the ADK stops before it starts an agent. A target becomes an argument of a command, so text that could be an option or point somewhere else is refused. Write this format in the `prompt` of the step that writes the list.
 
+[[workflows-parallel]]
+==== Running agents in parallel
+
+There are two ways to run agents at the same time. Both run in the same working tree, so the ADK checks, at validation and in the hook, that **agents running at once cannot write the same file**.
+
+**Run the targets of a repeated step in parallel** (`for_each.parallel`). Write every `writable` path with `{item}` in it. Each target's agent can write only its own target's paths, and `on_failure: continue` puts back only that target's paths.
+
+[source,yaml]
+----
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/{item}.spec.ts]   # a path per target; required with parallel
+    for_each:
+      from: targets.txt
+      max_items: 200
+      parallel: 4                          # up to 4 targets at once (at most 16; default 1)
+      on_failure: continue
+    prompt: Write the e2e test for screen {item} in e2e/tests/{item}.spec.ts.
+    until:
+      command: npx playwright test tests/{item}.spec.ts
+      cwd: e2e
+----
+
+**Run different steps at the same time** (a `parallel:` group). The agent steps listed in the group start together, and the run goes on to the next step when all of them have ended.
+
+[source,yaml]
+----
+  - id: build
+    description: Build the API and the screens at the same time
+    parallel:
+      - id: api
+        agent: api-writer
+        writable: [api/**]
+        prompt: Implement the API as planned.
+      - id: web
+        agent: web-writer
+        writable: [web/**]
+        prompt: Implement the screens as planned.
+  - id: integrate
+    agent: integrator
+    writable: [api/**, web/**]
+    prompt: Connect the two.
+----
+
+* A group holds agent steps only (2 to 16). Each of them may have `for_each` and `until`.
+* Validation refuses a group whose steps' `writable` may overlap, or where one step's `writable` may overlap another's `unchanged`. Overlap is judged from the fixed part (before `*` or `{item}`): `src/**` and `src/a.ts` overlap, `src/a.ts` and `src/b.ts` do not.
+* The steps of a group cannot read each other's reports. The steps after the group get all of them.
+* When one fails, the others keep running until they end (starting no new target). Then the run stops. `--resume` runs again only the steps that did not finish.
+* `until.command` runs at the same time too. Tests that use the same port or files get in each other's way when run at once.
+* The cost limit can be passed by as many starts as run at once (the agents already running when the limit is reached are not stopped).
+
 [[workflows-unchanged]]
 ==== Naming what must not change
 
@@ -774,6 +825,24 @@ agents:
     skills: [ticket-format]
     mcp: [azure-devops]
 ----
+
+[[workflows-subagents]]
+==== Naming the subagents an agent may start
+
+An agent with the `Agent` tool can hand part of its work to subagents (several at once if it likes). `subagents` **names the subagents** that agent may start. Write it in the agent's frontmatter or in workflow.yaml's `agents:`.
+
+[source,yaml]
+----
+agents:
+  lead:
+    subagents: [scout, reviewer]     # .aidev/agents/scout.md, reviewer.md
+----
+
+* A subagent is defined in an ordinary agent file (`.aidev/agents/<name>.md`). The ADK hands its body and skills to Claude Code as a subagent for that run (`--agents`).
+* An agent with `subagents` can start only those (the hook refuses the others, Claude Code's built-in general-purpose included). Without it, the agent can use whatever Claude Code offers, as before.
+* A subagent can use only its own `tools` and `mcp`, and cannot have a tool or MCP server its parent agent lacks (validation refuses it). It writes where the parent's step may write (`writable`).
+* An agent with `subagents` runs only on Claude Code. If the PKG's `.claude/settings.json` is older (its hook does not see `Agent`), the run stops before it starts; update it with `aidev sync tools` and commit.
+* A subagent's file is approved like the others: `aidev submit workflow` puts it in the PR.
 
 List them with `aidev list agents` / `aidev list skills`, and remove them with `aidev remove agent|skill <name>` (one referenced by a workflow is refused). All of them go into the PR together with the workflow through `aidev submit workflow`, are reviewed there, and only what is on `main` is used by a workflow.
 

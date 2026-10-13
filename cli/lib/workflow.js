@@ -51,6 +51,8 @@ const LIMITS = Object.freeze({
   // One start of an agent, one command: a hang must end even without a run time limit.
   maxTimeoutMinutes: 240,
   maxItems: 10000,
+  // Agents running at once: the targets of one for_each step, or the steps of one parallel group.
+  maxParallel: 16,
 });
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -65,6 +67,8 @@ const KIT_SKILLS_DIR = 'templates/claude/.claude/skills';
 const ENV_WORKFLOW = 'AIDEV_WORKFLOW';
 const ENV_STEP = 'AIDEV_WORKFLOW_STEP';
 const ENV_RUN = 'AIDEV_WORKFLOW_RUN';
+/** The target a for_each step's agent works on: `{item}` in its writable stands for it. */
+const ENV_ITEM = 'AIDEV_WORKFLOW_ITEM';
 
 /** A run id is the start time (`2026-10-01T01-08-32-123Z`); it names a directory under runs/. */
 const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
@@ -72,16 +76,17 @@ const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
 const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'steps', 'limits'];
 /** What a workflow's `agents: { <agent>: ... }` may assign to one agent. */
-const AGENT_GRANT_KEYS = ['skills', 'mcp', 'tools'];
+const AGENT_GRANT_KEYS = ['skills', 'mcp', 'tools', 'subagents'];
 /** Where an agent's capabilities are written, for the messages that point there. */
-const GRANTS_HINT = 'assign it to the agent in the top-level agents: (agents: { <agent>: { skills: [...], mcp: [...], tools: [...] } }) or in the agent\'s own frontmatter';
+const GRANTS_HINT = 'assign it to the agent in the top-level agents: (agents: { <agent>: { skills: [...], mcp: [...], tools: [...], subagents: [...] } }) or in the agent\'s own frontmatter';
 const LIMIT_KEYS = ['max_usd', 'max_minutes'];
 /**
  * A step is the kind its one kind key names: `agent:`, `command:` or
  * `pull_request:`. Everything else on the step says how that kind runs.
  */
-const STEP_KINDS = [['agent', 'agent'], ['command', 'command'], ['pull_request', 'pull-request']];
+const STEP_KINDS = [['agent', 'agent'], ['command', 'command'], ['pull_request', 'pull-request'], ['parallel', 'parallel']];
 const STEP_KEYS = {
+  parallel: ['id', 'description', 'parallel'],
   agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'timeout_minutes'],
   command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_minutes', 'writable'],
   'pull-request': ['id', 'description', 'pull_request'],
@@ -97,6 +102,7 @@ const RENAMED = {
   skills: `a step does not carry skills; ${GRANTS_HINT}`,
   mcp: `a step does not carry MCP servers; ${GRANTS_HINT}`,
   tools: `a step does not carry tools; ${GRANTS_HINT}`,
+  subagents: `a step does not carry subagents; ${GRANTS_HINT}`,
 };
 
 /**
@@ -106,7 +112,7 @@ const RENAMED = {
  * target. A target reaches a command's argv, so it is one plain token: no
  * whitespace, nothing a command would read as an option, no way up the tree.
  */
-const FOR_EACH_KEYS = ['from', 'max_items', 'on_failure'];
+const FOR_EACH_KEYS = ['from', 'max_items', 'on_failure', 'parallel'];
 const FOR_EACH_MAX_ITEMS = LIMITS.maxItems;
 /** stop: the first target that fails stops the run. continue: its changes are undone and the next target starts. */
 const ON_FAILURE = ['stop', 'continue'];
@@ -299,7 +305,69 @@ function forEachSpec(v, where) {
   if (v.max_items == null) throw new AidevError(`${where}: for_each.max_items is required (how many targets one run may take on)`);
   const onFailure = v.on_failure == null ? 'stop' : String(v.on_failure).trim();
   if (!ON_FAILURE.includes(onFailure)) throw new AidevError(`${where}: for_each.on_failure is ${ON_FAILURE.join(' or ')}`);
-  return { from, max_items: positiveInt(v.max_items, 'for_each.max_items', where, { max: FOR_EACH_MAX_ITEMS }), on_failure: onFailure };
+  return {
+    from,
+    max_items: positiveInt(v.max_items, 'for_each.max_items', where, { max: FOR_EACH_MAX_ITEMS }),
+    on_failure: onFailure,
+    // How many targets run at once (default 1: one after another).
+    parallel: v.parallel == null ? 1 : positiveInt(v.parallel, 'for_each.parallel', where, { max: LIMITS.maxParallel }),
+  };
+}
+
+/** The leading segments of a glob that hold no wildcard and no {item}: where it can match at all. */
+function literalPrefix(glob) {
+  const out = [];
+  for (const seg of String(glob).split('/')) {
+    if (/[*?[\]{}]/.test(seg)) break;
+    out.push(seg);
+  }
+  return out;
+}
+
+/**
+ * Could two globs match one path? Answered from their literal prefixes: when
+ * neither prefix is an ancestor of (or equal to) the other they cannot, and
+ * otherwise they are taken to overlap. Errs towards "they might".
+ */
+function mayOverlap(a, b) {
+  const pa = literalPrefix(a);
+  const pb = literalPrefix(b);
+  const whole = (g, p) => p.length === String(g).split('/').length;
+  // Two literal paths overlap only when they are the same path.
+  if (whole(a, pa) && whole(b, pb)) return pa.join('/') === pb.join('/');
+  const n = Math.min(pa.length, pb.length);
+  for (let i = 0; i < n; i++) if (pa[i] !== pb[i]) return false;
+  // One prefix contains the other. A literal path shorter than the other's
+  // prefix is a file beside it, not above it, unless it is that directory.
+  if (whole(a, pa) && pa.length < pb.length) return false;
+  if (whole(b, pb) && pb.length < pa.length) return false;
+  return true;
+}
+
+/**
+ * The steps of a parallel group share one working tree, so none may write
+ * where another writes, nor where another must leave things unchanged.
+ */
+function assertDisjoint(members, where) {
+  for (let a = 0; a < members.length; a++) {
+    for (let b = 0; b < members.length; b++) {
+      if (a === b) continue;
+      const A = members[a];
+      const B = members[b];
+      for (const g of A.writable) {
+        for (const h of B.writable) {
+          if (a < b && mayOverlap(g, h)) {
+            throw new AidevError(`${where}: steps ${A.id} and ${B.id} run at the same time but may write the same paths (${g} and ${h}); give each its own directory`);
+          }
+        }
+        for (const h of B.unchanged) {
+          if (mayOverlap(g, h)) {
+            throw new AidevError(`${where}: step ${A.id} may write ${g}, which step ${B.id} must leave unchanged (${h}) while both run at the same time`);
+          }
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -332,7 +400,7 @@ function forItem(step, item) {
     commands: step.until.commands.map((c) => ({ text: put(c.text), argv: c.argv.map(put) })),
     prompt: step.until.prompt == null ? null : put(step.until.prompt),
   };
-  return { ...step, prompt: put(step.prompt), until };
+  return { ...step, prompt: put(step.prompt), writable: step.writable.map(put), until };
 }
 
 function positiveInt(v, field, source, { max, min = 1 }) {
@@ -358,28 +426,28 @@ function grantList(v, field, where, check) {
 
 /**
  * The top-level `agents:`: what this workflow assigns to the agents its steps
- * name, on top of each agent's own frontmatter.
- *   skills  added to the agent's skills
- *   mcp     added to the agent's MCP servers
- *   tools   the built-in tools the agent may use in this workflow (replaces
- *           the frontmatter's list; omitted: the frontmatter decides)
- * An entry for an agent no step names is refused: it would grant nothing.
- * Returns { <agent>: { skills, mcp, tools } } ({} when there is no agents:).
+ * name (and to the subagents they may start), on top of each agent's own
+ * frontmatter.
+ *   skills     added to the agent's skills
+ *   mcp        added to the agent's MCP servers
+ *   tools      the built-in tools the agent may use in this workflow (replaces
+ *              the frontmatter's list; omitted: the frontmatter decides)
+ *   subagents  added to the agents it may start as subagents
+ * An entry for an agent no step names and no subagents list names is
+ * refused: it would grant nothing.
+ * Returns { <agent>: { skills, mcp, tools, subagents } } ({} when there is no agents:).
  */
 function agentGrants(v, used, source) {
   if (v == null) return {};
   if (typeof v !== 'object' || Array.isArray(v)) {
-    throw new AidevError(`${source}: agents is a mapping of agent name to what it is given (agents: { <agent>: { skills: [...], mcp: [...], tools: [...] } })`);
+    throw new AidevError(`${source}: agents is a mapping of agent name to what it is given (agents: { <agent>: { skills: [...], mcp: [...], tools: [...], subagents: [...] } })`);
   }
   const out = {};
   for (const [name, g] of Object.entries(v)) {
     const where = `${source}: agents.${name}`;
     try { toolsMod.assertAgentName(name); } catch (e) { throw new AidevError(`${where}: ${e.message}`); }
-    if (!used.includes(name)) {
-      throw new AidevError(`${where}: no step names agent ${name} (agents: assigns skills, MCP servers and tools to the agents the steps use)`);
-    }
-    if (g == null) { out[name] = { skills: [], mcp: [], tools: null }; continue; }
-    if (typeof g !== 'object' || Array.isArray(g)) throw new AidevError(`${where} must be a mapping with skills, mcp and/or tools`);
+    if (g == null) { out[name] = { skills: [], mcp: [], tools: null, subagents: [] }; continue; }
+    if (typeof g !== 'object' || Array.isArray(g)) throw new AidevError(`${where} must be a mapping with skills, mcp, tools and/or subagents`);
     assertKnownKeys(g, AGENT_GRANT_KEYS, where);
     out[name] = {
       skills: g.skills == null ? [] : grantList(g.skills, 'skills', where, (s) => toolsMod.assertAgentName(s)),
@@ -389,9 +457,19 @@ function agentGrants(v, used, source) {
       tools: g.tools == null ? null : grantList(g.tools, 'tools', where, (s) => {
         if (!TOOL_NAME_RE.test(s)) throw new Error(`${JSON.stringify(s)} is not a tool name (Read, Grep, Bash, …)`);
       }),
+      subagents: g.subagents == null ? [] : grantList(g.subagents, 'subagents', where, (s) => toolsMod.assertAgentName(s)),
     };
     if (out[name].tools && out[name].tools.length === 0) {
       throw new AidevError(`${where}: tools must name at least one tool (leave it out for the agent's own tools)`);
+    }
+    if (out[name].subagents.includes(name)) throw new AidevError(`${where}: an agent cannot be its own subagent`);
+  }
+  // A subagent a step's agent may start can be given things here too.
+  const named = new Set(used);
+  for (const n of used) for (const sub of (out[n] ? out[n].subagents : [])) named.add(sub);
+  for (const name of Object.keys(out)) {
+    if (!named.has(name)) {
+      throw new AidevError(`${source}: agents.${name}: no step names agent ${name} (agents: assigns skills, MCP servers, tools and subagents to the agents the steps use and to their subagents)`);
     }
   }
   return out;
@@ -402,11 +480,13 @@ function agentGrants(v, used, source) {
  * the workflow's `agents:` assigns to it (see agentGrants).
  */
 function mergeCapabilities(own, grant) {
-  if (!grant) return own;
+  const ownSubs = own.subagents || [];
+  if (!grant) return { ...own, subagents: ownSubs };
   return {
     skills: [...new Set([...own.skills, ...grant.skills])],
     tools: grant.tools ? [...grant.tools] : own.tools,
     mcp: [...new Set([...own.mcp, ...grant.mcp])],
+    subagents: [...new Set([...ownSubs, ...(grant.subagents || [])])],
   };
 }
 
@@ -450,22 +530,34 @@ function validateDefinition(raw, source = 'workflow.yaml') {
 
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) throw new AidevError(`${source}: steps must be a non-empty list`);
   const ids = new Set();
-  def.steps = raw.steps.map((s, i) => {
-    const where = `${source}: steps[${i}]`;
+  /** One step, validated and normalised; `inGroup` is the parallel group it belongs to (null: none). */
+  const oneStep = (s, i, where, inGroup) => {
     if (s == null || typeof s !== 'object' || Array.isArray(s)) throw new AidevError(`${where} must be a mapping`);
-    const id = s.id == null ? `step-${i + 1}` : String(s.id).trim();
+    const id = s.id == null ? (inGroup ? `${inGroup}-${i + 1}` : `step-${i + 1}`) : String(s.id).trim();
     if (!STEP_ID_RE.test(id)) throw new AidevError(`${where}: id ${JSON.stringify(id)} must be lowercase letters, digits and dashes (max 32)`);
     if (ids.has(id)) throw new AidevError(`${where}: duplicate step id ${id}`);
     ids.add(id);
     for (const k of Object.keys(s)) if (RENAMED[k]) throw new AidevError(`${where}: ${RENAMED[k]}`);
     // `pull_request:` with nothing after it is a pull request with the default title.
     const kinds = STEP_KINDS.filter(([key]) => (key === 'pull_request' ? key in s : s[key] != null)).map(([, kind]) => kind);
-    if (kinds.length !== 1) throw new AidevError(`${where}: a step has exactly one of agent, command or pull_request`);
+    if (kinds.length !== 1) throw new AidevError(`${where}: a step has exactly one of agent, command, pull_request or parallel`);
     const kind = kinds[0];
+    if (inGroup && kind !== 'agent') {
+      throw new AidevError(`${where}: a parallel group holds agent steps only (a ${kind} step runs before or after the group)`);
+    }
     for (const k of Object.keys(s)) {
       if (!STEP_KEYS[kind].includes(k)) throw new AidevError(`${where}: ${k} does not belong to ${kind === 'agent' ? 'an' : 'a'} ${kind} step (allowed: ${STEP_KEYS[kind].join(', ')})`);
     }
     const step = { id, kind, description: s.description == null ? '' : String(s.description).trim() };
+    if (kind === 'parallel') {
+      const list = s.parallel;
+      if (!Array.isArray(list) || list.length < 2) throw new AidevError(`${where}: parallel is a list of at least two agent steps that run at the same time`);
+      if (list.length > LIMITS.maxParallel) throw new AidevError(`${where}: parallel lists ${list.length} steps, above the ceiling of ${LIMITS.maxParallel}`);
+      step.members = list.map((m, j) => oneStep(m, j, `${where}.parallel[${j}]`, id));
+      assertDisjoint(step.members, where);
+      return step;
+    }
+    if (inGroup) step.group = inGroup;
     if (kind === 'agent') {
       try { step.agent = toolsMod.assertAgentName(s.agent); } catch (e) { throw new AidevError(`${where}: agent: ${e.message}`); }
       if (!agents.includes(step.agent)) agents.push(step.agent);
@@ -478,15 +570,27 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       // Paths the step must leave as it found them, even inside its writable:
       // the tests an upgrade must not weaken, the config a test writer must not loosen.
       step.unchanged = assertGlobList(s.unchanged, 'unchanged', where);
+      if (step.unchanged.some((g) => g.includes(ITEM_TOKEN))) throw new AidevError(`${where}: unchanged cannot name ${ITEM_TOKEN} (it holds for every target)`);
       step.for_each = forEachSpec(s.for_each, where);
       step.until = untilSpec(s.until, where);
       if (step.until && step.until.agent && !agents.includes(step.until.agent)) agents.push(step.until.agent);
-      const usesItem = [step.prompt, ...(step.until ? [...step.until.commands.map((c) => c.text), step.until.prompt || ''] : [])]
+      const usesItem = [step.prompt, ...step.writable, ...(step.until ? [...step.until.commands.map((c) => c.text), step.until.prompt || ''] : [])]
         .some((t) => t.includes(ITEM_TOKEN));
       if (step.for_each && !step.prompt.includes(ITEM_TOKEN)) {
         throw new AidevError(`${where}: a for_each step's prompt must name its target as ${ITEM_TOKEN}`);
       }
       if (!step.for_each && usesItem) throw new AidevError(`${where}: ${ITEM_TOKEN} needs for_each (the list the targets come from)`);
+      for (const g of step.writable) {
+        if (g.includes(ITEM_TOKEN) && (literalPrefix(g).length === 0 || literalPrefix(g).length === g.split('/').length)) {
+          throw new AidevError(`${where}: writable ${g} must start with a fixed directory before ${ITEM_TOKEN} (e.g. e2e/tests/${ITEM_TOKEN}.spec.ts)`);
+        }
+      }
+      // Targets run at the same time share one working tree: each may only
+      // write paths named after itself, so two targets never write one file
+      // and a failed target is undone without touching the others.
+      if (step.for_each && step.for_each.parallel > 1 && step.writable.some((g) => !g.includes(ITEM_TOKEN))) {
+        throw new AidevError(`${where}: for_each.parallel needs every writable path to name the target as ${ITEM_TOKEN} (e.g. writable: [e2e/tests/${ITEM_TOKEN}.spec.ts]), so targets running at once never write the same file`);
+      }
       // Retries belong to the check: without an until, a failed attempt
       // (a changed `unchanged` path) ends the step.
       step.max_retries = step.until ? step.until.max_retries : 0;
@@ -501,6 +605,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       // it and the tree; its writable only says which of its outputs the
       // pull-request step commits.
       step.writable = writableList(s.writable == null ? [] : s.writable, where);
+      if (step.writable.some((g) => g.includes(ITEM_TOKEN))) throw new AidevError(`${where}: ${ITEM_TOKEN} belongs to an agent step with for_each`);
     } else {
       const pr = s.pull_request == null ? {} : s.pull_request;
       if (typeof pr !== 'object' || Array.isArray(pr)) {
@@ -511,10 +616,23 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       }
     }
     return step;
+  };
+  // A parallel group is written as one step holding its members; the runner
+  // and everything else see the members as steps of their own, in order,
+  // marked with the group (`group`), and the group in def.groups.
+  def.groups = [];
+  def.steps = [];
+  raw.steps.forEach((s, i) => {
+    const step = oneStep(s, i, `${source}: steps[${i}]`, null);
+    if (step.kind !== 'parallel') { def.steps.push(step); return; }
+    def.groups.push({ id: step.id, description: step.description, members: step.members.map((m) => m.id) });
+    def.steps.push(...step.members);
   });
   if (def.steps.filter((s) => s.kind === 'pull-request').length > 1) throw new AidevError(`${source}: at most one pull-request step`);
-  // What the pull-request step commits: everything any step may write.
-  def.writable = [...new Set(def.steps.flatMap((s) => s.writable || []))];
+  // What the pull-request step commits: everything any step may write. A
+  // path named after a for_each target stands for every target's: the
+  // directory before {item}, whole.
+  def.writable = [...new Set(def.steps.flatMap((s) => (s.writable || []).map((g) => (g.includes(ITEM_TOKEN) ? `${literalPrefix(g).join('/')}/**` : g))))];
   def.grants = agentGrants(raw.agents, agents, source);
 
   // The budget and the time limit, together. max_usd is required: it is what
@@ -567,6 +685,7 @@ function frontmatterList(v) {
  *   skills  skills inlined into its prompt ([] when none)
  *   tools   the built-in tools it may use (null: the tool's default set)
  *   mcp     the MCP servers from the PKG's .mcp.json it may use ([] when none)
+ *   subagents  the agents it may start as subagents ([]: whatever the tool offers)
  * Throws on a malformed entry; the caller names the file.
  */
 function agentCapabilities(meta) {
@@ -580,7 +699,9 @@ function agentCapabilities(meta) {
   for (const m of mcp) {
     if (!MCP_SERVER_RE.test(m)) throw new Error(`mcp: ${JSON.stringify(m)} is not an MCP server name (a key of ${MCP_CONFIG_REL})`);
   }
-  return { skills: [...new Set(skills)], tools: tools ? [...new Set(tools)] : null, mcp: [...new Set(mcp)] };
+  const subagents = frontmatterList(meta.subagents) || [];
+  for (const n of subagents) toolsMod.assertAgentName(n);
+  return { skills: [...new Set(skills)], tools: tools ? [...new Set(tools)] : null, mcp: [...new Set(mcp)], subagents: [...new Set(subagents)] };
 }
 
 function readAgentFile(file, name, source, rel) {
@@ -620,15 +741,17 @@ function resolveSkill(repoRoot, installRoot, name) {
 function resolveDependencies(repoRoot, installRoot, def) {
   const agents = {};
   const skills = {};
-  for (const n of def.agents) {
+  const subagents = {};
+  const grants = def.grants || {};
+  // One agent with what it has in this workflow: `capabilities` is its
+  // frontmatter plus the workflow's agents:, `ownCapabilities` the frontmatter alone.
+  const load = (n, by = null) => {
     const a = resolveAgent(repoRoot, installRoot, n);
-    if (!a) throw new AidevError(`agent ${n} is neither in ${layout.AGENTS_REL}/ nor bundled with the kit`);
+    if (!a) throw new AidevError(`${by ? `${by}: subagent` : 'agent'} ${n} is neither in ${layout.AGENTS_REL}/ nor bundled with the kit`);
     const where = a.rel || `the kit's ${n}.md`;
     if (a.capabilityError) throw new AidevError(`${where}: ${a.capabilityError}`);
-    // From here on `capabilities` is what the agent has in this workflow;
-    // `ownCapabilities` is what its frontmatter alone says.
-    agents[n] = { ...a, ownCapabilities: a.capabilities, capabilities: mergeCapabilities(a.capabilities, (def.grants || {})[n]) };
-    for (const sn of agents[n].capabilities.skills) {
+    const out = { ...a, where, ownCapabilities: a.capabilities, capabilities: mergeCapabilities(a.capabilities, grants[n]) };
+    for (const sn of out.capabilities.skills) {
       if (skills[sn]) continue;
       const s = resolveSkill(repoRoot, installRoot, sn);
       if (!s) {
@@ -637,8 +760,40 @@ function resolveDependencies(repoRoot, installRoot, def) {
       }
       skills[sn] = s;
     }
+    return out;
+  };
+  const hasTool = (tools, t) => tools.includes(t) || (TOOL_ALIASES[t] != null && tools.includes(TOOL_ALIASES[t]));
+  for (const n of def.agents) agents[n] = load(n);
+  // Subagents: what a step's agent may start with its Agent tool. A subagent
+  // runs inside its parent's session, so it can never have more than the
+  // parent: its tools and MCP servers are a part of the parent's.
+  for (const n of def.agents) {
+    const parent = agents[n];
+    const pc = parent.capabilities;
+    parent.subagentDefs = {};
+    if (!pc.subagents.length) continue;
+    const at = pc.subagents.some((x) => !parent.ownCapabilities.subagents.includes(x)) ? `${defRel(def.name)}: agents.${n}` : parent.where;
+    if (pc.tools && !hasTool(pc.tools, 'Agent')) {
+      throw new AidevError(`${at}: agent ${n} names subagents but its tools do not include Agent (the tool that starts them)`);
+    }
+    for (const sn of pc.subagents) {
+      if (sn === n) throw new AidevError(`${at}: agent ${n} cannot be its own subagent`);
+      const sub = subagents[sn] || load(sn, at);
+      subagents[sn] = sub;
+      const sc = sub.capabilities;
+      if (sc.subagents.length) throw new AidevError(`${sub.where}: subagent ${sn} (of ${n}) names subagents of its own; a subagent cannot start others`);
+      let tools = sc.tools;
+      if (pc.tools) {
+        if (!tools) tools = pc.tools.filter((t) => !hasTool(['Agent'], t));
+        const extra = tools.filter((t) => !hasTool(pc.tools, t));
+        if (extra.length) throw new AidevError(`${at}: subagent ${sn} may use ${extra.join(', ')}, which its parent ${n} may not (a subagent works inside its parent's session)`);
+      }
+      const extraMcp = sc.mcp.filter((m) => !pc.mcp.includes(m));
+      if (extraMcp.length) throw new AidevError(`${at}: subagent ${sn} uses the MCP server(s) ${extraMcp.join(', ')}, which its parent ${n} does not`);
+      parent.subagentDefs[sn] = { ...sub, capabilities: { ...sc, tools } };
+    }
   }
-  return { agents, skills };
+  return { agents, skills, subagents };
 }
 
 /** The skills an agent brings, resolved (resolveDependencies has checked they exist). */
@@ -650,23 +805,48 @@ function agentSkills(deps, agentName) {
  * What one step may do: the step's own writable, and its agent's tools and
  * MCP servers. `<id>:until` is the step's `until` agent: its own tools and
  * MCP servers, and nothing writable (it judges the work, it does not do it).
+ * `item` is the for_each target the agent works on: `{item}` in the step's
+ * writable stands for it (without a valid one, those paths are not writable).
+ * `subagent` is the agent type of a subagent making the call (Claude Code's
+ * hook input `agent_type` when `agent_id` is present): it is held to its own
+ * grants, and to nothing at all when its parent may not start it.
  * Null for an unknown step id (the guard treats that as nothing).
  */
-function stepAccess(def, deps, stepId) {
+function stepAccess(def, deps, stepId, { item = null, subagent = null } = {}) {
   const id = String(stepId || '');
   const judging = id.endsWith(UNTIL_STEP_SUFFIX);
   const step = def.steps.find((s) => s.id === (judging ? id.slice(0, -UNTIL_STEP_SUFFIX.length) : id));
   if (!step) return null;
+  const forAgent = (name, base) => {
+    const a = deps.agents[name];
+    const cap = a.capabilities;
+    const out = { ...base, agent: name, tools: cap.tools, mcp: cap.mcp, subagents: cap.subagents };
+    if (subagent == null) return out;
+    // A call from inside a subagent. When the agent names its subagents, only
+    // those exist; when it names none, its subagents share its grants.
+    if (!cap.subagents.length) return { ...out, subagent };
+    const sub = (a.subagentDefs || {})[subagent];
+    if (!sub) return { ...out, subagent, tools: [], mcp: [], subagents: [], refused: `subagent ${subagent} is not one agent ${name} may start (${cap.subagents.join(', ')})` };
+    return { ...out, subagent, tools: sub.capabilities.tools, mcp: sub.capabilities.mcp, subagents: [] };
+  };
   if (judging) {
     if (step.kind !== 'agent' || !step.until || !step.until.agent) return null;
-    const cap = deps.agents[step.until.agent].capabilities;
-    return { step, agent: step.until.agent, writable: [], unchanged: [], notes: false, tools: cap.tools, mcp: cap.mcp };
+    return forAgent(step.until.agent, { step, writable: [], unchanged: [], notes: false });
   }
-  if (step.kind !== 'agent') return { step, agent: null, writable: step.writable || [], unchanged: [], notes: false, tools: null, mcp: [] };
-  const cap = deps.agents[step.agent].capabilities;
+  if (step.kind !== 'agent') return { step, agent: null, writable: step.writable || [], unchanged: [], notes: false, tools: null, mcp: [], subagents: [] };
+  const valid = item != null && ITEM_RE.test(String(item)) && !String(item).split('/').includes('..');
+  const writable = step.writable
+    .filter((g) => !g.includes(ITEM_TOKEN) || valid)
+    .map((g) => (g.includes(ITEM_TOKEN) ? g.split(ITEM_TOKEN).join(String(item)) : g));
   // `notes`: the step's agent may also write the run's notes directory (notesRel).
   // `unchanged`: paths it must not write even where `writable` covers them.
-  return { step, agent: step.agent, writable: step.writable, unchanged: step.unchanged, notes: true, tools: cap.tools, mcp: cap.mcp };
+  return forAgent(step.agent, { step, writable, unchanged: step.unchanged, notes: true });
+}
+
+/** Whether a call of the Agent tool may start this subagent type ([] subagents: any). */
+function subagentGranted(access, type) {
+  if (!access.subagents || !access.subagents.length) return true;
+  return access.subagents.includes(String(type || ''));
 }
 
 /**
@@ -675,6 +855,7 @@ function stepAccess(def, deps, stepId) {
  * be in `tools` when the agent lists them (null tools = the default set).
  */
 function toolGranted(access, toolName) {
+  if (access.refused) return false;
   const t = String(toolName || '');
   const m = /^mcp__(.+?)__/.exec(t);
   if (m) return access.mcp.includes(m[1]);
@@ -711,6 +892,9 @@ function mcpServersFor(repoRoot, agent) {
 function reviewedFiles(def, deps) {
   const files = [{ rel: defRel(def.name), kind: 'workflow', name: def.name }];
   for (const a of Object.values(deps.agents)) if (a.source === 'pkg') files.push({ rel: a.rel, kind: 'agent', name: a.name });
+  for (const a of Object.values(deps.subagents || {})) {
+    if (a.source === 'pkg' && !deps.agents[a.name]) files.push({ rel: a.rel, kind: 'agent', name: a.name });
+  }
   for (const s of Object.values(deps.skills)) if (s.source === 'pkg') files.push({ rel: s.rel, kind: 'skill', name: s.name });
   return files;
 }
@@ -801,10 +985,10 @@ function listWorkflows(repoRoot) {
 }
 
 module.exports = {
-  LIMITS, NAME_RE, RUN_ID_RE, ENV_WORKFLOW, ENV_STEP, ENV_RUN, MCP_CONFIG_REL, untilStepId, parseVerdict,
+  LIMITS, NAME_RE, RUN_ID_RE, ENV_WORKFLOW, ENV_STEP, ENV_RUN, ENV_ITEM, MCP_CONFIG_REL, untilStepId, parseVerdict,
   sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, runRel, notesRel, agentRel, skillRel,
   splitCommand, parseItems, forItem, ITEM_TOKEN, validateDefinition, parseDefinitionText, loadDefinition,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
-  agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, mcpServersFor,
+  agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, subagentGranted, literalPrefix, mayOverlap, mcpServersFor,
   trackingRef, approvalStatus, inspect, contentHash, listWorkflows,
 };
