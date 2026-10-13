@@ -389,7 +389,10 @@ const HOOK_ADAPTERS = Object.freeze({
     denyExitCode: 0,
     block: claudeShaped.block,
     stopActive: claudeShaped.stopActive,
-    subagentHint: (agent) => `spawn the "${agent}" custom agent (defined in .codex/agents/) and delegate the batch to it`,
+    // The kit ships no Codex profile for its agents (no .codex/agents/): the
+    // subagent gets the Claude definition when the PKG has it, and without it
+    // `aidev sync wiki` starts the agent itself with the definition prepended.
+    subagentHint: (agent) => `spawn a subagent that follows .claude/agents/${agent}.md (the kit ships no Codex profile for "${agent}"; when that file is missing, run "aidev sync wiki" instead of these steps: it starts ${agent} itself and commits)`,
   }),
   kiro: Object.freeze({
     id: 'kiro',
