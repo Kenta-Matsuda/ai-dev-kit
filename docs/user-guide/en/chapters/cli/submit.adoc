@@ -12,7 +12,15 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 
 === Description
 
-Validates the definition, commits `workflow.yaml` and the PKG-local agents (`.aidev/agents/`) and skills (`.aidev/skills/`) it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes it and opens a PR (Azure DevOps; with `generic` hosting it pushes, and you open the PR by hand). The PR body states the objective, what each step does (order, `description`, agent, where it may write, that agent's skills, tools and MCP servers, `until`), the agent and skill files, the limits, and that merging approves this workflow.
+Validates the definition, commits `workflow.yaml` and the PKG-local agents (`.aidev/agents/`) and skills (`.aidev/skills/`) it references on the branch `aidev/workflow-<name>` as `aidev: workflow <name>`, pushes it and opens a PR (Azure DevOps; with `generic` hosting it pushes, and you open the PR by hand). The PR body states the objective, what each step does (order, `description`, agent, where it may write, that agent's skills, tools and MCP servers, `until`), the agent and skill files (new or changed), the limits, and that merging approves this workflow.
+
+When it submits a change to an approved workflow, the body also has:
+
+* **What changed against the approved workflow**: the steps added, removed or reordered against the `origin/main` version, the fields that changed in each step (`prompt`, `writable`, `until` and so on), and top-level changes such as `limits`.
+* **Estimate**: the cost estimate (optimistic to pessimistic) before and after.
+* **Why this change**: for a change made with `aidev modify` (that started from the approved version), what was asked, why the `--from-run` run stopped and its failure output as recorded, the cause the agent found (`CAUSE:`) and its account. It also says when the definition was edited by hand after `modify`.
+
+The whole text is also written to `.aidev/cache/submit/<name>.md` (paste it when you open the PR by hand with `generic` hosting). When it is over the Azure DevOps limit (4000 characters), the agent's account is left out first.
 
 If it is already identical to `origin/main`, it prints `already matches origin/main; nothing to submit.` and does nothing.
 

@@ -139,7 +139,10 @@ limits:                            # what stops the run
 |If omitted, `tools.agent` / `tools.agent_model` of `aidev.yaml` apply (or the per-agent `tools.agents.<name>` if present). `tool` must be one of `tools.default`.
 
 |`steps`
-|Run from top to bottom. Each step is exactly one of three kinds, decided by which key it has: `agent`, `command` or `pull_request`. Every kind may have a `description` (optional) for the reviewer.
+|Run from top to bottom. Each step is exactly one of an agent step, a command step, a pull-request step or a parallel group, decided by which key it has: `agent`, `command`, `pull_request` or `parallel`. Every kind may have a `description` (optional) for the reviewer.
+
+|`agents`
+|Optional. What this workflow adds to its agents (`skills`, `mcp` and `subagents` are added; `tools` replaces) (xref:workflows-agents-skills[Agents and skills], xref:workflow-reference-agents[agents]).
 
 |agent step
 |`agent`, `writable` and `prompt` are required. With `until`, the agent is repeated until `until` is met (started again at most `until.max_retries` times). `timeout_minutes` (the time allowed for one start of the agent) is optional.
@@ -154,13 +157,16 @@ limits:                            # what stops the run
 |Optional. Paths (globs) the step must not change. They cannot be written even inside `writable`, and the step fails if their contents differ after it (xref:workflows-unchanged[Naming what must not change]).
 
 |`for_each`
-|Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]).
+|Optional. Repeats the step, starting the agent anew, for each target in a list (`from`). `max_items` is required (xref:workflows-for-each[Repeating a step per target]). `parallel` sets how many targets run at once (xref:workflows-parallel[Running agents in parallel]).
+
+|parallel group
+|The agent steps listed under `parallel:` start together; the run goes on when all have ended. Steps whose `writable` may overlap are refused (xref:workflows-parallel[Running agents in parallel]).
 
 |command step
 |`command` is split on whitespace and run without a shell. Any exit other than 0 fails the workflow. `cwd`, `env` and `timeout_minutes` are optional. To include files the command makes in the PR, list where they are in `writable` (the ADK runs the command itself, so the write guard does not apply).
 
 |`pull_request`
-|Commits and pushes the changes inside the `writable` of the steps and opens a PR. `title` is optional; without it, write `pull_request: {}`. At most one.
+|Pushes the steps' changes (each step's checkpoint commit, plus what is left inside the steps' `writable`) and opens a PR. `title` is optional; without it, write `pull_request: {}`. At most one.
 
 |`limits.max_usd`
 |Required. When the total cost reported by the tool (Claude Code only) reaches this, no further agent is started and the workflow stops.
@@ -228,7 +234,7 @@ The whole output of every command is kept under `logs/` in the run record. When 
 Each agent step starts as a new process. The conversation of an earlier step is gone. There are two ways to pass results on.
 
 * **The final report** — the ADK puts the final report of each earlier agent step into the instructions of the later agent steps (the last 6000 characters of a long report). In a survey step, ask in the `prompt` for the results the next step needs to be written in the final report.
-* **The notes directory** — have a long or exact result, such as a plan or a list of target files, written to a file. The place is `.aidev/workflows/<name>/runs/<id>/notes/`, one per run; the ADK puts it into the instructions of every agent step. A step with `writable: []` can write there too. A checking agent only reads it. Nothing in it is committed.
+* **The notes directory** — have a long or exact result, such as a plan or a list of target files, written to a file. The place is `.aidev/workflows/<name>/runs/<id>/notes/` in the run's worktree, one per run; the ADK puts it into the instructions of every agent step. A step with `writable: []` can write there too. A checking agent only reads it. Nothing in it is committed.
 
 [source,yaml]
 ----
@@ -526,7 +532,7 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 [source,text]
 ----
 aidev run workflow write-tests
-    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests-202609230112 at 9f8e7d6… (approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
+    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests at 9f8e7d6… (base 9f8e7d6…; approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
     [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
     [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
@@ -536,24 +542,56 @@ aidev run workflow write-tests
     [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
     [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
     [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
-    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests-202609230112
+    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests
     [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
-    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+    branch aidev/write-tests (2 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
+    record: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests/.aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z
 ----
 
 This is what happens during a run.
 
-* A workflow with a `pull_request` step requires a clean working tree and runs on a new branch `aidev/<name>-<yyyymmddHHMM>`. A workflow without one runs on the current branch, and the changes stay in the working tree.
+* A run works in **a git worktree of its own**. It never touches your working tree, so it runs even with uncommitted changes there, and you can keep working while it runs (xref:workflows-worktree[The run's worktree and branch]).
+* There is one branch per workflow (`aidev/<name>`); every run uses the same branch and worktree. Only when you want a dated branch of its own (`aidev/<name>-<yyyymmddHHMM>`), pass `--dated`.
 * The agents run under the same configuration files, hooks and policy as an interactive session. They can write only inside the `writable` of the step now running; the hook refuses writes anywhere else. The agents themselves never commit or push.
+* Each time a step (one target, for `for_each`) passes, the changes inside its `writable` are **committed as a checkpoint** (`aidev(<name>): <step>`). A stopped run continues from the last checkpoint.
 * Claude Code is started with only what is in the `tools` and `mcp` of the agent's frontmatter. Other tools do not exist for it, and the hook refuses them if called. An agent without `mcp` gets no MCP servers.
 * The final report of each earlier agent step goes into the instructions of the later agent steps. The files in the notes directory can be read too (xref:workflows-handoff[Passing results between steps]).
 * If `until` is not met, the same agent is started again with the result attached (the command's output, or the checking agent's report). If the same result appears twice in a row, the run stops.
 * When a command takes longer than 15 seconds, one line with the elapsed time is shown every 15 seconds.
-* The `pull_request` step commits and pushes only the changes inside the `writable` of the steps and opens a PR. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts, the cost, and the final report of each agent step (shortened to fit the 4000 characters Azure DevOps accepts). The full text is in `pull-request.md` in the run record. If there are no changes in the range, neither a commit nor a PR is created.
-* The record is written to `.aidev/workflows/<name>/runs/<id>/` as the run goes. It is gitignored and never committed.
+* The `pull_request` step makes a last commit of what is left inside the steps' `writable` and the run record, pushes the branch and opens a PR. A PR already open for the branch has its description updated instead. The PR body gives the workflow name, the run id, the starting commit, the approval reference, the number of agent starts, the cost, and the final report of each agent step (shortened to fit the 4000 characters Azure DevOps accepts). The full text is in `pull-request.md` in the run record. If the branch has no change since the base, neither a commit nor a PR is created.
+* The record is written to `.aidev/workflows/<name>/runs/<id>/` in the worktree as the run goes. It is gitignored and never committed. `--resume`, `aidev estimate` and `aidev modify --from-run` look for records in the checkout and the worktrees together.
+
+[[workflows-worktree]]
+==== The run's worktree and branch
+
+[%autowidth.stretch,options="header"]
+|===
+|Item |What it is
+
+|Where the worktree is
+|`<AIDEV_HOME>/worktrees/<PKG name>-<hash>/<branch name with / as ->` (`~/.local/share/ai-dev-kit/…` on Linux, `%LOCALAPPDATA%\ai-dev-kit\…` on Windows). The hash is made from **where the PKG clone is (its absolute path)**, only so that two clones of one PKG on a machine do not share a directory. It has nothing to do with the workflow's content and does not change when the workflow is fixed. Later runs find the worktree by its branch name (`git worktree list`), not by the path. It is outside the PKG, so tests and linters run in the PKG do not pick up a second copy of the sources.
+
+|Branch
+|`aidev/<name>`. The first time, it starts at the commit checked out now. With `--dated`, each run gets a new `aidev/<name>-<yyyymmddHHMM>` and a worktree of its own.
+
+|Later runs
+|Use the same branch and worktree. When the branch's changes are already in the base (the commit checked out now), the branch is moved to the base first. When it has changes the base does not, the base is merged into it, and the run builds on the earlier runs' work. A merge conflict stops the run (resolve it in the worktree, or use `--dated`).
+
+|Uncommitted changes
+|A new run does not start while the worktree has uncommitted changes inside the workflow's `writable` (a stopped run's partial work). Continue with `--resume last`, or throw them away with the commands shown.
+
+|One at a time
+|Only one run works in a worktree at a time; the next one stops while another is going.
+
+|What is not in it
+|What git ignores (`node_modules`, `.env`, build output) is not in a new worktree. A workflow that needs it starts with a step such as `command: npm ci`.
+
+|Cleaning up
+|The worktree stays after the run (for `--resume` and the records). Remove it with `git worktree remove <path>` and the branch with `git branch -D aidev/<name>` when no longer needed; the next run makes them again.
+|===
 
 [%autowidth.stretch,options="header"]
 |===
@@ -595,15 +633,16 @@ aidev run workflow write-tests --resume last          # continue the last run
 aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 ----
 
-* It continues on the same branch, with the same `--task` and the same notes. `--task` cannot be passed.
+* It continues in the run's worktree and branch, with the same `--task` and notes, whatever branch you are on. `--task` and `--dated` cannot be passed.
+* The step that stopped starts over **from the last checkpoint**: what it left uncommitted inside `writable` is put back. The finished steps and targets are in the checkpoints, so their work stays.
 * The final reports of the finished steps are read from the record and put into the instructions of the later steps.
-* A `for_each` step skips the targets that finished and continues from the one that stopped. The list is read again, so when a target cannot be made to pass, you can delete its line from the list file (in the notes directory) and continue. That target's partial changes stay in the working tree; revert them first if you do not want them.
-* The step that stopped starts over. The working tree still holds the earlier changes, and the agent is told why the run stopped.
+* A `for_each` step skips the targets that finished and continues from the one that stopped. The list is read again, so when a target cannot be made to pass, you can delete its line from the list file (in the worktree's notes directory) and continue.
+* The agent is told why the run stopped.
 * The time and cost limits are counted anew for the continued run. The cost and the agent starts in `run.json` are totals.
 * If the definition (`workflow.yaml`) changed after the run started, the run cannot continue. Start a new run.
-* A workflow with a `pull_request` step must be on the run's branch (`aidev/<name>-<yyyymmddHHMM>`).
+* When the worktree was removed but the branch is still there, the worktree is made again (the records were in the worktree, so after removing it, start a new run).
 
-When the cause is in the definition (the `until` command does not pass in this PKG, `writable` is too narrow, and so on), the run stops at the same place again. Ask the Engineering Manager to fix the definition, then start a new run.
+When the cause is in the definition (the `until` command does not pass in this PKG, `writable` is too narrow, and so on), the run stops at the same place again. A workflow mostly fails because an agent meets the same error again and again; have the definition fixed from the run's record (xref:workflows-fix-from-run[Fixing a workflow from a stopped run]).
 
 Messages when it stops, and what to do. The exit code is 1.
 
@@ -617,12 +656,18 @@ Messages when it stops, and what to do. The exit code is 1.
 |`workflow <name> is not approved: … differs from origin/main`
 |The definition was changed locally. Revert it, or ask the Engineering Manager to submit again.
 
-|`the working tree has uncommitted changes; commit or stash them first`
-|A workflow with a `pull_request` step runs from a clean working tree.
+|`the worktree of aidev/<name> (…) has uncommitted changes, left by a run that stopped in the middle of a step`
+|An earlier run stopped part way. Continue it with `--resume last`, or throw the changes away with the `git -C … reset --hard` and `clean -fd` shown, then run.
+
+|`another run (…, process N) is working in …`
+|A run of the same workflow is going. Wait for it to end.
+
+|`aidev/<name> has work that conflicts with …`
+|The branch's earlier work conflicts with the base now. Resolve it with `git merge` in the worktree, or use `--dated` for a branch of its own.
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The partial changes remain on the branch `aidev/<name>-<yyyymmddHHMM>`. Look at them, and at the command's output (the file `log` in `run.json` points to) or `review` in `run.json` (the checking agent's last report). If you can fix the cause by hand, fix it and continue with `--resume last`. Otherwise make `--task` more specific or ask the Engineering Manager to revisit `until.max_retries`, the `prompt` or `until.prompt`.
+|The agent could not meet `until` (the parentheses give the last result: `npm test exited 1`, `test-reviewer answered FAIL` and so on). The finished steps are in the checkpoints on the branch `aidev/<name>`. Look at them, and at the command's output (the file `log` in `run.json` points to) or `review` in `run.json` (the checking agent's last report). If you can fix the cause by hand, fix it and continue with `--resume last`. Otherwise make `--task` more specific or ask the Engineering Manager to revisit `until.max_retries`, the `prompt` or `until.prompt`.
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -644,8 +689,8 @@ Messages when it stops, and what to do. The exit code is 1.
 |`workflow <name> has changed since run <id> started`
 |The definition changed after the run started. Start a new run without `--resume`.
 
-|`run <id> was working on aidev/…; check it out first`
-|Switch to the run's branch (`git checkout aidev/…`) and `--resume` again.
+|`run <id> was not made on a branch of its own (it predates worktree runs)`
+|A run started by a version from before worktree runs cannot continue. Start a new run.
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |A server in the agent's `mcp` is not in the PKG's `.mcp.json`. Register the server in `.mcp.json` (a person does this). Nothing has started.
@@ -653,7 +698,7 @@ Messages when it stops, and what to do. The exit code is 1.
 |`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |An agent with `tools` or `mcp` does not start on an AI tool that cannot be limited (Copilot CLI and so on). Set `tools.agent` in `aidev.yaml` (or the workflow's `tool`) to `claude`.
 
-|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |Normal. Open the PR by hand from the pushed branch.
 |===
 
@@ -712,10 +757,26 @@ Start from the problem you see.
 
 |It stops at the cost or time limit
 |`limits.max_usd`, `limits.max_minutes`
-|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json`) and the estimate of `aidev estimate workflow <name>`.
+|Decide from the cost and time in the run record (`.aidev/workflows/<name>/runs/<id>/run.json` in the run's worktree) and the estimate of `aidev estimate workflow <name>`.
 |===
 
 Agents and skills are shared by every workflow that uses them. **Changing an agent's .md also changes how the other workflows that use that agent behave.** To change only one workflow, make a separate agent (`aidev create agent <new-name>`).
+
+[[workflows-fix-from-run]]
+==== Fixing a workflow from a stopped run
+
+A workflow mostly fails because an agent meets the same error again and again (`the same failure repeated`). With `--from-run`, the workflow-creator gets that run's record and is asked to change the definition so the cause goes away.
+
+[source,bash]
+----
+aidev modify workflow write-tests --from-run last
+aidev modify workflow write-tests --from-run 2026-09-23T01-12-03-114Z --describe "make the test data from fixtures"
+----
+
+* What the agent gets: why the run stopped, each step's result and agent starts, the last check of each step that did not pass (the log of the `until` command, the checking agent's findings, the failed targets), and the end of the run log.
+* The agent states the cause in one line (`CAUSE:`) before listing its changes. It is told to raise retries or limits only when the record shows that is the cause.
+* `--describe` may be left out (the request is then "fix what made this run fail"); when given, it goes to the agent too.
+* What changed and why is kept in `.aidev/cache/modify/<name>.json` and goes into the PR description of the next `aidev submit workflow` (xref:review-workflow-def[Workflow definition pull requests]).
 
 ==== Fix and submit again
 

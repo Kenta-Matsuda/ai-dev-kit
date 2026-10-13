@@ -93,7 +93,8 @@ limits:
 - **対象が多い仕事は `for_each` で 1 件ずつにします**（画面ごとのテスト、module ごとの移行）。一覧は前のステップに notes ディレクトリの file へ 1 行 1 件で書かせます。1 件は英数字と `. _ / @ -` だけの 1 語です（空白、先頭の `-`、`..` があると kit が止めます）。`until` は 1 件ごとに判定するので、その件だけを確かめるコマンドにします（`npx playwright test {item}` など）。件が独立したファイルを書くなら `for_each.parallel` で同時に動かせます（`writable` を `tests/e2e/{item}.spec.ts` のように件ごとのパスで書く。同じポートやデータを使うテストは同時に動かさない）
 - **互いに独立した作業は `parallel:` グループで同時に動かせます**（API と画面など）。`writable` が重ならないようにディレクトリを分けます。後のステップに渡る報告を前提にする作業は、グループに入れず順番に並べます
 - **通すために判定を弱められる file は `unchanged` に書きます**。バージョンアップなら既存のテスト（`tests/**`）、テストを書くステップなら test runner の設定（`playwright.config.ts`）です。`until.command` は `package.json` の script ではなく、test runner を直接呼びます（`package.json` が `writable` だと script を書き換えられるため）。file の一部だけの変更（`test.skip` の追加など）は検査できないので、`until.agent` の `until.prompt` に「skip や空のテストが無いこと」と書きます
-- 途中で止まった実行は `aidev run workflow <name> --resume last` で、止まったステップから続けられます。終わったステップはやり直さないので、ステップは「終わったら結果が作業ツリーか notes に残る」単位に分けます
+- 実行は専用の git worktree で、workflow ごとのブランチ `aidev/<name>` の上で動き、ステップ（`for_each` なら 1 件）が通るたびに kit がその `writable` の変更をコミットします。worktree には git が無視するもの（`node_modules`、`.env`、ビルド結果）が無いので、要るなら最初に `command: npm ci` のようなステップを置きます
+- 途中で止まった実行は `aidev run workflow <name> --resume last` で、止まったステップの最後のコミットから続けられます。終わったステップはやり直さないので、ステップは「終わったら結果が `writable` か notes に残る」単位に分けます
 - `until.agent` はレビューで判定する終了条件です。確認の観点を `until.prompt` に具体的に書きます。不合格ならその報告を添えてステップの agent がやり直します。コマンドで判定できることは `until.command` に書き、agent には判断が要ることだけを確認させます
 - 実行ロジック（ループ、再試行、commit、PR）は runner が持ちます。YAML に手順書やスクリプトを書かないでください
 

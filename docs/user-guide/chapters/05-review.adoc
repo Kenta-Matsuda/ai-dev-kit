@@ -56,6 +56,7 @@ PR は 4 種類あり、種類ごとに確認する観点が異なります。
 
 ==== 読む順番
 
+. **変更の PR なら、PR 本文の「Why this change」と「What changed against the approved workflow」** — `aidev modify` で直した変更には、何を頼んだか、どの実行の失敗を直すのか（止まった理由と、記録された失敗の出力）、agent が見つけた原因が書かれています。その下に、承認済みの版から変わったステップと項目（`prompt`、`writable`、`until` など）と、費用の見積もりの前後が並びます。原因と変更が合っているか、リトライや上限を上げただけになっていないかを見ます。
 . **PR 本文の「Steps」** — ステップが上から実行順に並び、それぞれに agent、書ける場所（writes）、その agent の skill・ツール・MCP server が書かれています。まずここで全体をつかみます。
 . **`workflow.yaml`** — `objective`（何をさせるか）、各ステップの `prompt`（そのステップへの指示）、`until`（終わりの判定）、上限を読みます。
 . **agent の `.md`（`.aidev/agents/`）** — 先頭の frontmatter で、その agent が使えるもの（`skills`・`tools`・`mcp`）を確かめ、本文でどう振る舞うよう指示されているかを読みます。
@@ -136,7 +137,7 @@ agent・skill は、それを使うすべての workflow で共有されてい�
 [[review-workflow-result]]
 === workflow 成果物の PR
 
-`aidev/<name>-<yyyymmddHHMM>` ブランチから届きます。PR 本文に workflow 名・run id・起点のコミット・費用と、各 agent step の最終報告（計画、確認したこと、残した課題）が書かれています。
+workflow ごとのブランチ `aidev/<name>`（`--dated` で実行したときは `aidev/<name>-<yyyymmddHHMM>`）から届きます。PR 本文に workflow 名・run id・起点のコミット・費用、ステップごとのチェックポイントのコミットと、各 agent step の最終報告（計画、確認したこと、残した課題）が書かれています。コミットはステップごとに分かれているので、ステップ単位で差分を読めます。同じ workflow をもう一度実行すると、同じ PR にコミットが積まれ、本文が更新されます。
 
 * 差分が各ステップの `writable` の中に収まっているか（書き込みは自動で制限されますが、確認します）。
 * テストが通っているか。CI の `aidev check` が通っているか。

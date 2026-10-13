@@ -231,6 +231,16 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: guard-writeのmatcherは書込・`Bash`・MCP・`Agent`だけなので、subagentの`Read` / `Grep`などはhookで見ず、`--agents`の`tools` / `disallowedTools`と親の`--tools`で絞ります。`--agents`のsubagentに`mcp__<server>`をallowする書き方は実機で未確認です。同時に動く`until.command`（同じport・DBを使うtest）はkitでは調停しません。費用の上限は同時に動く数だけ超え得ます。
 
+### D26: 実行は専用のworktreeで、workflowごとに1つのbranchに、stepごとのcheckpointを積む
+
+**判断**: `aidev run workflow`はPKGのcheckoutに触れず、`<AIDEV_HOME>/worktrees/<PKG>-<hash>/`の下のgit worktreeで動きます。branchはworkflowごとに1つ（`aidev/<name>`）で、実行のたびに同じbranch・worktreeを使い、`--dated`のときだけ`aidev/<name>-<yyyymmddHHMM>`を作ります。step（`for_each`なら件）が通るたびに、そのstepの`writable`の変更を`aidev(<name>): <step>`としてcommitします（checkpoint）。`--resume`はそのworktreeで、止まったstepの未commitの変更を戻して最後のcheckpointから続けます。実行記録（`runs/`）・notes・estimate recordはworktreeに置き、`--resume`・見積もり・`modify --from-run`はcheckoutと各worktreeを合わせて読みます。止まった実行からは`aidev modify workflow <name> --from-run <id>`で、記録（停止理由、繰り返した失敗の出力、確認役の指摘、失敗した件）をworkflow-creatorに渡して定義を直させ、その要約と原因を次の`aidev submit`のPR本文に入れます。submitのPR本文には、承認済みの版との差分（stepと項目）と見積もりの前後も入れます。D9のbranch名（`aidev/<name>-<yyyymmddHHMM>`）とpull-request stepのclean tree要求を改めます（2026-10-13）。
+
+**理由**: 同じcheckoutで動かすと、実行中は人がそのcheckoutで作業できず、未commitの変更があると始められず、止まった実行の途中の変更が人の作業と混ざります。checkpointが無いと、`--resume`の起点が「作業treeに残っているもの」になり、止まったstepの半端な変更と終わったstepの成果を区別できません。実行ごとに日付のbranchを作ると、同じworkflowのPRが実行の数だけ並び、前の実行の成果に積めません。workflowの失敗は、agentが同じエラーに何度も当たって止まる形がほとんどで、その出力は実行記録に残っています。人がそれを読んで`--describe`に書き写すより、記録をそのまま渡す方が原因に近づき、PRのレビュアーも「なぜ定義が変わったか」を本文で読めます。worktreeをPKGの中ではなく`AIDEV_HOME`に置くのは、PKGで動くtest runner・linter・compilerが2つ目のsourceを拾わないためです。
+
+**却下した代替案**: PKGの中（`.aidev/worktrees/`、gitignore）にworktreeを置く案（jest等がgitignoreを見ずに探索する）。実行記録をcheckoutに置きworktreeから参照する案（agentはcwdの外のfileを読めず、guardはrepoの外への書込を拒否するので、notesと報告がworktreeの外では使えない）。checkpointを`git stash`や別refに取る案（PRでstepごとに読めない）。新しい実行で前の実行のbranchを捨てる案（未mergeの成果が消える。mergeされていればbaseへ進め、未mergeならbaseをmergeする）。`--from-run`で失敗を自動で直して実行し直す案（定義の変更はPRのレビューを通す。D9）。
+
+**論点**: gitが無視するもの（`node_modules`、`.env`、build結果）は新しいworktreeに無いので、要るworkflowはcommand step（`npm ci`等）で用意します。worktreeは自動では消しません（`git worktree remove`）。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |

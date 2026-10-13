@@ -139,7 +139,10 @@ limits:                            # 実行を止める条件
 |省略すると `aidev.yaml` の `tools.agent` / `tools.agent_model`（agent ごとの `tools.agents.<name>` があればそれ）に従います。`tool` は `tools.default` にあるものだけです。
 
 |`steps`
-|上から順に実行します。1 つの step は次の 3 種類のどれか 1 つで、種類は `agent`・`command`・`pull_request` のどのキーを持つかで決まります。どの種類にも、レビューする人向けの `description`（任意）を書けます。
+|上から順に実行します。1 つの step は agent step・command step・pull-request step・parallel グループのどれか 1 つで、種類は `agent`・`command`・`pull_request`・`parallel` のどのキーを持つかで決まります。どの種類にも、レビューする人向けの `description`（任意）を書けます。
+
+|`agents`
+|任意。この workflow でだけ agent に足す能力（`skills`・`mcp`・`subagents` は追加、`tools` は置き換え）（xref:workflows-agents-skills[agent と skill]、xref:workflow-reference-agents[agents]）。
 
 |agent step
 |`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで agent を繰り返します（やり直しは `until.max_retries` 回まで）。`timeout_minutes`（agent 1 回の時間の上限）は任意です。
@@ -154,13 +157,16 @@ limits:                            # 実行を止める条件
 |任意。そのステップが変えてはいけないパス（glob）。`writable` の中にあっても書けず、ステップの前後で内容が変わっていれば不合格です（xref:workflows-unchanged[変えてはいけない場所を決める]）。
 
 |`for_each`
-|任意。対象の一覧（`from`）の 1 件ごとに、agent を新しく起動して繰り返します。`max_items` は必須です（xref:workflows-for-each[対象ごとに繰り返す]）。
+|任意。対象の一覧（`from`）の 1 件ごとに、agent を新しく起動して繰り返します。`max_items` は必須です（xref:workflows-for-each[対象ごとに繰り返す]）。`parallel` で同時に動かす件数を決められます（xref:workflows-parallel[並列に動かす]）。
+
+|parallel グループ
+|`parallel:` に並べた agent step を同時に起動し、全部終わってから次へ進みます。`writable` どうしが重なり得ると拒否されます（xref:workflows-parallel[並列に動かす]）。
 
 |command step
 |`command` を空白で分割して shell 無しで実行します。exit 0 以外で workflow は失敗します。`cwd`・`env`・`timeout_minutes` は任意です。コマンドが作るファイルを PR に入れるときは、その場所を `writable` に書きます（ADK が実行するコマンドなので、書き込みの検問はかかりません）。
 
 |`pull_request`
-|各ステップの `writable` の範囲の変更を commit・push して PR を作ります。`title` は任意で、書かないときは `pull_request: {}` と書きます。1 つまでです。
+|各ステップの変更（ステップごとのチェックポイントのコミット）と、残った `writable` の範囲の変更をまとめて push し、PR を作ります。`title` は任意で、書かないときは `pull_request: {}` と書きます。1 つまでです。
 
 |`limits.max_usd`
 |必須。ツールが報告した費用（Claude Code のみ）の合計がこれに達すると、次の agent を起動せず止まります。
@@ -228,7 +234,7 @@ limits:                            # 実行を止める条件
 各 agent step は、新しいプロセスとして起動されます。前のステップの会話は残りません。結果を渡す方法は 2 つあります。
 
 * **最終報告** — 前の agent step の最終報告を、ADK が後の agent step の指示に入れます（長い報告は末尾 6000 文字）。調査ステップでは、次のステップが使う結果を最終報告に書くよう `prompt` で頼みます。
-* **notes ディレクトリ** — 計画や対象ファイルの一覧のように、長いものや正確に渡したいものは file に書かせます。場所は実行ごとの `.aidev/workflows/<name>/runs/<id>/notes/` で、ADK が各 agent step の指示に入れます。`writable: []` のステップも書けます。確認役の agent は読むだけです。コミットはされません。
+* **notes ディレクトリ** — 計画や対象ファイルの一覧のように、長いものや正確に渡したいものは file に書かせます。場所は実行ごとの `.aidev/workflows/<name>/runs/<id>/notes/`（実行の worktree の中）で、ADK が各 agent step の指示に入れます。`writable: []` のステップも書けます。確認役の agent は読むだけです。コミットはされません。
 
 [source,yaml]
 ----
@@ -526,7 +532,7 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 [source,text]
 ----
 aidev run workflow write-tests
-    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests-202609230112 at 9f8e7d6… (approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
+    [2026-09-23T01:12:03.114Z] run 2026-09-23T01-12-03-114Z on aidev/write-tests at 9f8e7d6… (base 9f8e7d6…; approved: origin/main 3f2a9c1b7d0e; 45 min, $8)
     [2026-09-23T01:12:03.201Z] step survey: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
     [2026-09-23T01:16:40.882Z] step survey: agent finished in 4m 37s ($0.3120)
     [2026-09-23T01:16:40.890Z] step write: agent test-writer via claude (sonnet) attempt 1 (budget 30m 0s)
@@ -536,24 +542,56 @@ aidev run workflow write-tests
     [2026-09-23T01:31:47.330Z] step write: agent finished in 6m 28s ($0.7402)
     [2026-09-23T01:32:01.118Z] step write: "npm test" exited 0
     [2026-09-23T01:32:01.500Z] step pr: committed 5c1d2e3f4a5b
-    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests-202609230112
+    [2026-09-23T01:32:03.912Z] step pr: pushed aidev/write-tests
     [2026-09-23T01:32:05.377Z] step pr: pull request !125 created
 ✓ workflow finished: 3 step(s)
     agent runs: 3, reported cost $2.0333
 ✓ pull request !125: https://dev.azure.com/…/pullrequest/125 — hand it to a reviewer
-    record: .aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z/
+    branch aidev/write-tests (2 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests
+    record: ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests/.aidev/workflows/write-tests/runs/2026-09-23T01-12-03-114Z
 ----
 
 実行中に起きることは次のとおりです。
 
-* `pull_request` のステップがある workflow は、作業ツリーがきれいであることを要求し、`aidev/<name>-<yyyymmddHHMM>` ブランチを切って動きます。無い workflow は今のブランチで動き、変更は作業ツリーに残ります。
+* 実行は **専用の git worktree** で動きます。あなたの作業ツリーには触れないので、未コミットの変更があっても実行でき、実行中も手元で作業を続けられます（xref:workflows-worktree[実行の worktree とブランチ]）。
+* ブランチは workflow ごとに 1 つ（`aidev/<name>`）で、実行のたびに同じブランチ・同じ worktree を使います。日付付きのブランチ（`aidev/<name>-<yyyymmddHHMM>`）に分けたいときだけ `--dated` を付けます。
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
+* ステップ（`for_each` なら 1 件）が通るたびに、そのステップの `writable` の変更を **チェックポイントとしてコミット** します（`aidev(<name>): <step>`）。止まった実行は、最後のチェックポイントから続けられます。
 * Claude Code は、agent の frontmatter の `tools` と `mcp` にあるものだけを渡して起動します。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
-* `pull_request` のステップは、各ステップの `writable` の範囲の変更だけを commit・push し、PR を作ります。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。範囲内に変更が無ければ commit も PR も作りません。
-* 記録は `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。
+* `pull_request` のステップは、チェックポイントの後に残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチを push して PR を作ります。同じブランチの PR が開いていれば、新しく作らずに本文を更新します。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。ブランチに起点からの変更が無ければ commit も PR も作りません。
+* 記録は worktree の `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。`--resume`・`aidev estimate`・`aidev modify --from-run` は、手元と worktree の記録をまとめて探します。
+
+[[workflows-worktree]]
+==== 実行の worktree とブランチ
+
+[%autowidth.stretch,options="header"]
+|===
+|項目 |内容
+
+|worktree の場所
+|`<AIDEV_HOME>/worktrees/<PKG 名>-<ハッシュ>/<ブランチ名の / を - にしたもの>`（Linux なら `~/.local/share/ai-dev-kit/…`、Windows なら `%LOCALAPPDATA%\ai-dev-kit\…`）。ハッシュは **PKG のクローンの場所（絶対パス）** から作るもので、同じ端末に同じ PKG のクローンが複数あっても置き場所がぶつからないようにするためだけのものです。workflow の内容とは関係なく、workflow を直しても変わりません。2 回目以降の実行は、場所ではなくブランチ名（`git worktree list`）で worktree を探します。PKG の外に置くので、PKG で動かすテストやリンターが 2 つ目のソースを拾いません。
+
+|ブランチ
+|`aidev/<name>`。初回は、今チェックアウトしているコミットから作ります。`--dated` なら実行ごとに `aidev/<name>-<yyyymmddHHMM>` と、その worktree を新しく作ります。
+
+|2 回目以降の実行
+|同じブランチ・worktree を使います。ブランチの変更がすでに起点（今チェックアウトしているコミット）に取り込まれていれば、起点まで進めてから始めます。取り込まれていない変更があれば、起点をブランチにマージしてから始め、前の実行の成果の上に積みます。マージが衝突したら止まります（worktree で解決するか、`--dated` で別のブランチにします）。
+
+|未コミットの変更
+|worktree の `writable` の範囲に未コミットの変更があると、新しい実行は始まりません（止まった実行の途中の変更です）。`--resume last` で続けるか、表示されるコマンドで捨てます。
+
+|同時実行
+|1 つの worktree で動く実行は 1 つだけです。動いている実行があれば、次の実行は止まります。
+
+|worktree に無いもの
+|git が無視するもの（`node_modules`、`.env`、ビルド結果）は新しい worktree にありません。要る workflow は、最初に `command: npm ci` のようなステップを置きます。
+
+|片付け
+|worktree は実行の後も残ります（`--resume` と記録のため）。要らなくなったら `git worktree remove <path>`、ブランチは `git branch -D aidev/<name>` で消します。消しても、次の実行で作り直します。
+|===
 
 [%autowidth.stretch,options="header"]
 |===
@@ -595,15 +633,16 @@ aidev run workflow write-tests --resume last          # 最後の実行を続け
 aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 ----
 
-* 同じブランチ、同じ `--task`、同じ notes で続きます。`--task` は付けられません。
+* その実行の worktree・ブランチ・`--task`・notes で続きます。手元でどのブランチにいてもかまいません。`--task` と `--dated` は付けられません。
+* 止まったステップは、**最後のチェックポイントから** やり直します。そのステップが `writable` に残した未コミットの変更は戻します。終わったステップと終わった件の変更はチェックポイントにあるので残ります。
 * 終わったステップの最終報告は記録から読み、後のステップの指示に入れます。
-* `for_each` のステップは、終わった件を飛ばして、止まった件から続けます。一覧はもう一度読むので、どうしても通らない件は、一覧の file（notes ディレクトリ）からその行を消してから続けられます。その件の途中の変更は作業ツリーに残るので、要らなければ先に戻します。
-* 止まったステップは最初からやり直します。作業ツリーには前回の変更が残っていて、agent には前回止まった理由を伝えます。
+* `for_each` のステップは、終わった件を飛ばして、止まった件から続けます。一覧はもう一度読むので、どうしても通らない件は、一覧の file（worktree の notes ディレクトリ）からその行を消してから続けられます。
+* agent には前回止まった理由を伝えます。
 * 時間と費用の上限は、続きの実行で新しく数えます。`run.json` の費用と起動回数は合計です。
 * 実行を始めたあとに定義（`workflow.yaml`）が変わっていると続けられません。新しく実行します。
-* `pull_request` のステップがある workflow は、その実行のブランチ（`aidev/<name>-<yyyymmddHHMM>`）に居る必要があります。
+* worktree を消していても、ブランチが残っていれば作り直して続けます（記録は worktree にあるので、消したときは新しく実行します）。
 
-原因が定義にあるとき（`until` のコマンドがこの PKG で通らない、`writable` が足りないなど）は、続けても同じところで止まります。 Engineering Manager に定義を直してもらい、新しく実行します。
+原因が定義にあるとき（`until` のコマンドがこの PKG で通らない、`writable` が足りないなど）は、続けても同じところで止まります。workflow の失敗は、agent が同じエラーに何度も当たって止まることがほとんどです。その実行の記録から定義を直させます（xref:workflows-fix-from-run[止まった実行から直す]）。
 
 止まったときの表示と対処です。終了コードは 1 です。
 
@@ -617,12 +656,18 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |`workflow <name> is not approved: … differs from origin/main`
 |手元で定義を変えています。戻すか、 Engineering Manager に提出し直してもらいます。
 
-|`the working tree has uncommitted changes; commit or stash them first`
-|`pull_request` のステップがある workflow は、きれいな作業ツリーで実行します。
+|`the worktree of aidev/<name> (…) has uncommitted changes, left by a run that stopped in the middle of a step`
+|前の実行が途中で止まっています。`--resume last` で続けるか、表示された `git -C … reset --hard` と `clean -fd` で捨ててから実行します。
+
+|`another run (…, process N) is working in …`
+|同じ workflow の実行が動いています。終わるのを待ちます。
+
+|`aidev/<name> has work that conflicts with …`
+|ブランチの前の成果と、今の起点が衝突しています。worktree で `git merge` して解決するか、`--dated` で別のブランチにします。
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。ブランチ `aidev/<name>-<yyyymmddHHMM>` に途中の変更が残っています。中身と、コマンドの出力（`run.json` の `log` が指す file）か `run.json` の `review`（確認役の最後の報告）を見ます。手で直せる原因なら直して `--resume last` で続けます。そうでなければ `--task` を具体的にするか、 Engineering Manager に `until.max_retries` や `prompt`、`until.prompt` の見直しを相談します。
+|agent が `until` を満たせませんでした（括弧内が最後の結果です。`npm test exited 1`、`test-reviewer answered FAIL` など）。終わったステップまではブランチ `aidev/<name>` のチェックポイントにあります。中身と、コマンドの出力（`run.json` の `log` が指す file）か `run.json` の `review`（確認役の最後の報告）を見ます。手で直せる原因なら直して `--resume last` で続けます。そうでなければ `--task` を具体的にするか、 Engineering Manager に `until.max_retries` や `prompt`、`until.prompt` の見直しを相談します。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
@@ -644,8 +689,8 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |`workflow <name> has changed since run <id> started`
 |実行を始めたあとに定義が変わっています。`--resume` なしで新しく実行します。
 
-|`run <id> was working on aidev/…; check it out first`
-|その実行のブランチに移ってから（`git checkout aidev/…`）、もう一度 `--resume` します。
+|`run <id> was not made on a branch of its own (it predates worktree runs)`
+|worktree で動く前の版で始めた実行は続けられません。新しく実行します。
 
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |agent の `mcp` にある server が、PKG の `.mcp.json` にありません。`.mcp.json` に server を登録します（人が行います）。何も始まっていません。
@@ -653,7 +698,7 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |`agent <name> is given tools (in its frontmatter or the workflow's agents:), and <tool> cannot be limited to them; run it with claude`
 |`tools` や `mcp` を書いた agent は、制限できない AI ツール（Copilot CLI など）では起動しません。`aidev.yaml` の `tools.agent`（または workflow の `tool`）を `claude` にします。
 
-|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |正常です。push 済みのブランチから手で PR を作ります。
 |===
 
@@ -712,10 +757,26 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 
 |費用や時間の上限で止まる
 |`limits.max_usd`、`limits.max_minutes`
-|実行の記録（`.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間、`aidev estimate workflow <name>` の見積もりを見て決めます。
+|実行の記録（実行の worktree の `.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間、`aidev estimate workflow <name>` の見積もりを見て決めます。
 |===
 
 agent・skill は、それを使うすべての workflow で共有されています。**agent.md を直すと、その agent を使う他の workflow の動きも変わります。** 1 つの workflow だけ変えたいときは、agent を分けます（`aidev create agent <新しい名前>`）。
+
+[[workflows-fix-from-run]]
+==== 止まった実行から直す
+
+workflow の失敗は、agent が同じエラーに何度も当たって止まることがほとんどです（`the same failure repeated`）。`--from-run` を付けると、その実行の記録を workflow-creator に渡して、原因を取り除くように定義を直させます。
+
+[source,bash]
+----
+aidev modify workflow write-tests --from-run last
+aidev modify workflow write-tests --from-run 2026-09-23T01-12-03-114Z --describe "テストのデータは fixtures から作る"
+----
+
+* agent に渡るもの: 止まった理由、ステップごとの結果と agent の起動回数、通らなかったステップの最後の確認の出力（`until` のコマンドのログ、確認役の指摘、失敗した件）、実行ログの末尾。
+* agent は、原因を 1 文（`CAUSE:`）で書いてから、変更を並べます。リトライや上限を上げるだけの修正は、それが原因だと記録から言えるときだけにさせます。
+* `--describe` は省略できます（「この実行が失敗した原因を直す」になります）。書けば、その指示も合わせて渡します。
+* 何をなぜ変えたかは `.aidev/cache/modify/<name>.json` に残り、次の `aidev submit workflow` の PR 本文に入ります（xref:review-workflow-def[workflow 定義の PR]）。
 
 ==== 直して提出し直す
 

@@ -17,7 +17,7 @@ aidev uninstall --all --yes [--json]
 
 ==== 引数なし — 端末から消す
 
-installer が置いたものを消します。①起動スクリプト（Windows: `aidev.cmd` と `aidev.ps1`、POSIX: `aidev`。installer が生成したものだけ）、②Windows ではユーザー PATH に足した起動スクリプトの場所、③`AIDEV_HOME` の `registry.json` と `cache/`。
+installer が置いたものを消します。①起動スクリプト（Windows: `aidev.cmd` と `aidev.ps1`、POSIX: `aidev`。installer が生成したものだけ）、②Windows ではユーザー PATH に足した起動スクリプトの場所、③`AIDEV_HOME` の `registry.json` と `cache/`。workflow の実行の worktree（`AIDEV_HOME/worktrees/`）は、まだ push していない成果が残っていることがあるので消しません（`git worktree remove` で消します）。
 
 消さないものと、消したいときのコマンドを表示します。
 

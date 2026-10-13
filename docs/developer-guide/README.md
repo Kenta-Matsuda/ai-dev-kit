@@ -10,7 +10,7 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのstepの`writable`を含む）、agentの能力（frontmatterの`skills` / `tools` / `mcp`）、workflow（YAML定義、origin一致による承認、runner、同梱workflow）、MCP、update、self-evolution |
+| [architecture.md](architecture.md) | PKG clone内の配置、`AIDEV_HOME`、tool configのtemplate適用（3-way merge）、Wiki整合判定（inventoryとHEAD treeの比較、head / knowledge / tracking）、publish lease、Wiki inventory / manifest v3とbatch agent実行、`sync wiki`（別commit、plan.json、worktreeベースのpublish）、hooks（tool adapter、after-bash、Stop）、policy評価順序（承認済みworkflowのstepの`writable`を含む）、agentの能力（frontmatterの`skills` / `tools` / `mcp`）、workflow（YAML定義、origin一致による承認、runner、専用worktreeとstepごとのcheckpoint。同梱workflowは無い）、MCP、update、self-evolution |
 | [cli-reference.md](cli-reference.md) | 全command・subcommand・option・終了code。`aidev <cmd> --help`と一致させる |
 | [configuration-reference.md](configuration-reference.md) | `aidev.yaml` schema v2（`validateConfig` / `DEFAULTS`）、`.aidev/policy.yaml`、`DEFAULT_POLICY_SCOPES`、workflow.yaml、model解決、環境変数、CLIが書く各fileの形 |
 | [implementation-status.md](implementation-status.md) | 実装済み・部分実装・未実装の台帳、既知の不整合、保守時の完了条件 |
@@ -42,7 +42,9 @@
 | Wiki manifest / inventory / 完了報告 / clean-tree検査 | `cli/lib/inventory.js` |
 | evidence scope | `cli/lib/knowledge-scope.js` |
 | agent起動（batch、prompt、launcher） | `cli/lib/agent.js` |
-| workflow（定義の検証、agent / skillの解決、origin一致による承認、runner、`create --describe` / `submit` / `run` / `list`） | `cli/lib/workflow.js`、`cli/commands/workflow.js`、`templates/workflows/` |
+| workflow（定義の検証、agent / skillの解決、origin一致による承認、runner、`create --describe` / `submit` / `run` / `list`） | `cli/lib/workflow.js`、`cli/commands/workflow.js` |
+| workflow実行のworktreeとbranch（`aidev/<name>`、checkpoint、lock、`runRoots`） | `cli/lib/runtree.js`、`cli/commands/workflow.js`（`runWorkflow`） |
+| `modify --from-run`（`runDigest`）とsubmitのPR本文（`definitionChanges`、`submitContext`） | `cli/commands/workflow.js` |
 | `sync wiki`（構造、prose、commit、plan.json） | `cli/commands/knowledge.js` |
 | publish（worktree、`aidev/wiki-<sha12>`、PR） | `cli/commands/knowledge.js`（`publish`）、`cli/lib/ado.js` |
 | publish lease | `cli/lib/leases.js` |

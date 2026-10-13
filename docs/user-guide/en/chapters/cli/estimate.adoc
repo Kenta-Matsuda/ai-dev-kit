@@ -29,7 +29,7 @@ A run costs the number of agent starts times what one start costs, added up. The
 . what a work size (table below) costs in this PKG, learned from its runs
 . the default range of the work size: `M` for a step, `S` for a checking agent
 
-What things cost before comes from the records the team shares (`.aidev/estimates/records/`) and from `calls` in this machine's `runs/<id>/run.json`. With fewer than 3 the range is widened (half the lowest to twice the highest). With 10 or more, the most extreme tenth at each end is left out.
+What things cost before comes from the records the team shares (`.aidev/estimates/records/`) and from `calls` in this machine's `runs/<id>/run.json` (in the checkout and the run worktrees). With fewer than 3 the range is widened (half the lowest to twice the highest). With 10 or more, the most extreme tenth at each end is left out.
 |===
 
 [cols="1,2,1",options="header"]
@@ -89,8 +89,8 @@ flowchart LR
 
 **Records.** Each `aidev run workflow` writes `.aidev/estimates/records/<workflow>-<run id>.json` when it ends: for each agent step the estimated range and the actual cost, the attempts and targets, and for each agent start the model, cost and tokens. No prompts, agent reports or command output. The records are committed to Git and shared by the team.
 
-* With a pull-request step, the records go into that pull request (this run's, and any left in the working tree before).
-* A run without a pull-request step leaves its record in the working tree. Commit it yourself, or leave it to the next run that opens a pull request. The "no uncommitted changes" check before a pull-request step does not count `.aidev/estimates/`.
+* A run writes its record in its worktree. With a pull-request step, the records go into that pull request (this run's, and any left in the worktree before).
+* A run without a pull-request step leaves its record in the worktree, for the next run on the same branch that opens a pull request. The estimate reads the records of the checkout and of every run worktree together.
 
 **1. Calibration (every time, no AI).** Each estimate works out from the records:
 

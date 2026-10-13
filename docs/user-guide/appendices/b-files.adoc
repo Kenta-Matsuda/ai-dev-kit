@@ -74,7 +74,7 @@
 |パス |内容
 
 |`.aidev/cache/`
-|remote 確認のキャッシュ、hook が覚えている前回の HEAD（`last-head.json`）と Stop hook の回数（`wiki-stop.json`）、tracking branch への publish の一時 worktree（`wiki-worktree/`）、agent に渡す仕事ファイル
+|remote 確認のキャッシュ、hook が覚えている前回の HEAD（`last-head.json`）と Stop hook の回数（`wiki-stop.json`）、tracking branch への publish の一時 worktree（`wiki-worktree/`）、agent に渡す仕事ファイル、`aidev modify` の変更前のファイルと記録（`modify/`）、`aidev submit` の PR 本文（`submit/<name>.md`）
 
 |`.aidev/sync.lock`
 |tracking branch への publish の lease
@@ -83,11 +83,11 @@
 |`plan.json`（hook がセッションに渡す batch の計画）と agent の完了報告
 
 |`.aidev/workflows/*/runs/`
-|workflow の実行記録（`run.json`、`log.txt`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`）。コマンドの出力を含むのでコミットしない（xref:workflows-run[workflow の実行]）
+|workflow の実行記録（`run.json`、`log.txt`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`）。実行の worktree の中に書かれる。コマンドの出力を含むのでコミットしない（xref:workflows-run[workflow の実行]）
 |===
 
 一時的に現れるもの: `.aidev/policy.candidate.yaml`（承認すると消えます）、`.aidev/ejected.json`（`aidev uninstall --package` が書き、`aidev init` が消します）。
 
 === 端末側（AIDEV_HOME）
 
-`registry.json`（登録済み PKG の一覧）と `cache/update-check.json`（ADK 更新の確認結果）を置きます。ADK 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。`aidev uninstall` がどちらも消します。{project-name} 本体の開発者の端末には `developer.json` も置かれます（利用者には関係ありません）。
+`registry.json`（登録済み PKG の一覧）、`cache/update-check.json`（ADK 更新の確認結果）と、workflow の実行の worktree（`worktrees/<PKG 名>-<PKG のクローンの場所のハッシュ>/<ブランチ>`。xref:workflows-worktree[実行の worktree とブランチ]）を置きます。ADK 本体は `AIDEV_HOME` ではなく、installer を実行した clone にあります。`aidev uninstall` は `registry.json` と `cache/` を消します。`worktrees/` は、まだ push していない成果が残っていることがあるので消しません（`git worktree remove` で消します）。{project-name} 本体の開発者の端末には `developer.json` も置かれます（利用者には関係ありません）。

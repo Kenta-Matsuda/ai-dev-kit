@@ -7,7 +7,8 @@ Changes an existing workflow from instructions in plain language. It only writes
 
 [source,text]
 ----
-aidev modify workflow <name> --describe "<what to change>" [--dry-run] [--json]
+aidev modify workflow <name> --describe "<what to change>" [--from-run <run id | last>] [--dry-run] [--json]
+aidev modify workflow <name> --from-run <run id | last> [--dry-run] [--json]
 ----
 
 === Description
@@ -20,6 +21,10 @@ The workflow-creator agent (`tools.agent` in `aidev.yaml`) is given the current 
 * The files as they were before are kept in `.aidev/cache/modify/<name>-<time>/` (gitignored). If you do not like the result, put them back from there, or with `git checkout -- <path>`.
 * The modified workflow differs from `main`, so it is no longer approved. Submit it again with `aidev submit workflow <name>`; it is approved once merged.
 
+With `--from-run`, the agent gets that run's record (why it stopped, each step's result and agent starts, the check output, the checking agent's findings and the failed targets of the steps that did not pass, the end of the run log) and is asked to change the definition so the failure's cause goes away. It starts its final message with the cause in one line, `CAUSE: …`. Without `--describe`, the request is "fix what made this run fail" (xref:workflows-fix-from-run[Fixing a workflow from a stopped run]).
+
+When it changes something, what was asked, the `--from-run` run's summary, the cause, the agent's account and the files that changed are kept in `.aidev/cache/modify/<name>.json`. The next `aidev submit workflow <name>` puts them in the PR description.
+
 It also works while the current YAML does not validate; the agent is told to fix that too.
 
 `aidev create workflow <name> --describe "…" --force` also overwrites, but it rewrites from the description alone without looking at the current definition. To change part of a workflow, use `modify`.
@@ -31,7 +36,10 @@ It also works while the current YAML does not validate; the agent is told to fix
 |Option |Description
 
 |`--describe <text>`
-|Required. What to change, in plain language
+|What to change, in plain language. Required without `--from-run`
+
+|`--from-run <run id \| last>`
+|The run the change is for; its record goes to the agent. Looked for in the checkout and the run worktrees
 
 |`--dry-run`
 |Show the agent, the AI tool, the file and the agents shared with other workflows; write nothing and start no agent
@@ -50,7 +58,7 @@ It also works while the current YAML does not validate; the agent is told to fix
 |Edited, and the result validates. `--dry-run`
 
 |1
-|An object other than `workflow`, or no name. No such workflow. No `--describe`. The agent failed. The edited definition does not validate. The agent changed nothing
+|An object other than `workflow`, or no name. No such workflow. Neither `--describe` nor `--from-run`. No such run for `--from-run`. The agent failed. The edited definition does not validate. The agent changed nothing
 |===
 
 === Examples

@@ -5,6 +5,7 @@
  *   registry.json   every PKG clone `aidev init` has set up on this machine,
  *                   so `aidev update` can list which still carry older templates
  *   cache/          the update check and other best-effort caches
+ *   worktrees/      the git worktrees workflow runs work in (runtree.js)
  *
  * The kit checkout that provides the running CLI is *not* here: the installer
  * points the launcher at wherever the kit was cloned (`installRoot`). Keeping

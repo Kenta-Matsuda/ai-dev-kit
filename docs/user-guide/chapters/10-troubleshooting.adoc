@@ -265,18 +265,30 @@
 |`for_each.parallel needs every writable path to name the target as {item}`
 |件を同時に動かすには、`writable` を件ごとのパス（`e2e/tests/{item}.spec.ts` など）で書きます。
 
-|`the working tree has uncommitted changes; commit or stash them first`
-|`pull_request` のステップがある workflow は、きれいな作業ツリーで実行します。
+|`the worktree of aidev/<name> (…) has uncommitted changes, left by a run that stopped in the middle of a step`
+|実行の worktree に、止まった実行の途中の変更があります。`--resume last` で続けるか、表示されたコマンドで捨ててから実行します（xref:workflows-worktree[実行の worktree とブランチ]）。
+
+|`another run (…, process N) is working in …`
+|同じ worktree で実行が動いています。終わるのを待ちます。
+
+|`aidev/<name> has work that conflicts with …`
+|ブランチの前の成果と今の起点が衝突しています。worktree で `git merge` して解決するか、`--dated` で別のブランチにします。
+
+|`the worktree of aidev/<name> (…) does not hold the approved workflow <name>`
+|ブランチの定義が承認済みの版と違います。worktree で承認済みの版をマージするか、`--dated` で実行します。
+
+|実行の worktree で `npm` のコマンドが `not found` や `Cannot find module` で失敗する
+|worktree には git が無視するもの（`node_modules` など）がありません。workflow の最初に `command: npm ci` のステップを置きます。
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。`aidev/<name>-<yyyymmddHHMM>` ブランチに途中の変更が残っています。手で直せる原因なら直して `aidev run workflow <name> --resume last` で続けます（xref:workflows-resume[止まった実行を続ける]）。そうでなければ `--task` を具体的にするか、 Engineering Manager に `prompt`、`until.prompt`、`until.max_retries` の見直しを相談します。
+|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。終わったステップまではブランチ `aidev/<name>` のチェックポイントにあります。手で直せる原因なら worktree で直して `aidev run workflow <name> --resume last` で続けます（xref:workflows-resume[止まった実行を続ける]）。原因が定義にあるなら `aidev modify workflow <name> --from-run last` で直させます（xref:workflows-fix-from-run[止まった実行から直す]）。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`
 |上限に達しました。`--task` を小さくするか、 Engineering Manager に上限の見直し（定義の PR）を相談します。
 
-|`branch aidev/<name>-<yyyymmddHHMM> is ready; hosting.type is generic; open the pull request by hand`
+|`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |正常です。push 済みのブランチから手で PR を作ります。
 
 |`the pull request could not be opened: …`

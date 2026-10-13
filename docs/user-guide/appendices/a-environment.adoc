@@ -12,7 +12,7 @@
 |Azure DevOps の PAT。tracking branch 上の `aidev sync wiki`（PR 作成）と `aidev submit workflow` が使います。PKG が `.mcp.json` に用意する MCP server も同じ変数を使えます。名前は `aidev.yaml` の `hosting.auth_env` で変えられます。
 
 |`AIDEV_HOME`
-|端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧と ADK 更新確認のキャッシュを置きます。
+|端末ごとの作業領域。既定は Windows `{aidev-home-win}`、POSIX `{aidev-home-posix}`。登録済み PKG の一覧、ADK 更新確認のキャッシュ、workflow の実行の worktree（`worktrees/`）を置きます。
 
 |`AIDEV_NO_UPDATE_CHECK`
 |設定すると新しい ADK の確認をしません。CI では `1` にします。

@@ -257,7 +257,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | 変数 | 読む場所 | 意味 |
 | --- | --- | --- |
 | `<hosting.auth_env>`（既定`AZURE_DEVOPS_PAT`） | `ado.js`、`sync wiki`（publish）、`init` / `doctor`（有無のみ） | Azure DevOpsのPAT。値をlogに出さない |
-| `AIDEV_HOME` | `home.js` | registryとupdate cacheの場所 |
+| `AIDEV_HOME` | `home.js`、`runtree.js` | registry、update cache、workflow実行のworktree（`worktrees/<PKG>-<hash>/<branch>`）の場所 |
 | `AIDEV_NO_UPDATE_CHECK` | `aidev.js` | 起動時のkit更新確認を抑止 |
 | `AIDEV_CLAUDE_BIN` | `tools.js` | `claude`の代わりに起動する実行file（`.js`ならnodeで実行、version検査を省略） |
 | `AIDEV_COPILOT_BIN` / `AIDEV_CODEX_BIN` / `AIDEV_KIRO_BIN` | `tools.js` | 同じく`copilot` / `codex` / `kiro-cli`の代わりに起動する実行file |
@@ -299,7 +299,7 @@ CLI起動agent（knowledge update / workflow run。knowledge updateは`--no-agen
 | `.aidev/estimates/notes.md` | 同上 | reviewerの注意書き（Markdown）。cost-estimatorのpromptに入る |
 | `.aidev/estimates/judgments/<name>.json` | `estimate workflow --ai`（答えが読めたとき） | `{schemaVersion: 1, hash, steps: [{id, size, checkSize, kind}]}`。`hash`が今の定義の`contentHash`と同じ間だけ使う |
 | `AIDEV_HOME/cache/evolve/estimates-<yyyymmdd>/`、`estimates-<yyyymmdd>-input/<pkg>/` | `npm run evolve -- estimates` | kit checkoutのworktree（branch `aidev/evolve-estimates-<yyyymmdd>`）と、PKGごとのrecordのcopy |
-| `.aidev/workflows/<name>/runs/<id>/` | `workflow run` | `log.txt`、`run.json`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`（`cli-reference.md`の`run`） |
+| `.aidev/workflows/<name>/runs/<id>/`（実行のworktreeの中） | `workflow run` | `log.txt`、`run.json`、`reports/`、`logs/`、`diffs/`、`notes/`、`pull-request.md`（`cli-reference.md`の`run`） |
 | `AIDEV_HOME/registry.json` | `init`、`sync tools`、`uninstall --package`（書く）。`list packages`、`update`、`doctor`、`--package`（読む） | `{schemaVersion: 1, packages: [{name, path, remote, kitCommit, registeredAt, updatedAt?}]}` |
 | `AIDEV_HOME/cache/update-check.json` | `home.checkForUpdate` | `{checkedAt, localSha, remoteSha, newer}` |
 
