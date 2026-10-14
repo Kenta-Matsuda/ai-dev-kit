@@ -1,0 +1,77 @@
+[[cli-ask]]
+== aidev ask
+
+Asks a question about {project-name} itself: which command does what you want, what a setting does, what an error means, in your own words. The **kit-guide** agent answers by reading this guide and the CLI source in the ADK clone.
+
+=== Synopsis
+
+[source,text]
+----
+aidev ask "<question>" [--package <name|path>] [--json]
+----
+
+=== Description
+
+kit-guide starts as Claude Code in the ADK clone and answers from this user guide (Japanese and English) and, where needed, the CLI source. It only reads: it writes and runs nothing (Claude Code is started with `Read`, `Glob` and `Grep` only, and no MCP server).
+
+* The prompt carries every command and its options (the same as `aidev <command> --help`). kit-guide names no command or option outside that list.
+* A feature still being designed (`docs/developer-guide/proposals/`) is answered as "not there yet".
+* It answers in the language of the question and names the chapters it relied on at the end.
+* Inside a PKG, it is told the PKG's name, hosting, `tools.agent`, and the names of its workflows, agents and skills. It cannot read the PKG's files.
+* It works outside a PKG too.
+
+The AI tool is always Claude Code, whatever `tools.agent` in `aidev.yaml` says (Claude Code is the tool that can be held to reading). The model is `tools.agents.kit-guide.model`, else `tools.agent_model` (xref:configuration[aidev.yaml]), but only when the agent's tool (`tools.agents.kit-guide.tool`, else `tools.agent`) is `claude`; otherwise no model is passed. Each question costs a little, shown on the last line.
+
+TIP: It works from inside an AI tool's session too. The `CLAUDE.md` and the other instruction files a PKG gets tell the AI tool to answer questions about {project-name} by running `aidev ask`. In Claude Code you can also type `!aidev ask "<question>"` to run it yourself.
+
+=== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--json`
+|Output JSON (`ok`, `answer`, `reason`, `tool`, `model`, `costUsd`)
+|===
+
+=== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Answered
+
+|1
+|No question, or one too long (at most 4000 characters). Claude Code not found, kit-guide failed, or its answer was empty
+|===
+
+=== Examples
+
+[source,bash]
+----
+aidev ask "how do I resume a failed workflow run?"
+aidev ask "workflow で agent に MCP server を渡すには？"
+----
+
+[source,text]
+----
+aidev ask "how do I resume a failed workflow run?"
+ℹ asking kit-guide via Claude Code…
+     0:03  Grep --resume in docs/user-guide/en/chapters
+     0:05  Read docs/user-guide/en/chapters/cli/run.adoc
+
+Run it with `--resume` and the run id, or `last`. It continues from the last checkpoint in that run's worktree.
+
+    aidev run workflow <name> --resume last
+
+Source: docs/user-guide/en/chapters/cli/run.adoc
+
+  (kit-guide: $0.0412)
+----
+
+=== Related information
+
+* xref:cli-reference[How to read the command reference]
+* xref:troubleshooting[Troubleshooting]

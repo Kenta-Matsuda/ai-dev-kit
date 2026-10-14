@@ -34,7 +34,7 @@ A command starts with a verb, followed by an object (`workflow`, `policy`, `kit`
 |Show what would change and write nothing (supported commands only).
 
 |`--package <name\|path>`, `-p <name\|path>`
-|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `modify`, `edit`, `estimate`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`). An error on `update`.
+|Run on this PKG instead of the current clone. `<name>` is a name shown by xref:cli-list[`aidev list packages`]; `<path>` is the path of a PKG clone. Accepted by the commands that act on a PKG (`init`, `check`, `doctor`, `create`, `modify`, `edit`, `estimate`, `remove`, `list`, `submit`, `run`, `sync`, `uninstall`, `ask`). An error on `update`.
 
 |`--help`, `-h`
 |Show the command list, or the options of one command.
@@ -132,6 +132,15 @@ Every command except `hook` and `update` (including `--help` and `--version`) te
 |===
 
 
+.Ask
+[%autowidth.stretch,options="header"]
+|===
+|Command |Summary
+
+|xref:cli-ask[`aidev ask "<question>"`]
+|Ask how to use {project-name} itself (answered from the guide and the source)
+|===
+
 .Called by tools
 [%autowidth.stretch,options="header"]
 |===
@@ -141,6 +150,8 @@ Every command except `hook` and `update` (including `--help` and `--version`) te
 |Internal command called by the AI tool's hooks (not listed by `aidev --help`)
 
 |===
+
+include::ask.adoc[]
 
 include::check.adoc[]
 

@@ -9,7 +9,7 @@
 - optionは各commandの`FLAGS`で宣言され、未知のoptionはエラー（exit 1）。`--flag=value`形式も可。boolean flagに`=true|false`以外の値は不可。`--`以降はpositional
 - objectを持つcommand（`bin/aidev.js`の`SUBCOMMANDS`: `create` workflow|agent|skill|policy、`modify` / `edit` / `estimate` / `submit` / `run` workflow、`remove` workflow|agent|skill、`list` workflows|agents|skills|packages、`sync` tools|wiki、`hook` session-start|guard-write|quality-gate|after-bash|session-stop）はobject必須
 - repo rootは`git.findRepoRoot(cwd)`（`aidev.yaml`または`.aidev/`を上へ探索）。`hook`だけは`CLAUDE_PROJECT_DIR`を起点にする
-- `--package <name|path>`（`-p`、`--package=<v>`）は`aidev.js`の`takePackageOption`が各commandの`parseArgs`より先に取り除き、`home.resolvePackage`（registry名、同名が複数ならerror、なければdirectory）→`findRepoRoot(dir) || dir`をrepo rootにする。`ctx.packageRef`に元の値が入る。受け付けるのは`PACKAGE_COMMANDS`（`init` / `check` / `doctor` / `create` / `modify` / `edit` / `estimate` / `remove` / `list` / `submit` / `run` / `sync` / `uninstall`）だけで、`update`と`hook`はexit 1（黙って無視しない）。2回指定、値なしもexit 1。`--`以降は見ない。`--help`は`PACKAGE_COMMANDS`に`package:`欄を出す
+- `--package <name|path>`（`-p`、`--package=<v>`）は`aidev.js`の`takePackageOption`が各commandの`parseArgs`より先に取り除き、`home.resolvePackage`（registry名、同名が複数ならerror、なければdirectory）→`findRepoRoot(dir) || dir`をrepo rootにする。`ctx.packageRef`に元の値が入る。受け付けるのは`PACKAGE_COMMANDS`（`init` / `check` / `doctor` / `create` / `modify` / `edit` / `estimate` / `remove` / `list` / `submit` / `run` / `sync` / `uninstall` / `ask`）だけで、`update`と`hook`はexit 1（黙って無視しない）。2回指定、値なしもexit 1。`--`以降は見ない。`--help`は`PACKAGE_COMMANDS`に`package:`欄を出す
 - `hook`・`update`（`QUIET_COMMANDS`）以外は、`--help`・`--version`を含め起動直後にkit更新の有無を確認し（`AIDEV_NO_UPDATE_CHECK=1`で抑止）、新しければstderrに警告する。TTYで`--json`でも`uninstall`（`NO_OFFER_COMMANDS`）でもなければ先に`update`するか尋ねる（PKGへの適用は別途`aidev sync tools`）
 - `AidevError`は`ui.fail`でstderrへ出し、`code`をexit codeにする。それ以外の例外は`internal error`としてexit 1、`AIDEV_DEBUG=1`でstack traceを出す
 
@@ -204,6 +204,14 @@ installerが置いたものをこの端末から消します。順序: bin direc
 kit管理を解除します。既にejected（marker あり）なら`--force`なしでexit 0。`aidev.yaml` / `materialized.json` / `policy.yaml`のどれも無ければ`--force`なしで拒否。有効なsync leaseがあれば`--force`なしで拒否。
 
 順序: `.claude/settings.json`から`aidev hook`を呼ぶhookだけを外す → `policy.yaml`、`policy.candidate.yaml`、`materialized.json`、`sync.lock`、`cache/`を削除 → `--keep-assets`でなければkit所有file（lockに記録されたfileと現在のtemplateが置くfile。teamが追加したfileは含まない）を削除 → 空になった`.aidev/`を削除 → registryから除外 → `.aidev/ejected.json`を書く。`--yes`なしでは一覧を表示してexit 1。PKG file、`.aidev/knowledge/`、`aidev.yaml`、`.aidev/workflows/`は残します。
+
+### `aidev ask "<question>"`
+
+```text
+--json
+```
+
+`cli/commands/ask.js`。positionalを空白で連結したものが質問（空ならexit 1、4000文字超もexit 1）。PKGの外でも動く。`cli/agents/kit-guide.md`（PKGに配布しない）を`definition`で前置し、**常にclaude**で、cwdを**kit checkout**（`installRoot`）にして起動する: `--tools Read Glob Grep`、空の`--mcp-config`と`--strict-mcp-config`、promptはstdin（kit checkoutに何も書かない。`update`はclean treeを要求する）、10分。modelは`agentSettings(config, 'kit-guide')`のtoolが`claude`のときだけそのmodel（他toolのmodelはclaudeに渡さない）。promptは質問（data扱い）、`bin/aidev.js`の`commandReference()`（`ctx.commandReference`。`HIDDEN_COMMANDS`以外の全commandのobject・summary・`FLAGS`/`FLAG_HELP`、`PACKAGE_COMMANDS`なら`--package`）、PKGの中なら名前・hosting・`tools.agent`・`tools.default`・workflow / agent / skillの名前（agentはPKGを読めない）。最終messageをそのまま表示し、`costUsd`をdimで出す。答えが空・tool失敗・claude不在はexit 1。JSON: `{ok, answer, reason, tool, model, costUsd}`
 
 ### self-evolution（`npm run evolve -- enable|disable|status|run`。CLI commandではない）
 

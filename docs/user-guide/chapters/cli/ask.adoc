@@ -1,0 +1,77 @@
+[[cli-ask]]
+== aidev ask
+
+{project-name} 自体の使い方を質問します。「こういうことをしたいときはどのコマンドを打つか」「この設定は何をするか」「このエラーは何か」を、ふだんの言葉で尋ねられます。答えるのは、ADK の clone にあるこのガイドと CLI のソースを読む **kit-guide** agent です。
+
+=== 書式
+
+[source,text]
+----
+aidev ask "<質問>" [--package <name|path>] [--json]
+----
+
+=== 説明
+
+kit-guide は ADK の clone の中で Claude Code として起動し、このユーザーガイド（日本語版と英語版）と、必要なら CLI のソースを読んで答えます。読むだけで、何も書かず、何も実行しません（Claude Code は `Read`・`Glob`・`Grep` だけ、MCP server なしで起動されます）。
+
+* prompt には、全コマンドとそのオプションの一覧（`aidev <command> --help` と同じ内容）が入ります。kit-guide はここにないコマンドやオプションを答えません。
+* 設計中で実装されていない機能（`docs/developer-guide/proposals/`）は「まだない」と答えます。
+* 質問と同じ言語で答え、根拠にしたガイドの章を最後に示します。
+* PKG の中で実行すると、その PKG の名前、hosting、`tools.agent`、workflow・agent・skill の名前を kit-guide に渡します。kit-guide は PKG のファイルを読めません。
+* PKG の外でも使えます。
+
+AI ツールは `aidev.yaml` の `tools.agent` にかかわらず、常に Claude Code です（読むだけに制限できるのが Claude Code だけのため）。モデルは `tools.agents.kit-guide.model`、無ければ `tools.agent_model` です（xref:configuration[aidev.yaml]）。ただし、その agent の tool（`tools.agents.kit-guide.tool`、無ければ `tools.agent`）が `claude` でないときは、モデルを指定せずに起動します。質問 1 回ごとに少し費用がかかり、最後の行に表示されます。
+
+TIP: AI ツールの対話セッションの中でも使えます。PKG に配られる `CLAUDE.md` などは、{project-name} の使い方を聞かれたら `aidev ask` を実行して答えるよう AI ツールに指示しています。Claude Code では `!aidev ask "<質問>"` と打って自分で実行することもできます。
+
+=== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--json`
+|JSON で出力する（`ok`、`answer`、`reason`、`tool`、`model`、`costUsd`）
+|===
+
+=== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|答えた
+
+|1
+|質問が無い、長すぎる（4000 文字まで）。Claude Code が見つからない、kit-guide が失敗した、答えが空だった
+|===
+
+=== 例
+
+[source,bash]
+----
+aidev ask "失敗した workflow の実行を途中から再開するには？"
+aidev ask "how do I give an agent an MCP server in a workflow?"
+----
+
+[source,text]
+----
+aidev ask "失敗した workflow の実行を途中から再開するには？"
+ℹ asking kit-guide via Claude Code…
+     0:03  Grep --resume in docs/user-guide/chapters
+     0:05  Read docs/user-guide/chapters/cli/run.adoc
+
+`--resume` に実行 ID か `last` を付けて実行します。その実行の worktree の最後のチェックポイントから続けます。
+
+    aidev run workflow <name> --resume last
+
+根拠: docs/user-guide/chapters/cli/run.adoc
+
+  (kit-guide: $0.0412)
+----
+
+=== 関連情報
+
+* xref:cli-reference[コマンドリファレンスの読み方]
+* xref:troubleshooting[トラブルシューティング]
