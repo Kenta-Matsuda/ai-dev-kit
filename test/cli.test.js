@@ -950,6 +950,65 @@ function run() {
       ok(/requires a package name or path/.test(none.stderr), none.stderr);
     });
   });
+
+  suite('cli: ask');
+
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-ask-'));
+    const stub = path.join(dir, 'fake-claude.js');
+    const argvOut = path.join(dir, 'argv.json');
+    const promptOut = path.join(dir, 'prompt.md');
+    const cwdOut = path.join(dir, 'cwd.txt');
+    fs.writeFileSync(stub, `#!/usr/bin/env node
+'use strict';
+const fs = require('fs');
+const argv = process.argv.slice(2);
+if (argv[0] === '--version') { process.stdout.write('2.1.300 (Claude Code)\\n'); process.exit(0); }
+fs.writeFileSync(process.env.STUB_ARGV_OUT, JSON.stringify(argv));
+fs.writeFileSync(process.env.STUB_CWD_OUT, process.cwd());
+let stdin = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (c) => { stdin += c; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(process.env.STUB_PROMPT_OUT, stdin);
+  process.stdout.write(JSON.stringify({ type: 'result', result: process.env.STUB_ANSWER || '', is_error: false, total_cost_usd: 0.01, session_id: 's' }) + '\\n');
+});
+`, 'utf8');
+    fs.chmodSync(stub, 0o755);
+    const env = (answer) => ({ AIDEV_CLAUDE_BIN: stub, STUB_ARGV_OUT: argvOut, STUB_PROMPT_OUT: promptOut, STUB_CWD_OUT: cwdOut, STUB_ANSWER: answer });
+    const kitRoot = path.resolve(__dirname, '..');
+
+    test('ask hands the question to the read-only kit-guide in the kit checkout, with the command list', () => {
+      const fx = makeRepo();
+      const r = aidev(['ask', 'how', 'do I resume a failed run?', '--json'], { cwd: fx.root, env: env('Run `aidev run workflow <name> --resume`.') });
+      eq(r.code, EXIT.OK, r.stderr);
+      const j = JSON.parse(r.stdout);
+      eq([j.ok, j.answer, j.tool], [true, 'Run `aidev run workflow <name> --resume`.', 'claude']);
+      const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+      eq(a.slice(a.indexOf('--tools') + 1), ['Read', 'Glob', 'Grep'], 'kit-guide only reads');
+      ok(a.includes('--strict-mcp-config'), 'and loads no MCP server');
+      eq(fs.realpathSync(fs.readFileSync(cwdOut, 'utf8')), fs.realpathSync(kitRoot), 'it runs where the guide is');
+      const prompt = fs.readFileSync(promptOut, 'utf8');
+      ok(/# Agent: kit-guide/.test(prompt) && /how do I resume a failed run\?/.test(prompt), prompt.slice(0, 300));
+      ok(/aidev run <workflow> — [\s\S]*--resume/.test(prompt), 'the prompt lists the commands and their options');
+      ok(!/aidev hook/.test(prompt), 'not the internal hook entry point');
+      ok(/- package: my-pkg/.test(prompt), 'and names the package it was asked in');
+    });
+
+    test('ask works outside a package, and fails without a question or an answer', () => {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-ask-out-'));
+      const r = aidev(['ask', 'what is a PKG?'], { cwd: outside, env: env('A repository set up with aidev init.') });
+      eq(r.code, EXIT.OK, r.stderr);
+      ok(/A repository set up with aidev init\./.test(r.stdout), r.stdout);
+      ok(/asked outside a package/.test(fs.readFileSync(promptOut, 'utf8')));
+      const none = aidev(['ask'], { cwd: outside, env: env('x') });
+      eq(none.code, EXIT.GENERAL);
+      ok(/needs a question/.test(none.stderr), none.stderr);
+      const empty = aidev(['ask', 'anything', '--json'], { cwd: outside, env: env('') });
+      eq(empty.code, EXIT.GENERAL);
+      eq([JSON.parse(empty.stdout).ok, JSON.parse(empty.stdout).reason], [false, 'the agent gave no answer']);
+    });
+  }
 }
 
 module.exports = { run };

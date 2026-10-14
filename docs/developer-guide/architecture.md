@@ -673,3 +673,4 @@ CLI起動agent（aidev sync wiki, aidev run workflow）:
 - workflow: `cli/commands/workflow.js`（`modify.js` / `estimate.js`は薄いwrapper）、`cli/lib/workflow.js`、`cli/lib/estimate.js`、`cli/agents/cost-estimator.md`、`cli/agents/estimate-reviewer.md`
 - workflow editor: `cli/commands/edit.js`、`cli/lib/editor.js`、`cli/editor/index.html`、`cli/lib/yaml.js`（`stringify`）
 - update: `cli/commands/update.js`、`cli/bin/aidev.js`
+- ask（kit自体への質問）: `cli/commands/ask.js`、`cli/agents/kit-guide.md`、`cli/bin/aidev.js`（`commandReference`）

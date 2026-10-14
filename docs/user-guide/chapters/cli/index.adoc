@@ -34,7 +34,7 @@ aidev <verb> [<object>] [<name>] [options]
 |何が変わるかを表示し、何も書きません（対応コマンドのみ）。
 
 |`--package <name\|path>`, `-p <name\|path>`
-|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`modify`、`edit`、`estimate`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`）で使えます。`update` に付けるとエラーです。
+|カレントの clone ではなく、この PKG に対して実行します。`<name>` は xref:cli-list[`aidev list packages`] に出る名前、`<path>` は PKG の clone のパスです。PKG に対して動くコマンド（`init`、`check`、`doctor`、`create`、`modify`、`edit`、`estimate`、`remove`、`list`、`submit`、`run`、`sync`、`uninstall`、`ask`）で使えます。`update` に付けるとエラーです。
 
 |`--help`, `-h`
 |コマンド一覧、またはそのコマンドのオプションを表示します。
@@ -132,6 +132,15 @@ aidev <verb> [<object>] [<name>] [options]
 |===
 
 
+.質問する
+[%autowidth.stretch,options="header"]
+|===
+|コマンド |要約
+
+|xref:cli-ask[`aidev ask "<質問>"`]
+|{project-name} 自体の使い方を質問する（ガイドとソースを読んで答える）
+|===
+
 .ツールから呼ばれる
 [%autowidth.stretch,options="header"]
 |===
@@ -141,6 +150,8 @@ aidev <verb> [<object>] [<name>] [options]
 |AI ツールの hook から呼ばれる内部コマンド（`aidev --help` には出ない）
 
 |===
+
+include::ask.adoc[]
 
 include::check.adoc[]
 

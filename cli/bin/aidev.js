@@ -27,6 +27,7 @@ const COMMANDS = [
   'init', 'check', 'doctor',
   'create', 'modify', 'edit', 'estimate', 'remove', 'list', 'submit', 'run',
   'update', 'sync', 'uninstall',
+  'ask',
   'hook',
 ];
 
@@ -59,7 +60,7 @@ const NO_OFFER_COMMANDS = new Set(['uninstall']);
  * at a registered package or a clone elsewhere instead of the current
  * directory. `update` acts on the machine only; `hook` follows the tool.
  */
-const PACKAGE_COMMANDS = new Set(['init', 'check', 'doctor', 'create', 'modify', 'edit', 'estimate', 'remove', 'list', 'submit', 'run', 'sync', 'uninstall']);
+const PACKAGE_COMMANDS = new Set(['init', 'check', 'doctor', 'create', 'modify', 'edit', 'estimate', 'remove', 'list', 'submit', 'run', 'sync', 'uninstall', 'ask']);
 
 /** Internal entry points (the AI tools' hooks call them); routable, not advertised. */
 const HIDDEN_COMMANDS = new Set(['hook']);
@@ -93,6 +94,7 @@ function usage() {
     ['develop (in a package clone)', ['run', 'estimate', 'create', 'modify', 'edit', 'submit', 'list', 'remove']],
     ['maintain (in a package clone)', ['init', 'check', 'sync']],
     ['this machine', ['update', 'doctor', 'uninstall']],
+    ['help', ['ask']],
   ];
   for (const [title, names] of groups) {
     ui.out(`  ${title}:`);
@@ -138,6 +140,29 @@ function commandHelp(name, mod) {
     ]));
   }
   ui.out('');
+}
+
+/**
+ * Every advertised command with its objects and options, as plain text: what
+ * `aidev ask` hands its agent, so the answer names only what exists.
+ */
+function commandReference() {
+  const lines = [];
+  for (const name of COMMANDS.filter((c) => !HIDDEN_COMMANDS.has(c))) {
+    let mod = null;
+    try { mod = loadCommand(name); } catch { mod = null; }
+    if (!mod) continue;
+    const subs = SUBCOMMANDS[name];
+    lines.push(`aidev ${name}${subs ? ` <${subs.join('|')}>` : ''} — ${mod.summary || ''}`);
+    if (PACKAGE_COMMANDS.has(name)) lines.push('  --package, -p <name|path>  act on this package instead of the current clone');
+    const help = mod.FLAG_HELP || {};
+    for (const [f, t] of Object.entries(mod.FLAGS || {})) {
+      if (help[f] === false) continue;
+      lines.push(`  --${f}${t === 'string' ? ' <value>' : ''}  ${typeof help[f] === 'string' ? help[f] : ''}`.trimEnd());
+    }
+  }
+  lines.push('', 'exit codes: 0 ok · 1 error · 2 drift · 3 permission · 4 wiki inconsistent');
+  return lines.join('\n');
 }
 
 /**
@@ -269,7 +294,7 @@ async function main(argv) {
     if (reran !== null) return reran;
   }
 
-  const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, packageRef, flags, positionals, argv: rest, command: name };
+  const ctx = { installRoot: INSTALL_ROOT, version: VERSION, repoRoot, packageRef, flags, positionals, argv: rest, command: name, commandReference };
   const code = await mod.run(ctx);
   return typeof code === 'number' ? code : EXIT.OK;
 }

@@ -38,6 +38,7 @@
 | AI tool adapter（registry、binary解決、argv、結果のparse） | `cli/lib/tools.js` |
 | tool configの適用・検査 | `cli/lib/assets.js`、`cli/commands/sync.js`、`templates/<tool>/` |
 | self-update | `cli/commands/update.js` |
+| kit自体への質問（`aidev ask`、kit-guide） | `cli/commands/ask.js`、`cli/agents/kit-guide.md` |
 | Wiki整合判定（head / knowledge / tracking） | `cli/lib/state.js`、`cli/lib/inventory.js`（`compareWithTree`）、`cli/lib/git.js` |
 | Wiki manifest / inventory / 完了報告 / clean-tree検査 | `cli/lib/inventory.js` |
 | evidence scope | `cli/lib/knowledge-scope.js` |
