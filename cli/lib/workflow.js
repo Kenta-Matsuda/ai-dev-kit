@@ -38,6 +38,7 @@ const layout = require('./layout');
 const cfgMod = require('./config');
 const gitMod = require('./git');
 const toolsMod = require('./tools');
+const pathsMod = require('./paths');
 const yaml = require('./yaml');
 
 /**
@@ -74,7 +75,57 @@ const ENV_ITEM = 'AIDEV_WORKFLOW_ITEM';
 const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
-const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'steps', 'limits'];
+const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'inputs', 'provide', 'never_commit', 'steps', 'limits'];
+
+/**
+ * `inputs`: what a run is given on the command line (`--input name=value`),
+ * declared so that the kit can check it before anything starts and put it
+ * where the definition says (`{inputs.<name>}` in prompts and commands).
+ *   description  for the person running it (and the pull request)
+ *   default      the value when none is given; an input without one is required
+ *   pattern      a regular expression the whole value must match; required
+ *                when the input reaches a command's argv (unless it is a path
+ *                or a file, which are bounded already)
+ *   path         true: the value is a path inside the repository that must
+ *                exist when the run starts (after `provide` has copied)
+ *   file         true: the value is a file anywhere on this machine; the
+ *                runner copies it into the run's directory (gitignored, inside
+ *                the worktree) and `{inputs.<name>}` is that copy's path
+ */
+const INPUT_KEYS = ['description', 'default', 'pattern', 'path', 'file'];
+const INPUT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+/** `{inputs.<name>}` wherever a value may be written; anything else inside the braces is a mistake. */
+const INPUT_TOKEN_RE = /\{inputs\.([^}]*)\}/g;
+const INPUT_MAX_CHARS = 1000;
+const INPUT_PATTERN_MAX_CHARS = 200;
+/** A value is one line of text; control characters never belong in a prompt or an argv. */
+const INPUT_CONTROL_RE = /[\x00-\x1f\x7f]/;
+/**
+ * A value that reaches a command's argv is held to a fixed whitelist the
+ * author cannot loosen (the author's pattern narrows it further), as a
+ * for_each target is: one plain token of letters, digits and . _ / @ : = + -,
+ * not starting with a dash, no way up the tree. Nothing a shell, a cmd.exe
+ * shim or an option parser reads specially.
+ */
+const COMMAND_VALUE_RE = /^[A-Za-z0-9._@][A-Za-z0-9._/@:=+-]{0,999}$/;
+/** Where a file input lands: inside the run's directory, which runs/ is gitignored. */
+const INPUTS_DIR = 'inputs';
+
+/**
+ * Paths a run never commits, wherever a step may write: what toolchains
+ * leave behind, never what a step produces. The pull-request step, the
+ * checkpoints, `unchanged` and the undo of a failed target all leave them
+ * out, as if the PKG ignored them (a PKG without a .gitignore does not).
+ * A workflow adds its own with `never_commit:`; nothing takes these away.
+ */
+/** File names that hold credentials, as a last name of a `provide` glob: never copied into a run. */
+const SECRET_FILE_RE = /^(\.env(\..*)?|\.npmrc|\.netrc|\.pypirc|.*\.(pem|key|p12|pfx|jks|keystore))$/i;
+
+const NEVER_COMMITTED = Object.freeze([
+  '**/node_modules/**', '**/bower_components/**', '**/.pnpm-store/**', '**/.yarn/cache/**',
+  '**/.venv/**', '**/venv/**', '**/__pycache__/**', '**/*.pyc', '**/.pytest_cache/**', '**/.mypy_cache/**', '**/.ruff_cache/**',
+  '**/.tox/**', '**/.nox/**', '**/.gradle/**', '**/.DS_Store', '**/Thumbs.db', '**/*.orig', '**/*.rej',
+]);
 /** What a workflow's `agents: { <agent>: ... }` may assign to one agent. */
 const AGENT_GRANT_KEYS = ['skills', 'mcp', 'tools', 'subagents'];
 /** Where an agent's capabilities are written, for the messages that point there. */
@@ -236,6 +287,8 @@ function envMap(v, field, where) {
   for (const [k, raw] of Object.entries(v)) {
     if (!ENV_NAME_RE.test(k)) throw new AidevError(`${where}: ${field}: ${JSON.stringify(k)} is not an environment variable name`);
     if (/^AIDEV_/i.test(k)) throw new AidevError(`${where}: ${field}: ${k} is the kit's own; a workflow cannot set AIDEV_* variables`);
+    // The git configuration a run hands its children (a trial's no-push settings) is not a step's to change.
+    if (/^GIT_CONFIG/i.test(k)) throw new AidevError(`${where}: ${field}: ${k} is git configuration, which the runner sets; a workflow cannot set GIT_CONFIG* variables`);
     if (raw == null || typeof raw === 'object') throw new AidevError(`${where}: ${field}: ${k} must be a plain value`);
     const s = String(raw);
     if (/[\r\n\0]/.test(s)) throw new AidevError(`${where}: ${field}: ${k} must be a single line`);
@@ -490,6 +543,248 @@ function mergeCapabilities(own, grant) {
   };
 }
 
+/** The names written as `{inputs.<name>}` in a text, in order of appearance (a malformed one throws). */
+function inputRefs(text, where) {
+  const out = [];
+  for (const m of String(text == null ? '' : text).matchAll(INPUT_TOKEN_RE)) {
+    const name = m[1];
+    if (!INPUT_NAME_RE.test(name)) throw new AidevError(`${where}: ${JSON.stringify(m[0])} is not an input reference (write {inputs.<name>}, lowercase letters, digits, - and _)`);
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * The checks every input value passes: one line, bounded, the author's
+ * pattern when there is one, and the argv shape when the input reaches a
+ * command. Throws with the reason.
+ */
+function checkInputValue(spec, name, value, where, { placed = false } = {}) {
+  const s = String(value == null ? '' : value);
+  if (s.length > INPUT_MAX_CHARS) throw new AidevError(`${where}: input ${name} is ${s.length} characters long, above ${INPUT_MAX_CHARS}`);
+  if (INPUT_CONTROL_RE.test(s)) throw new AidevError(`${where}: input ${name} must be one line without control characters`);
+  // A value is never a template: what it says is what the agent gets.
+  if (/[{}]/.test(s)) throw new AidevError(`${where}: input ${name} cannot contain { or } (a value is not a template; ${ITEM_TOKEN} and {inputs.…} are written in the definition)`);
+  if (spec.pattern && !spec.patternRe.test(s)) throw new AidevError(`${where}: input ${name}: ${JSON.stringify(s.slice(0, 80))} does not match its pattern (${spec.pattern})`);
+  const textOnly = (p) => {
+    if (cfgMod.NON_TEXT_REFERENCE_EXTENSIONS.includes(path.extname(p).toLowerCase())) {
+      throw new AidevError(`${where}: input ${name}: the AI tools read text; export ${p} to Markdown, CSV or text first and pass that file`);
+    }
+  };
+  if (spec.file && !placed) {
+    // A file on this machine, to be copied into the run: it must be there
+    // now. What a command sees is the copy's path, checked when placed.
+    if (!s) throw new AidevError(`${where}: input ${name} is a file on this machine (empty)`);
+    textOnly(s);
+    let stat = null;
+    try { stat = fs.statSync(path.resolve(s)); } catch { stat = null; }
+    if (!stat || !stat.isFile()) throw new AidevError(`${where}: input ${name}: ${s} is not a file on this machine`);
+    return s;
+  }
+  if (spec.path || spec.file) {
+    if (!s || s.startsWith('/') || /^[A-Za-z]:/.test(s) || s.split(/[\\/]/).includes('..')) {
+      throw new AidevError(`${where}: input ${name} is a path inside the repository (${s || 'empty'})`);
+    }
+    textOnly(s);
+  }
+  if (spec.inCommand && (!COMMAND_VALUE_RE.test(s) || s.split('/').includes('..'))) {
+    throw new AidevError(`${where}: input ${name} reaches a command, so its value must be one plain token (letters, digits and . _ / @ : = + - only; no spaces, no leading dash, no "..")`);
+  }
+  return s;
+}
+
+/**
+ * The top-level `inputs:`, validated: { <name>: { description, default,
+ * pattern, patternRe, path, inCommand } }. `inCommand` is filled in by the
+ * caller once it knows where each input is written.
+ */
+function inputSpecs(v, source) {
+  if (v == null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new AidevError(`${source}: inputs is a mapping of input name to its declaration (inputs: { <name>: { description: ..., default: ..., pattern: ..., path: true } })`);
+  }
+  const out = {};
+  for (const [name, raw] of Object.entries(v)) {
+    const where = `${source}: inputs.${name}`;
+    if (!INPUT_NAME_RE.test(name)) throw new AidevError(`${source}: inputs: ${JSON.stringify(name)} is not an input name (lowercase letters, digits and _, starting with a letter, at most 32)`);
+    const decl = raw == null ? {} : raw;
+    if (typeof decl !== 'object' || Array.isArray(decl)) throw new AidevError(`${where} must be a mapping with description, default, pattern and/or path`);
+    assertKnownKeys(decl, INPUT_KEYS, where);
+    const spec = {
+      description: decl.description == null ? '' : String(decl.description).trim(),
+      default: null, pattern: null, patternRe: null, path: decl.path === true, file: decl.file === true, inCommand: false,
+    };
+    if (decl.path != null && typeof decl.path !== 'boolean') throw new AidevError(`${where}: path is true or false`);
+    if (decl.file != null && typeof decl.file !== 'boolean') throw new AidevError(`${where}: file is true or false`);
+    if (spec.path && spec.file) throw new AidevError(`${where}: path (inside the repository) and file (anywhere on this machine) exclude each other`);
+    if (decl.pattern != null) {
+      const p = String(decl.pattern);
+      if (!p || p.length > INPUT_PATTERN_MAX_CHARS) throw new AidevError(`${where}: pattern must be a regular expression of at most ${INPUT_PATTERN_MAX_CHARS} characters`);
+      try { spec.patternRe = new RegExp(`^(?:${p})$`); } catch (e) { throw new AidevError(`${where}: pattern is not a regular expression (${e.message})`); }
+      spec.pattern = p;
+    }
+    if (decl.default != null) {
+      if (typeof decl.default === 'object') throw new AidevError(`${where}: default must be a plain value`);
+      if (spec.file) throw new AidevError(`${where}: a file input has no default (the file is on the machine of whoever runs it)`);
+      spec.default = String(decl.default);
+    }
+    out[name] = spec;
+  }
+  return out;
+}
+
+/**
+ * Every input written in the definition, with where: [{ name, where,
+ * command }]. `command` is true where the value reaches a child process (an
+ * argv entry, an env value): such an input is held to the argv whitelist.
+ * Anywhere else in the definition, {inputs.…} is a mistake.
+ */
+function inputUses(def, source = null) {
+  const uses = [];
+  const at = (where) => (source ? `${source}: ${where}` : where);
+  const note = (text, where, command = false) => {
+    for (const name of inputRefs(text, at(where))) uses.push({ name, where, command });
+  };
+  const never = (text, where) => {
+    if (String(text == null ? '' : text).includes('{inputs.')) throw new AidevError(`${at(where)} cannot name an input ({inputs.…}); inputs go in objective, a step's prompt, until.prompt, a command or an env value`);
+  };
+  note(def.objective, 'objective');
+  never(def.description, 'description');
+  for (const s of def.steps) {
+    const where = `steps[${s.id}]`;
+    const cmd = (c, at) => {
+      if (c.argv[0].includes('{inputs.')) throw new AidevError(`${source ? `${source}: ` : ''}${at}: the executable of a command (${c.argv[0]}) is fixed; an input can be an argument, not the command`);
+      note(c.text, at, true);
+    };
+    never(s.description, `${where}.description`);
+    if (s.kind === 'agent') {
+      note(s.prompt, `${where}.prompt`);
+      if (s.until) {
+        for (const c of s.until.commands) cmd(c, `${where}.until.command`);
+        for (const [k, v] of Object.entries(s.until.env || {})) note(v, `${where}.until.env.${k}`, true);
+        if (s.until.prompt != null) note(s.until.prompt, `${where}.until.prompt`);
+      }
+    } else if (s.kind === 'command') {
+      cmd(s.command, `${where}.command`);
+      for (const [k, v] of Object.entries(s.env || {})) note(v, `${where}.env.${k}`, true);
+    } else if (s.kind === 'pull-request') {
+      never(s.title, `${where}.pull_request.title`);
+    }
+  }
+  return uses;
+}
+
+/**
+ * The values of a run's inputs, from `--input name=value` lines (or a
+ * recorded { name: value } object): defaults filled in, everything checked.
+ * Throws on an input the definition does not declare, a required one that is
+ * missing, or a value its declaration refuses.
+ */
+function collectInputs(def, given, where = '--input', { allowMissing = false, placed = false } = {}) {
+  const specs = def.inputs || {};
+  const values = {};
+  const entries = Array.isArray(given)
+    ? given.map((line) => {
+      const s = String(line == null ? '' : line);
+      const at = s.indexOf('=');
+      if (at <= 0) throw new AidevError(`${where} takes name=value (got ${JSON.stringify(s.slice(0, 80))})`);
+      return [s.slice(0, at).trim(), s.slice(at + 1)];
+    })
+    : Object.entries(given || {});
+  for (const [name, value] of entries) {
+    if (!specs[name]) {
+      const known = Object.keys(specs);
+      throw new AidevError(`${where}: the workflow declares no input ${JSON.stringify(name)}${known.length ? ` (its inputs: ${known.join(', ')})` : ' (it declares no inputs)'}`);
+    }
+    if (name in values) throw new AidevError(`${where}: input ${name} is given twice`);
+    values[name] = checkInputValue(specs[name], name, value, where, { placed });
+  }
+  const missing = [];
+  for (const [name, spec] of Object.entries(specs)) {
+    if (name in values) continue;
+    if (spec.default == null) { missing.push(name); continue; }
+    values[name] = spec.default;
+  }
+  if (missing.length && !allowMissing) {
+    throw new AidevError(`the workflow needs ${where} for: ${missing.map((n) => `${n}${specs[n].description ? ` (${specs[n].description})` : ''}`).join(', ')}`);
+  }
+  return values;
+}
+
+/**
+ * Where a file input lands in the run: `{inputs.<name>}` names this
+ * repo-relative path, under the run's directory (gitignored, inside the
+ * worktree, so the agents read it and nothing commits it). Returns the values
+ * with file inputs replaced by their destination, and the files to copy:
+ * { values, files: [{ name, from, to }] }.
+ */
+function placeFileInputs(def, values, { name, runId }) {
+  const out = { ...values };
+  const files = [];
+  for (const [n, spec] of Object.entries(def.inputs || {})) {
+    if (!spec.file || values[n] == null) continue;
+    const from = path.resolve(values[n]);
+    const ext = path.extname(from).toLowerCase();
+    const to = `${runRel(name, runId)}/${INPUTS_DIR}/${n}${/^\.[a-z0-9]{1,10}$/.test(ext) ? ext : ''}`;
+    out[n] = to;
+    files.push({ name: n, from, to });
+  }
+  return { values: out, files };
+}
+
+/** `text` with every `{inputs.<name>}` replaced by its value. */
+function putInputs(text, values) {
+  return String(text == null ? '' : text).replace(INPUT_TOKEN_RE, (m, name) => (Object.prototype.hasOwnProperty.call(values, name) ? values[name] : m));
+}
+
+/**
+ * The definition as a run with these input values sees it: the values
+ * written into the objective, the prompts, the commands (each argv entry on
+ * its own, so a value is one argument) and the env values. Everything else,
+ * `writable` included, is the definition's own: an input never widens what
+ * a step may touch.
+ */
+function withInputs(def, values) {
+  if (!Object.keys(values || {}).length) return def;
+  const put = (s) => putInputs(s, values);
+  const cmd = (c) => ({ text: put(c.text), argv: c.argv.map(put) });
+  const env = (e) => Object.fromEntries(Object.entries(e || {}).map(([k, v]) => [k, put(v)]));
+  return {
+    ...def,
+    objective: put(def.objective),
+    steps: def.steps.map((s) => {
+      if (s.kind === 'agent') {
+        const until = s.until && { ...s.until, commands: s.until.commands.map(cmd), env: env(s.until.env), prompt: s.until.prompt == null ? null : put(s.until.prompt) };
+        return { ...s, prompt: put(s.prompt), until };
+      }
+      if (s.kind === 'command') return { ...s, command: cmd(s.command), env: env(s.env) };
+      return s;
+    }),
+  };
+}
+
+/** The globs a run never commits: the kit's own list and the workflow's `never_commit:`. */
+function neverCommitted(def) {
+  return [...NEVER_COMMITTED, ...((def && def.never_commit) || [])];
+}
+
+/** Git pathspecs for "under these globs" (and, when given, "but not under those"). */
+function pathspecs(globs, exclude = []) {
+  return [...globs.map((g) => `:(glob)${g}`), ...exclude.map((g) => `:(exclude,glob)${g}`)];
+}
+
+/**
+ * Residue: an untracked file that matches the never-committed globs. Only
+ * untracked ones: an edit to a file git tracks is the run's work wherever
+ * the file is, and stays visible to the checkpoints, `unchanged` and the
+ * undo. `entries` are git status entries ({ xy, path }).
+ */
+function isResidue(entry, exclude) {
+  return entry.xy === '??' && !!pathsMod.firstMatch(exclude, entry.path);
+}
+function withoutResidue(entries, exclude) { return entries.filter((e) => !isResidue(e, exclude)); }
+function residueOf(entries, exclude) { return entries.filter((e) => isResidue(e, exclude)); }
+
 /**
  * Validate a raw definition and normalise it. Everything that reaches a
  * subprocess argument (tool, model, agent names, commands) is validated here
@@ -570,6 +865,10 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       // Paths the step must leave as it found them, even inside its writable:
       // the tests an upgrade must not weaken, the config a test writer must not loosen.
       step.unchanged = assertGlobList(s.unchanged, 'unchanged', where);
+      // Where a step may write is read by the reviewer as written: no input decides it.
+      for (const [field, list] of [['writable', step.writable], ['unchanged', step.unchanged]]) {
+        if (list.some((g) => g.includes('{inputs.'))) throw new AidevError(`${where}: ${field} cannot name an input ({inputs.…}); what a step may touch is fixed by the definition`);
+      }
       if (step.unchanged.some((g) => g.includes(ITEM_TOKEN))) throw new AidevError(`${where}: unchanged cannot name ${ITEM_TOKEN} (it holds for every target)`);
       step.for_each = forEachSpec(s.for_each, where);
       step.until = untilSpec(s.until, where);
@@ -634,6 +933,51 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   // directory before {item}, whole.
   def.writable = [...new Set(def.steps.flatMap((s) => (s.writable || []).map((g) => (g.includes(ITEM_TOKEN) ? `${literalPrefix(g).join('/')}/**` : g))))];
   def.grants = agentGrants(raw.agents, agents, source);
+
+  // What a run is given (`--input`), what it finds in its worktree
+  // (`provide`), and what it never commits (`never_commit`).
+  def.inputs = inputSpecs(raw.inputs, source);
+  for (const s of def.steps) {
+    for (const [field, v] of [['cwd', s.cwd], ['until.cwd', s.until && s.until.cwd], ['for_each.from', s.for_each && s.for_each.from]]) {
+      if (v && String(v).includes('{inputs.')) throw new AidevError(`${source}: steps[${s.id}]: ${field} cannot name an input ({inputs.…})`);
+    }
+  }
+  for (const use of inputUses(def, source)) {
+    const spec = def.inputs[use.name];
+    if (!spec) throw new AidevError(`${source}: ${use.where} names {inputs.${use.name}}, which inputs: does not declare`);
+    if (use.command) {
+      if (!spec.pattern && !spec.path && !spec.file) throw new AidevError(`${source}: inputs.${use.name} reaches a command (${use.where}), so it needs a pattern that bounds its value (or path: true / file: true)`);
+      spec.inCommand = true;
+    }
+  }
+  for (const [name, spec] of Object.entries(def.inputs)) {
+    if (spec.default != null) checkInputValue(spec, name, spec.default, `${source}: inputs.${name}.default`);
+  }
+  def.provide = assertGlobList(raw.provide, 'provide', source);
+  for (const g of def.provide) {
+    const prefix = literalPrefix(g);
+    const head = prefix[0] || '';
+    if (!head) throw new AidevError(`${source}: provide: ${g} must start with a fixed directory or file name (what a run copies from a checkout is named, never "everything that is ignored")`);
+    if (head === '.git' || layout.isKitManaged(prefix.join('/')) || layout.isKitManaged(g) || cfgMod.ALWAYS_PROTECTED.some((p) => pathsMod.matches(p, prefix.join('/')))) {
+      throw new AidevError(`${source}: provide cannot name ${g}; the kit's own state and the tool configuration are never copied into a run`);
+    }
+    // The files a PKG keeps out of git most often are its credentials.
+    const last = g.split('/').pop();
+    if (SECRET_FILE_RE.test(last)) throw new AidevError(`${source}: provide cannot name ${g}: credentials never go into a run (settings reach a command through env)`);
+  }
+  def.never_commit = assertGlobList(raw.never_commit, 'never_commit', source);
+  // A subtree that is never committed cannot be where a step does its work.
+  for (const g of def.never_commit) {
+    if (!g.endsWith('/**')) continue;
+    const under = literalPrefix(g);
+    const covers = (h) => { const p = literalPrefix(h); return under.length <= p.length && under.every((seg, i) => seg === p[i]); };
+    for (const st of def.steps) {
+      const hit = (st.writable || []).find(covers);
+      if (hit) throw new AidevError(`${source}: never_commit ${g} covers what step ${st.id} may write (${hit}); nothing that step did would ever be committed`);
+    }
+    const prov = def.provide.find(covers);
+    if (prov) throw new AidevError(`${source}: never_commit ${g} covers provide ${prov}`);
+  }
 
   // The budget and the time limit, together. max_usd is required: it is what
   // stops an unattended run. max_minutes is optional: without it a run goes on
@@ -952,20 +1296,97 @@ function approvalStatus(repoRoot, config, def, deps) {
   return { approved: reason == null, ref, refSha, files, reason };
 }
 
+// --------------------------------------------------------------------- trial
+
+/**
+ * A trial run (`aidev run workflow --trial`) runs a definition that is not
+ * approved, in a worktree of its own, and pushes nothing. In place of the
+ * tracking branch, the guard holds the agents to a record the runner leaves
+ * in the worktree's git directory (outside the working tree, where no agent
+ * writes): the workflow's name, a token the runner also puts in the agents'
+ * environment (AIDEV_WORKFLOW_TRIAL), and the hash of the reviewed files as
+ * the trial started. A file that changes mid-run changes the hash, and the
+ * guard refuses from then on, exactly as an edit unapproves a workflow.
+ */
+const TRIAL_FILE = 'aidev-trial.json';
+const ENV_TRIAL = 'AIDEV_WORKFLOW_TRIAL';
+const TRIAL_REF = 'trial';
+
+/** One hash over the reviewed files (the YAML, the PKG agents and skills), as approval compares them. Null when one is missing. */
+function reviewedHash(repoRoot, files) {
+  const parts = [];
+  for (const f of [...files].sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))) {
+    const text = cfgMod.readTextIfExists(layout.abs(repoRoot, f.rel));
+    if (text == null) return null;
+    parts.push(`${f.rel}\0${normalize(text)}\0`);
+  }
+  return `sha256:${cfgMod.sha256(Buffer.from(parts.join(''), 'utf8'))}`;
+}
+
+/** The trial record of a worktree: in its git directory, beside the run lock. Null outside a git worktree. */
+function trialFile(repoRoot) {
+  const r = gitMod.run(['rev-parse', '--absolute-git-dir'], { cwd: repoRoot });
+  return r.ok && r.stdout ? path.join(r.stdout.trim(), TRIAL_FILE) : null;
+}
+
+/** Leave the trial record for the guard; returns the token the agents' environment carries, with release(). */
+function startTrial(repoRoot, { name, hash, runId }) {
+  const file = trialFile(repoRoot);
+  if (!file) throw new AidevError(`${repoRoot} is not a git worktree; a trial run needs one`);
+  const token = require('crypto').randomBytes(16).toString('hex');
+  cfgMod.writeJsonAtomic(file, { schemaVersion: 1, name, token, hash, runId, startedAt: new Date().toISOString() });
+  return { token, release: () => { try { fs.rmSync(file, { force: true }); } catch { /* gone already */ } } };
+}
+
+function readTrial(repoRoot) {
+  const file = trialFile(repoRoot);
+  if (!file) return null;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Is this definition the one a trial run started with? { ok, hash, reason }:
+ * ok when the worktree's record names this workflow, carries `token`, and
+ * the reviewed files still hash as recorded. Not an approval: the guard
+ * grants a trial its step's writable on this, and nothing else does. Never throws.
+ */
+function trialStatus(repoRoot, def, deps, token) {
+  const refuse = (reason) => ({ ok: false, hash: null, reason });
+  const rec = readTrial(repoRoot);
+  if (!rec || typeof rec !== 'object') return refuse('no trial run is recorded for this worktree');
+  if (!token || rec.token !== token) return refuse('the trial token does not match the record of this worktree');
+  if (rec.name !== def.name) return refuse(`the trial recorded here is of workflow ${rec.name}, not ${def.name}`);
+  const hash = reviewedHash(repoRoot, reviewedFiles(def, deps));
+  if (!hash) return refuse('a reviewed file is missing locally');
+  if (hash !== rec.hash) return refuse('the definition (or an agent or skill it uses) changed since the trial started');
+  return { ok: true, hash: rec.hash, reason: null };
+}
+
 /**
  * One call for the write guard: the named workflow, its dependencies and
  * whether it is approved. Errors become "not approved" with the message as
- * the reason; the guard never needs to catch.
+ * the reason; the guard never needs to catch. With `trial` (the token from
+ * AIDEV_WORKFLOW_TRIAL) the answer also carries `trial` ({ ok, hash, reason }):
+ * a trial run is never approved, but its steps may write while the trial
+ * record holds.
  */
-function inspect(repoRoot, installRoot, config, name) {
+function inspect(repoRoot, installRoot, config, name, { trial = null } = {}) {
   try {
     const def = loadDefinition(repoRoot, name);
     const deps = resolveDependencies(repoRoot, installRoot, def);
     const approval = approvalStatus(repoRoot, config, def, deps);
-    return { ok: true, def, deps, approval };
+    return { ok: true, def, deps, approval, trial: trial ? trialStatus(repoRoot, def, deps, trial) : null };
   } catch (e) {
-    return { ok: false, def: null, deps: null, approval: { approved: false, reason: e.message, files: [] } };
+    return { ok: false, def: null, deps: null, approval: { approved: false, reason: e.message, files: [] }, trial: trial ? { ok: false, hash: null, reason: e.message } : null };
   }
+}
+
+/** Whether a run's steps may write at all: approved, or a trial whose record holds. { granted, how: 'approved'|'trial'|null, reason } */
+function writeGrant(wf) {
+  if (wf.approval.approved) return { granted: true, how: 'approved', reason: null };
+  if (wf.trial && wf.trial.ok) return { granted: true, how: 'trial', reason: null };
+  if (wf.trial) return { granted: false, how: null, reason: `trial run: ${wf.trial.reason}` };
+  return { granted: false, how: null, reason: wf.approval.reason };
 }
 
 /** sha256 of the definition as reviewed (LF-normalised), for run records and PR bodies. */
@@ -985,10 +1406,11 @@ function listWorkflows(repoRoot) {
 }
 
 module.exports = {
-  LIMITS, NAME_RE, RUN_ID_RE, ENV_WORKFLOW, ENV_STEP, ENV_RUN, ENV_ITEM, MCP_CONFIG_REL, untilStepId, parseVerdict,
+  LIMITS, NAME_RE, RUN_ID_RE, ENV_WORKFLOW, ENV_STEP, ENV_RUN, ENV_ITEM, ENV_TRIAL, TRIAL_REF, MCP_CONFIG_REL, untilStepId, parseVerdict,
   sanitizeName, workflowRel, defRel, workflowDir, defPath, runsDir, runRel, notesRel, agentRel, skillRel,
   splitCommand, parseItems, forItem, ITEM_TOKEN, validateDefinition, parseDefinitionText, loadDefinition,
+  NEVER_COMMITTED, SECRET_FILE_RE, INPUTS_DIR, neverCommitted, pathspecs, isResidue, withoutResidue, residueOf, collectInputs, placeFileInputs, withInputs, putInputs, inputUses,
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
   agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, subagentGranted, literalPrefix, mayOverlap, mcpServersFor,
-  trackingRef, approvalStatus, inspect, contentHash, listWorkflows,
+  trackingRef, approvalStatus, reviewedHash, trialFile, startTrial, readTrial, trialStatus, inspect, writeGrant, contentHash, listWorkflows,
 };

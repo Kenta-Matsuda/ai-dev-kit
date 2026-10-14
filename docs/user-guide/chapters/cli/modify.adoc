@@ -83,8 +83,9 @@ aidev modify workflow write-tests
 
 ℹ Next:
     1. review:   git diff -- .aidev/workflows/write-tests/ .aidev/agents/ .aidev/skills/
-    2. estimate: aidev estimate workflow write-tests
-    3. submit:   aidev submit workflow write-tests     ← the change is approved when its pull request is merged
+    2. try:      aidev run workflow write-tests --trial   ← runs the change as it is here; pushes nothing
+    3. estimate: aidev estimate workflow write-tests
+    4. submit:   aidev submit workflow write-tests     ← the change is approved when its pull request is merged
 ----
 
 === 関連情報

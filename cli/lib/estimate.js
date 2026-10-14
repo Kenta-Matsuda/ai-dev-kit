@@ -140,6 +140,9 @@ function readRecords(repoRoot) {
       const r = readJson(path.join(dir, n));
       if (!r || r.schemaVersion !== 1 || !r.workflow || !r.runId || seen.has(`${r.workflow}/${r.runId}`)) continue;
       seen.add(`${r.workflow}/${r.runId}`);
+      // A trial runs a definition still being written, often on a small
+      // budget and stopped early: not what the next estimate should learn from.
+      if (r.trial) continue;
       out.push(r);
     }
   }
@@ -168,6 +171,7 @@ function collectHistory(repoRoot) {
         const rec = readJson(path.join(wfMod.runsDir(root, name), id, 'run.json'));
         if (!rec) continue;
         seen.add(`${name}/${id}`);
+        if (rec.trial) continue;
         sources.push({ workflow: name, runId: id, steps: rec.steps, calls: rec.calls });
       }
     }
@@ -498,6 +502,7 @@ function buildRecord(run, { kitVersion = null } = {}) {
   });
   return {
     schemaVersion: 1, workflow: run.name, runId: run.runId, hash: run.hash, kitVersion,
+    ...(run.trial ? { trial: true } : {}),
     startedAt: run.startedAt, done: !!run.done,
     costUsd: run.costUsd == null ? null : round4(Number(run.costUsd)),
     estimate: run.estimate || null, steps, calls,

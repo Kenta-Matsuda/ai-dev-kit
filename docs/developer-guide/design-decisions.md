@@ -239,7 +239,41 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **却下した代替案**: PKGの中（`.aidev/worktrees/`、gitignore）にworktreeを置く案（jest等がgitignoreを見ずに探索する）。実行記録をcheckoutに置きworktreeから参照する案（agentはcwdの外のfileを読めず、guardはrepoの外への書込を拒否するので、notesと報告がworktreeの外では使えない）。checkpointを`git stash`や別refに取る案（PRでstepごとに読めない）。新しい実行で前の実行のbranchを捨てる案（未mergeの成果が消える。mergeされていればbaseへ進め、未mergeならbaseをmergeする）。`--from-run`で失敗を自動で直して実行し直す案（定義の変更はPRのレビューを通す。D9）。
 
-**論点**: gitが無視するもの（`node_modules`、`.env`、build結果）は新しいworktreeに無いので、要るworkflowはcommand step（`npm ci`等）で用意します。worktreeは自動では消しません（`git worktree remove`）。
+**論点**: gitが無視するもの（`node_modules`、`.env`、build結果）は新しいworktreeに無いので、要るworkflowはcommand step（`npm ci`等）で用意します。worktreeは自動では消しません（`git worktree remove`）。試走（D27）のbranch `aidev/<name>.trial`はこの判断の例外で、試走のたびにbaseへresetし、前の試走の成果を積みません。commandで作れないdata（仕様書など）は`provide:`（D29）と`file: true`の入力（D28）でworktreeへ持ち込めるようになりました。
+
+### D27: 承認前の定義は`--trial`で試走し、試走はpushもPR作成もしない
+
+**判断**: `aidev run workflow <name> --trial`は、checkoutにある今の定義（未commitの編集を含む`workflow.yaml`と、参照するPKG内のagent / skill）を、承認の有無に関わらず最後まで動かします。branchは`aidev/<name>.trial`（`--dated`で`aidev/<name>.trial-<yyyymmddHHMM>`。workflow名に`.`は使えないので、`aidev/<name>`や他のworkflowのbranchと衝突しません）、worktreeは通常の実行と同じ`<AIDEV_HOME>/worktrees/<PKG>-<hash>/`の下の専用のものです。pushもPR作成もしません: pull-request stepはcommitまで行い（本文に`approved: none (a trial run of the definition sha256:…)`と`trial run: not pushed`）、pushとPRを飛ばします。guard（`policy.decide`の第6段と`decideToolUse`）は、`origin/<tracking_branch>`との一致の代わりに、runnerがworktreeのgit directory（作業treeの外。`aidev-trial.json`）に書いた記録`{ name, token, hash }`と、agentの環境変数`AIDEV_WORKFLOW_TRIAL=<token>`を見ます。`hash`はreviewed files（workflow.yamlとPKG内のagent / skill）のpathとLF正規化した内容のsha256（`reviewedHash`）で、書込とtool呼び出しのたびにworktreeのfileから計算し直し、名前・token・hashが一致する間だけstepの`writable`を許します（rule id `workflow-trial-writable`。理由文は「a trial run of the definition sha256:…」で、「approved on」とは言いません）。記録は`run.json`に`trial: true`・`trialHash`・`approvedRef: null`・`approvedSha: null`として残ります（2026-10-14）。
+
+これはD6 / D9の「承認 = `origin/<tracking_branch>`との一致」を次のように狭めます: **pushできる実行の根拠は、引き続きhostingの承認（tracking branch）だけ**です。手元の記録が許すのは、runnerがpushできない実行に限ります。pushできないことは4つで保証します: (1) pull-request stepがpushとPR作成を飛ばす、(2) 全child process（agentもcommand stepも）に`GIT_CONFIG_*`環境変数で`core.hooksPath`（kitの`cli/git-hooks/no-push/`。`pre-push` hookが拒否する。単一値なので、repositoryに`pushurl`があっても効く）と`remote.origin.pushurl`・`url.….pushInsteadOf`（https / http / ssh / git@）を渡し、`git push`を失敗させる（stepの`env`はrunnerの項目を上書きできず、`GIT_CONFIG*`は`env`に書けない）、(3) argvが`git … push`のcommand step / `until.command`は起動前に拒否する（「pushes; a trial run pushes nothing」）、(4) hook（guard-write）がBashの`git … push` / `gh pr create` / `az repos pr create` / `glab mr create`をdenyする。
+
+**理由**: workflowは試行錯誤で完成するのに、承認を経ないと動かせないと、1回の修正ごとにPRのreviewとmergeが挟まり、`main`が未完成の定義のcommitで埋まります（`proposals/2026-10-14-workflow-trial-inputs-provide.md`）。承認が守っている線は「AIがPKG sourceを書ける範囲はreviewされた定義の`writable`だけ」で、試走はこの線の外へ出る経路（pushとPR）を閉じたうえで、承認の前に定義をそのまま動かします。
+
+脅威model: reviewされていない定義でも、agentにMCP serverとallow-listedなBashを与えられます。これは対話sessionと同じ露出に、使い捨てのworktreeの中でのstepの`writable`を足したものです。試走が縛るのはrunnerとgitであって、reviewされていない定義のあらゆる副作用ではありません。記録は作業treeの外にあるので、Write / Editはrule 1で拒否され、Bashが届くかはPKGのallow ruleが許す範囲で、これは今のoriginのrefと同じ露出です。tokenはagentの環境変数にだけあり、file・log・出力には出しません。実行中に定義（か使うagent / skill）を編集するとhashが変わり、承認済みworkflowを編集すると承認を失うのと同じく、以後の書込が拒否されます。記録は実行の終わり（Ctrl-C / SIGTERMでも）に消し、crashで残ったものはtokenがどの環境にも無いので不活性で、次の試走が上書きします。
+
+試走のbranchは使い捨てです: 新しい試走のたびにbaseへ`reset --hard`し、前の試走が残した未commitのfileを消します（gitが無視するものとD29の残骸は残す）。これはD26の「branchを保ち、baseをmergeして積む」の意図的な例外で、試走は「ここから実行したら何が起きるか」を見せるものであり、前の試走の上に積むものではないからです。試走の`--resume`には`--trial`が要り（通常の実行は`--trial`無しで。種類は記録のbranch名から読み、記録のflagは信用しない）、checkoutのreviewed filesのhashが記録の`trialHash`と一致しなければ「start a new trial」です。`--resume last`は同じ種類の最新の実行（`--trial`なら最新の試走、無しなら試走でない最新の実行）です。試走の記録は見積もりの学習（`readRecords` / `collectHistory`）から除き、試走の後に自動のestimate reviewerも起動しません。`aidev modify workflow --from-run`は試走も受け付けます。
+
+**却下した代替案**: 承認の基準refをworkflowごとに変える`--approval-ref`（「どのbranchが承認か」が増えて汚染が移るだけで、pushしない保証も得られない）。定義をcommitしてそのcommitを承認扱いにする（試行錯誤のたびにcommitが要り、wip commitがPRに混ざる）。`--dry-run`を拡張してagentを起動する（`--dry-run`は「何も始めない」契約）。別の動詞`aidev try workflow`（`run`のflagのほうが`--resume` / `--task` / `--input` / `--log`と記録の形を共有できる）。hostingのPATを環境から外す（MCP serverが必要とすることがある）。試走の終わりにworktreeを消す（結果と記録を見てから`submit`する。削除は未決の論点）。
+
+**論点**: 試走を止めても、command stepが起動したもの（container serverなど）は止まりません（未決の論点「実行の後始末」）。試走のworktree / branchは自動では消しません。
+
+### D28: 実行ごとに変わる値は`inputs:`で宣言し、`--input name=value`で受け取る
+
+**判断**: workflow.yamlのtop-levelに`inputs: { <name>: { description, default, pattern, path, file } }`を書き、`aidev run workflow <name> --input spec=docs/spec/login.txt --input browser=firefox`（繰り返し可）で値を渡します（`aidev estimate workflow`も`--input`を取ります）。`default`の無い入力は必須で、`required:` keyはありません。`{inputs.<name>}`を書ける場所は`objective`、agent stepの`prompt`、`until.prompt`、`until.command`、command stepの`command`、`env`の値（stepと`until`）だけで、`description`・stepの`description`・`pull_request.title`・`writable`・`unchanged`・`cwd`・`for_each.from`に書くと検証errorです。commandの実行file（argv[0]）にもできません。置換は実行前に定義に対して行い（inputsが先、`{item}`は対象ごとに後）、値は`{`と`}`を含めません（値はtemplateではない）。commandかenvの値に届く入力は`pattern`か`path: true` / `file: true`が必須で、その上で固定のwhitelist `^[A-Za-z0-9._@][A-Za-z0-9._/@:=+-]{0,999}$`（`..`のsegmentなし）を満たすことを要求します（for_each対象の`ITEM_RE`と同じ考え。作者の`pattern`は狭めるだけで、広げられません）。`path: true`はrepo相対のpathで、text file（referenceと同じく非textの拡張子を拒否）で、worktreeに届くもの（HEADでtracked、またはcheckoutでignoreされていて`provide`のglobに合う）でなければ起動前に止まります。`file: true`はこの端末のfileで、runnerが`.aidev/workflows/<name>/runs/<id>/inputs/<name><ext>`（worktree内、`runs/`ごとgitignore、agentが読める、commitされない）へ複製し、`{inputs.<name>}`はその複製のrepo相対pathです。`--resume`では記録の値を「与えられたもの」として検査し直します（`run.json`はagentが書けるfileなので）。`--task`は従来どおり自由文です（2026-10-14）。
+
+**理由**: ITテスト作成のように「テスト仕様書」「browser名」を実行ごとに渡したい場面があり、`--task`の自由文に埋めるとagentが読み解くことになり、commandには入れられません。宣言すれば、kitが起動前に検査でき（無い・不正な値でagentを起動しない）、reviewerは`{inputs.<name>}`がどこに入るかをYAMLで静的に読めます。`writable`に書けないのは、reviewで書ける範囲が読めなくなるからです。commandに届く値をwhitelistで縛るのは、`{item}`と同じく、argvの1要素になる文字列にoptionや上のdirectoryを指すものを通さないためです。`file: true`は1人が持つfile（Excelから書き出した仕様書）のためで、teamが決まったignore済みのpathに置くdataは`provide`（D29）です。
+
+**却下した代替案**: `--task`を構造化する（自由文の用途が消える）。入力を`writable`に書けるようにする（上記。件ごとのpathが要るなら`for_each`）。`required:` key（`default`が無ければ必須、で足り、同じことを2通りで書かせない）。入力をYAML fileで渡す（`--input`の繰り返しで足り、CIからも渡せる。要望があれば足す）。
+
+### D29: gitが無視するdataは`provide:`でcheckoutから補給し、toolchainの残骸は`never_commit`で決してcommitしない
+
+**判断**: `provide: [<glob>]`は、実行の開始時（最初のstepの前。`--resume`でも）に、checkoutでgitが無視しているfileのうちglobに合うものを、file単位でworktreeの同じpathへ複製します（上書き）。`git ls-files --others --ignored --exclude-standard`の列挙は、1 fileに合うglobでもignoreされたdirectory全体を挙げることがあるので、kitのmatcherで絞り直します。tracked fileと無視されていないuntracked fileは複製しません（実行はHEADから始まる）。`secrets_paths`に合うもの、`.aidev/`・`.git/`の下、symbolic link、最後の名前が認証情報のfile（`.env`、`.env.*`、`.npmrc`、`.netrc`、`.pypirc`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`*.jks`、`*.keystore`）に見えるglobも複製しません。複製したfileはworktreeでもignoreされていなければならず（commit済みの`.gitignore`の規則で）、そうでなければ実行を止めます。checkoutで1つも合わないglobは、`--dry-run`と`run`を起動前に止めます。残骸は、kitの`NEVER_COMMITTED`（`**/node_modules/**`、`**/bower_components/**`、`**/.pnpm-store/**`、`**/.yarn/cache/**`、`**/.venv/**`、`**/venv/**`、`**/__pycache__/**`、`**/*.pyc`、`**/.pytest_cache/**`、`**/.mypy_cache/**`、`**/.ruff_cache/**`、`**/.tox/**`、`**/.nox/**`、`**/.gradle/**`、`**/.DS_Store`、`**/Thumbs.db`、`**/*.orig`、`**/*.rej`）とworkflowの`never_commit: [<glob>]`に合う**untracked**なfileで、決してcommitしません（tracked fileへの編集はどこにあってもrunの成果です）。適用箇所はstepと件のcheckpoint、pull-request stepの最終stage、`unchanged`の比較、失敗した件の戻し、until agentに見せるdiff、新しい実行の前の「未commitの変更」検査です。除いたpathは、log・`run.json`（stepの`leftOut`）・画面・PR本文（「## Left out」）で報告し、黙って捨てません。`never_commit`はstepの`writable`や`provide`の項目を覆えません（検証で拒否）（2026-10-14）。
+
+**理由**: worktreeにはgitが無視するものが無く（D26の論点）、command stepで作れるもの（`npm ci`）はそれで足りますが、別リポジトリ由来の仕様書のようにcommandで作れないdataには手段がありませんでした。tracked fileやcheckoutの未commit変更を持ち込まないのは、「実行はHEADから始まる」を保つためです（試走でreviewed filesだけを持ち込むD27と同じ線）。残骸は、`until.command`やcommand stepの`npm ci`が`writable`の中（`.gitignore`の無い新しい`e2e/`など）に`node_modules`を作り、checkpointとpull-request stepが`writable`の中の変更をすべてstageするのでPRに入っていました。作る人がこれを予見できず、agentは自分の責務以上のこと（`.gitignore`を書く）をしません。untrackedに限るのは、vendoredでcommit済みの`node_modules`のfileをstepが編集したときに、それを隠してはいけないからです。build出力（`dist/`、`build/`、`target/`）をkitのlistに入れないのは、成果物のことがあるからです。
+
+**却下した代替案**: `node_modules`のsymlink / hardlink（`npm ci`がcheckoutの`node_modules`を消す。Windowsの権限、cross-platformの差）。`.git/info/exclude`に書く（worktreeで共有され、人のcheckoutの`git status`も変わる）。`provide`を`aidev.yaml`に書く（要るかどうかはworkflowごとに違い、定義と一緒にreviewされるべき）。file数の閾値で止める（根拠が無く、止まると実行が無駄になる）。build出力をkitのlistに入れる（上記）。pathspecの`:(exclude,glob)`でtracked / untrackedを問わず隠す（最初の実装。tracked fileへの編集まで見えなくなった）。
+
+**論点**: `provide`の複製は毎回上書きで、変更の無いfileを飛ばしません。`node_modules`を`provide`に書くこともできますが、複製は遅く、worktreeのlockfileと違えば壊れます。依存はcommand stepで入れます。
 
 ## 未決の論点
 
@@ -255,6 +289,8 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 | 追加tool / provider | 次に対応するtoolとhosting、強制水準の差の扱い | D7、D8 |
 | self-evolutionの運用 | 閾値、`--auto`の既定、PR作成の経路 | D13 |
 | 登録PKGへの一括実行 | `aidev sync tools --all` / `aidev check --all`でregistryの全PKGに順に実行するか。`--json`の形（PKGごとの配列か）、exitを最悪値にするか、`missing`のPKGを報告するか | D19 |
+| 実行の後始末 | 実行の終わり（止まった試走を含む）に必ず走る`cleanup:`のcommand listを足すか。command stepが起動したcontainer serverは、試走を止めても動き続ける | D27、D20 |
+| 試走のworktree / branchの処分 | 試走のworktreeとbranch（`aidev/<name>.trial`）を自動で消すか、一覧する（`aidev list workflows`）に留めるか。今は`git worktree remove`で手動 | D26、D27 |
 
 ## wrapper方式から維持した判断
 

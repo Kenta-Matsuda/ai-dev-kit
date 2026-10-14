@@ -7,15 +7,18 @@ Runs an approved workflow (the definition that is on `origin/main`). Development
 
 [source,text]
 ----
-aidev run workflow <name> [--task "<text>" | --task-file <path>] [--dated] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
-aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--dated] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> --trial [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--dated] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> --resume <run id | last> [--trial] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
 ----
 
 === Description
 
-Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]).
+Runs only when `.aidev/workflows/<name>/workflow.yaml` and the PKG-local agents (`.aidev/agents/<name>.md`) and skills (`.aidev/skills/<name>/SKILL.md`) it references are **identical to what is on `origin/<tracking branch>`**. The check uses the last fetch, and the hook repeats the same check on every write. There is no command that records an approval (xref:workflows-approval[What approval means]). With `--trial`, it runs the definition as it is in your checkout (uncommitted edits included) as a trial, without waiting for approval. It works on the branch `aidev/<name>.trial` of its own, pushes nothing and opens no PR (xref:workflows-trial[Trying it before approval]).
 
-Runs the steps (`steps`) in order. The run does not work in your working tree but in a git worktree of its own (`<AIDEV_HOME>/worktrees/…`), on the workflow's branch `aidev/<name>` (`aidev/<name>-<yyyymmddHHMM>` with `--dated`). Each time a step (one target, for `for_each`) passes, the changes inside its `writable` are committed as a checkpoint (xref:workflows-worktree[The run's worktree and branch]). Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>`, `AIDEV_WORKFLOW_STEP=<id>` and `AIDEV_WORKFLOW_RUN=<run id>` (and `AIDEV_WORKFLOW_ITEM=<target>` for a `for_each` target). The hook allows writes only inside that step's `writable`. Claude Code is started with only the `tools` and `mcp` given by the agent's frontmatter and the workflow's `agents:` (named `subagents` are handed over with `--agents`). The final report of each earlier agent step goes into the instructions of the later agent steps. The record is written to `.aidev/workflows/<name>/runs/<id>/` in the worktree as the run goes (`run.json`, `log.txt`, the reports, the command output). A run that stopped continues in its worktree from the last checkpoint with `--resume` (xref:workflows-resume[Continuing a stopped run]). To have the definition fixed from a stopped run, use `aidev modify workflow <name> --from-run <run id>`. See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]).
+Before it starts, it runs the pre-launch checks: that the executables of the command steps and of `until.command` are on PATH, that your checkout has gitignored files matching the globs of `provide:`, that each `path: true` input reaches the worktree (committed at HEAD, or copied by `provide:`) and, with `--trial`, that no command step is a `git … push`. When something is wrong, it stops without starting anything. A workflow that declares `inputs:` takes its values with `--input <name>=<value>`; they go where the definition writes `{inputs.<name>}`, and into the instructions of every agent as data under `## Inputs for this run` (xref:workflows-inputs[Taking values that change per run]).
+
+Runs the steps (`steps`) in order. The run does not work in your working tree but in a git worktree of its own (`<AIDEV_HOME>/worktrees/…`), on the workflow's branch `aidev/<name>` (`aidev/<name>-<yyyymmddHHMM>` with `--dated`, `aidev/<name>.trial` with `--trial`). Before the first step, the files of `provide:` are copied from your checkout into the worktree, and a copy of each `file: true` input is put under `inputs/` in the run record (xref:workflows-provide[Providing files the worktree lacks]). Each time a step (one target, for `for_each`) passes, the changes inside its `writable` are committed as a checkpoint (xref:workflows-worktree[The run's worktree and branch]). Untracked files matching the ADK's own list or `never_commit:` (`node_modules` and so on) are not committed (xref:workflows-never-commit[What is never committed]). Each agent step starts the AI tool anew, and its child process receives `AIDEV_WORKFLOW=<name>`, `AIDEV_WORKFLOW_STEP=<id>` and `AIDEV_WORKFLOW_RUN=<run id>` (and `AIDEV_WORKFLOW_ITEM=<target>` for a `for_each` target; with `--trial`, the agents also get `AIDEV_WORKFLOW_TRIAL`). The hook allows writes only inside that step's `writable`. Claude Code is started with only the `tools` and `mcp` given by the agent's frontmatter and the workflow's `agents:` (named `subagents` are handed over with `--agents`). The final report of each earlier agent step goes into the instructions of the later agent steps. The record is written to `.aidev/workflows/<name>/runs/<id>/` in the worktree as the run goes (`run.json`, `log.txt`, the reports, the command output). A run that stopped continues in its worktree from the last checkpoint with `--resume` (xref:workflows-resume[Continuing a stopped run]). To have the definition fixed from a stopped run, use `aidev modify workflow <name> --from-run <run id>`. See xref:workflows-run[Running a workflow] for what happens during a run. During an agent step, one line is printed per tool call (elapsed time, tool, target), with subagent calls indented (the same format as "What you see while it runs" under xref:cli-create[aidev create]). At the end of the run, it shows the files that changed outside the steps' `writable` (`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`), the tool calls the agents were refused (`step <id>: the tool was refused N call(s): …`) and the number left out as never committed (`left out, never committed: …`).
 
 === Options
 
@@ -29,20 +32,29 @@ Runs the steps (`steps`) in order. The run does not work in your working tree bu
 |`--task-file <path>`
 |Read `--task` from a file. Cannot be combined with `--task`
 
+|`--input <name>=<value>`
+|The value of an input the workflow declares under `inputs:`. Once per input (`--input=<name>=<value>` works too). An input without `default` is required; without it, nothing starts. A `file: true` input is the path of a file on this machine, and the run gets a copy (xref:workflows-inputs[Taking values that change per run])
+
 |`--max-minutes <n>`
 |A time limit for this run only, in minutes. With `limits.max_minutes` it can only lower it; without, it gives this run a time limit
+
+|`--max-usd <n>`
+|A cost limit for this run only, in USD. It can only lower `limits.max_usd` (the `limits` row then reads like `$0.5 (limits.max_usd is $5)`)
 
 |`--log <file>`
 |Write the whole run and a summary to this file (see "Log file" below). Nothing is written by default
 
 |`--resume <run id \| last>`
-|Continue a stopped run in its worktree, from the last checkpoint of the step it stopped at. `last` is the most recent run. Finished steps are not run again. Cannot be combined with `--task`, `--task-file` or `--dated` (the task and the branch are the ones the run started with)
+|Continue a stopped run in its worktree, from the last checkpoint of the step it stopped at. `last` is the most recent run of the same kind (with `--trial`, the last trial; without it, the last run that was not a trial). Finished steps are not run again. Cannot be combined with `--task`, `--task-file`, `--input` or `--dated` (the task, the inputs and the branch are the ones the run started with). Continuing a trial needs `--trial`, and a run that was not a trial cannot take it. A run whose finished steps' checkpoints are no longer on the branch cannot continue
 
 |`--dated`
 |Run on a new dated branch `aidev/<name>-<yyyymmddHHMM>` and a worktree of its own instead of the workflow's branch `aidev/<name>`
 
+|`--trial`
+|Run the definition as it is in your checkout as a trial, without waiting for approval. It works on the branch `aidev/<name>.trial` (`aidev/<name>.trial-<yyyymmddHHMM>` with `--dated`) and its worktree. At every trial the branch is reset to the commit checked out now, and the definition's files (`workflow.yaml` and the agents and skills it references) are committed as `aidev(<name>): trial definition` before it starts. Nothing is pushed and no PR is opened (a `git push` by an agent or a command step fails too). `run.json` gets `trial: true`, and the estimate learns nothing from this run (xref:workflows-trial[Trying it before approval])
+
 |`--dry-run`
-|Show the approval state, the files involved, the agents and AI tools, the limits, a cost estimate (optimistic to pessimistic; the breakdown is xref:cli-estimate[aidev estimate]), the task, and what each step does (where it may write; the agent's skills, tools and MCP servers; `until`); start nothing. Problems that would stop the run before it starts are shown, with exit code 1
+|Show the approval state, the files involved, the agents and AI tools, the limits, a cost estimate (optimistic to pessimistic; the breakdown is xref:cli-estimate[aidev estimate]), the task and the inputs (with `inputs:`, also the `provide` and `never commit` rows; with `--trial`, a `trial` row), and what each step does (where it may write; the agent's skills, tools and MCP servers; `until`); start nothing. Problems that would stop the run before it starts are shown, with exit code 1
 
 |`--json`
 |Machine-readable output
@@ -67,7 +79,7 @@ A run's record is always kept, in pieces, under `.aidev/workflows/<name>/runs/<i
 |Part |Contents
 
 |Head
-|The workflow, the run id, the approval reference, the limits, where the record is, `--task`
+|The workflow, the run id (`(trial)` added with `--trial`), the approval reference (`none (a trial run of the definition sha256:…)` in a trial), the limits, where the record is, `--task`, the `--input` values
 
 |Progress lines
 |The lines shown on screen and in `log.txt` (steps starting and ending, command exit codes, cost)
@@ -82,7 +94,7 @@ A run's record is always kept, in pieces, under `.aidev/workflows/<name>/runs/<i
 |The whole output of each `until.command` and command step (between `----- output of "…" -----` lines)
 
 |Summary (at the end)
-|The result (finished, or why it stopped), start and end time and duration, the branch, agent starts, cost, each step's result and attempts, `for_each` target counts (done, failed and undone, not finished) with the reason of each failure, the PR, and the command to continue
+|The result (finished, or why it stopped; `(a trial run: nothing pushed)` in a trial), start and end time and duration, the branch, the inputs, agent starts, cost, each step's result and attempts, the refused tool calls (`refused tool calls`), `for_each` target counts (done, failed and undone, not finished) with the reason of each failure, the PR, and the command to continue
 |===
 
 The file is appended to as the run goes, so a run that stops still leaves what happened up to then (the summary is written at the end). An existing file is overwritten. With `--resume`, it holds that continuation only. Keeping the file outside the PKG is recommended (command output can contain secrets; `runs/` is gitignored).
@@ -99,10 +111,10 @@ aidev run workflow e2e-tests --task "the order screen" --log ~/aidev-logs/e2e-te
 |Code |Condition
 
 |0
-|Finished every step. `--dry-run` when approved and no problem would stop the run before it starts
+|Finished every step (with `--trial` too). `--dry-run` when approved (or, with `--trial`, when the definition validates) and no problem would stop the run before it starts
 
 |1
-|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched). Invalid definition, or an agent or skill that exists neither in the PKG nor in the ADK. A server in an agent's `mcp` that `.mcp.json` does not register. An agent with `tools`, `mcp` or `subagents` started on an AI tool other than Claude Code. Uncommitted changes inside `writable` in the run's worktree. Another run working in the same worktree. A conflict between the branch `aidev/<name>` and the base. A worktree that does not hold the approved workflow. A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, a checkpoint commit that failed, the time or cost limit). `--resume` for a run that does not exist, has finished, whose definition changed since it started, or that was started before worktree runs. `--resume` together with `--task` or `--dated`
+|An object other than `workflow`, or no name. Not approved (not on `origin/main`, changed, or not fetched; not checked with `--trial`). Invalid definition, or an agent or skill that exists neither in the PKG nor in the ADK. A server in an agent's `mcp` that `.mcp.json` does not register. An agent with `tools`, `mcp` or `subagents` started on an AI tool other than Claude Code. An `--input` missing, not declared, breaking the rules, or given twice. A `path: true` input that does not exist, is not committed, or is not copied by `provide`. A `file: true` input that is not on this machine or is not text. A `provide` glob with no matching gitignored file in your checkout, or a copied file whose ignore rule is not committed. The executable of a command step or `until.command` not on PATH. `--max-minutes` or `--max-usd` not a positive number. A `git … push` command step with `--trial`. Uncommitted changes inside `writable` in the run's worktree. Another run working in the same worktree. A conflict between the branch `aidev/<name>` and the base. A worktree that does not hold the approved workflow (in a trial, the definition in your checkout). A failed step (agent failure, `until` still failing after the retries, the same failure repeated, a `command` exiting non-zero, a checkpoint commit that failed, the time or cost limit). `--resume` for a run that does not exist, has finished, whose definition changed since it started, that was started before worktree runs, or whose finished steps' checkpoints are no longer on the branch. A trial continued without `--trial`, or a run that was not a trial continued with it. A trial whose definition (or an agent or skill) changed since it started. `--resume` together with `--task`, `--input` or `--dated`
 |===
 
 === Examples
@@ -131,6 +143,7 @@ test-writer via claude [pkg]
   limits    45 min, $5
   cost      $0.80 – $5.40 (optimistic – pessimistic; "aidev estimate workflow write-tests" for the breakdown)
   task      src/services/order.ts
+  inputs    (none declared)
   branch    aidev/write-tests
   worktree  under ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d
 
@@ -144,6 +157,34 @@ test-writer via claude [pkg]
     3. pr: commit, push and open a pull request
 
 ✓ dry run: the workflow is approved and would run.
+----
+
+For a workflow that declares `inputs:`, the `inputs` row shows the values (a `file: true` input with `(copied from <path>)`; `(none given; defaults apply)` when none was passed). With `provide:` there is a `provide` row, with `never_commit:` a `never commit` row, and with `--trial` a `trial` row; after the steps come the sections `## Inputs (--input name=value)` (name, description, required or default, `pattern`, `a path in the repository`, `reaches a command`), `## Provided from the checkout` and `## Never committed`.
+
+[source,text]
+----
+aidev run workflow e2e-tests --dry-run --trial --input spec=../specs/login.txt --input screen=login
+  approved  not required: --trial runs the definition as it is in this checkout (NO — .aidev/workflows/e2e-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged))
+  …
+  inputs    spec=.aidev/workflows/e2e-tests/runs/2026-10-14T01-12-03-114Z/inputs/spec.txt (copied from /home/me/specs/login.txt)
+screen=login
+browser=chromium
+  provide   e2e/fixtures/** (ignored files, copied from /home/me/src/my-pkg)
+  never commit  e2e/test-results/** (and the kit's own list: node_modules and the like)
+  branch    aidev/e2e-tests.trial
+  worktree  under ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d
+  trial     nothing is pushed and no pull request is opened; the result stays on the trial branch
+  …
+    ## Inputs (--input name=value)
+
+    - spec: the test specification to work from (required)
+    - screen: the screen to cover (required; pattern [a-z0-9-]+; reaches a command)
+    - browser (default chromium; pattern [a-z]+; reaches a command)
+
+    ## Provided from the checkout
+    …
+
+✓ dry run: the definition validates and would run as a trial (nothing pushed).
 ----
 
 [source,text]
@@ -170,10 +211,27 @@ When it is not approved:
 ----
 ✗ workflow write-tests is not approved: .aidev/workflows/write-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged)
       Approved means identical to origin/main. Submit it ("aidev submit workflow write-tests"), have the pull request reviewed and merged, then fetch.
+      To try it as it is first: aidev run workflow write-tests --trial
+----
+
+The end of a `--trial` run (nothing is pushed; the result stays on the trial branch):
+
+[source,text]
+----
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+ℹ trial run: nothing pushed; the result is on aidev/write-tests.trial in ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial (the pull request text it would carry: .aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z/pull-request.md)
+    branch aidev/write-tests.trial (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial
+ℹ trial run: nothing was pushed. aidev/write-tests.trial holds 3 commit(s) since 9f8e7d6a1b2c
+    inspect: git -C "<worktree>" log --oneline 9f8e7d6a1b2c..HEAD   /   git -C "<worktree>" diff --stat 9f8e7d6a1b2c
+    when the result is right: aidev submit workflow write-tests   (the reviewed definition then runs with "aidev run workflow write-tests")
+    record: <worktree>/.aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z
 ----
 
 === See also
 
 * xref:workflows[Delegating work to the AI] — the fields of a definition, approval, what happens during a run, review
+* xref:workflows-trial[Trying it before approval] — how `--trial` works, and what it does not guarantee
+* xref:workflows-inputs[Taking values that change per run], xref:workflows-provide[Providing files the worktree lacks], xref:workflows-never-commit[What is never committed]
 * xref:cli-create[aidev create], xref:cli-estimate[aidev estimate], xref:cli-submit[aidev submit], xref:cli-list[aidev list]
 * xref:permissions-source[Allowing the AI to write source]

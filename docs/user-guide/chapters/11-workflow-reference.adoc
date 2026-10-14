@@ -49,7 +49,7 @@ agent と skill は、PKG の `.aidev/` を先に探し、無ければ ADK 同�
 name: e2e-tests                    # 必須
 description: 主要画面の IT テストを書いて PR にする
 objective: |                       # 必須
-  Add Playwright tests for the screens named in the task.
+  Add Playwright tests for the screens named in the task, from {inputs.spec}.
 tool: claude                       # 任意
 model: sonnet                      # 任意
 agents:                            # 任意。この workflow で agent に足す能力
@@ -57,6 +57,15 @@ agents:                            # 任意。この workflow で agent に足�
     skills: [test-and-verify]      # frontmatter の skills に足す
     mcp: [playwright]              # frontmatter の mcp に足す
     tools: [Read, Grep, Edit]      # frontmatter の tools の代わりに使う
+inputs:                            # 任意。実行のたびに --input <name>=<値> で受け取る値
+  spec:
+    description: the test specification to work from
+    file: true                     # この端末のファイル。実行はそのコピーを受け取る
+  browser:
+    default: chromium
+    pattern: '[a-z]+'              # コマンドに届く入力には pattern が要る
+provide: [e2e/fixtures/**]         # 任意。gitignore 済みのファイルを手元のチェックアウトからコピーする
+never_commit: [e2e/test-results/**]   # 任意。ADK の既定の一覧に加えて、決してコミットしないもの
 
 steps:                             # 必須。上から順に実行する
   - id: plan                       # agent step
@@ -74,7 +83,7 @@ steps:                             # 必須。上から順に実行する
       on_failure: continue
     prompt: 画面 {item} の IT テストを e2e/tests/{item}.spec.ts に書く。
     until:
-      command: [npm ci, npx playwright test tests/{item}.spec.ts]
+      command: [npm ci, npx playwright test tests/{item}.spec.ts --project {inputs.browser}]
       cwd: e2e
       env: { CI: 1 }
       timeout_minutes: 15
@@ -131,6 +140,21 @@ limits:
 |mapping
 |任意
 |この workflow で agent に足す能力。キーは steps（`agent:` か `until.agent:`）で使う agent の名前です（xref:workflow-reference-agents[agents]）。
+
+|`inputs`
+|mapping
+|任意
+|実行のたびに `--input <name>=<値>` で受け取る値の宣言。キーは入力の名前で、定義の `{inputs.<name>}` と書いた場所に入ります（xref:workflow-reference-inputs[inputs]）。
+
+|`provide`
+|glob の list
+|任意
+|手元のチェックアウトで git が無視していて、最初のステップの前に実行の worktree へコピーするファイル（xref:workflow-reference-provide[provide]）。
+
+|`never_commit`
+|glob の list
+|任意
+|ADK の既定の一覧に加えて、実行が決してコミットしないパス（xref:workflow-reference-never-commit[never_commit]）。
 
 |`steps`
 |list
@@ -192,6 +216,148 @@ agents:
 * workflow.yaml は承認の対象なので、`agents:` を変えると workflow は承認前に戻ります。`aidev submit workflow` で PR にし、レビューを受けます。
 * ステップに `skills`・`mcp`・`tools`・`subagents` は書けません（`a step does not carry …`）。ステップごとに能力を変えたいときは、別の agent にします。
 
+[[workflow-reference-inputs]]
+=== inputs
+
+実行のたびに変わる値を、定義の決まった場所に入れる仕組みです（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。`inputs:` に宣言した名前を `{inputs.<name>}` と書き、実行する人が `aidev run workflow <name> --input <name>=<値>` で渡します。
+
+[source,yaml]
+----
+inputs:
+  spec:
+    description: the test specification to work from
+    file: true
+  screen:
+    description: the screen to cover
+    pattern: '[a-z0-9-]+'
+  browser:
+    default: chromium
+    pattern: '[a-z]+'
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`inputs.<name>`
+|mapping
+|任意
+|`<name>` は英小文字で始まる英小文字・数字・`_`・`-`、32 文字まで（`^[a-z][a-z0-9_-]{0,31}$`）。持てるのは下の 5 つだけです（`required` という項目はありません。`default` の無い入力が必須です）。空の mapping（`notes: {}`）は、必須で、規則の無い入力です。
+
+|`description`
+|文字列
+|任意
+|実行する人向けの説明。`--input` が足りないときの表示、`--dry-run` と提出の PR 本文の `## Inputs (--input name=value)` に出ます。
+
+|`default`
+|文字列
+|任意
+|`--input` が無いときの値。無ければ必須の入力です。検証のとき、値と同じ規則で確かめます。`file: true` の入力には書けません。
+
+|`pattern`
+|文字列
+|コマンドに届く入力は必須（`path`・`file` が無ければ）
+|値全体が一致すべき正規表現（200 文字まで。ADK が `^(?:…)$` で囲みます）。`[` で始まる値は YAML の list になるので、引用符で囲みます（`'[a-z]+'`）。
+
+|`path`
+|`true` / `false`
+|任意
+|`true` なら、値は PKG 内の相対パスです。`/` やドライブ文字で始まるもの、`..` を含むもの、テキストでない拡張子（`.xlsx`・`.docx`・`.pdf`・画像・アーカイブ）は拒否します。実行を始める前に、HEAD にコミット済みか、git が無視していて `provide` の glob に一致するかを確かめ、`provide` がコピーした後に worktree にあることも確かめます。`file` とは同時に書けません。
+
+|`file`
+|`true` / `false`
+|任意
+|`true` なら、値はこの端末のどこかにあるファイルのパスです（絶対パスか、シェルのカレントディレクトリからの相対パス）。存在するテキストファイルでなければなりません（拡張子の規則は `path` と同じ）。ADK は実行の worktree の `.aidev/workflows/<name>/runs/<id>/inputs/<name><拡張子>` にコピーし、`{inputs.<name>}` はその PKG 内の相対パスになります（gitignore 済み。コミットされません）。`--resume` はそのコピーを使います。`default` は書けず、`path` とは同時に書けません。
+|===
+
+`{inputs.<name>}` の規則:
+
+* 書ける場所は `objective`、agent step の `prompt`、`until.prompt`、`until.command`、command step の `command`、`env` の値（step と `until`）です。`description`、step の `description`、`pull_request.title`、`writable`、`unchanged`、`cwd`、`until.cwd`、`for_each.from` に書くと検証で拒否されます（`… cannot name an input ({inputs.…})`）。コマンドの実行ファイル（先頭の語）にはできません（`the executable of a command (…) is fixed; an input can be an argument, not the command`）。宣言していない名前は `… names {inputs.<name>}, which inputs: does not declare` です。
+* 値は実行の前に定義へ書き込まれます（コマンドでは 1 つの引数として）。`{item}` はその後で件ごとに置き換わります。値は `{` と `}` を含められません。
+* 値は 1 行、1000 文字まで、制御文字なし。`pattern` があれば値全体が一致すること。
+* **コマンドに届く入力**（`until.command`、command step の `command`、`env` の値に書いたもの）は `pattern`、`path: true`、`file: true` のどれかが必須です（`inputs.<name> reaches a command (…), so it needs a pattern that bounds its value (or path: true / file: true)`）。その値は、さらに固定の規則 `^[A-Za-z0-9._@][A-Za-z0-9._/@:=+-]{0,999}$` に収まり、`..` のセグメントを含まない 1 語でなければなりません（空白なし、先頭の `-` なし。`for_each` の件と同じ考え方です）。`pattern` はこれを狭められますが、広げられません。
+
+`--input` の規則（`aidev run workflow`、`aidev estimate workflow`）:
+
+* 入力ごとに 1 回ずつ `--input <name>=<値>`（`--input=<name>=<値>` も可）。
+* 必須の入力が無い: `the workflow needs --input for: <name> (<description>)`（実行は何も始めずに終了コード 1。`--dry-run` でも同じ。`aidev estimate` は無くても見積もります）。宣言に無い名前: `the workflow declares no input "<name>" (its inputs: …)`。同じ名前が 2 回: `input <name> is given twice`。
+* `--resume` には付けられません。続きの実行は `run.json` に記録された値を、渡されたときと同じ規則でもう一度確かめて使います。
+* 値は、`{inputs.<name>}` の場所のほか、すべての agent（確認役も）の指示の `## Inputs for this run` の節（データとして）、`--dry-run` の `inputs` の行、実行の PR 本文の `## Inputs`、最後のコミットの本文、`run.json` の `inputs`、`--log` の先頭とサマリ、`aidev modify --from-run` の記録に出ます。
+
+[[workflow-reference-provide]]
+=== provide
+
+手元のチェックアウトで git が無視しているファイルのうち、実行の worktree にコピーするものです（xref:workflows-provide[worktree に無いファイルを用意する]）。
+
+[source,yaml]
+----
+provide: [docs/spec/**, e2e/fixtures/**]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`provide`
+|glob の list
+|任意（既定 `[]`）
+|固定のディレクトリかファイル名で始まる glob（`**/*.txt` は拒否: `must start with a fixed directory or file name`）。`.aidev`・`.git`・protected のパス（`never copied into a run`）、最後の名前が認証情報のファイルに見えるもの（`.env`、`.env.*`、`.npmrc`、`.netrc`、`.pypirc`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`*.jks`、`*.keystore`。`credentials never go into a run`）は検証で拒否します。
+|===
+
+* 最初のステップの前に（始めるたび。`--resume` も）、glob に一致する **無視されているファイル** を 1 ファイルずつ worktree の同じパスにコピーします（上書き）。追跡されているファイルは HEAD の内容が worktree にあり、追跡も無視もされていないファイルはコピーしません。`docs/spec/**` は docs/spec の下の無視されているすべてのファイルです。
+* `secrets_paths` に一致するもの、`.aidev/`・`.git/` の下、シンボリックリンクはコピーしません（ログに `provide: <path> not copied (<理由>)`）。
+* 無視されているファイルに 1 つも一致しない glob があると、`--dry-run` と実行は始める前に止まります（`provide: <glob> matches no file that git ignores in <チェックアウト> (…)`）。
+* コピーしたファイルを無視する規則が、コミット済みの `.gitignore` に無ければ止まります（`provide: <file> is ignored in <チェックアウト> by a rule the repository does not carry; commit the .gitignore that ignores it, …`）。
+* ログに `provide: N path(s) copied from the checkout: …`。`--dry-run` に `provide` の行、提出の PR 本文に `## Provided from the checkout` の節が出ます。
+
+[[workflow-reference-never-commit]]
+=== never_commit
+
+ADK の既定の一覧に加えて、実行が決してコミットしないパスです（xref:workflows-never-commit[決してコミットしないもの]）。
+
+[source,yaml]
+----
+never_commit: [e2e/test-results/**, e2e/playwright-report/**]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`never_commit`
+|glob の list
+|任意（既定 `[]`）
+|追跡されていないファイルのうち、どのステップの `writable` の中にあってもコミットしないもの。`<dir>/**` の形で、どれかのステップの `writable` の項目や `provide` の項目を覆うものは検証で拒否します（`never_commit <glob> covers what step <id> may write (…)`、`never_commit <glob> covers provide <glob>`）。
+|===
+
+ADK の既定の一覧です。これに一致する追跡されていないファイルは、`never_commit` を書かなくてもコミットされません。一覧から外すことはできません。
+
+[source,text]
+----
+**/node_modules/**
+**/bower_components/**
+**/.pnpm-store/**
+**/.yarn/cache/**
+**/.venv/**
+**/venv/**
+**/__pycache__/**
+**/*.pyc
+**/.pytest_cache/**
+**/.mypy_cache/**
+**/.ruff_cache/**
+**/.tox/**
+**/.nox/**
+**/.gradle/**
+**/.DS_Store
+**/Thumbs.db
+**/*.orig
+**/*.rej
+----
+
+* 対象は追跡されていないファイルだけです。git が追跡しているファイルへの変更は、どこにあってもコミットされます。
+* チェックポイント、pull-request step の最後のコミット、`unchanged` の比較、失敗した件の戻し、確認役に見せる差分、新しい実行の前の未コミットの変更の検査に効きます。
+* 外したものは、pull-request step のログ（`N file(s) left out as never committed (<glob>; e.g. <path>)`）、`run.json` のそのステップの `leftOut`、実行の終わりの表示（`left out, never committed: …`）、PR 本文の `## Left out` に出ます。`--dry-run` に `never commit` の行、提出の PR 本文に `## Never committed` の節が出ます。
+
 [[workflow-reference-agent-step]]
 === agent step
 
@@ -223,7 +389,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |文字列
 |必須
 |
-|このステップでさせること。`for_each` があるときは `{item}` が必須です。
+|このステップでさせること。`for_each` があるときは `{item}` が必須です。`{inputs.<name>}` も書けます（xref:workflow-reference-inputs[inputs]）。
 
 |`writable`
 |glob の list
@@ -268,7 +434,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |`command`
 |文字列、または文字列の list
 |`agent` が無ければ必須
-|exit 0 になれば合格のコマンド。list は上から順に実行し、最初に失敗したところで不合格です。shell を通さないので、引用符・パイプ・リダイレクト・変数（`\|&;<>$"'` とバッククォート、`\`）は書けません。
+|exit 0 になれば合格のコマンド。list は上から順に実行し、最初に失敗したところで不合格です。shell を通さないので、引用符・パイプ・リダイレクト・変数（`\|&;<>$"'` とバッククォート、`\`）は書けません。`{inputs.<name>}` は引数として書けます（実行ファイルにはできません。その入力には `pattern` か `path`・`file` が要ります）。
 
 |`cwd`
 |文字列
@@ -278,7 +444,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |`env`
 |mapping
 |任意
-|コマンドに渡す環境変数（`名前: 値`）。値は 1 行の固定の文字列です。`AIDEV_` で始まる名前は書けません。PR でレビューされる値なので、秘密情報は書きません。`command` があるときだけ書けます。
+|コマンドに渡す環境変数（`名前: 値`）。値は 1 行の固定の文字列です。`AIDEV_` か `GIT_CONFIG` で始まる名前は書けません。PR でレビューされる値なので、秘密情報は書きません。`command` があるときだけ書けます。値に `{inputs.<name>}` を書けます（コマンドに届く入力と同じ規則です）。
 
 |`timeout_minutes`
 |数値
@@ -293,7 +459,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |`prompt`
 |文字列
 |`agent` があれば必須
-|確認役に確認させる観点。
+|確認役に確認させる観点。`{inputs.<name>}` も書けます。
 
 |`max_retries`
 |整数
@@ -378,7 +544,7 @@ ADK がコマンドを 1 回実行するステップです。exit 0 以外なら
 |`command`
 |文字列
 |必須
-|実行するコマンド（1 行）。`until.command` と同じく shell を通しません。`{item}` は書けません。
+|実行するコマンド（1 行）。`until.command` と同じく shell を通しません。`{item}` は書けません。`{inputs.<name>}` は引数として書けます（実行ファイルにはできません）。
 
 |`cwd`、`env`、`timeout_minutes`
 |
@@ -414,7 +580,7 @@ ADK がコマンドを 1 回実行するステップです。exit 0 以外なら
 |PR とコミットのタイトル。省略すると `aidev: <description、無ければ name>`。
 |===
 
-各ステップの変更は、ステップが通るたびにチェックポイントとしてコミット済みです。この step は、残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチ（`aidev/<name>`、`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）を push して PR を作ります（Azure DevOps。同じブランチの PR が開いていれば本文を更新）。ブランチに起点からの変更が無ければ何もしません。
+各ステップの変更は、ステップが通るたびにチェックポイントとしてコミット済みです。この step は、残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチ（`aidev/<name>`、`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）を push して PR を作ります（Azure DevOps。同じブランチの PR が開いていれば本文を更新）。ブランチに起点からの変更が無ければ何もしません。追跡されていないファイルのうち ADK の既定の一覧と `never_commit` に一致するものはコミットせず、外した件数をログと PR 本文（`## Left out`）に書きます（xref:workflow-reference-never-commit[never_commit]）。`--trial` の実行では最後のコミットまで行い、push と PR は行いません（xref:workflows-trial[承認の前に試す]）。
 
 [[workflow-reference-limits]]
 === limits
@@ -427,7 +593,7 @@ ADK がコマンドを 1 回実行するステップです。exit 0 以外なら
 |数値
 |必須
 |
-|費用の上限（USD）。AI ツールが報告した費用の合計がこれに達すると、次の agent を起動せずに止まります。動いている agent は止めないので、最後の 1 回分だけ超えることがあります。費用を報告するのは Claude Code だけです。見積もりは xref:cli-estimate[aidev estimate] で出せます。
+|費用の上限（USD）。AI ツールが報告した費用の合計がこれに達すると、次の agent を起動せずに止まります。動いている agent は止めないので、最後の 1 回分だけ超えることがあります。費用を報告するのは Claude Code だけです。見積もりは xref:cli-estimate[aidev estimate] で出せます。`aidev run workflow --max-usd` で、その実行だけ下げられます（上げられません）。
 
 |`limits.max_minutes`
 |整数
@@ -514,6 +680,9 @@ model: inherit
 |Task for this run
 |`--task` の内容（データとして）
 
+|Inputs for this run
+|`--input` の値（データとして。`{inputs.<name>}` と書いた場所にはすでに入っています）
+
 |Reports from the earlier steps
 |前の agent step の最終報告（ステップごとに末尾 6000 文字）
 
@@ -577,19 +746,22 @@ description: リリース前に確認する項目と順番
 |実行の id（開始時刻）、workflow の名前、開始時の `workflow.yaml` の hash
 
 |`approvedRef`、`approvedSha`
-|承認の基準にした ref（`origin/main` など）と、その commit
+|承認の基準にした ref（`origin/main` など）と、その commit。`--trial` の実行では両方 `null`
+
+|`trial`、`trialHash`
+|`--trial` の実行なら `true` と、始めたときのレビュー対象のファイル（`workflow.yaml` と agent・skill）のハッシュ（`sha256:…`）。続けるときに同じであることを確かめます。試験でない実行は `false`（`trialHash` なし）
 
 |`startedAt`、`finishedAt`、`startedBy`
 |開始・終了の時刻と、実行したユーザー名（記録用）
 
-|`branch`、`worktree`、`baseSha`、`task`
-|動いたブランチ（`aidev/<name>`、`--dated` なら日付付き）、実行の worktree のパス、起点の commit、`--task` の内容
+|`branch`、`worktree`、`baseSha`、`task`、`inputs`
+|動いたブランチ（`aidev/<name>`、`--dated` なら日付付き、`--trial` なら `aidev/<name>.trial`）、実行の worktree のパス、起点の commit、`--task` の内容、`--input` の値（`default` を含む。`file: true` の入力は実行記録の `inputs/` にあるコピーのパス）
 
 |`steps`
-|ステップごとの `id`、`kind`、`ok`、`attempts`、通ったときのチェックポイントのコミット（`checkpoint`）。agent step は最後の結果の要約（`result`）、確認役の報告（`review`）、コマンドの出力のファイル（`log`）。`for_each` は件ごとの `items`（件ごとの `checkpoint`。`on_failure: continue` で失敗した件は `failed: true` と `reason`）と、失敗した件の数（`failed`）
+|ステップごとの `id`、`kind`、`ok`、`attempts`、通ったときのチェックポイントのコミット（`checkpoint`）。agent step は最後の結果の要約（`result`）、確認役の報告（`review`）、コマンドの出力のファイル（`log`）、agent が拒否されたツール呼び出し（`denied`。`Write src/x.ts` のような行、20 件まで）。`for_each` は件ごとの `items`（件ごとの `checkpoint`。`on_failure: continue` で失敗した件は `failed: true` と `reason`）と、失敗した件の数（`failed`）。pull-request step は決してコミットしないものとして外した件数（`leftOut`。glob ごと）と、push したか（`pushed`。`--trial` では `false`）
 
 |`calls`
-|agent を起動するたびに 1 件: `step`、`role`（`agent` か、確認役の `until`）、`agent`、`item`（`for_each` の件）、`attempt`、`tool`、`model`、`ok`、`costUsd`、`durationMs`
+|agent を起動するたびに 1 件: `step`、`role`（`agent` か、確認役の `until`）、`agent`、`item`（`for_each` の件）、`attempt`、`tool`、`model`、`ok`、`costUsd`、`durationMs`、拒否されたツール呼び出しの数（`denials`。あるときだけ）
 
 |`done`、`stopReason`
 |最後まで終わったか、止まった理由
@@ -598,5 +770,5 @@ description: リリース前に確認する項目と順番
 |agent の起動回数と、報告された費用の合計（`--resume` した分も含む）
 
 |`pr`、`resumes`
-|作った PR、`--resume` した時刻と再開したステップ
+|作った PR（`--trial` では `{ ok: false, trial: true, reason, branch, description }`）、`--resume` した時刻と再開したステップ
 |===

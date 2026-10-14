@@ -7,7 +7,7 @@ workflow を実行する前に、1 回の実行にかかる費用を見積もり
 
 [source,text]
 ----
-aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--review] [--json]
+aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--ai] [--review] [--json]
 ----
 
 === 説明
@@ -57,7 +57,7 @@ aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--
 
 **モデルの違いは換算します。** 1 回の起動の費用は、モデルの単価にほぼ比例します。ADK はモデルごとの単価の比（例: Opus 5.5 は Sonnet 5.5 の 2 倍、Haiku 5.5 は 20 分の 1）で換算します。たとえば Sonnet で動かした実績しか無いステップを Opus で動かすときは、その実績を 2 倍にして使います。既定の幅も、ステップが動くモデルに合わせて換算します。ADK が単価を知らないモデルは換算しません（1 倍）。
 
-`--ai` を付けると、先に **cost-estimator** agent を起動します。cost-estimator は workflow の定義と `--task` を読み、Wiki とソースを調べて、ステップごとに次のことを見積もります。読むだけで、何も書きません（Claude Code では `Read`・`Glob`・`Grep` だけを渡して起動します）。
+`--ai` を付けると、先に **cost-estimator** agent を起動します。cost-estimator は workflow の定義と `--task`、`--input` の値を読み、Wiki とソースを調べて、ステップごとに次のことを見積もります。読むだけで、何も書きません（Claude Code では `Read`・`Glob`・`Grep` だけを渡して起動します）。
 
 * 仕事の大きさ（`S`〜`XL`）。実行記録が無いステップの 1 回の費用に使います
 * 悪い場合に何回目の試行で通るか。悲観の試行回数に使います
@@ -106,7 +106,7 @@ flowchart LR
 * `aidev estimate workflow <name> --ai` で、ステップごとの仕事の種類を決めさせる。同じ種類の仕事の振り返りの目安があれば、新しい agent でもそれを使います。
 * `for_each` の仕事は、最初の数件が一番の手がかりです。`aidev run workflow` は 3 件終わった時点（その後は 10 件ごと）で、残りの件数にかかる費用の見込みをログに書きます。このままでは `limits.max_usd` が足りないと分かった時点で、その旨も書きます（実行は止めません。上限に達すれば止まり、`--resume` で続けられます）。
 
-承認されていない workflow でも見積もれます。定義を書いている途中や、`aidev modify workflow` で直した後の確認に使えます。
+承認されていない workflow でも見積もれます。定義を書いている途中や、`aidev modify workflow` で直した後の確認に使えます。`--trial` の実行（xref:workflows-trial[承認の前に試す]）の記録は、見積もりには使いません。
 
 === オプション
 
@@ -120,6 +120,9 @@ flowchart LR
 |`--task-file <path>`
 |`--task` をファイルから読む。`--task` とは併用できない
 
+|`--input <name>=<value>`
+|実行するときの `--input`（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。入力ごとに 1 回ずつ付ける（`--input=<name>=<value>` とも書ける）。必須の入力が無くても見積もりはできる（`default` のある入力はその値になる）。`--ai` のとき cost-estimator が読む
+
 |`--ai`
 |先に cost-estimator agent に、今回の task での仕事の量を見積もらせる（その分の費用がかかる）。決めた仕事の大きさと種類は、定義が変わるまで残る
 
@@ -127,7 +130,7 @@ flowchart LR
 |先に estimate-reviewer agent に、まだ振り返っていない記録を振り返らせる（自動の振り返りを待たずに。`estimates.review: off` でも動く。その分の費用がかかる）
 
 |`--json`
-|JSON で出力する（`optimistic`、`pessimistic`、`uncapped`、`worstCase`、`budget`、`cap`、ステップごとの `starts`・`usd`・`perStart`・`basis`・`model`、`calibration`、`priors`、`estimator`、`review`）
+|JSON で出力する（`optimistic`、`pessimistic`、`uncapped`、`worstCase`、`budget`、`cap`、ステップごとの `starts`・`usd`・`perStart`・`basis`・`model`、`calibration`、`priors`、`estimator`、`review`、`inputs`）
 |===
 
 === 終了コード
@@ -140,7 +143,7 @@ flowchart LR
 |見積もった（cost-estimator の答えが読めなかったときも、定義だけで見積もって 0。`--review` の振り返りが終わらなかったときも、警告を出して 0）
 
 |1
-|`workflow` 以外の object、名前が無い。workflow が無い、定義が不正、agent か skill が見つからない。`--task` と `--task-file` を両方付けた
+|`workflow` 以外の object、名前が無い。workflow が無い、定義が不正、agent か skill が見つからない。`--task` と `--task-file` を両方付けた。`--input` の名前が宣言に無い、値が規則に合わない、同じ名前を 2 回付けた
 |===
 
 === 例
@@ -179,6 +182,9 @@ aidev estimate workflow e2e-tests
 [%autowidth.stretch,options="header"]
 |===
 |列・行 |意味
+
+|`inputs`
+|workflow が `inputs:` を宣言しているときだけ。`--input` で渡した値と `default` の値（`name=value`）。渡していなければ `(none given)`
 
 |`agent starts`
 |そのステップで agent を起動する回数（楽観 – 悲観）。確認役の起動も含む

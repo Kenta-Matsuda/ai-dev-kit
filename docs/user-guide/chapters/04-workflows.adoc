@@ -10,8 +10,8 @@ AI に開発作業を任せる入口は workflow だけです。「何をさせ�
 |役割 |作業 |参照先
 
 |Engineering Manager
-|workflow を定義し、レビューへ提出する
-|xref:workflows-define[workflow の定義]、xref:workflows-submit[提出する]
+|workflow を定義し、手元で試してから、レビューへ提出する
+|xref:workflows-define[workflow の定義]、xref:workflows-trial[承認の前に試す]、xref:workflows-submit[提出する]
 
 |レビューする人
 |定義をレビューして `main` に入れる。**取り込むことが承認です。**
@@ -29,7 +29,7 @@ AI に開発作業を任せる入口は workflow だけです。「何をさせ�
 [[workflows-flow]]
 === 全体フロー
 
-.定義 → 承認 → 実行。承認済みの定義だけが実行できる
+.定義 → 試す → 承認 → 実行。push と PR を伴う実行ができるのは承認済みの定義だけ
 [mermaid]
 ----
 flowchart LR
@@ -37,8 +37,9 @@ flowchart LR
     direction TB
     n["workflow を作る"]
     d["内容を確認する"]
+    t["--trial で試す"]
     s["レビューへ提出"]
-    n --> d --> s
+    n --> d --> t --> s
   end
   subgraph R["レビューする人"]
     direction TB
@@ -144,6 +145,15 @@ limits:                            # 実行を止める条件
 |`agents`
 |任意。この workflow でだけ agent に足す能力（`skills`・`mcp`・`subagents` は追加、`tools` は置き換え）（xref:workflows-agents-skills[agent と skill]、xref:workflow-reference-agents[agents]）。
 
+|`inputs`
+|任意。実行のたびに `--input <name>=<値>` で受け取る値の宣言。定義の `{inputs.<name>}` と書いた場所に入ります（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。
+
+|`provide`
+|任意。git が無視するファイルのうち、手元のチェックアウトから実行の worktree にコピーするもの（glob）（xref:workflows-provide[worktree に無いファイルを用意する]）。
+
+|`never_commit`
+|任意。ADK の既定の一覧に加えて、実行が決してコミットしないパス（glob）（xref:workflows-never-commit[決してコミットしないもの]）。
+
 |agent step
 |`agent`・`writable`・`prompt` が必須です。`until` を書くと、それを満たすまで agent を繰り返します（やり直しは `until.max_retries` 回まで）。`timeout_minutes`（agent 1 回の時間の上限）は任意です。
 
@@ -220,7 +230,7 @@ limits:                            # 実行を止める条件
 |コマンドを実行するディレクトリです。PKG の外（`..` や絶対パス）は書けません。
 
 |`env`
-|コマンドに渡す環境変数です。値は定義に書いた固定の文字列で、PR でレビューされます。**秘密情報は書きません。** `AIDEV_` で始まる名前は書けません。
+|コマンドに渡す環境変数です。値は定義に書いた固定の文字列で、PR でレビューされます。**秘密情報は書きません。** `AIDEV_` か `GIT_CONFIG` で始まる名前は書けません。
 
 |`timeout_minutes`
 |コマンド 1 つの時間の上限（分）です。省略すると、workflow の時間の上限まで（それも無ければ終わるまで）待ちます。
@@ -359,6 +369,97 @@ agent を同時に動かす書き方は 2 つあります。どちらも同じ�
 * `until.command` は `npm test` ではなく、test runner を直接呼びます（`package.json` が `writable` だと、`scripts.test` を書き換えられるためです）。
 * `until` に確認役の agent を足し、`until.prompt` に「skip したテストや空のテストが無いこと」と書きます（xref:workflows-until-agent[agent のレビューで終わりを判定する]）。
 
+[[workflows-inputs]]
+==== 実行ごとに変わる値を受け取る（`inputs` と `--input`）
+
+テスト仕様書のパス、対象の画面、使うブラウザのように、実行のたびに変わる値を `prompt` に書き換えていると、実行のたびに定義が変わり、承認をやり直すことになります。`--task` は agent に「データ」として渡す自由な文章で、コマンドには入りません。定義の決まった場所に入れる値は `inputs:` に宣言し、実行する人が `--input <name>=<値>` で渡します。
+
+[source,yaml]
+----
+inputs:
+  spec:
+    description: the test specification to work from   # 実行する人、--dry-run、PR 本文に出る説明
+    file: true          # この端末のどこかにあるファイル。実行はそのコピーを受け取る
+  screen:
+    description: the screen to cover
+    pattern: '[a-z0-9-]+'   # 引用符で囲む（裸の [ は YAML の list になる）
+  browser:
+    default: chromium
+    pattern: '[a-z]+'
+
+objective: |
+  Write the IT tests the specification {inputs.spec} describes for the screen {inputs.screen}.
+
+steps:
+  - id: write
+    agent: e2e-writer
+    writable: [e2e/tests/**]
+    prompt: Read {inputs.spec} and write the tests for {inputs.screen}.
+    until:
+      command: npx playwright test tests/{inputs.screen}.spec.ts --project {inputs.browser}
+      cwd: e2e
+----
+
+* 宣言に書けるのは `description`・`default`・`pattern`・`path`・`file` です。`default` の無い入力は必須です（`required` という項目はありません）。`path` と `file` は同時に書けず、`file` の入力に `default` は書けません。名前は英小文字で始まる英小文字・数字・`_`・`-`、32 文字までです。
+* `{inputs.<name>}` を書けるのは、`objective`、agent step の `prompt`、`until.prompt`、`until.command`、command step の `command`、`env` の値（step と `until`）です。それ以外（`description`、step の `description`、`pull_request.title`、`writable`、`unchanged`、`cwd`、`for_each.from`）に書くと検証で拒否されます。コマンドの実行ファイル（先頭の語）にはできません。宣言していない名前を書くと検証で拒否されます。
+* 値は実行の前に定義へ書き込まれ、`{item}` はその後で件ごとに置き換わります。値そのものはテンプレートではないので、`{` と `}` を含められません。
+* 値は 1 行、1000 文字まで、制御文字なしで、`pattern` があれば値全体がそれに一致すること（ADK は `^(?:…)$` で囲みます）。`default` も検証のときに同じ規則で確かめます。
+* **コマンドに届く入力**（`until.command`、command step の `command`、`env` の値に書いたもの）は、`pattern`、`path: true`、`file: true` のどれかが必須です。その値はさらに固定の規則 `^[A-Za-z0-9._@][A-Za-z0-9._/@:=+-]{0,999}$`（`..` のセグメントを含まない）に収まる 1 語でなければなりません。空白や先頭の `-` を含む値はオプションや別の場所を指せるため、`for_each` の件と同じ考え方です。`pattern` はこれを狭めることはできても、広げることはできません。
+* `path: true` は PKG 内の相対パスです（`/` やドライブ文字で始まるもの、`..` を含むものは不可）。テキストでなければなりません（`.xlsx`・`.docx`・`.pdf`・画像などは `the AI tools read text; export … to Markdown, CSV or text first and pass that file` と拒否されます）。そのパスは実行の worktree に届くものでなければなりません。HEAD にコミット済みか、git が無視していて `provide` の glob に一致するかのどちらかです。`--dry-run` と実行は始める前にこれを判定し、`is not committed; a run starts from HEAD (commit it, or declare the input with file: true and pass the file)` または `is ignored by git and no provide: entry copies it into the run (add one, or pass it as a file input)` と表示して止まります。`provide` がコピーした後、そのパスが worktree にあることも確かめます。
+* `file: true` はこの端末のどこかにあるファイルのパスです（絶対パスか、シェルのカレントディレクトリからの相対パス）。存在するファイルで、テキストであること（拡張子の規則は `path` と同じ）。ADK は実行の worktree の `.aidev/workflows/<name>/runs/<id>/inputs/<name><拡張子>` にコピーし、`{inputs.<name>}` はその PKG 内の相対パスになります（`runs/` の中なので gitignore 済み。agent は読めますが、コミットされません）。`run.json` にはそのパスが残り、ログに `input <name>: copied <元> to <先>` と書きます。`--resume` はそのコピーをそのまま使います。1 人が持っているファイル（Excel から書き出した仕様書など）には `file`、チーム全員が決まった gitignore 済みのパスに置くデータには `provide` を使います（xref:workflows-provide[worktree に無いファイルを用意する]）。
+
+実行するときは、入力ごとに `--input` を付けます（`--input=<name>=<値>` とも書けます）。
+
+[source,bash]
+----
+aidev run workflow e2e-tests --input spec=../specs/login.txt --input screen=login --input browser=firefox
+aidev estimate workflow e2e-tests --input screen=login     # 見積もりでは、必須の入力が無くてもかまいません
+----
+
+* 必須の入力が無いと、何も始めずに `the workflow needs --input for: spec (the test specification to work from)` と表示して終了コード 1 で止まります（`--dry-run` でも同じです）。宣言に無い名前は `the workflow declares no input "nope" (its inputs: spec, screen, browser)`、同じ名前を 2 回渡すと `input <name> is given twice` です。
+* `--resume` には `--input` を付けられません（`--resume continues the run with the inputs it was started with; do not pass --input`）。続きの実行は記録された値を使い、渡されたときと同じ規則でもう一度確かめます（記録は agent が書き換えられるファイルだからです）。
+* 値は、`{inputs.<name>}` と書いた場所に入るほか、すべての agent（確認役も）の指示に `## Inputs for this run` の節として「データ」として入ります。`--dry-run` の `inputs` の行（`file` の入力は `(copied from <パス>)` 付き）、`--dry-run` と提出の PR 本文の `## Inputs (--input name=value)` の節（名前、説明、必須か既定値か、`pattern`、`a path in the repository`、`reaches a command`）、実行の PR 本文の `## Inputs`、最後のコミットの本文の `inputs:` の行、`run.json` の `inputs`、`--log` の先頭とサマリ、`aidev modify --from-run` が agent に渡す記録にも出ます。
+
+[[workflows-provide]]
+==== worktree に無いファイルを用意する（`provide` と `file` 入力）
+
+実行は HEAD から作った専用の worktree で動くので、git が無視するファイルはそこにありません。別のリポジトリから持ってきて gitignore に入れてある仕様書や、テストのフィクスチャがこれにあたります。用意する方法は 2 つです。チームの全員が決まった gitignore 済みのパスに置くデータは `provide:` で手元のチェックアウトからコピーし、1 人が持っているファイルは `file: true` の入力で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。依存パッケージ（`node_modules`）は `provide` ではなく、`command: npm ci` のような command step で入れます。`provide` はコマンドでは作れないデータのためのものです。
+
+[source,yaml]
+----
+provide: [docs/spec/**, e2e/fixtures/**]
+----
+
+* 最初のステップの前に（`--resume` を含め、始めるたびに）、手元のチェックアウトで git が無視していて glob に一致するファイルを、1 ファイルずつ worktree の同じパスにコピーします（上書きします）。コピーするのは無視されているファイルだけです。追跡されているファイルは HEAD の内容が worktree にあり、追跡も無視もされていないファイルは手元の作業中の状態なので、実行には届きません。ディレクトリ単位ではなく、glob がファイルを名指しします（`docs/spec/**` は docs/spec の下の無視されているすべてのファイル）。
+* コピーしないもの: `secrets_paths` に一致するもの（ログに `not copied (a secret path …)`）、`.aidev/` と `.git/` の下、シンボリックリンク。検証は、固定のディレクトリで始まらない glob（`**/*.txt`）、`.aidev`・`.git`・protected のパスを名指しする glob、最後の名前が認証情報のファイルに見える glob（`.env`、`.env.*`、`.npmrc`、`.netrc`、`.pypirc`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`*.jks`、`*.keystore`）を拒否します。
+* 手元のチェックアウトで無視されているファイルに 1 つも一致しない glob があると、`--dry-run` と実行は何も始めずに止まります: `provide: <glob> matches no file that git ignores in <チェックアウト> (a run copies only ignored files from the checkout; put the file there, or take the entry out)`。
+* コピーしたファイルは worktree でも無視されていなければなりません（無視する規則がコミット済みの `.gitignore` にあること）。そうでなければ `provide: <file> is ignored in <チェックアウト> by a rule the repository does not carry; commit the .gitignore that ignores it, so every run (and every teammate's) treats it alike` と表示して止まります。
+* ログに `provide: N path(s) copied from the checkout: …` と、コピーしなかったパスを 1 行ずつ書きます。`--dry-run` には `provide` の行が出ます。提出の PR 本文には `## Provided from the checkout` の節が入ります。
+
+[[workflows-never-commit]]
+==== 決してコミットしないもの（`never_commit` と ADK の既定の一覧）
+
+`npm ci` を実行する command step を置くと、`node_modules` が worktree にできます。PKG の `.gitignore` がそれを無視していなければ、`writable` の範囲の中にある限り、チェックポイントや pull-request step がコミットしてしまいます。ADK は、ツールが残す残骸を決してコミットしません。追跡されていないファイルのうち、次の glob に一致するものです。
+
+[source,text]
+----
+**/node_modules/**  **/bower_components/**  **/.pnpm-store/**  **/.yarn/cache/**
+**/.venv/**  **/venv/**  **/__pycache__/**  **/*.pyc  **/.pytest_cache/**  **/.mypy_cache/**  **/.ruff_cache/**
+**/.tox/**  **/.nox/**  **/.gradle/**  **/.DS_Store  **/Thumbs.db  **/*.orig  **/*.rej
+----
+
+workflow は `never_commit:` で自分の分を足せます。ADK の一覧から外すことはできません。ビルド結果（`dist/`、`build/`、`target/`）は成果物になり得るので一覧にはありません。要らなければ workflow で足します。
+
+[source,yaml]
+----
+never_commit: [e2e/test-results/**, e2e/playwright-report/**]
+----
+
+* 対象は追跡されていないファイルだけです。git が追跡しているファイルへの変更は、どこにあっても実行の仕事です（コミット済みの vendored な `node_modules` の中のファイルをステップが変えれば、他と同じようにコミットされます）。
+* 効くところ: ステップと件のチェックポイント、pull-request step の最後のコミット、`unchanged` の比較、失敗した件の戻し（`on_failure: continue`）、確認役の agent に見せる差分、新しい実行の前の「未コミットの変更」の検査（worktree に残った残骸は次の実行を止めません）。
+* 検証は、`<dir>/**` の形の `never_commit` が、どれかのステップの `writable` や `provide` の項目を覆うときに拒否します（そのステップの仕事が何もコミットされなくなるためです）。
+* 外したものは表示します。pull-request step のログに glob ごとに `N file(s) left out as never committed (<glob>; e.g. <path>)`、`run.json` のそのステップに `leftOut: { "<glob>": 件数 }`、`--json` の出力に `leftOut`、実行の終わりに `left out, never committed: N file(s) matching <glob> (e.g. <path>)`、PR 本文に `## Left out` の節。`--dry-run` には `never commit` の行、提出の PR 本文には `## Never committed` の節が出ます。
+
 [[workflows-unattended]]
 ==== 人が介入せずに大きな仕事を走らせる
 
@@ -442,6 +543,60 @@ limits:
 * 合格したときの確認役の報告は、後の agent step の指示にも入ります。
 * 確認役の agent も workflow と一緒に PR でレビューされ、`origin/main` と同じでなければ実行できません。
 
+[[workflows-trial]]
+=== 承認の前に試す（`--trial`）
+
+workflow は、書いて一度で動くことがほとんどありません。`until` のコマンドがこの PKG では通らない、`writable` が足りない、command step が残す残骸、worktree に無いファイル、といったことは実行してみて分かります。提出 → 承認 → 実行 → 失敗 → 修正を繰り返すと、`main` に試行錯誤のコミットが積まれます。`--trial` は、承認の前に、手元の定義をそのまま実行して確かめるためのものです。
+
+[source,bash]
+----
+aidev run workflow write-tests --trial --task "src/services/order.ts"      # 直す → 試す → 直す → 試す
+aidev run workflow write-tests --trial --dry-run                           # 何を試すかだけ見る
+aidev submit workflow write-tests                                          # 結果が正しくなったら提出
+----
+
+`aidev create workflow` と `aidev modify workflow` の後に表示される次の手順も、1. review、2. try（`--trial`）、3. submit、4. run の順です。
+
+試験の実行（trial）は次のように動きます。
+
+* **手元の定義をそのまま実行します。** 承認されているかどうかは問いません。未コミットの編集も含みます。定義は検証を通り、起動前の検査（xref:workflows-run[workflow の実行]）に通らなければなりません。`--dry-run --trial` は `approved` の行に `not required: --trial runs the definition as it is in this checkout (…)` と表示し、`trial` の行とブランチ `aidev/<name>.trial` を示し、問題が無ければ `dry run: the definition validates and would run as a trial (nothing pushed).` で終了コード 0 になります。`--trial` なしで未承認の workflow を実行しようとしたときの表示にも `To try it as it is first: aidev run workflow <name> --trial` が付きます（`--dry-run` なら `(try it as it is with --trial)`）。
+* **専用のブランチと worktree で動きます。** ブランチは `aidev/<name>.trial`（`--dated` なら `aidev/<name>.trial-<yyyymmddHHMM>`）、worktree は普通の実行と同じ場所の `aidev-<name>.trial` です。workflow の名前に `.` は使えないので、他の workflow のブランチとぶつかりません。
+* **毎回まっさらです。** 新しい試験（`--resume` でないもの）のたびに、試験のブランチを今チェックアウトしているコミットへ `reset --hard` し、前の試験が未コミットのまま残したものを消します。git が無視するものと、決してコミットしない残骸は残すので、command step が入れた `node_modules` は次の試験でも使えます。前の試験の `runs/` の記録も残ります（`--from-run` で読めます）。
+* **定義のファイルだけを持ち込みます。** レビュー対象のファイル（`workflow.yaml` と、それが参照する PKG の agent・skill）を手元のチェックアウトから worktree にコピーし、`aidev(<name>): trial definition` として試験のブランチにコミットします。それ以外の未コミットの変更は worktree に届きません（実行は HEAD から始まります）。手元に未コミットの変更があると、試験とその `--dry-run` は `the checkout has N uncommitted change(s) a run does not see (it starts from HEAD): …; commit them first if the steps need them` と警告します。
+* **書き込みの検問は、試験の定義に対して効きます。** 承認の代わりに、ADK は worktree の git ディレクトリ（作業ツリーの外）に試験の記録を置き、agent にだけ `AIDEV_WORKFLOW_TRIAL` を渡します。hook は書き込みとツール呼び出しのたびに、worktree の定義ファイルのハッシュが試験を始めたときと同じことを確かめ、同じ間だけそのステップの `writable` を許可します（許可の理由は `a trial run of the definition sha256:…` で、承認とは呼びません）。実行中に定義や agent・skill を書き換えると、承認済みの workflow を編集したときと同じく、その時点で拒否されます。記録は実行が終わると消えます（Ctrl-C でも）。
+* **何も push せず、PR も作りません。** pull-request step はコミットまでは行い（最後のコミットの本文に `approved: none (a trial run of the definition sha256:…)` と `trial run: not pushed` が入ります）、push と PR を飛ばします。agent と command step には、`git push` を拒否する git の設定（ADK の `pre-push` hook と、push 先を無効な URL に向ける設定）が環境変数で渡されます。step の `env` はこれを上書きできません（`GIT_CONFIG` で始まる名前は書けません）。`git … push` の command step や `until.command` は、始める前に `pushes; a trial run pushes nothing` と拒否されます。agent の `Bash` からの `git push`、`gh pr create`、`az repos pr create`、`glab mr create` は hook が拒否します。
+* **記録と見積もり。** `run.json` には `trial: true`、`trialHash`、`approvedRef: null` が入ります。見積もりの記録にも `trial: true` が付き、`aidev estimate` は試験の実行から学びません。試験の後は estimate-reviewer も自動では動きません。`--log` のサマリには `(a trial run: nothing pushed)` と出ます。
+* **続きと修正。** `--resume last` は同じ種類の最後の実行を選びます（`--trial` 付きなら最後の試験、無しなら試験でない最後の実行）。試験を続けるには `--trial` が要り、試験でない実行には付けられません。続ける試験は始めたときの定義のままでなければならず、変わっていれば `start a new trial` と表示します。続ける実行は（試験でなくても）、終わったステップのチェックポイントがブランチに残っていなければ拒否します（後の試験がブランチを戻したとき、マージ後にブランチを進めたとき）。`aidev modify workflow <name> --from-run last` は試験の記録も受け付けます（先頭に `(a trial run)` と付き、入力と、agent が拒否されたツール呼び出しも渡します）。
+* **費用を抑える。** `--max-usd <n>` で、この実行だけ `limits.max_usd` より下げられます（下げる方向だけです。`limits` の行は `$0.5 (limits.max_usd is $1)` のようになります）。試験に限らず使えます。
+
+試験が終わると、次のように表示します。
+
+[source,text]
+----
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+ℹ trial run: nothing pushed; the result is on aidev/write-tests.trial in ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial (the pull request text it would carry: .aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z/pull-request.md)
+    branch aidev/write-tests.trial (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial
+    left out, never committed: 312 file(s) matching **/node_modules/** (e.g. node_modules/.package-lock.json)
+⚠ 1 file(s) changed outside what the steps may write, by a command step or past the guard; not committed: coverage/lcov.info
+⚠ step write: the tool was refused 2 call(s): Write src/services/order.ts; Edit package.json (a path outside writable? see run.json "denied")
+ℹ trial run: nothing was pushed. aidev/write-tests.trial holds 3 commit(s) since 9f8e7d6a1b2c
+    inspect: git -C "<worktree>" log --oneline 9f8e7d6a1b2c..HEAD   /   git -C "<worktree>" diff --stat 9f8e7d6a1b2c
+    when the result is right: aidev submit workflow write-tests   (the reviewed definition then runs with "aidev run workflow write-tests")
+    record: <worktree>/.aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z
+----
+
+* `left out, never committed: …` は、ツールの残骸と `never_commit` のパスをコミットから外した件数です（xref:workflows-never-commit[決してコミットしないもの]）。
+* `… changed outside what the steps may write …` は、command step が `writable` の外に書いたか、agent が検問を通らずに書いたファイルです。コミットされていません。要るものなら、そのステップの `writable` を広げます。
+* `the tool was refused N call(s): …` は、agent が `writable` の外や、与えられていないツールを呼んで拒否された回数です（`run.json` のそのステップの `denied` に一覧があります）。`writable` が足りないのか、`prompt` を直すのかの手がかりになります。
+* `inspect:` の 2 つの git コマンドで、試験のブランチのコミットと差分を見ます。PR 本文になるはずの文章は実行記録の `pull-request.md` にあります。
+* 結果が正しければ `aidev submit workflow <name>` で提出します。止まったときは `--resume <run id> --trial` で続けるか、`aidev modify workflow <name> --from-run <run id>` で直させます。
+
+試験が保証しないこともあります。
+
+* 試験が縛るのは ADK の実行と git です。agent が他のツールや MCP server を通してできることは、承認済みの実行と同じく PKG の policy の許可規則で決まります。未レビューの定義のあらゆる副作用を止めるものではありません。hosting の PAT も外しません（MCP server が要ることがあるためです）。外部システムを更新する agent を含む workflow は、試験でも更新します。
+* 試験が通っても、承認ではありません。提出して、レビューを経て `main` に入った定義だけが `aidev run workflow <name>` で（push と PR を伴って）実行できます。
+
 [[workflows-submit]]
 === workflow の提出（Engineering Manager）
 
@@ -516,9 +671,10 @@ aidev list workflows
 git fetch origin
 aidev run workflow write-tests --dry-run --task "src/services/order.ts"
 aidev run workflow write-tests --task "src/services/order.ts"
+aidev run workflow e2e-tests --input spec=../specs/login.txt --input screen=login   # inputs: を宣言した workflow
 ----
 
-`--dry-run` は承認の状態、使う agent と AI ツール、上限、費用の見積もり（楽観〜悲観）、ステップごとの内容（書ける場所、skill・ツール・MCP server）を表示して何も始めません。まずこれで確認します。
+`--dry-run` は承認の状態、使う agent と AI ツール、上限、費用の見積もり（楽観〜悲観）、今回の指示と入力、ステップごとの内容（書ける場所、skill・ツール・MCP server）を表示して何も始めません。起動前に止まる問題（コマンドの実行ファイルが PATH に無い、`provide` の glob に一致するファイルが無い、`path: true` の入力が worktree に届かない）もここで分かります。まずこれで確認します。
 
 費用の内訳は `aidev estimate workflow <name>` で見ます。`--ai` を付けると、agent が今回の `--task` とコードを読んで、やり直しの回数や `for_each` の件数を見積もり、幅を狭めます（xref:cli-estimate[aidev estimate]）。
 
@@ -528,6 +684,8 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 ----
 
 `--task` は今回の指示です（Work Item の番号、対象のパスなど）。すべての agent step に「データ」として渡され、`objective` や各ステップの `writable` を変えることはできません。長い指示は `--task-file <path>` で渡します。
+
+workflow が `inputs:` を宣言していれば、入力ごとに `--input <name>=<値>` を付けます。必須の入力が無いと、何も始めずに `the workflow needs --input for: …` と表示して止まります（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。`--max-usd <n>` を付けると、この実行だけ費用の上限を `limits.max_usd` より下げられます（`--max-minutes` と同じく、下げる方向だけです）。
 
 [source,text]
 ----
@@ -559,13 +717,15 @@ aidev run workflow write-tests
 * 実行は **専用の git worktree** で動きます。あなたの作業ツリーには触れないので、未コミットの変更があっても実行でき、実行中も手元で作業を続けられます（xref:workflows-worktree[実行の worktree とブランチ]）。
 * ブランチは workflow ごとに 1 つ（`aidev/<name>`）で、実行のたびに同じブランチ・同じ worktree を使います。日付付きのブランチ（`aidev/<name>-<yyyymmddHHMM>`）に分けたいときだけ `--dated` を付けます。
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
-* ステップ（`for_each` なら 1 件）が通るたびに、そのステップの `writable` の変更を **チェックポイントとしてコミット** します（`aidev(<name>): <step>`）。止まった実行は、最後のチェックポイントから続けられます。
+* 最初のステップの前に、`provide:` の glob に一致する gitignore 済みのファイルを手元のチェックアウトから worktree にコピーし、`file: true` の入力のコピーを実行記録の `inputs/` に置きます（xref:workflows-provide[worktree に無いファイルを用意する]）。
+* ステップ（`for_each` なら 1 件）が通るたびに、そのステップの `writable` の変更を **チェックポイントとしてコミット** します（`aidev(<name>): <step>`）。止まった実行は、最後のチェックポイントから続けられます。追跡されていないファイルのうち、ADK の既定の一覧（`node_modules`、`__pycache__` など）と `never_commit:` に一致するものはコミットしません（xref:workflows-never-commit[決してコミットしないもの]）。
 * Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば、その定義を `--agents` で渡します）。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
 * `pull_request` のステップは、チェックポイントの後に残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチを push して PR を作ります。同じブランチの PR が開いていれば、新しく作らずに本文を更新します。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。ブランチに起点からの変更が無ければ commit も PR も作りません。
 * 記録は worktree の `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。`--resume`・`aidev estimate`・`aidev modify --from-run` は、手元と worktree の記録をまとめて探します。
+* 実行の終わりに、ステップの `writable` の外で変わったファイル（`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`）と、agent が拒否されたツール呼び出し（`step <id>: the tool was refused N call(s): Write src/x.ts …`。`run.json` のそのステップの `denied` にも残ります）を表示します。どちらもコミットされません。`writable` が足りないのか、ステップを直すのかの手がかりです。
 
 [[workflows-worktree]]
 ==== 実行の worktree とブランチ
@@ -578,7 +738,7 @@ aidev run workflow write-tests
 |`<AIDEV_HOME>/worktrees/<PKG 名>-<ハッシュ>/<ブランチ名の / を - にしたもの>`（Linux なら `~/.local/share/ai-dev-kit/…`、Windows なら `%LOCALAPPDATA%\ai-dev-kit\…`）。ハッシュは **PKG のクローンの場所（絶対パス）** から作るもので、同じ端末に同じ PKG のクローンが複数あっても置き場所がぶつからないようにするためだけのものです。workflow の内容とは関係なく、workflow を直しても変わりません。2 回目以降の実行は、場所ではなくブランチ名（`git worktree list`）で worktree を探します。PKG の外に置くので、PKG で動かすテストやリンターが 2 つ目のソースを拾いません。
 
 |ブランチ
-|`aidev/<name>`。初回は、今チェックアウトしているコミットから作ります。`--dated` なら実行ごとに `aidev/<name>-<yyyymmddHHMM>` と、その worktree を新しく作ります。
+|`aidev/<name>`。初回は、今チェックアウトしているコミットから作ります。`--dated` なら実行ごとに `aidev/<name>-<yyyymmddHHMM>` と、その worktree を新しく作ります。`--trial` なら `aidev/<name>.trial` と、その worktree（`aidev-<name>.trial`）で動き、試験のたびに今チェックアウトしているコミットへ戻します（xref:workflows-trial[承認の前に試す]）。
 
 |2 回目以降の実行
 |同じブランチ・worktree を使います。ブランチの変更がすでに起点（今チェックアウトしているコミット）に取り込まれていれば、起点まで進めてから始めます。取り込まれていない変更があれば、起点をブランチにマージしてから始め、前の実行の成果の上に積みます。マージが衝突したら止まります（worktree で解決するか、`--dated` で別のブランチにします）。
@@ -590,7 +750,7 @@ aidev run workflow write-tests
 |1 つの worktree で動く実行は 1 つだけです。動いている実行があれば、次の実行は止まります。
 
 |worktree に無いもの
-|git が無視するもの（`node_modules`、`.env`、ビルド結果）は新しい worktree にありません。要る workflow は、最初に `command: npm ci` のようなステップを置きます。
+|git が無視するもの（`node_modules`、`.env`、ビルド結果）は新しい worktree にありません。依存パッケージが要る workflow は、最初に `command: npm ci` のようなステップを置きます（入れたものはコミットされません。xref:workflows-never-commit[決してコミットしないもの]）。gitignore 済みのデータ（仕様書、フィクスチャ）は `provide:` で手元のチェックアウトからコピーするか、`file: true` の入力で渡します（xref:workflows-provide[worktree に無いファイルを用意する]）。
 
 |片付け
 |worktree は実行の後も残ります（`--resume` と記録のため）。要らなくなったら `git worktree remove <path>`、ブランチは `git branch -D aidev/<name>` で消します。消しても、次の実行で作り直します。
@@ -621,8 +781,11 @@ aidev run workflow write-tests
 |`notes/`
 |ステップが次のステップのために書いた file
 
+|`inputs/<name><拡張子>`
+|`file: true` の入力のコピー。`{inputs.<name>}` はこのパスです（xref:workflows-inputs[実行ごとに変わる値を受け取る]）
+
 |`pull-request.md`
-|PR 本文の全文。`generic` hosting で PR を手で作るときに使います。
+|PR 本文の全文。`generic` hosting で PR を手で作るときに使います。`--trial` の実行では、PR にするはずだった文章です。
 |===
 
 [[workflows-resume]]
@@ -654,10 +817,10 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |表示 |対処
 
 |`workflow <name> is not approved: … is not on origin/main yet`
-|PR が未マージです。マージ済みなら `git fetch origin`。
+|PR が未マージです。マージ済みなら `git fetch origin`。手元の定義をそのまま試すなら、表示される `aidev run workflow <name> --trial` です（xref:workflows-trial[承認の前に試す]）。
 
 |`workflow <name> is not approved: … differs from origin/main`
-|手元で定義を変えています。戻すか、 Engineering Manager に提出し直してもらいます。
+|手元で定義を変えています。戻すか、 Engineering Manager に提出し直してもらいます。変えた定義を試すなら `--trial` です。
 
 |`the worktree of aidev/<name> (…) has uncommitted changes, left by a run that stopped in the middle of a step`
 |前の実行が途中で止まっています。`--resume last` で続けるか、表示された `git -C … reset --hard` と `clean -fd` で捨ててから実行します。
@@ -695,6 +858,50 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 |`run <id> was not made on a branch of its own (it predates worktree runs)`
 |worktree で動く前の版で始めた実行は続けられません。新しく実行します。
 
+|`the checkpoints of run <id> are no longer on aidev/<name> (… is not in its history; a later run moved the branch); start a new run`
+|終わったステップのチェックポイントがブランチに残っていません（後の `--trial` がブランチを戻した、マージ後にブランチを進めた）。`--resume` なしで新しく実行します。
+
+|`run <id> was a trial run; resume it with --trial` +
+`run <id> was not a trial run; resume it without --trial` +
+`workflow <name> has no recorded run that was not a trial (pass --trial to continue the last trial)` +
+`workflow <name> has no recorded trial run (its runs were started without --trial)`
+|`--resume` は同じ種類の実行だけを続けます。試験（`--trial`）を続けるなら `--trial` を付け、普通の実行なら外します（xref:workflows-trial[承認の前に試す]）。
+
+|`the definition of <name> (or an agent or skill it uses) changed since trial run <id> started; start a new trial`
+|試験を始めたあとに定義（または agent・skill）が変わっています。`--resume` なしで、もう一度 `--trial` で実行します。
+
+|`--resume continues the run with the inputs it was started with; do not pass --input`
+|続きの実行は最初の入力を使います。`--input` を外します。
+
+|`the workflow needs --input for: <name> (<説明>)` +
+`the workflow declares no input "<name>" (its inputs: …)` +
+`input <name>: "<値>" does not match its pattern (<pattern>)` +
+`input <name> reaches a command, so its value must be one plain token (…)` +
+`input <name> is given twice`
+|`--input` が足りない、名前が宣言に無い、値が規則に合いません。`--dry-run` の `## Inputs (--input name=value)` に宣言の一覧が出ます（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。何も始まっていません。
+
+|`input <name>: <path> is not committed; a run starts from HEAD (commit it, or declare the input with file: true and pass the file)` +
+`input <name>: <path> is ignored by git and no provide: entry copies it into the run (add one, or pass it as a file input)` +
+`input <name>: <path> does not exist in <チェックアウト>` +
+`input <name>: <path> does not exist in the run's worktree (…); a file git ignores reaches it only through provide:`
+|`path: true` の入力が実行の worktree に届きません。コミットするか、`provide:` に足すか、`file: true` の入力にして渡します（xref:workflows-provide[worktree に無いファイルを用意する]）。何も始まっていません。
+
+|`input <name>: <file> is not a file on this machine` +
+`input <name>: the AI tools read text; export <file> to Markdown, CSV or text first and pass that file`
+|`file: true` の入力のファイルが無いか、テキストではありません（Excel・Word・PDF・画像は読めません）。テキストに書き出して、そのパスを渡します。
+
+|`provide: <glob> matches no file that git ignores in <チェックアウト> (a run copies only ignored files from the checkout; put the file there, or take the entry out)`
+|手元のチェックアウトに、その glob に一致する gitignore 済みのファイルがありません。ファイルを置くか、 Engineering Manager に `provide` の項目を外してもらいます。何も始まっていません。
+
+|`provide: <file> is ignored in <チェックアウト> by a rule the repository does not carry; commit the .gitignore that ignores it, so every run (and every teammate's) treats it alike`
+|そのファイルを無視する規則がコミットされていません（`.git/info/exclude` や、コミット前の `.gitignore`）。`.gitignore` に書いてコミットします。
+
+|`step <id>: <command> was not found on PATH, so "…" could not run`
+|コマンドの実行ファイルが PATH にありません。インストールするか、PATH を通します。何も始まっていません（`./run.sh` や `node_modules/.bin/x` のような相対パスは、前のステップが作ることがあるので検査しません）。
+
+|`step <id>: "git … push" pushes; a trial run pushes nothing`
+|`--trial` では、push する command step や `until.command` を実行できません。試験の間は外すか、別の確認方法にします。
+
 |`agent <name> uses the MCP server <server>, which .mcp.json does not register`
 |agent の `mcp` にある server が、PKG の `.mcp.json` にありません。`.mcp.json` に server を登録します（人が行います）。何も始まっていません。
 
@@ -703,6 +910,15 @@ aidev run workflow write-tests --resume 2026-09-23T01-12-03-114Z
 
 |`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |正常です。push 済みのブランチから手で PR を作ります。
+
+|`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`
+|実行は止まっていません（終了コードは結果どおりです）。command step が `writable` の外に書いたか、agent が検問を通らずに書いています。コミットされていないので、要るものなら Engineering Manager がそのステップの `writable` を広げます。
+
+|`step <id>: the tool was refused N call(s): Write src/x.ts … (a path outside writable? see run.json "denied")`
+|実行は止まっていません。agent が `writable` の外や、与えられていないツールを呼んで拒否されています。`run.json` のそのステップの `denied` に一覧があります。仕事に要るなら、 Engineering Manager が `writable` か agent の `tools` を直します。
+
+|`left out, never committed: N file(s) matching <glob> (e.g. <path>)`
+|正常です。ツールが残した残骸（`node_modules` など）と `never_commit` のパスを、コミットから外しました（xref:workflows-never-commit[決してコミットしないもの]）。
 |===
 
 [[workflows-fix]]
@@ -761,6 +977,18 @@ workflow を直すきっかけは 2 つあります。定義の PR でレビュ�
 |費用や時間の上限で止まる
 |`limits.max_usd`、`limits.max_minutes`
 |実行の記録（実行の worktree の `.aidev/workflows/<name>/runs/<id>/run.json`）の費用と時間、`aidev estimate workflow <name>` の見積もりを見て決めます。
+
+|実行ごとに違う値（仕様書のパス、対象の画面）を `prompt` に書き換えている
+|`inputs`
+|`inputs:` に宣言し、`prompt` や `until.command` に `{inputs.<name>}` と書きます。実行する人が `--input` で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。
+
+|worktree に無いファイル（gitignore 済みの仕様書やフィクスチャ）で止まる
+|`provide`、`file: true` の入力
+|チームで決まったパスに置くものは `provide:` に glob を書きます。1 人が持つファイルは `file: true` の入力にします（xref:workflows-provide[worktree に無いファイルを用意する]）。`node_modules` は `command: npm ci` のステップで入れます。
+
+|command step やテストが残したもの（結果レポート、キャッシュ）がコミットされる
+|`never_commit`
+|そのパスを `never_commit:` に書きます。`node_modules` や `__pycache__` などは書かなくてもコミットされません（xref:workflows-never-commit[決してコミットしないもの]）。
 |===
 
 agent・skill は、それを使うすべての workflow で共有されています。**agent.md を直すと、その agent を使う他の workflow の動きも変わります。** 1 つの workflow だけ変えたいときは、agent を分けます（`aidev create agent <新しい名前>`）。
@@ -812,7 +1040,7 @@ aidev edit workflow write-tests
 ----
 aidev list workflows
 ----
-. ステップごとの内容を表示して、意図どおりかを見ます。未承認なので最後に「refused」と出ますが、内容の確認には使えます。
+. ステップごとの内容を表示して、意図どおりかを見ます。未承認なので最後に `would be refused (try it as it is with --trial)` と出ますが、内容の確認には使えます。
 +
 [source,bash]
 ----
@@ -823,6 +1051,12 @@ aidev run workflow write-tests --dry-run
 [source,bash]
 ----
 aidev estimate workflow write-tests
+----
+. 手元の定義をそのまま試します。承認の前でも実行でき、何も push しません。結果が期待どおりになるまで、直して試すを繰り返します（xref:workflows-trial[承認の前に試す]）。
++
+[source,bash]
+----
+aidev run workflow write-tests --trial --task "src/services/order.ts"
 ----
 . もう一度提出します。同じブランチに修正のコミットが積まれ、PR があれば本文も新しい内容に更新されます。
 +

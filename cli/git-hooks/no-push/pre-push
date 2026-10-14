@@ -1,0 +1,7 @@
+#!/bin/sh
+# ai-dev-kit: a trial run (aidev run workflow --trial) pushes nothing.
+# The runner points core.hooksPath at this directory for every child of a
+# trial, so a push from a command step or an agent stops here, before any
+# ref reaches a remote.
+echo "aidev: this is a trial run of the workflow; nothing is pushed from it" >&2
+exit 1

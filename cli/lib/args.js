@@ -11,7 +11,9 @@ const { AidevError } = require('./errors');
 
 /**
  * @param {string[]} argv       raw args after the command path
- * @param {object} spec         { flagName: 'boolean'|'string' }
+ * @param {object} spec         { flagName: 'boolean'|'string'|'list' }
+ *                              ('list': the flag may be given more than once;
+ *                              its value is the array of values, in order)
  * @returns {{ flags: object, positionals: string[] }}
  */
 function parseArgs(argv, spec = {}) {
@@ -44,7 +46,8 @@ function parseArgs(argv, spec = {}) {
     } else {
       const v = inlineValue != null ? inlineValue : argv[++i];
       if (v == null) throw new AidevError(`option --${name} requires a value`);
-      flags[name] = v;
+      if (type === 'list') (flags[name] = flags[name] || []).push(v);
+      else flags[name] = v;
     }
   }
   return { flags, positionals };

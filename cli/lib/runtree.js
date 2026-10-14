@@ -30,12 +30,23 @@ const gitMod = require('./git');
 const homeMod = require('./home');
 
 const BRANCH_PREFIX = 'aidev/';
+const TRIAL_SUFFIX = '.trial';
 const LOCK_FILE = 'aidev-run.lock';
 
-/** The branch a run of `name` works on: one per workflow, or a dated one. */
-function branchFor(name, { dated = false, now = new Date() } = {}) {
-  if (!dated) return `${BRANCH_PREFIX}${name}`;
-  return `${BRANCH_PREFIX}${name}-${now.toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
+/**
+ * The branch a run of `name` works on: one per workflow, or a dated one. A
+ * trial run (`--trial`) has `aidev/<name>.trial`: a workflow name cannot
+ * hold a dot, so it never meets the branch of this or any other workflow.
+ */
+function branchFor(name, { dated = false, trial = false, now = new Date() } = {}) {
+  const base = `${BRANCH_PREFIX}${name}${trial ? TRIAL_SUFFIX : ''}`;
+  if (!dated) return base;
+  return `${base}-${now.toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
+}
+
+/** Is this the branch of a trial run (of any workflow)? */
+function isTrialBranch(branch) {
+  return typeof branch === 'string' && branch.startsWith(BRANCH_PREFIX) && /\.trial(-\d{12})?$/.test(branch);
 }
 
 /** This PKG's directory of worktrees: its name and a hash of its path, so two clones never share one. */
@@ -80,13 +91,16 @@ function branchExists(repoRoot, branch) {
 
 /**
  * Uncommitted changes in a worktree under `globs` (what the workflow's steps
- * may write; anything else there is no step's work). Ignored files do not count.
+ * may write; anything else there is no step's work). Ignored files do not
+ * count, and neither does what the run never commits (`exclude`: the kit's
+ * never-committed list and the workflow's `never_commit`).
  */
-function dirtyEntries(root, globs = []) {
+function dirtyEntries(root, globs = [], exclude = []) {
   if (!globs.length) return [];
-  const r = gitMod.run(['status', '--porcelain', '--untracked-files=all', '--', ...globs.map((g) => `:(glob)${g}`)], { cwd: root });
-  if (!r.ok) throw new AidevError(`git status failed in ${root}: ${r.stderr}`);
-  return String(r.stdout || '').split('\n').filter((l) => l.trim());
+  const entries = gitMod.statusEntries(root, { pathspecs: globs.map((g) => `:(glob)${g}`) });
+  if (!entries) throw new AidevError(`git status failed in ${root}`);
+  const pathsMod = require('./paths');
+  return entries.filter((e) => !(e.xy === '??' && pathsMod.firstMatch(exclude, e.path))).map((e) => `${e.xy} ${e.path}`);
 }
 
 /**
@@ -98,15 +112,26 @@ function dirtyEntries(root, globs = []) {
  *             its commits are in it already (its last pull request was
  *             merged), and otherwise has `base` merged in, so it carries the
  *             approved definition and keeps the work of the runs before.
+ *   fresh     (a trial) the branch is moved to `base` whatever it holds: a
+ *             trial never pushes, so nothing on it is kept, and every trial
+ *             starts from the commit the person has checked out. The caller
+ *             clears what the last trial left uncommitted where the steps write.
  *   resume    the worktree is used as it is (made again from the branch
  *             if it was removed); the caller puts back what the stopped step
  *             left uncommitted.
  *
- * Returns { root, branch, created, synced: 'new'|'moved'|'merged'|'current'|null }.
+ * Returns { root, branch, created, synced: 'new'|'moved'|'merged'|'current'|'reset'|null }.
  */
-function prepare(repoRoot, { branch, base, resume = false, writable = [], env = process.env }) {
+function prepare(repoRoot, { branch, base, resume = false, fresh = false, writable = [], exclude = [], env = process.env }) {
   gitMod.assertSafeRef(branch, 'branch');
-  const found = listWorktrees(repoRoot).find((w) => w.branch === branch);
+  const all = listWorktrees(repoRoot);
+  const found = all.find((w) => w.branch === branch);
+  // The person's own checkout (the first entry git lists, or wherever this
+  // command runs) is never a run's worktree: a run resets and cleans its
+  // worktree, and that must not be anyone's working copy.
+  if (found && (all.indexOf(found) === 0 || gitMod.samePath(found.path, repoRoot))) {
+    throw new AidevError(`${branch} is checked out in ${found.path}, and a run never works in that checkout; check out another branch there, or run with --dated`);
+  }
   let root = found && fs.existsSync(found.path) ? found.path : null;
   let created = false;
   if (!root) {
@@ -126,9 +151,20 @@ function prepare(repoRoot, { branch, base, resume = false, writable = [], env = 
     created = true;
     if (!exists) return { root, branch, created, synced: 'new' };
   }
+  // A worktree another live run holds is not moved or cleaned: the caller
+  // takes the lock right after this, and would be refused there anyway.
+  if (!created) {
+    const held = lockHolder(root);
+    if (held) throw new AidevError(`another run (${held.runId || '?'}, process ${held.pid}) is working in ${root}; wait for it to end`);
+  }
   if (resume) return { root, branch, created, synced: null };
+  if (fresh) {
+    const r = gitMod.run(['reset', '--hard', base], { cwd: root });
+    if (!r.ok) throw new AidevError(`could not move ${branch} to ${base.slice(0, 12)}: ${r.stderr}`);
+    return { root, branch, created, synced: 'reset' };
+  }
 
-  const dirty = dirtyEntries(root, writable);
+  const dirty = dirtyEntries(root, writable, exclude);
   if (dirty.length) {
     throw new AidevError(
       `the worktree of ${branch} (${root}) has uncommitted changes, left by a run that stopped in the middle of a step:\n` +
@@ -153,6 +189,73 @@ function prepare(repoRoot, { branch, base, resume = false, writable = [], env = 
   return { root, branch, created, synced: 'merged' };
 }
 
+/**
+ * The files git ignores in `checkout` that match `globs`, one by one, as
+ * `provide:` names them. Tracked files and untracked files git does not
+ * ignore are not listed: they are the checkout's own state, which a run
+ * never starts from. Git's own glob match is checked again with the kit's
+ * matcher, so a glob brings exactly the files it names (git would also list
+ * a whole ignored directory for a glob that matches one file in it).
+ */
+function ignoredFiles(checkout, globs) {
+  if (!globs.length) return { files: [], repos: [] };
+  const pathsMod = require('./paths');
+  const r = gitMod.run(['ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', ...globs.map((g) => `:(glob)${g}`)], { cwd: checkout });
+  if (!r.ok) throw new AidevError(`git ls-files failed in ${checkout}: ${r.stderr}`);
+  const out = { files: [], repos: [] };
+  for (const p of String(r.stdout || '').split('\0').filter(Boolean)) {
+    // A slash-terminated entry is a directory git does not look into: a nested repository.
+    if (p.endsWith('/')) { if (globs.some((g) => pathsMod.matches(g, p))) out.repos.push(p); continue; }
+    if (globs.some((g) => pathsMod.matches(g, p))) out.files.push(p);
+  }
+  return out;
+}
+
+/**
+ * Copy what `provide:` names from the checkout into the worktree: the files
+ * git ignores there (a spec sheet kept out of git, test data), file by file,
+ * never a tracked file (the run starts from the commit, not the checkout's
+ * edits), never a secret (`secrets`), never the kit's own state. Existing
+ * files in the worktree are overwritten. Returns { copied: [rel], skipped: [{ rel, why }], missing: [glob] }.
+ */
+function provide(checkout, root, globs, { secrets = [] } = {}) {
+  const out = { copied: [], skipped: [], missing: [] };
+  if (!globs.length) return out;
+  const pathsMod = require('./paths');
+  const under = (rel) => {
+    const head = rel.split('/')[0];
+    return head === '.git' || head === '.aidev';
+  };
+  const done = new Set();
+  const { SECRET_FILE_RE } = require('./workflow');
+  const layout = require('./layout');
+  for (const g of globs) {
+    let found;
+    try { found = ignoredFiles(checkout, [g]); } catch (e) { throw new AidevError(`provide: ${g}: ${e.message}`); }
+    for (const repo of found.repos) out.skipped.push({ rel: repo, why: 'a nested git repository (git does not list its files)' });
+    if (!found.files.length) { out.missing.push(g); continue; }
+    for (const rel of found.files) {
+      if (done.has(rel)) continue;
+      done.add(rel);
+      if (under(rel) || layout.isKitManaged(rel)) { out.skipped.push({ rel, why: 'the kit\'s own state' }); continue; }
+      const secret = pathsMod.firstMatch(secrets, rel);
+      if (secret) { out.skipped.push({ rel, why: `a secret path (secrets_paths: ${secret})` }); continue; }
+      if (SECRET_FILE_RE.test(rel.split('/').pop())) { out.skipped.push({ rel, why: 'a credential file, by its name' }); continue; }
+      const from = path.join(checkout, ...rel.split('/'));
+      const to = path.join(root, ...rel.split('/'));
+      try {
+        let stat = null;
+        try { stat = fs.lstatSync(from); } catch { stat = null; }
+        if (!stat || !stat.isFile()) { out.skipped.push({ rel, why: stat && stat.isSymbolicLink() ? 'a symbolic link' : 'not a file' }); continue; }
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+      } catch (e) { throw new AidevError(`provide: could not copy ${rel} into the worktree: ${e.message}`); }
+      out.copied.push(rel);
+    }
+  }
+  return out;
+}
+
 /** The lock file of a worktree (in its own git directory, so it is never committed or seen). */
 function lockPath(root) {
   const r = gitMod.run(['rev-parse', '--absolute-git-dir'], { cwd: root });
@@ -165,6 +268,13 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
+/** The live run holding a worktree's lock ({ pid, runId }), or null (no lock, or its process is gone). */
+function lockHolder(root) {
+  let held = null;
+  try { held = JSON.parse(fs.readFileSync(lockPath(root), 'utf8')); } catch { held = null; }
+  return held && alive(held.pid) ? held : null;
+}
+
 /** Hold the worktree for this run; returns release(). Refuses while another live process holds it. */
 function lock(root, { runId }) {
   const file = lockPath(root);
@@ -174,11 +284,8 @@ function lock(root, { runId }) {
       return () => { try { fs.rmSync(file, { force: true }); } catch { /* gone already */ } };
     } catch (e) {
       if (e.code !== 'EEXIST') throw new AidevError(`could not lock ${root}: ${e.message}`);
-      let held = null;
-      try { held = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { held = null; }
-      if (held && alive(held.pid)) {
-        throw new AidevError(`another run (${held.runId || '?'}, process ${held.pid}) is working in ${root}; wait for it to end`);
-      }
+      const held = lockHolder(root);
+      if (held) throw new AidevError(`another run (${held.runId || '?'}, process ${held.pid}) is working in ${root}; wait for it to end`);
       fs.rmSync(file, { force: true });
     }
   }
@@ -186,5 +293,5 @@ function lock(root, { runId }) {
 }
 
 module.exports = {
-  BRANCH_PREFIX, branchFor, worktreesDir, listWorktrees, runRoots, branchExists, dirtyEntries, prepare, lock, lockPath,
+  BRANCH_PREFIX, TRIAL_SUFFIX, branchFor, isTrialBranch, worktreesDir, listWorktrees, runRoots, branchExists, dirtyEntries, ignoredFiles, provide, prepare, lock, lockHolder, lockPath,
 };
