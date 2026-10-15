@@ -752,7 +752,7 @@ function promptHead(def, { task, inputs = null, earlier = [], run = null }) {
   return lines;
 }
 
-function stepPrompt(def, step, index, { task, inputs = null, attempt, previous, hasPr, earlier = [], run = null, resumed = null, item = null }) {
+function stepPrompt(def, step, index, { task, inputs = null, attempt, previous, hasPr, trial = false, earlier = [], run = null, resumed = null, item = null }) {
   const lines = promptHead(def, { task, inputs, earlier, run: run && { ...run, writeNotes: true } });
   lines.push(`## Step ${step.id} (${index + 1}/${def.steps.length})`, '', step.prompt, '');
   if (item) {
@@ -791,7 +791,7 @@ function stepPrompt(def, step, index, { task, inputs = null, attempt, previous, 
       ? [`- Leave unchanged: ${step.unchanged.join(', ')}. The workflow compares them with how they were when the step started; a change there (an edit, a skipped or deleted test, a loosened setting) fails the step.`]
       : []),
     hasPr
-      ? '- Do not run git commit or git push. The workflow commits this step\'s changes when its checks pass, and opens the pull request after the steps.'
+      ? `- Do not run git commit or git push. The workflow commits this step's changes when its checks pass, and ${trial ? 'in this trial run pushes nothing and opens no pull request' : 'opens the pull request after the steps'}.`
       : '- Do not run git commit or git push. The workflow commits this step\'s changes on its own branch when its checks pass.',
     '- Report in your final message what you did, what you verified and what is left open.', '');
   return lines.join('\n');
@@ -1243,7 +1243,7 @@ function runSummary(rec) {
     if (Array.isArray(st.denied) && st.denied.length) lines.push(`    refused tool calls: ${st.denied.slice(0, 5).join('; ')}${st.denied.length > 5 ? '; …' : ''}`);
   }
   if (rec.pr) lines.push('', `pull request: ${rec.pr.ok ? (rec.pr.url || `!${rec.pr.pullRequestId}`) : `${rec.pr.branch} — ${rec.pr.reason}`}`);
-  if (!rec.done) lines.push('', `continue: aidev run workflow ${rec.name} --resume ${rec.runId}`);
+  if (!rec.done) lines.push('', `continue: aidev run workflow ${rec.name} --resume ${rec.runId}${rec.trial ? ' --trial' : ''}`);
   return lines.join('\n');
 }
 
@@ -1846,7 +1846,7 @@ async function runWorkflow(ctx) {
       // eslint-disable-next-line no-await-in-loop
       const res = await startAgent({
         step, agentName: step.agent, stepId: step.id, attempt, what: item ? `agent (target ${item.value})` : 'agent', item: item ? item.value : null,
-        promptText: stepPrompt(def, step, index, { task, inputs, attempt, previous, hasPr, earlier, run: runFiles(), resumed, item }),
+        promptText: stepPrompt(def, step, index, { task, inputs, attempt, previous, hasPr, trial, earlier, run: runFiles(), resumed, item }),
       });
       if (!res.ok) { out.stop = res.reason; out.limit = !!res.limit; break; }
       const report = String(res.result || '');
@@ -2232,10 +2232,10 @@ async function runWorkflow(ctx) {
     ui.dim(`    inspect: git -C "${repoRoot}" log --oneline ${baseSha.slice(0, 12)}..HEAD   /   git -C "${repoRoot}" diff --stat ${baseSha.slice(0, 12)}`);
     if (done) ui.dim(`    when the result is right: aidev submit workflow ${name}   (the reviewed definition then runs with "aidev run workflow ${name}")`);
   }
-  if (!done && artifactsOk) ui.dim(`    continue from the step that stopped: aidev run workflow ${name} --resume ${runId}`);
+  if (!done && artifactsOk) ui.dim(`    continue from the step that stopped: aidev run workflow ${name} --resume ${runId}${trial ? ' --trial' : ''}`);
   if (!done && artifactsOk) ui.dim(`    or have the workflow fixed from this run: aidev modify workflow ${name} --from-run ${runId}`);
   ui.dim(`    record: ${path.join(runDir)}`);
-  if (recordRel && agentRuns > 0) ui.dim(`    estimate record: ${recordRel} (${hasPr && pr && pr.branch ? 'in the pull request' : 'commit it, or the next workflow pull request takes it'})`);
+  if (recordRel && agentRuns > 0) ui.dim(`    estimate record: ${recordRel} (${trial ? 'on the trial branch, not pushed; the estimate skips trial runs' : hasPr && pr && pr.branch ? 'in the pull request' : 'commit it, or the next workflow pull request takes it'})`);
   // Enough runs outside their estimate: the reviewer looks at why, once, now.
   let review = null;
   if (config.estimates.review === 'auto' && agentRuns > 0 && !trial) {

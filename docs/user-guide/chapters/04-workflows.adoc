@@ -555,7 +555,7 @@ aidev run workflow write-tests --trial --dry-run                           # 何
 aidev submit workflow write-tests                                          # 結果が正しくなったら提出
 ----
 
-`aidev create workflow` と `aidev modify workflow` の後に表示される次の手順も、1. review、2. try（`--trial`）、3. submit、4. run の順です。
+`aidev create workflow` の後に表示される次の手順も、1. review、2. try（`--trial`）、3. submit、4. run の順です（`aidev modify workflow` では 1. review、2. try、3. estimate、4. submit）。
 
 試験の実行（trial）は次のように動きます。
 

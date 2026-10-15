@@ -173,7 +173,7 @@ function decide(repoRoot, targetPath, {
         return allow(`workflow ${workflow} step ${step} may write its run notes ("${rel}")`,
           { rule: 'workflow-notes', path: rel, workflow, step });
       }
-      scopeHint = `workflow ${workflow} is approved but the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
+      scopeHint = `${grant.how === 'trial' ? `this trial run of workflow ${workflow} grants writes, but` : `workflow ${workflow} is approved but`} the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
     }
   }
 

@@ -152,7 +152,7 @@ function guardWrite(ctx, input, adapter) {
     const t = policyMod.decideToolUse(repoRoot, tool, { config: wfConfig, subagent, toolInput: toolCall(input).args });
     if (t) return emitDecision(adapter, false, `ai-dev-kit: ${t.reason}`);
     // A trial run pushes nothing: not the runner, and not an agent through Bash.
-    if (process.env.AIDEV_WORKFLOW_TRIAL && tool === 'Bash') {
+    if (process.env.AIDEV_WORKFLOW_TRIAL && /^(bash|shell|execute_bash|powershell)$/i.test(tool)) {
       const command = String((toolCall(input).args || {}).command || '');
       if (TRIAL_PUSH_RE.test(command)) return emitDecision(adapter, false, 'ai-dev-kit: this is a trial run of the workflow; nothing is pushed and no pull request is opened from it');
     }

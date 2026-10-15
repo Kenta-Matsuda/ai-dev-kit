@@ -555,7 +555,7 @@ aidev run workflow write-tests --trial --dry-run                           # onl
 aidev submit workflow write-tests                                          # submit once the result is right
 ----
 
-The next steps shown after `aidev create workflow` and `aidev modify workflow` follow the same order: 1. review, 2. try (`--trial`), 3. submit, 4. run.
+The next steps shown after `aidev create workflow` follow the same order: 1. review, 2. try (`--trial`), 3. submit, 4. run (after `aidev modify workflow`: 1. review, 2. try, 3. estimate, 4. submit).
 
 A trial run works like this.
 

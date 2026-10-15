@@ -1544,6 +1544,11 @@ function run() {
         eq([at('src/x.ts', { trial: rec.token }).rule, at('docs/x.md', { trial: rec.token }).rule, at('src/x.ts', { trial: 'nope' }).rule, at('src/x.ts', {}).rule],
           ['workflow-trial-writable', 'read-only', 'read-only', 'read-only']);
         ok(/a trial run of the definition sha256:/.test(at('src/x.ts', { trial: rec.token }).reason), 'never called approved');
+        ok(/this trial run of workflow trial grants writes, but the writable of step write/.test(at('docs/x.md', { trial: rec.token }).reason), 'outside writable, the hint names the trial, not an approval');
+        const wfCmd = require('../cli/commands/workflow');
+        const tdef = wfMod.loadDefinition(fx.root, 'trial');
+        ok(/in this trial run pushes nothing and opens no pull request/.test(wfCmd.stepPrompt(tdef, tdef.steps[0], 0, { task: '', attempt: 1, previous: null, hasPr: true, trial: true })), 'the agent is told no pull request follows a trial');
+        ok(/opens the pull request after the steps/.test(wfCmd.stepPrompt(tdef, tdef.steps[0], 0, { task: '', attempt: 1, previous: null, hasPr: true })));
         eq(policyMod.decideToolUse(wt, 'Bash', { workflow: 'trial', step: 'write', trial: rec.token, installRoot: KIT_ROOT }), null, 'tool calls stand on the same record');
         ok(/not approved/.test(policyMod.decideToolUse(wt, 'Bash', { workflow: 'trial', step: 'write', installRoot: KIT_ROOT }).reason));
         const hook = (input, extra = {}) => {
@@ -1555,6 +1560,7 @@ function run() {
         ok(/"permissionDecision": ?"deny"/.test(hook({ tool_name: 'Write', tool_input: { file_path: 'src/y.ts', content: '' } })), 'the hook, without it');
         ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'a push from Bash is refused in a trial');
         ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'Bash', tool_input: { command: 'cd x && git -C . push' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })));
+        ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'shell', tool_input: { command: 'git push' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'whatever the shell tool is called');
         ok(/"permissionDecision": ?"allow"/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git status' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })));
         ok(/"permissionDecision": ?"allow"/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git stash push -m wip' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'only the push subcommand is a push');
         fs.appendFileSync(path.join(wt, trialRel), '# widened\n');
@@ -1596,6 +1602,11 @@ function run() {
         ok(fs.existsSync(path.join(fx.root, 'src', 'mine.ts')), 'the checkout was not touched');
         fs.rmSync(path.join(fx.root, 'src', 'mine.ts'), { force: true });
         git(['checkout', '-q', 'main'], fx.root);
+        // A trial that stops is continued with --trial, and the hint says so.
+        write(path.join(fx.root, ...trialRel.split('/')), yamlOf('trial', { steps: ['  - id: c', '    command: git rev-parse --verify no-such-ref-here'] }));
+        const stopped = aidev(fx.root, ['run', 'workflow', 'trial', '--trial'], { env: env() });
+        eq(stopped.code, 1, stopped.out);
+        ok(/continue from the step that stopped: aidev run workflow trial --resume \S+ --trial/.test(stopped.out), stopped.out);
         write(path.join(fx.root, ...trialRel.split('/')), yamlOf('trial', { steps: ['  - id: p', '    command: git push origin main'] }));
         const pushy = aidev(fx.root, ['run', 'workflow', 'trial', '--dry-run', '--trial'], { env: env() });
         eq(pushy.code, 1);
