@@ -124,6 +124,9 @@ function emitContext(adapter, event, text) {
 
 // ---------------------------------------------------------------- guard-write
 
+/** What a trial never lets an agent do: push, or open a pull request through a hosting CLI. */
+const TRIAL_PUSH_RE = /\bgit(?:\s+(?:-[cC]\s+\S+|--?\S+))*\s+push\b|\bgh\s+pr\s+create\b|\baz\s+repos\s+pr\s+create\b|\bglab\s+mr\s+create\b/;
+
 function guardWrite(ctx, input, adapter) {
   const { repoRoot } = ctx;
 
@@ -148,6 +151,11 @@ function guardWrite(ctx, input, adapter) {
     const subagent = input.agent_id && input.agent_type ? String(input.agent_type) : null;
     const t = policyMod.decideToolUse(repoRoot, tool, { config: wfConfig, subagent, toolInput: toolCall(input).args });
     if (t) return emitDecision(adapter, false, `ai-dev-kit: ${t.reason}`);
+    // A trial run pushes nothing: not the runner, and not an agent through Bash.
+    if (process.env.AIDEV_WORKFLOW_TRIAL && /^(bash|shell|execute_bash|powershell)$/i.test(tool)) {
+      const command = String((toolCall(input).args || {}).command || '');
+      if (TRIAL_PUSH_RE.test(command)) return emitDecision(adapter, false, 'ai-dev-kit: this is a trial run of the workflow; nothing is pushed and no pull request is opened from it');
+    }
   }
   // Starting a subagent writes nothing; its own calls come through here.
   if (/^(Agent|Task)$/.test(tool)) return EXIT.OK;

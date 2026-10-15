@@ -9,7 +9,7 @@
 - `.aidev/policy.yaml` — AI が書いてよいパスの定義。hooks が毎回の書き込みを検査
 - `aidev.yaml` — PKG 固有の設定（生成対象・秘密パス・Azure DevOps 接続先）
 
-PR のマージは常に人間が行います。生成された Wiki のレビューは利用者の責任です。開発は `aidev run workflow <name>` から行い、workflow（`.aidev/workflows/<name>/workflow.yaml`）は PR でレビューされて `main` にあるものだけが実行されます。実行は手元のチェックアウトではなく専用の git worktree で、workflow ごとのブランチ `aidev/<name>` の上で動き、ステップが通るたびにコミットします。agent は `aidev sync wiki` と workflow から、`aidev.yaml` の `tools.agent`（agent ごとの上書きは `tools.agents.<name>`）で決めたツールで起動します。実機で検証済みのツールは Claude Code で、GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI のアダプタと hooks は各ツールの公開仕様に沿って実装しており未検証です。hosting は Azure DevOps または generic（git のみ）です。
+PR のマージは常に人間が行います。生成された Wiki のレビューは利用者の責任です。開発は `aidev run workflow <name>` から行い、workflow（`.aidev/workflows/<name>/workflow.yaml`）は PR でレビューされて `main` にあるものだけが実行されます。実行は手元のチェックアウトではなく専用の git worktree で、workflow ごとのブランチ `aidev/<name>` の上で動き、ステップが通るたびにコミットします。承認前の定義は `aidev run workflow <name> --trial` で試せます（手元の定義をそのまま専用のブランチ `aidev/<name>.trial` で動かし、何も push しません）。workflow が `inputs:` で宣言した値は、実行時に `--input <name>=<value>` で渡します。agent は `aidev sync wiki` と workflow から、`aidev.yaml` の `tools.agent`（agent ごとの上書きは `tools.agents.<name>`）で決めたツールで起動します。実機で検証済みのツールは Claude Code で、GitHub Copilot CLI・OpenAI Codex CLI・Kiro CLI のアダプタと hooks は各ツールの公開仕様に沿って実装しており未検証です。hosting は Azure DevOps または generic（git のみ）です。
 
 ## インストール（端末につき 1 回）
 

@@ -55,7 +55,7 @@ const agentsAt = argv.indexOf('--agents');
 if (agentsAt >= 0 && process.env.STUB_AGENTS_OUT) fs.writeFileSync(process.env.STUB_AGENTS_OUT, fs.readFileSync(argv[agentsAt + 1]));
 // STUB_SPANS_OUT: one line per start (step, target, start and end time); STUB_SLEEP_MS keeps each start busy that long.
 const startedAt = Date.now();
-if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null }));
+if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null, ...(process.env.AIDEV_WORKFLOW_TRIAL ? { AIDEV_WORKFLOW_TRIAL: process.env.AIDEV_WORKFLOW_TRIAL } : {}) }));
 if (process.env.STUB_STEPS_OUT) fs.appendFileSync(process.env.STUB_STEPS_OUT, (process.env.AIDEV_WORKFLOW_STEP || '') + '\\n');
 // An until agent (step "<id>:until") answers the next verdict from STUB_VERDICTS (a JSON list).
 let answer = process.env.STUB_ANSWER || 'stub answer';
@@ -97,7 +97,13 @@ process.stdin.on('end', () => {
   // STUB_COST prices this start; the estimate reviewer answers STUB_REVIEW_ANSWER.
   const cost = Number(process.env.STUB_COST || 0.0123);
   const review = /# Review the cost estimates/.test(stdin) && process.env.STUB_REVIEW_ANSWER;
-  process.stdout.write(JSON.stringify({ type: 'result', result: review || answer, is_error: false, total_cost_usd: cost, session_id: 's',
+  // STUB_DENIALS: paths the tool reports as refused writes; STUB_PUSH_OUT: try a git push and write how it went.
+  const denials = String(process.env.STUB_DENIALS || '').split(',').filter(Boolean).map((p) => ({ tool_name: 'Write', tool_input: { file_path: p } }));
+  if (process.env.STUB_PUSH_OUT) {
+    const r = require('child_process').spawnSync('git', ['push', 'origin', 'HEAD:refs/heads/evil'], { encoding: 'utf8' });
+    fs.writeFileSync(process.env.STUB_PUSH_OUT, String(r.status) + ' ' + String(r.stderr || ''));
+  }
+  process.stdout.write(JSON.stringify({ type: 'result', result: review || answer, is_error: false, total_cost_usd: cost, session_id: 's', permission_denials: denials,
     usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 50 },
     modelUsage: { 'claude-haiku-5-5': { costUSD: 0.0001 }, 'claude-sonnet-5-5': { costUSD: cost } } }) + '\\n');
 });
@@ -330,6 +336,82 @@ function run() {
     eq(wfMod.stepAccess(d, deps, 'a', { item: 'login' }).writable, ['e2e/tests/login.spec.ts']);
     eq(wfMod.stepAccess(d, deps, 'a').writable, [], 'no target: none of its paths');
     eq(wfMod.stepAccess(d, deps, 'a', { item: '../x' }).writable, [], 'not a target');
+  });
+
+  test('inputs, provide and never_commit: what a run is given, what it finds in its worktree, what it never commits', () => {
+    const IN = { spec: { description: 'the spec', path: true }, browser: { default: 'chromium', pattern: '[a-z]+' }, notes: {} };
+    const d = wfMod.validateDefinition({
+      ...GOOD, objective: 'from {inputs.spec}', inputs: IN, provide: ['docs/spec/**'], never_commit: ['e2e/test-results/**'],
+      steps: [
+        { id: 'a', agent: 'issue-to-pr', writable: ['e2e/**'], prompt: 'read {inputs.spec} for {inputs.notes}', until: { command: 'npx t --project {inputs.browser}', env: { B: '{inputs.browser}' } } },
+        { id: 'c', command: 'node x {inputs.spec}' },
+      ],
+    }, 'wf');
+    eq(Object.keys(d.inputs), ['spec', 'browser', 'notes']);
+    eq([d.inputs.spec.path, d.inputs.spec.inCommand, d.inputs.browser.default, d.inputs.browser.inCommand, d.inputs.notes.inCommand], [true, true, 'chromium', true, false]);
+    eq([d.provide, d.never_commit], [['docs/spec/**'], ['e2e/test-results/**']]);
+    eq(wfMod.neverCommitted(d).slice(-1), ['e2e/test-results/**'], 'the kit\'s own list first, the workflow\'s after');
+    ok(wfMod.NEVER_COMMITTED.includes('**/node_modules/**'));
+    eq(wfMod.pathspecs(['e2e/**'], ['**/node_modules/**']), [':(glob)e2e/**', ':(exclude,glob)**/node_modules/**']);
+    // The values: given, checked, defaults filled in, written where the definition named them.
+    const v = wfMod.collectInputs(d, ['spec=docs/spec/login.txt', 'notes=be brief']);
+    eq(v, { spec: 'docs/spec/login.txt', notes: 'be brief', browser: 'chromium' });
+    const live = wfMod.withInputs(d, v);
+    eq([live.objective, live.steps[0].prompt], ['from docs/spec/login.txt', 'read docs/spec/login.txt for be brief']);
+    eq(live.steps[0].until.commands[0].argv, ['npx', 't', '--project', 'chromium'], 'a value is one argv entry');
+    eq([live.steps[0].until.env.B, live.steps[1].command.text], ['chromium', 'node x docs/spec/login.txt']);
+    eq(d.steps[0].prompt, 'read {inputs.spec} for {inputs.notes}', 'the definition itself is untouched');
+    throws(() => wfMod.collectInputs(d, ['notes=x']), /needs --input for: spec \(the spec\)/);
+    throws(() => wfMod.collectInputs(d, ['spec=a', 'zzz=1']), /declares no input "zzz"/);
+    throws(() => wfMod.collectInputs(d, ['spec=a', 'spec=b']), /given twice/);
+    throws(() => wfMod.collectInputs(d, ['spec=a', 'browser=Fire']), /does not match its pattern/);
+    throws(() => wfMod.collectInputs(d, ['spec=../etc/x']), /a path inside the repository/);
+    throws(() => wfMod.collectInputs(d, ['spec=docs/spec.xlsx']), /export docs\/spec\.xlsx to Markdown/);
+    throws(() => wfMod.collectInputs(d, ['spec=a', 'notes={item}']), /cannot contain \{ or \}/);
+    throws(() => wfMod.collectInputs(d, ['spec=a b']), /one plain token/, 'a value that reaches a command is one token');
+    eq(wfMod.collectInputs(d, [], '--input', { allowMissing: true }), { browser: 'chromium' });
+    // The declarations.
+    throws(() => wfMod.validateDefinition({ ...GOOD, objective: 'x {inputs.zzz}' }, 'wf'), /names \{inputs\.zzz\}, which inputs: does not declare/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: {} }, steps: [{ id: 'c', command: 'node x {inputs.v}' }] }, 'wf'), /reaches a command .*needs a pattern/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: {} }, steps: [{ id: 'c', command: 'node x', env: { V: '{inputs.v}' } }] }, 'wf'), /reaches a command/, 'an env value is as much a command as an argument');
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { pattern: '[a-z]+' } }, steps: [{ id: 'c', command: '{inputs.v} test' }] }, 'wf'), /the executable of a command .* is fixed/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: {} }, steps: [{ ...GOOD.steps[0], writable: ['{inputs.v}/**'] }] }, 'wf'), /writable cannot name an input/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: {} }, description: 'd {inputs.v}' }, 'wf'), /description cannot name an input/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { Bad: {} } }, 'wf'), /is not an input name/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { required: true } } }, 'wf'), /inputs\.v: unknown key required/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { pattern: '(' } } }, 'wf'), /not a regular expression/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { default: 'A1', pattern: '[a-z]+' } } }, 'wf'), /inputs\.v\.default: input v: "A1" does not match/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { path: true, file: true } } }, 'wf'), /exclude each other/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: { file: true, default: 'x' } } }, 'wf'), /a file input has no default/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['**/*.txt'] }, 'wf'), /must start with a fixed directory/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['.aidev/cache/**'] }, 'wf'), /never copied into a run/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, ignore: ['x/**'] }, 'wf'), /unknown key ignore/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, never_commit: ['src/**'] }, 'wf'), /never_commit src\/\*\* covers what step a may write/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['config/.env'] }, 'wf'), /credentials never go into a run/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['certs/*.pem'] }, 'wf'), /credentials never go into a run/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['.claude/settings.local.json'] }, 'wf'), /never copied into a run/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, provide: ['.github/agents/*.md'] }, 'wf'), /never copied into a run/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'c', command: 'npm run deploy', env: { GIT_CONFIG_COUNT: '0' } }] }, 'wf'), /cannot set GIT_CONFIG\* variables/);
+    // Residue is an untracked file under the never-committed globs; an edit to a tracked file is the run's work wherever it is.
+    const st = [{ xy: '??', path: 'e2e/node_modules/x.js' }, { xy: ' M', path: 'vendor/node_modules/r.js' }, { xy: '??', path: 'e2e/a.ts' }];
+    eq(wfMod.withoutResidue(st, wfMod.NEVER_COMMITTED).map((e) => e.path), ['vendor/node_modules/r.js', 'e2e/a.ts']);
+    eq(wfMod.residueOf(st, wfMod.NEVER_COMMITTED).map((e) => e.path), ['e2e/node_modules/x.js']);
+    // A file input: the value is a file on this machine; the run gets a copy under its runs/<id>/inputs/.
+    const f = wfMod.validateDefinition({ ...GOOD, inputs: { spec: { file: true } }, steps: [{ id: 'c', command: 'node x {inputs.spec}' }] }, 'wf');
+    const specFile = path.join(os.tmpdir(), `aidev-spec-${process.pid}.txt`);
+    fs.writeFileSync(specFile, 'spec');
+    try {
+      const given = wfMod.collectInputs(f, [`spec=${specFile}`]);
+      const placed = wfMod.placeFileInputs(f, given, { name: 'wf', runId: '2026-01-01T00-00-00-000Z' });
+      eq(placed.values.spec, '.aidev/workflows/wf/runs/2026-01-01T00-00-00-000Z/inputs/spec.txt');
+      eq(placed.files, [{ name: 'spec', from: specFile, to: placed.values.spec }]);
+      eq(wfMod.collectInputs(f, placed.values, 'recorded', { placed: true }).spec, placed.values.spec, 'a recorded copy is checked as a repository path');
+      throws(() => wfMod.collectInputs(f, [`spec=${specFile}.xlsx`]), /export .* to Markdown/);
+      throws(() => wfMod.collectInputs(f, ['spec=/no/such/file.txt']), /is not a file on this machine/);
+    } finally { fs.rmSync(specFile, { force: true }); }
+    // --input is a flag that may be repeated.
+    const { parseArgs } = require('../cli/lib/args');
+    eq(parseArgs(['--input', 'a=1', '--input=b=2', 'x'], { input: 'list' }), { flags: { input: ['a=1', 'b=2'] }, positionals: ['x'] });
   });
 
   test('subagents: an agent names the ones it may start, and the guard holds each to its own grants', () => {
@@ -1302,6 +1384,234 @@ function run() {
         eq(rm.code, 1, rm.out);
         ok(/subs/.test(rm.out) && fs.existsSync(path.join(fx.root, '.aidev', 'agents', 'scout.md')), 'a subagent a workflow uses is not removed: ' + rm.out);
         write(settingsFile, settings);
+      });
+
+      test('what a toolchain leaves behind inside writable is never committed, is said so, and does not block the next run', () => {
+        write(path.join(fx.root, 'tools', 'residue.js'), [
+          "const fs = require('fs');",
+          "for (const d of ['e2e/node_modules/pkg', 'e2e/tests', 'e2e/test-results']) fs.mkdirSync(d, { recursive: true });",
+          "fs.writeFileSync('e2e/node_modules/pkg/index.js', 'x'); fs.writeFileSync('e2e/tests/a.spec.ts', 'spec'); fs.writeFileSync('e2e/test-results/r.txt', 'r');", '',
+        ].join('\n'));
+        // This PKG has no .gitignore: node_modules would be an ordinary untracked directory.
+        define('residue', { extra: ['never_commit: [e2e/test-results/**]'], steps: [
+          '  - id: make', '    command: node tools/residue.js', '    writable: [e2e/**]',
+          '  - id: pr', '    pull_request: {}',
+        ] });
+        const r = aidev(fx.root, ['run', 'workflow', 'residue', '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq(git(['show', '--name-only', '--format=', j.steps[0].checkpoint], j.worktree), 'e2e/tests/a.spec.ts', 'the test, not node_modules nor the test results');
+        eq([j.leftOut, j.steps[1].leftOut], [{ '**/node_modules/**': 1, 'e2e/test-results/**': 1 }, { '**/node_modules/**': 1, 'e2e/test-results/**': 1 }]);
+        ok(/left out as never committed \(\*\*\/node_modules\/\*\*; e\.g\. e2e\/node_modules\/pkg\/index\.js\)/.test(fs.readFileSync(path.join(runsDirOf('residue'), j.runId, 'log.txt'), 'utf8')));
+        ok(/## Left out[\s\S]*`\*\*\/node_modules\/\*\*`: 1 file\(s\)/.test(fs.readFileSync(path.join(j.worktree, j.pr.description), 'utf8')), 'the pull request text says so');
+        ok(fs.existsSync(path.join(j.worktree, 'e2e/node_modules/pkg/index.js')), 'the residue stays in the worktree');
+        const again = aidev(fx.root, ['run', 'workflow', 'residue', '--json'], { env: env() });
+        eq(again.code, 0, `the residue in the worktree is not a stopped run's work: ${again.out}`);
+        // A file git tracks under such a path is not residue: an edit to it is committed like any other.
+        write(path.join(fx.root, 'e2e', 'node_modules', 'vendored.js'), 'v1\n');
+        write(path.join(fx.root, 'tools', 'vendored.js'), "require('fs').writeFileSync('e2e/node_modules/vendored.js', 'v2\\n');\n");
+        define('vendored', { steps: ['  - id: edit', '    command: node tools/vendored.js', '    writable: [e2e/**]'] });
+        const v = lastJson(aidev(fx.root, ['run', 'workflow', 'vendored', '--json'], { env: env() }).out);
+        eq(git(['show', '--name-only', '--format=', v.steps[0].checkpoint], v.worktree), 'e2e/node_modules/vendored.js', 'tracked, so committed');
+      });
+
+      test('inputs are declared, given with --input, checked before anything starts, and reach the prompts and commands', () => {
+        write(path.join(fx.root, 'tools', 'browser.js'), "process.exit(process.argv[2] === 'firefox' ? 0 : 9);\n");
+        define('inputs', { extra: [
+          'inputs:', '  spec:', '    description: the spec to work from', '    path: true',
+          '  browser:', '    default: chromium', '    pattern: "[a-z]+"',
+        ], steps: [
+          '  - id: write', '    agent: coder', '    prompt: Read {inputs.spec}; test on {inputs.browser}.',
+          '    until:', '      command: node tools/browser.js {inputs.browser}', '      max_retries: 0',
+        ] });
+        reset();
+        write(path.join(fx.root, 'draft.txt'), 'not committed\n');
+        const none = aidev(fx.root, ['run', 'workflow', 'inputs', '--dry-run'], { env: env() });
+        eq(none.code, 1, none.out);
+        ok(/needs --input for: spec \(the spec to work from\)/.test(none.out), none.out);
+        const bad = (args) => aidev(fx.root, ['run', 'workflow', 'inputs', '--dry-run', ...args], { env: env() }).out;
+        ok(/declares no input "nope"/.test(bad(['--input', 'spec=docs/readme.md', '--input', 'nope=1'])));
+        ok(/does not match its pattern/.test(bad(['--input', 'spec=docs/readme.md', '--input', 'browser=Fire'])));
+        ok(/draft\.txt is not committed; a run starts from HEAD/.test(bad(['--input', 'spec=draft.txt'])), 'a path input must reach the worktree');
+        git(['add', 'draft.txt'], fx.root);
+        ok(/draft\.txt is not committed; a run starts from HEAD/.test(bad(['--input', 'spec=draft.txt'])), 'staged is not committed');
+        git(['rm', '-q', '--cached', 'draft.txt'], fx.root);
+        fs.rmSync(path.join(fx.root, 'draft.txt'), { force: true });
+        const dry = aidev(fx.root, ['run', 'workflow', 'inputs', '--dry-run', '--input', 'spec=docs/readme.md', '--input', 'browser=firefox'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/inputs\s+spec=docs\/readme\.md\nbrowser=firefox/.test(dry.out), dry.out);
+        ok(/repeats until node tools\/browser\.js firefox exits 0/.test(dry.out), 'the dry run shows the command as it will run');
+        ok(/## Inputs \(--input name=value\)[\s\S]*- spec: the spec to work from \(required; a path in the repository\)[\s\S]*- browser \(default chromium; pattern \[a-z\]\+; reaches a command\)/.test(dry.out), dry.out);
+        ok(!fs.existsSync(promptOut), 'nothing started');
+        const r = aidev(fx.root, ['run', 'workflow', 'inputs', '--input', 'spec=docs/readme.md', '--input', 'browser=firefox', '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq(j.inputs, { spec: 'docs/readme.md', browser: 'firefox' });
+        const prompt = fs.readFileSync(promptOut, 'utf8');
+        ok(/## Inputs for this run[\s\S]*- spec: docs\/readme\.md\n- browser: firefox/.test(prompt), prompt.slice(0, 1500));
+        ok(/## Step write \(1\/1\)\n\nRead docs\/readme\.md; test on firefox\./.test(prompt), 'the values are written where the definition named them');
+        ok(/`node tools\/browser\.js firefox` must exit 0/.test(prompt));
+        ok(/do not pass --input/.test(aidev(fx.root, ['run', 'workflow', 'inputs', '--resume', 'last', '--input', 'browser=x'], { env: env() }).out));
+        const est = aidev(fx.root, ['estimate', 'workflow', 'inputs', '--input', 'browser=firefox', '--json'], { env: env() });
+        eq(lastJson(est.out).inputs, { browser: 'firefox' }, 'estimate takes the inputs; a missing one is no reason not to estimate');
+        const dflt = aidev(fx.root, ['run', 'workflow', 'inputs', '--input', 'spec=docs/readme.md', '--json'], { env: env() });
+        eq(dflt.code, 1);
+        ok(/node tools\/browser\.js chromium exited 9/.test(lastJson(dflt.out).stopReason), 'the default applies: ' + lastJson(dflt.out).stopReason);
+      });
+
+      test('a file input is copied into the run; provide brings ignored files from the checkout, never a secret', () => {
+        const specFile = path.join(tmp, 'login.txt');
+        fs.writeFileSync(specFile, 'LOGIN SPEC\n');
+        write(path.join(fx.root, '.gitignore'), 'docs/spec/\nconfig/secrets/local.key\n');
+        write(path.join(fx.root, 'docs', 'spec', 'orders.txt'), 'ORDERS\n');
+        write(path.join(fx.root, 'docs', 'spec', '.env'), 'TOKEN=x\n');
+        write(path.join(fx.root, 'config', 'secrets', 'local.key'), 'SECRET\n');
+        write(path.join(fx.root, 'tools', 'cat.js'), "process.stdout.write(require('fs').readFileSync(process.argv[2], 'utf8')); process.exit(require('fs').existsSync('config/secrets/local.key') ? 7 : 0);\n");
+        define('files', { extra: ['inputs:', '  spec:', '    file: true', 'provide: [docs/spec/**, config/secrets/**]'], steps: [
+          '  - id: check', '    command: node tools/cat.js {inputs.spec}',
+          '  - id: check2', '    command: node tools/cat.js docs/spec/orders.txt',
+        ] });
+        ok(/export .*\.xlsx to Markdown/.test(aidev(fx.root, ['run', 'workflow', 'files', '--input', `spec=${path.join(tmp, 'x.xlsx')}`], { env: env() }).out));
+        ok(/is not a file on this machine/.test(aidev(fx.root, ['run', 'workflow', 'files', '--input', 'spec=/no/such.txt'], { env: env() }).out));
+        const r = aidev(fx.root, ['run', 'workflow', 'files', '--input', `spec=${specFile}`, '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        ok(/^\.aidev\/workflows\/files\/runs\/[^/]+\/inputs\/spec\.txt$/.test(j.inputs.spec), j.inputs.spec);
+        eq(fs.readFileSync(path.join(j.worktree, j.inputs.spec), 'utf8'), 'LOGIN SPEC\n', 'the copy is in the run directory');
+        eq(fs.readFileSync(path.join(j.worktree, 'docs/spec/orders.txt'), 'utf8'), 'ORDERS\n', 'provided from the checkout');
+        ok(!fs.existsSync(path.join(j.worktree, 'config/secrets/local.key')) && !fs.existsSync(path.join(j.worktree, 'docs/spec/.env')), 'a secret is never provided, by path or by name');
+        const logText = fs.readFileSync(path.join(runsDirOf('files'), j.runId, 'log.txt'), 'utf8');
+        ok(/provide: 1 path\(s\) copied from the checkout: docs\/spec\/orders\.txt/.test(logText) && /provide: config\/secrets\/local\.key not copied \(a secret path/.test(logText) && /docs\/spec\/\.env not copied \(a credential file/.test(logText), logText);
+        ok(!git(['status', '--porcelain', '--', 'docs/spec'], j.worktree).trim(), 'what was provided stays ignored, uncommitted');
+        define('files-none', { extra: ['provide: [fixtures/**]'], steps: ['  - id: c', '    command: node --version'] });
+        const dry = aidev(fx.root, ['run', 'workflow', 'files-none', '--dry-run'], { env: env() });
+        eq(dry.code, 1, dry.out);
+        ok(/provide: fixtures\/\*\* matches no file that git ignores/.test(dry.out), dry.out);
+        // A file ignored only by a rule the repository does not carry would land in the worktree as new: refused.
+        write(path.join(fx.root, 'fixtures', 'data.json'), '{}\n');
+        fs.appendFileSync(path.join(fx.root, '.gitignore'), 'fixtures/\n');
+        const uncommitted = aidev(fx.root, ['run', 'workflow', 'files-none', '--json'], { env: env() });
+        eq(uncommitted.code, 1, uncommitted.out);
+        ok(/fixtures\/data\.json is ignored in .* by a rule the repository does not carry; commit the \.gitignore/.test(uncommitted.out), uncommitted.out);
+        git(['checkout', '-q', '--', '.gitignore'], fx.root);
+        fs.rmSync(path.join(fx.root, 'fixtures'), { recursive: true, force: true });
+      });
+
+      test('a trial runs the definition as it is here, approved or not, on aidev/<name>.trial, and pushes nothing', () => {
+        const pushOut = path.join(tmp, 'push.txt');
+        const trialRel = '.aidev/workflows/trial/workflow.yaml';
+        const before = lastJson(aidev(fx.root, ['estimate', 'workflow', 'plain', '--json'], { env: env() }).out).history.starts;
+        write(path.join(fx.root, ...trialRel.split('/')), yamlOf('trial', { steps: [
+          '  - id: write', '    agent: coder', '    prompt: write it',
+          '  - id: pr', '    pull_request: {}',
+        ] }));
+        reset();
+        fs.rmSync(pushOut, { force: true });
+        const refused = aidev(fx.root, ['run', 'workflow', 'trial', '--json'], { env: env() });
+        eq(refused.code, 1);
+        ok(/not approved/.test(refused.out) && /--trial/.test(refused.out), refused.out);
+        const dry = aidev(fx.root, ['run', 'workflow', 'trial', '--dry-run', '--trial', '--max-usd', '0.5'], { env: env() });
+        eq(dry.code, 0, dry.out);
+        ok(/approved\s+not required: --trial runs the definition as it is in this checkout \(NO/.test(dry.out), dry.out);
+        ok(/branch\s+aidev\/trial\.trial/.test(dry.out) && /limits\s+5 min, \$0\.5 \(limits\.max_usd is \$1\)/.test(dry.out), dry.out);
+        ok(/dry run: the definition validates and would run as a trial/.test(dry.out));
+        const r = aidev(fx.root, ['run', 'workflow', 'trial', '--trial', '--json'], { env: env({ STUB_PUSH_OUT: pushOut, STUB_DENIALS: 'src/x.ts', STUB_WRITE_FILE: 'outside.txt', STUB_WRITE_TEXT: 'past the guard' }) });
+        eq(r.code, 0, r.out);
+        const j = lastJson(r.out);
+        eq([j.trial, j.branch, j.approvedRef, j.approvedSha, j.done, j.pr.ok, j.pr.trial, j.steps[1].pushed], [true, 'aidev/trial.trial', null, null, true, false, true, false]);
+        ok(/^sha256:/.test(j.trialHash));
+        const wt = j.worktree;
+        eq(wt, wtOf('aidev/trial.trial'));
+        eq(git(['log', '--format=%s', `${j.baseSha}..HEAD`], wt).split('\n'), ['aidev: test workflow', 'aidev(trial): trial definition']);
+        const body = git(['log', '-1', '--format=%B'], wt);
+        ok(body.includes('approved: none (a trial run of the definition sha256:') && body.includes('trial run: not pushed'), body);
+        eq(fs.readFileSync(path.join(wt, trialRel), 'utf8'), fs.readFileSync(path.join(fx.root, ...trialRel.split('/')), 'utf8'), 'the worktree holds the definition as it is in the checkout');
+        ok(!git(['ls-remote', '--heads', 'origin'], fx.root).includes('aidev/trial'), 'nothing pushed');
+        const pushed = fs.readFileSync(pushOut, 'utf8');
+        ok(/^[1-9]\d* /.test(pushed) && /aidev: this is a trial run|aidev-no-push/.test(pushed), `a push from inside a trial is refused by git itself: ${pushed}`);
+        eq([j.steps[0].denied, j.outside], [['Write src/x.ts'], ['outside.txt']], 'what the tool was refused, and what landed outside writable');
+        ok(/was refused 1 call\(s\): Write src\/x\.ts/.test(r.out) && /changed outside what the steps may write/.test(r.out), r.out);
+        ok(/\| approved on \| none \(a trial run of the definition sha256:/.test(fs.readFileSync(path.join(wt, j.pr.description), 'utf8')));
+        const e = JSON.parse(fs.readFileSync(envOut, 'utf8'));
+        eq([e.AIDEV_WORKFLOW, e.AIDEV_WORKFLOW_STEP, typeof e.AIDEV_WORKFLOW_TRIAL], ['trial', 'write', 'string'], 'the agent carries the trial token');
+        ok(!fs.existsSync(wfMod.trialFile(wt)), 'the trial record is gone when the run ends');
+        ok(!r.out.includes(e.AIDEV_WORKFLOW_TRIAL), 'the token is in no record or output');
+        eq(lastJson(aidev(fx.root, ['estimate', 'workflow', 'plain', '--json'], { env: env() }).out).history.starts, before, 'the estimate learns nothing from a trial');
+        // The guard: the trial record grants the step's writable, and nothing else does.
+        const policyMod = require('../cli/lib/policy');
+        const rec = wfMod.startTrial(wt, { name: 'trial', hash: j.trialHash, runId: j.runId });
+        const at = (rel, o) => policyMod.decide(wt, rel, { workflow: 'trial', step: 'write', installRoot: KIT_ROOT, ...o });
+        eq([at('src/x.ts', { trial: rec.token }).rule, at('docs/x.md', { trial: rec.token }).rule, at('src/x.ts', { trial: 'nope' }).rule, at('src/x.ts', {}).rule],
+          ['workflow-trial-writable', 'read-only', 'read-only', 'read-only']);
+        ok(/a trial run of the definition sha256:/.test(at('src/x.ts', { trial: rec.token }).reason), 'never called approved');
+        ok(/this trial run of workflow trial grants writes, but the writable of step write/.test(at('docs/x.md', { trial: rec.token }).reason), 'outside writable, the hint names the trial, not an approval');
+        const wfCmd = require('../cli/commands/workflow');
+        const tdef = wfMod.loadDefinition(fx.root, 'trial');
+        ok(/in this trial run pushes nothing and opens no pull request/.test(wfCmd.stepPrompt(tdef, tdef.steps[0], 0, { task: '', attempt: 1, previous: null, hasPr: true, trial: true })), 'the agent is told no pull request follows a trial');
+        ok(/opens the pull request after the steps/.test(wfCmd.stepPrompt(tdef, tdef.steps[0], 0, { task: '', attempt: 1, previous: null, hasPr: true })));
+        eq(policyMod.decideToolUse(wt, 'Bash', { workflow: 'trial', step: 'write', trial: rec.token, installRoot: KIT_ROOT }), null, 'tool calls stand on the same record');
+        ok(/not approved/.test(policyMod.decideToolUse(wt, 'Bash', { workflow: 'trial', step: 'write', installRoot: KIT_ROOT }).reason));
+        const hook = (input, extra = {}) => {
+          const f = path.join(tmp, 'hook-input.json');
+          fs.writeFileSync(f, JSON.stringify(input));
+          return aidev(wt, ['hook', 'guard-write', '--input', f], { env: { AIDEV_WORKFLOW: 'trial', AIDEV_WORKFLOW_STEP: 'write', ...extra } }).out;
+        };
+        ok(/"permissionDecision": ?"allow"/.test(hook({ tool_name: 'Write', tool_input: { file_path: 'src/y.ts', content: '' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'the hook, with the token');
+        ok(/"permissionDecision": ?"deny"/.test(hook({ tool_name: 'Write', tool_input: { file_path: 'src/y.ts', content: '' } })), 'the hook, without it');
+        ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'a push from Bash is refused in a trial');
+        ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'Bash', tool_input: { command: 'cd x && git -C . push' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })));
+        ok(/nothing is pushed and no pull request is opened/.test(hook({ tool_name: 'shell', tool_input: { command: 'git push' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'whatever the shell tool is called');
+        ok(/"permissionDecision": ?"allow"/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git status' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })));
+        ok(/"permissionDecision": ?"allow"/.test(hook({ tool_name: 'Bash', tool_input: { command: 'git stash push -m wip' } }, { AIDEV_WORKFLOW_TRIAL: rec.token })), 'only the push subcommand is a push');
+        fs.appendFileSync(path.join(wt, trialRel), '# widened\n');
+        ok(/changed since the trial started/.test(at('src/x.ts', { trial: rec.token }).reason), 'an edit mid-run revokes the grant');
+        git(['checkout', '-q', '--', trialRel], wt);
+        rec.release();
+        // A trial that is still running keeps the next one out before anything is moved.
+        write(path.join(wt, 'src', 'half.ts'), 'left by the agent\n');
+        const lockFile = runtreeMod.lockPath(wt);
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, runId: 'other' }));
+        const busy = aidev(fx.root, ['run', 'workflow', 'trial', '--trial', '--json'], { env: env() });
+        eq(busy.code, 1, busy.out);
+        ok(/another run \(other, process \d+\) is working in/.test(busy.out) && fs.existsSync(path.join(wt, 'src', 'half.ts')), 'refused, and nothing was reset');
+        fs.rmSync(lockFile, { force: true });
+        // Trial after trial: the branch goes back to the base, the definition as it is now goes on it, what the last trial left is gone.
+        fs.appendFileSync(path.join(fx.root, ...trialRel.split('/')), '# v2\n');
+        const again = aidev(fx.root, ['run', 'workflow', 'trial', '--trial', '--json'], { env: env() });
+        eq(again.code, 0, again.out);
+        const j2 = lastJson(again.out);
+        eq([j2.worktree, j2.worktreeSync, fs.existsSync(path.join(wt, 'src', 'half.ts')), fs.existsSync(path.join(wt, 'outside.txt'))], [wt, 'reset', false, false], 'the worktree was reset to the base, and what the last trial left is gone');
+        eq(git(['log', '--format=%s', `${j2.baseSha}..HEAD`], wt).split('\n'), ['aidev: test workflow', 'aidev(trial): trial definition'], 'not on top of the first trial');
+        ok(fs.readFileSync(path.join(wt, trialRel), 'utf8').endsWith('# v2\n'));
+        ok(/no recorded run that was not a trial/.test(aidev(fx.root, ['run', 'workflow', 'trial', '--resume', 'last'], { env: env() }).out));
+        ok(/nothing to resume/.test(aidev(fx.root, ['run', 'workflow', 'trial', '--resume', 'last', '--trial'], { env: env() }).out));
+        ok(/was a trial run; resume it with --trial/.test(aidev(fx.root, ['run', 'workflow', 'trial', '--resume', j2.runId], { env: env() }).out));
+        // The first trial's record is still there, unfinished as far as it knows, but its branch was moved: no resume onto a tree without its checkpoints.
+        const stale = path.join(runsDirOf('trial', 'aidev/trial.trial'), j.runId, 'run.json');
+        const staleRec = JSON.parse(fs.readFileSync(stale, 'utf8'));
+        fs.writeFileSync(stale, JSON.stringify({ ...staleRec, hash: j2.hash, trialHash: j2.trialHash, done: false, steps: [{ id: 'write', kind: 'agent', ok: true, attempts: 1, checkpoint: j.steps[1].sha }, { ...staleRec.steps[1], ok: false }] }));
+        ok(/checkpoints of run .* are no longer on aidev\/trial\.trial/.test(aidev(fx.root, ['run', 'workflow', 'trial', '--resume', j.runId, '--trial'], { env: env() }).out), 'a resume onto a branch that lost its checkpoints is refused');
+        ok(/\(a trial run\)/.test(lastJson(aidev(fx.root, ['modify', 'workflow', 'trial', '--from-run', 'last', '--dry-run', '--json'], { env: env() }).out).fromRun ? 'x (a trial run)' : ''), '--from-run sees a trial');
+        // The person's own checkout is never a run's worktree, whatever branch it has checked out.
+        git(['worktree', 'remove', '--force', wt], fx.root);
+        git(['checkout', '-q', '-f', 'aidev/trial.trial'], fx.root);
+        write(path.join(fx.root, 'src', 'mine.ts'), 'my uncommitted work\n');
+        const mine = aidev(fx.root, ['run', 'workflow', 'trial', '--trial', '--json'], { env: env() });
+        eq(mine.code, 1, mine.out);
+        ok(/aidev\/trial\.trial is checked out in .*; check out another branch there, or run with --dated/.test(mine.out), mine.out);
+        ok(fs.existsSync(path.join(fx.root, 'src', 'mine.ts')), 'the checkout was not touched');
+        fs.rmSync(path.join(fx.root, 'src', 'mine.ts'), { force: true });
+        git(['checkout', '-q', 'main'], fx.root);
+        // A trial that stops is continued with --trial, and the hint says so.
+        write(path.join(fx.root, ...trialRel.split('/')), yamlOf('trial', { steps: ['  - id: c', '    command: git rev-parse --verify no-such-ref-here'] }));
+        const stopped = aidev(fx.root, ['run', 'workflow', 'trial', '--trial'], { env: env() });
+        eq(stopped.code, 1, stopped.out);
+        ok(/continue from the step that stopped: aidev run workflow trial --resume \S+ --trial/.test(stopped.out), stopped.out);
+        write(path.join(fx.root, ...trialRel.split('/')), yamlOf('trial', { steps: ['  - id: p', '    command: git push origin main'] }));
+        const pushy = aidev(fx.root, ['run', 'workflow', 'trial', '--dry-run', '--trial'], { env: env() });
+        eq(pushy.code, 1);
+        ok(/"git push origin main" pushes; a trial run pushes nothing/.test(pushy.out), pushy.out);
+        fs.rmSync(path.join(fx.root, '.aidev', 'workflows', 'trial'), { recursive: true, force: true });
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

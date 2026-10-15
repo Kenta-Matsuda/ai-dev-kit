@@ -1,6 +1,6 @@
 # 提案: 長く・多く・失敗しやすい仕事のための workflow 改善
 
-日付: 2026-10-01 / 状態: 提案（一部実装。2026-10-13: 提案 1 の `on_failure` を実装、提案 4 は D20 で置き換え。`for_each` の並列は D25、下の表の「worktree で実行」は D26 で実装: 専用 worktree・workflow ごとの branch `aidev/<name>`・step ごとの checkpoint）
+日付: 2026-10-01 / 状態: 提案（一部実装。2026-10-13: 提案 1 の `on_failure` を実装、提案 4 は D20 で置き換え。`for_each` の並列は D25、下の表の「worktree で実行」は D26 で実装: 専用 worktree・workflow ごとの branch `aidev/<name>`・step ごとの checkpoint。2026-10-14: 提案 5 の「入力の宣言」を `inputs:` と `--input` で実装、D28）
 
 ## ねらい
 
@@ -55,7 +55,7 @@ workflow:
 
 | 項目 | 内容 |
 | --- | --- |
-| 入力の宣言（`inputs`） | `--task` は自由文だけ。`inputs: { target_version: { pattern: '^[0-9.]+$', required: true } }` を宣言し、`--input target_version=4.2` で渡して prompt と command の `{input.target_version}` に入れる。`pattern` 必須（command に入るため） |
+| 入力の宣言（`inputs`） | `--task` は自由文だけ。`inputs: { target_version: { pattern: '^[0-9.]+$', required: true } }` を宣言し、`--input target_version=4.2` で渡して prompt と command の `{input.target_version}` に入れる。`pattern` 必須（command に入るため） （→ 2026-10-14 に `inputs:` と `--input name=value` で実装、D28。書き方は `{inputs.<name>}`、`required` は無く `default` の無い入力が必須、`pattern` が要るのは command か env に入る入力だけ。`proposals/2026-10-14-workflow-trial-inputs-provide.md` B） |
 | 失敗時の draft PR | 止まった run の変更は `aidev/…` branch の作業 tree に残るだけ。pull-request step に `on_failure: draft` を足し、途中の変更と停止理由を draft PR にする |
 | worktree で実行 | 利用者の checkout で `checkout -b` し、終了後もその branch に残る。Wiki publish と同じく worktree で動かせば作業を止めず、並列にも実行できる。`node_modules` が無いので install step が必要になる （→ D26 で実装） |
 | 実行中の費用上限 | `cost.max_usd` は agent が終わった後にしか見ない。tool に残り予算を渡す flag があれば渡す（claude の flag は未確認） |

@@ -232,7 +232,7 @@
 |症状 |対処
 
 |`workflow <name> is not approved: … is not on origin/main yet`
-|定義の PR が未マージです。マージ済みなら `git fetch origin`。
+|定義の PR が未マージです。マージ済みなら `git fetch origin`。手元の定義をそのまま試すなら `aidev run workflow <name> --trial` です（xref:workflows-trial[承認の前に試す]）。
 
 |`workflow <name> is not approved: … differs from origin/main`
 |手元で定義（または参照する agent・skill）を変えています。`git checkout origin/main -- .aidev/workflows/<name>/` で戻すか、 Engineering Manager が提出し直します。
@@ -281,7 +281,45 @@
 |ブランチの定義が承認済みの版と違います。worktree で承認済みの版をマージするか、`--dated` で実行します。
 
 |実行の worktree で `npm` のコマンドが `not found` や `Cannot find module` で失敗する
-|worktree には git が無視するもの（`node_modules` など）がありません。workflow の最初に `command: npm ci` のステップを置きます。
+|worktree には git が無視するもの（`node_modules` など）がありません。workflow の最初に `command: npm ci` のステップを置きます（入れたものはコミットされません）。gitignore 済みのデータ（仕様書、フィクスチャ）は `provide:` で手元のチェックアウトからコピーします（xref:workflows-provide[worktree に無いファイルを用意する]）。
+
+|`step <id>: <command> was not found on PATH, so "…" could not run`
+|command step か `until.command` の実行ファイルが PATH にありません。インストールするか、PATH を通します。何も始まっていません。
+
+|`the workflow needs --input for: <name> (…)` +
+`the workflow declares no input "<name>" (its inputs: …)` +
+`input <name>: "<値>" does not match its pattern (…)`
+|workflow が `inputs:` で宣言した入力を `--input <name>=<値>` で渡します。宣言の一覧は `aidev run workflow <name> --dry-run` の `## Inputs (--input name=value)` に出ます（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。何も始まっていません。
+
+|`input <name>: <path> is not committed; a run starts from HEAD (…)` +
+`input <name>: <path> is ignored by git and no provide: entry copies it into the run (…)`
+|`path: true` の入力が実行の worktree に届きません。コミットするか、`provide:` に足すか、`file: true` の入力にして渡します（xref:workflows-provide[worktree に無いファイルを用意する]）。
+
+|`provide: <glob> matches no file that git ignores in <チェックアウト> (…)`
+|手元のチェックアウトに、その glob に一致する gitignore 済みのファイルがありません。ファイルを置くか、`provide` の項目を外します。何も始まっていません。
+
+|`provide: <file> is ignored in <チェックアウト> by a rule the repository does not carry; commit the .gitignore that ignores it, …`
+|そのファイルを無視する規則がコミットされていません（`.git/info/exclude` や、コミット前の `.gitignore`）。`.gitignore` に書いてコミットします。
+
+|`run <id> was a trial run; resume it with --trial` +
+`run <id> was not a trial run; resume it without --trial` +
+`workflow <name> has no recorded run that was not a trial (pass --trial to continue the last trial)`
+|`--resume` は同じ種類の実行だけを続けます。試験（`--trial`）を続けるときは `--trial` を付け、普通の実行なら外します（xref:workflows-trial[承認の前に試す]）。
+
+|`the definition of <name> (or an agent or skill it uses) changed since trial run <id> started; start a new trial`
+|試験を始めたあとに定義（または agent・skill）が変わっています。`--resume` なしで、もう一度 `--trial` で実行します。
+
+|`the checkpoints of run <id> are no longer on <branch> (…); start a new run`
+|終わったステップのチェックポイントがブランチに残っていません（後の試験がブランチを戻した、マージ後にブランチを進めた）。`--resume` なしで新しく実行します。
+
+|`step <id>: "git … push" pushes; a trial run pushes nothing`
+|`--trial` では push する command step や `until.command` を実行できません。試験の間は外すか、別の確認方法にします。
+
+|`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`
+|実行は止まっていません。command step が `writable` の外に書いたか、agent が検問を通らずに書いています。コミットされていないので、要るものなら Engineering Manager がそのステップの `writable` を広げます。
+
+|`step <id>: the tool was refused N call(s): … (a path outside writable? see run.json "denied")`
+|実行は止まっていません。agent が `writable` の外や、与えられていないツールを呼んで拒否されています。`run.json` のそのステップの `denied` に一覧があります。仕事に要るなら `writable` か agent の `tools` を直します。
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`

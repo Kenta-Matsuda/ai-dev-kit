@@ -49,7 +49,7 @@ An example with every field. Text after `#` explains it.
 name: e2e-tests                    # required
 description: Write e2e tests for the main screens and open a PR
 objective: |                       # required
-  Add Playwright tests for the screens named in the task.
+  Add Playwright tests for the screens named in the task, from {inputs.spec}.
 tool: claude                       # optional
 model: sonnet                      # optional
 agents:                            # optional. What this workflow adds to an agent
@@ -57,6 +57,15 @@ agents:                            # optional. What this workflow adds to an age
     skills: [test-and-verify]      # added to the frontmatter's skills
     mcp: [playwright]              # added to the frontmatter's mcp
     tools: [Read, Grep, Edit]      # used instead of the frontmatter's tools
+inputs:                            # optional. Values taken per run with --input <name>=<value>
+  spec:
+    description: the test specification to work from
+    file: true                     # a file on this machine; the run gets a copy
+  browser:
+    default: chromium
+    pattern: '[a-z]+'              # an input that reaches a command needs a pattern
+provide: [e2e/fixtures/**]         # optional. Gitignored files copied from your checkout
+never_commit: [e2e/test-results/**]   # optional. Never committed, on top of the ADK's own list
 
 steps:                             # required; run top to bottom
   - id: plan                       # an agent step
@@ -74,7 +83,7 @@ steps:                             # required; run top to bottom
       on_failure: continue
     prompt: Write the e2e test for screen {item} in e2e/tests/{item}.spec.ts.
     until:
-      command: [npm ci, npx playwright test tests/{item}.spec.ts]
+      command: [npm ci, npx playwright test tests/{item}.spec.ts --project {inputs.browser}]
       cwd: e2e
       env: { CI: 1 }
       timeout_minutes: 15
@@ -131,6 +140,21 @@ A field that is not in the tables below is refused by validation (`unknown key �
 |mapping
 |optional
 |What this workflow adds to its agents. The keys are names of agents the steps use (`agent:` or `until.agent:`) (xref:workflow-reference-agents[agents]).
+
+|`inputs`
+|mapping
+|optional
+|Declares the values taken per run with `--input <name>=<value>`. The keys are the inputs' names; each goes where the definition writes `{inputs.<name>}` (xref:workflow-reference-inputs[inputs]).
+
+|`provide`
+|list of globs
+|optional
+|Files git ignores in your checkout, copied into the run's worktree before the first step (xref:workflow-reference-provide[provide]).
+
+|`never_commit`
+|list of globs
+|optional
+|Paths a run never commits, on top of the ADK's own list (xref:workflow-reference-never-commit[never_commit]).
 
 |`steps`
 |list
@@ -192,6 +216,148 @@ agents:
 * workflow.yaml is what gets approved, so changing `agents:` makes the workflow unapproved again. Put it in a PR with `aidev submit workflow` and have it reviewed.
 * A step cannot carry `skills`, `mcp`, `tools` or `subagents` (`a step does not carry …`). For different capabilities per step, use a different agent.
 
+[[workflow-reference-inputs]]
+=== inputs
+
+How a value that changes per run goes into a fixed place in the definition (xref:workflows-inputs[Taking values that change per run]). A name declared under `inputs:` is written as `{inputs.<name>}`, and the person running the workflow passes it with `aidev run workflow <name> --input <name>=<value>`.
+
+[source,yaml]
+----
+inputs:
+  spec:
+    description: the test specification to work from
+    file: true
+  screen:
+    description: the screen to cover
+    pattern: '[a-z0-9-]+'
+  browser:
+    default: chromium
+    pattern: '[a-z]+'
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`inputs.<name>`
+|mapping
+|optional
+|`<name>` starts with a lowercase letter and is made of lowercase letters, digits, `_` and `-`, up to 32 characters (`^[a-z][a-z0-9_-]{0,31}$`). It holds only the five fields below (there is no `required` field: an input without `default` is required). An empty mapping (`notes: {}`) is a required input with no rule.
+
+|`description`
+|string
+|optional
+|For the person running it. Shown when an `--input` is missing, and under `## Inputs (--input name=value)` in `--dry-run` and in the submit PR body.
+
+|`default`
+|string
+|optional
+|The value when `--input` is not given. Without it, the input is required. Checked at validation by the same rules as a value. Cannot be written for a `file: true` input.
+
+|`pattern`
+|string
+|required for an input that reaches a command (without `path` or `file`)
+|A regular expression the whole value must match (up to 200 characters; the ADK wraps it as `^(?:…)$`). A value starting with `[` is a YAML list, so quote it (`'[a-z]+'`).
+
+|`path`
+|`true` / `false`
+|optional
+|With `true`, the value is a path relative to the PKG. One starting with `/` or a drive letter, one containing `..`, and one with a non-text extension (`.xlsx`, `.docx`, `.pdf`, images, archives) are refused. Before the run starts, it is checked to be committed at HEAD, or ignored by git and matched by a `provide` glob; after `provide` has copied, it is checked to exist in the worktree. Cannot be written with `file`.
+
+|`file`
+|`true` / `false`
+|optional
+|With `true`, the value is the path of a file anywhere on this machine (absolute, or relative to the shell's current directory). It must be an existing text file (the same extension rule as `path`). The ADK copies it to `.aidev/workflows/<name>/runs/<id>/inputs/<name><extension>` in the run's worktree, and `{inputs.<name>}` becomes that path relative to the PKG (gitignored; never committed). `--resume` uses that copy. No `default`, and cannot be written with `path`.
+|===
+
+Rules for `{inputs.<name>}`:
+
+* It can be written in `objective`, an agent step's `prompt`, `until.prompt`, `until.command`, a command step's `command` and the values of `env` (of a step and of `until`). In `description`, a step's `description`, `pull_request.title`, `writable`, `unchanged`, `cwd`, `until.cwd` or `for_each.from`, validation refuses it (`… cannot name an input ({inputs.…})`). It cannot be the executable of a command (the first word) (`the executable of a command (…) is fixed; an input can be an argument, not the command`). A name that is not declared gives `… names {inputs.<name>}, which inputs: does not declare`.
+* The values are written into the definition before the run (as one argument in a command). `{item}` is replaced per target afterwards. A value cannot contain `{` or `}`.
+* A value is one line, up to 1000 characters, with no control characters. With `pattern`, the whole value must match it.
+* **An input that reaches a command** (one written in `until.command`, a command step's `command` or an `env` value) must have `pattern`, `path: true` or `file: true` (`inputs.<name> reaches a command (…), so it needs a pattern that bounds its value (or path: true / file: true)`). Its value must also be one word within the fixed rule `^[A-Za-z0-9._@][A-Za-z0-9._/@:=+-]{0,999}$` with no `..` segment (no whitespace, no leading `-`: the same idea as a `for_each` target). A `pattern` can narrow this, never widen it.
+
+Rules for `--input` (`aidev run workflow`, `aidev estimate workflow`):
+
+* `--input <name>=<value>` once per input (`--input=<name>=<value>` works too).
+* A required input missing: `the workflow needs --input for: <name> (<description>)` (the run exits 1 before anything starts; `--dry-run` too. `aidev estimate` estimates without it). A name not declared: `the workflow declares no input "<name>" (its inputs: …)`. The same name twice: `input <name> is given twice`.
+* It cannot be passed with `--resume`. A continued run uses the values recorded in `run.json`, checked again by the same rules as when they were passed.
+* Besides where `{inputs.<name>}` is written, the values go, as data, into a `## Inputs for this run` section of the instructions of every agent (the checking agents included), onto the `inputs` row of `--dry-run`, into `## Inputs` of the run's PR body, into the last commit's message, into `inputs` in `run.json`, into the head and the summary of `--log`, and into the record of `aidev modify --from-run`.
+
+[[workflow-reference-provide]]
+=== provide
+
+Files git ignores in your checkout that are copied into the run's worktree (xref:workflows-provide[Providing files the worktree lacks]).
+
+[source,yaml]
+----
+provide: [docs/spec/**, e2e/fixtures/**]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`provide`
+|list of globs
+|optional (default `[]`)
+|Globs starting with a fixed directory or file name (`**/*.txt` is refused: `must start with a fixed directory or file name`). Validation refuses a path under `.aidev`, `.git` or `protected` (`never copied into a run`), and one whose last name looks like a credential file (`.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`; `credentials never go into a run`).
+|===
+
+* Before the first step (every time it starts, `--resume` included), the **ignored files** matching a glob are copied, file by file, to the same path in the worktree (overwriting). A tracked file is in the worktree as it is at HEAD; a file that is neither tracked nor ignored is not copied. `docs/spec/**` is every ignored file under docs/spec.
+* Anything matching `secrets_paths`, anything under `.aidev/` or `.git/`, and symbolic links are not copied (the log says `provide: <path> not copied (<reason>)`).
+* A glob that matches no ignored file stops `--dry-run` and the run before anything starts (`provide: <glob> matches no file that git ignores in <checkout> (…)`).
+* When the rule that ignores a copied file is not in a committed `.gitignore`, the run stops (`provide: <file> is ignored in <checkout> by a rule the repository does not carry; commit the .gitignore that ignores it, …`).
+* The log says `provide: N path(s) copied from the checkout: …`. `--dry-run` has a `provide` row, and the submit PR body a `## Provided from the checkout` section.
+
+[[workflow-reference-never-commit]]
+=== never_commit
+
+Paths a run never commits, on top of the ADK's own list (xref:workflows-never-commit[What is never committed]).
+
+[source,yaml]
+----
+never_commit: [e2e/test-results/**, e2e/playwright-report/**]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`never_commit`
+|list of globs
+|optional (default `[]`)
+|Untracked files that are not committed even inside a step's `writable`. One of the form `<dir>/**` that covers an entry of a step's `writable` or of `provide` is refused by validation (`never_commit <glob> covers what step <id> may write (…)`, `never_commit <glob> covers provide <glob>`).
+|===
+
+The ADK's own list. An untracked file matching it is not committed even without `never_commit`. Nothing can be taken off it.
+
+[source,text]
+----
+**/node_modules/**
+**/bower_components/**
+**/.pnpm-store/**
+**/.yarn/cache/**
+**/.venv/**
+**/venv/**
+**/__pycache__/**
+**/*.pyc
+**/.pytest_cache/**
+**/.mypy_cache/**
+**/.ruff_cache/**
+**/.tox/**
+**/.nox/**
+**/.gradle/**
+**/.DS_Store
+**/Thumbs.db
+**/*.orig
+**/*.rej
+----
+
+* Only untracked files are concerned. A change to a file git tracks is committed wherever it is.
+* It applies to the checkpoints, the last commit of the pull-request step, the `unchanged` comparison, the undoing of a failed target, the diff shown to the checking agent, and the check for uncommitted changes before a new run.
+* What is left out appears in the pull-request step's log (`N file(s) left out as never committed (<glob>; e.g. <path>)`), in `leftOut` of that step in `run.json`, at the end of the run (`left out, never committed: …`) and in the `## Left out` section of the PR body. `--dry-run` has a `never commit` row, and the submit PR body a `## Never committed` section.
+
 [[workflow-reference-agent-step]]
 === Agent step
 
@@ -223,7 +389,7 @@ A step that starts an agent to do the work. A step with `agent` is an agent step
 |string
 |required
 |
-|What this step asks for. With `for_each`, it must contain `{item}`.
+|What this step asks for. With `for_each`, it must contain `{item}`. `{inputs.<name>}` can be written too (xref:workflow-reference-inputs[inputs]).
 
 |`writable`
 |list of globs
@@ -268,7 +434,7 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |`command`
 |string, or a list of strings
 |required without `agent`
-|Passes when it exits 0. A list runs top to bottom and fails at the first command that fails. No shell: quotes, pipes, redirections and variables (`\|&;<>$"'`, backquote, `\`) cannot be written.
+|Passes when it exits 0. A list runs top to bottom and fails at the first command that fails. No shell: quotes, pipes, redirections and variables (`\|&;<>$"'`, backquote, `\`) cannot be written. `{inputs.<name>}` can be written as an argument (not as the executable; that input needs `pattern`, `path` or `file`).
 
 |`cwd`
 |string
@@ -278,7 +444,7 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |`env`
 |mapping
 |optional
-|Environment variables for the commands (`NAME: value`). Each value is one fixed line. Names starting with `AIDEV_` are refused. The values are reviewed in the PR, so never put secrets here. Only with `command`.
+|Environment variables for the commands (`NAME: value`). Each value is one fixed line. Names starting with `AIDEV_` or `GIT_CONFIG` are refused. The values are reviewed in the PR, so never put secrets here. Only with `command`. A value can hold `{inputs.<name>}` (the same rules as an input that reaches a command).
 
 |`timeout_minutes`
 |number
@@ -293,7 +459,7 @@ Write `command`, `agent`, or both. With both, the agent checks only after every 
 |`prompt`
 |string
 |required with `agent`
-|What the checking agent checks.
+|What the checking agent checks. `{inputs.<name>}` can be written too.
 
 |`max_retries`
 |integer
@@ -378,7 +544,7 @@ A step where ADK runs a command once. Anything but exit 0 stops the workflow the
 |`command`
 |string
 |required
-|The command to run (one line). No shell, as with `until.command`. `{item}` cannot be written.
+|The command to run (one line). No shell, as with `until.command`. `{item}` cannot be written. `{inputs.<name>}` can be written as an argument (not as the executable).
 
 |`cwd`, `env`, `timeout_minutes`
 |
@@ -414,7 +580,7 @@ A step where ADK runs a command once. Anything but exit 0 stops the workflow the
 |The title of the PR and the commit. When omitted: `aidev: <description, or name>`.
 |===
 
-Each step's changes are already committed as a checkpoint when the step passes. This step makes a last commit of what is left inside the steps' `writable` and the run record, pushes the branch (`aidev/<name>`, or `aidev/<name>-<yyyymmddHHMM>` with `--dated`) and opens a PR (Azure DevOps; a PR already open for the branch has its description updated). When the branch has no change since the base, it does nothing.
+Each step's changes are already committed as a checkpoint when the step passes. This step makes a last commit of what is left inside the steps' `writable` and the run record, pushes the branch (`aidev/<name>`, or `aidev/<name>-<yyyymmddHHMM>` with `--dated`) and opens a PR (Azure DevOps; a PR already open for the branch has its description updated). When the branch has no change since the base, it does nothing. Untracked files matching the ADK's own list or `never_commit` are not committed, and the number left out goes into the log and the PR body (`## Left out`) (xref:workflow-reference-never-commit[never_commit]). A `--trial` run goes as far as the last commit and does neither the push nor the PR (xref:workflows-trial[Trying it before approval]).
 
 [[workflow-reference-limits]]
 === limits
@@ -427,7 +593,7 @@ Each step's changes are already committed as a checkpoint when the step passes. 
 |number
 |required
 |
-|The cost ceiling in USD. Once the cost the AI tool reported adds up to it, no further agent starts. An agent already running is not stopped, so a run can go past it by its last start. Only Claude Code reports cost. xref:cli-estimate[aidev estimate] gives an estimate.
+|The cost ceiling in USD. Once the cost the AI tool reported adds up to it, no further agent starts. An agent already running is not stopped, so a run can go past it by its last start. Only Claude Code reports cost. xref:cli-estimate[aidev estimate] gives an estimate. `aidev run workflow --max-usd` lowers it for one run (it cannot raise it).
 
 |`limits.max_minutes`
 |integer
@@ -514,6 +680,9 @@ ADK puts the body at the head of an agent step's instructions and adds the follo
 |Task for this run
 |What `--task` says (as data)
 
+|Inputs for this run
+|The `--input` values (as data; they are already in place where `{inputs.<name>}` was written)
+
 |Reports from the earlier steps
 |The final reports of the earlier agent steps (the last 6000 characters of each)
 
@@ -577,19 +746,22 @@ description: What to check before a release, in order
 |The run's id (its start time), the workflow's name, the hash of `workflow.yaml` at the start
 
 |`approvedRef`, `approvedSha`
-|The ref approval was checked against (`origin/main` and so on) and its commit
+|The ref approval was checked against (`origin/main` and so on) and its commit. Both `null` in a `--trial` run
+
+|`trial`, `trialHash`
+|`true` in a `--trial` run, with the hash (`sha256:…`) of the reviewed files (`workflow.yaml` and the agents and skills) when it started; a continued trial must still match it. `false` (no `trialHash`) in a run that is not a trial
 
 |`startedAt`, `finishedAt`, `startedBy`
 |When it started and finished, and the user name that ran it (for the record)
 
-|`branch`, `worktree`, `baseSha`, `task`
-|The branch it ran on (`aidev/<name>`, dated with `--dated`), the path of the run's worktree, the commit it started from, what `--task` said
+|`branch`, `worktree`, `baseSha`, `task`, `inputs`
+|The branch it ran on (`aidev/<name>`, dated with `--dated`, `aidev/<name>.trial` with `--trial`), the path of the run's worktree, the commit it started from, what `--task` said, the `--input` values (`default` included; a `file: true` input is the path of the copy under `inputs/` in the run record)
 
 |`steps`
-|Per step: `id`, `kind`, `ok`, `attempts`, and the checkpoint commit made when it passed (`checkpoint`). An agent step also has a summary of its last result (`result`), the checking agent's report (`review`), the command output file (`log`); a `for_each` step has `items` per target (each with its own `checkpoint`; a target that failed under `on_failure: continue` has `failed: true` and `reason`) and the number that failed (`failed`)
+|Per step: `id`, `kind`, `ok`, `attempts`, and the checkpoint commit made when it passed (`checkpoint`). An agent step also has a summary of its last result (`result`), the checking agent's report (`review`), the command output file (`log`) and the tool calls the agent was refused (`denied`: lines such as `Write src/x.ts`, up to 20); a `for_each` step has `items` per target (each with its own `checkpoint`; a target that failed under `on_failure: continue` has `failed: true` and `reason`) and the number that failed (`failed`). The pull-request step has the number left out as never committed (`leftOut`, per glob) and whether it pushed (`pushed`; `false` in a `--trial`)
 
 |`calls`
-|One entry per agent start: `step`, `role` (`agent`, or `until` for the checking agent), `agent`, `item` (the `for_each` target), `attempt`, `tool`, `model`, `ok`, `costUsd`, `durationMs`
+|One entry per agent start: `step`, `role` (`agent`, or `until` for the checking agent), `agent`, `item` (the `for_each` target), `attempt`, `tool`, `model`, `ok`, `costUsd`, `durationMs`, and the number of refused tool calls (`denials`, only when there were any)
 
 |`done`, `stopReason`
 |Whether it finished, and why it stopped
@@ -598,5 +770,5 @@ description: What to check before a release, in order
 |The number of agent starts and the total reported cost (including any `--resume`)
 
 |`pr`, `resumes`
-|The PR it opened; when it was resumed and at which step
+|The PR it opened (in a `--trial`, `{ ok: false, trial: true, reason, branch, description }`); when it was resumed and at which step
 |===

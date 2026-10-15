@@ -268,6 +268,10 @@ const REGISTRY = Object.freeze({
         costUsd: payload.total_cost_usd,
         sessionId: payload.session_id,
         permissionDenials: Array.isArray(payload.permission_denials) ? payload.permission_denials.length : 0,
+        // What the tool was refused (by the guard or its own rules): the
+        // tool and, in a few words, what it tried. A step that keeps being
+        // refused a path is the commonest way a workflow fails.
+        denials: Array.isArray(payload.permission_denials) ? payload.permission_denials.slice(0, 50).map(denialLabel) : [],
         ...claudeUsage(payload),
       };
     },
@@ -553,6 +557,35 @@ function resolveCommand(bin, env = process.env) {
   return { ok: true, bin, argvPrefix: [], shell: false, killTree: process.platform === 'win32', source: 'PATH' };
 }
 
+/**
+ * Would `bin` start from PATH? For a workflow's preflight: a command step
+ * or `until.command` whose executable is nowhere is a run that stops after
+ * the first agent has already cost something. A path with a separator is
+ * checked as a file; a bare name is looked up on PATH (where.exe on
+ * Windows, PATHEXT applied; an executable file on POSIX).
+ */
+function commandFound(bin, env = process.env) {
+  const name = String(bin == null ? '' : bin);
+  if (!name) return false;
+  if (/[\\/]/.test(name)) {
+    try { return fs.statSync(name).isFile(); } catch { return false; }
+  }
+  if (process.platform === 'win32') return locateOnWindows(name, env) != null;
+  const dirs = String(env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const d of dirs) {
+    try { fs.accessSync(path.join(d, name), fs.constants.X_OK); return true; } catch { /* next */ }
+  }
+  return false;
+}
+
+/** One permission denial of Claude Code as a short line: the tool and its target. */
+function denialLabel(d) {
+  if (!d || typeof d !== 'object') return String(d);
+  const input = d.tool_input && typeof d.tool_input === 'object' ? d.tool_input : {};
+  const target = input.file_path || input.path || input.notebook_path || input.command || input.pattern || input.subagent_type || '';
+  return `${d.tool_name || 'tool'}${target ? ` ${String(target).replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
+}
+
 /** Compare a parsed semantic version with a floor. */
 function versionAtLeast(actual, minimum) {
   const parse = (value) => String(value).split('.').map((part) => Number(part));
@@ -601,7 +634,7 @@ function checkVersion(resolved, env = process.env) {
 module.exports = {
   REGISTRY, TOOL_IDS, HOOK_ADAPTERS, hookAdapter, AGENT_NAME_RE, ALL_CONFIG_GLOBS, TEMPLATES_DIR,
   TEMPLATE_AGENTS_DIR, TEMPLATE_SKILLS_DIR, TEMPLATE_INSTRUCTIONS,
-  getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents, resolveCommand,
+  getTool, isTool, templateDir, assertAgentName, parseFrontmatter, listBundledAgents, resolveCommand, commandFound,
   filePointerPrompt, resolveBinary, checkVersion, versionAtLeast, stripControl,
   spawnSpec, pickWindowsCandidate, quoteCmdArg,
 };

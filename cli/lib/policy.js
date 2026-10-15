@@ -13,7 +13,11 @@
  *   6. approved workflow step              → allow when the workflow runner
  *                                            started this session (AIDEV_WORKFLOW
  *                                            and AIDEV_WORKFLOW_STEP), the workflow
- *                                            is identical to origin/<tracking_branch>,
+ *                                            is identical to origin/<tracking_branch>
+ *                                            (or, in a trial run, AIDEV_WORKFLOW_TRIAL
+ *                                            names the trial record the runner left
+ *                                            in the worktree's git directory and the
+ *                                            definition still hashes as recorded),
  *                                            and that step's writable covers the path
  *                                            (or the path is in the notes directory
  *                                            of the run, AIDEV_WORKFLOW_RUN)
@@ -58,6 +62,7 @@ function decide(repoRoot, targetPath, {
   step = process.env.AIDEV_WORKFLOW_STEP || null,
   run = process.env.AIDEV_WORKFLOW_RUN || null,
   item = process.env.AIDEV_WORKFLOW_ITEM || null,
+  trial = process.env.AIDEV_WORKFLOW_TRIAL || null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   const rel = pathsMod.toRepoRelative(repoRoot, targetPath);
@@ -129,13 +134,17 @@ function decide(repoRoot, targetPath, {
   // hook. The scope comes from the workflow's YAML, which must be identical to
   // origin/<tracking_branch> at this very moment — re-checked on every write,
   // so editing the YAML mid-run only revokes the scope.
+  // A trial run (AIDEV_WORKFLOW_TRIAL, set by `aidev run workflow --trial`)
+  // stands on the trial record the runner left in the worktree's git
+  // directory instead of the tracking branch; it pushes nothing.
   let scopeHint = null;
   if (workflow) {
     const wfMod = require('./workflow');
-    const wf = wfMod.inspect(repoRoot, installRoot, config, workflow);
-    const access = wf.approval.approved && step ? wfMod.stepAccess(wf.def, wf.deps, step, { item }) : null;
-    if (!wf.approval.approved) {
-      scopeHint = `workflow ${workflow} is not approved: ${wf.approval.reason}`;
+    const wf = wfMod.inspect(repoRoot, installRoot, config, workflow, { trial });
+    const grant = wfMod.writeGrant(wf);
+    const access = grant.granted && step ? wfMod.stepAccess(wf.def, wf.deps, step, { item }) : null;
+    if (!grant.granted) {
+      scopeHint = `workflow ${workflow} is not approved: ${grant.reason}`;
     } else if (!access) {
       scopeHint = `workflow ${workflow} has no step ${step || '(none named)'}, so nothing is writable`;
     } else {
@@ -150,9 +159,12 @@ function decide(repoRoot, targetPath, {
           { rule: 'workflow-unchanged', path: rel, pattern: uHit, workflow, step });
       }
       if (sHit) {
-        return allow(
-          `workflow ${workflow} step ${step} may write "${rel}" (writable: ${sHit}; approved on ${wf.approval.ref})`,
-          { rule: 'workflow-writable', path: rel, pattern: sHit, workflow, step });
+        // A trial's grant is named as such: nothing a trial writes was approved.
+        return grant.how === 'trial'
+          ? allow(`workflow ${workflow} step ${step} may write "${rel}" (writable: ${sHit}; a trial run of the definition ${String(wf.trial.hash).slice(0, 19)})`,
+            { rule: 'workflow-trial-writable', path: rel, pattern: sHit, workflow, step })
+          : allow(`workflow ${workflow} step ${step} may write "${rel}" (writable: ${sHit}; approved on ${wf.approval.ref})`,
+            { rule: 'workflow-writable', path: rel, pattern: sHit, workflow, step });
       }
       // The run's notes directory: where the agent steps of one run leave
       // files for each other. Gitignored, so nothing written there is committed.
@@ -161,7 +173,7 @@ function decide(repoRoot, targetPath, {
         return allow(`workflow ${workflow} step ${step} may write its run notes ("${rel}")`,
           { rule: 'workflow-notes', path: rel, workflow, step });
       }
-      scopeHint = `workflow ${workflow} is approved but the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
+      scopeHint = `${grant.how === 'trial' ? `this trial run of workflow ${workflow} grants writes, but` : `workflow ${workflow} is approved but`} the writable of step ${step} (${access.writable.join(', ') || 'empty'}) does not cover this path`;
     }
   }
 
@@ -256,15 +268,17 @@ function decideToolUse(repoRoot, toolName, {
   workflow = process.env.AIDEV_WORKFLOW || null,
   step = process.env.AIDEV_WORKFLOW_STEP || null,
   item = process.env.AIDEV_WORKFLOW_ITEM || null,
+  trial = process.env.AIDEV_WORKFLOW_TRIAL || null,
   subagent = null,
   toolInput = null,
   installRoot = DEFAULT_INSTALL_ROOT,
 } = {}) {
   if (!workflow) return null;
   const wfMod = require('./workflow');
-  const wf = wfMod.inspect(repoRoot, installRoot, config, workflow);
-  if (!wf.approval.approved) {
-    return deny(`workflow ${workflow} is not approved: ${wf.approval.reason}`, { rule: 'workflow-tool', workflow, tool: toolName });
+  const wf = wfMod.inspect(repoRoot, installRoot, config, workflow, { trial });
+  const grant = wfMod.writeGrant(wf);
+  if (!grant.granted) {
+    return deny(`workflow ${workflow} is not approved: ${grant.reason}`, { rule: 'workflow-tool', workflow, tool: toolName });
   }
   const access = step ? wfMod.stepAccess(wf.def, wf.deps, step, { item, subagent }) : null;
   if (!access) {

@@ -135,8 +135,8 @@ function commandHelp(name, mod) {
   if (flags.length > 0) {
     ui.out('\n  options:');
     ui.table(flags.map(([f, t]) => [
-      `--${f}${t === 'string' ? ' <value>' : ''}`,
-      typeof help[f] === 'string' ? help[f] : (t === 'string' ? '<value>' : 'flag'),
+      `--${f}${t === 'string' ? ' <value>' : t === 'list' ? ' <value> …' : ''}`,
+      typeof help[f] === 'string' ? help[f] : (t === 'string' ? '<value>' : t === 'list' ? '<value> (may be repeated)' : 'flag'),
     ]));
   }
   ui.out('');
@@ -158,7 +158,7 @@ function commandReference() {
     const help = mod.FLAG_HELP || {};
     for (const [f, t] of Object.entries(mod.FLAGS || {})) {
       if (help[f] === false) continue;
-      lines.push(`  --${f}${t === 'string' ? ' <value>' : ''}  ${typeof help[f] === 'string' ? help[f] : ''}`.trimEnd());
+      lines.push(`  --${f}${t === 'string' ? ' <value>' : t === 'list' ? ' <value> …' : ''}  ${typeof help[f] === 'string' ? help[f] : ''}`.trimEnd());
     }
   }
   lines.push('', 'exit codes: 0 ok · 1 error · 2 drift · 3 permission · 4 wiki inconsistent');

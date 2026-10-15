@@ -7,7 +7,7 @@ Estimates what one run of a workflow will cost, before you run it: an optimistic
 
 [source,text]
 ----
-aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--ai] [--review] [--json]
+aidev estimate workflow <name> [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--ai] [--review] [--json]
 ----
 
 === Description
@@ -57,7 +57,7 @@ The default ranges are rough figures for Sonnet.
 
 **Models are converted.** What one start costs is roughly proportional to the model's price. ADK converts between models by their price ratio (for example, Opus 5.5 costs twice Sonnet 5.5, Haiku 5.5 a twentieth). A step that has run only on Sonnet and now runs on Opus is priced at twice its Sonnet record. The default ranges are converted to the model the step runs on as well. A model whose price ADK does not know is not converted (1:1).
 
-With `--ai`, the **cost-estimator** agent runs first. It reads the workflow and `--task`, looks at the Wiki and the source, and estimates per step the following. It only reads (Claude Code is started with `Read`, `Glob` and `Grep` only).
+With `--ai`, the **cost-estimator** agent runs first. It reads the workflow, `--task` and the `--input` values, looks at the Wiki and the source, and estimates per step the following. It only reads (Claude Code is started with `Read`, `Glob` and `Grep` only).
 
 * The size of the work (`S` to `XL`), used for the cost of one start where there is no record
 * At which attempt it passes in a bad case, used for the pessimistic number of attempts
@@ -106,7 +106,7 @@ flowchart LR
 * `aidev estimate workflow <name> --ai` decides the kind of work of each step. If the review has a guide for that kind, a new agent is priced by it.
 * For `for_each` work, the first targets tell the most. After 3 targets (then every 10), `aidev run workflow` writes to its log what the remaining targets are likely to cost, and says so as soon as `limits.max_usd` looks too small (the run does not stop for it: it stops at the budget, and `--resume` continues it).
 
-A workflow that is not approved yet can be estimated, while you write it or after `aidev modify workflow`.
+A workflow that is not approved yet can be estimated, while you write it or after `aidev modify workflow`. The records of `--trial` runs (xref:workflows-trial[Trying it before approval]) are not used by the estimate.
 
 === Options
 
@@ -120,6 +120,9 @@ A workflow that is not approved yet can be estimated, while you write it or afte
 |`--task-file <path>`
 |Read `--task` from a file. Not with `--task`
 
+|`--input <name>=<value>`
+|The `--input` you would run it with (xref:workflows-inputs[Taking values that change per run]). Once per input (`--input=<name>=<value>` works too). The estimate does not need the required inputs (an input with a `default` takes that value). cost-estimator reads them with `--ai`
+
 |`--ai`
 |First have the cost-estimator agent estimate the amount of work for this task (this costs a little). The sizes and kinds it decides are kept until the definition changes
 
@@ -127,7 +130,7 @@ A workflow that is not approved yet can be estimated, while you write it or afte
 |First have the estimate-reviewer agent review the records it has not seen (without waiting for the automatic review; works with `estimates.review: off` too; this costs a little)
 
 |`--json`
-|Output JSON (`optimistic`, `pessimistic`, `uncapped`, `worstCase`, `budget`, `cap`, per step `starts`, `usd`, `perStart`, `basis` and `model`, `calibration`, `priors`, `estimator`, `review`)
+|Output JSON (`optimistic`, `pessimistic`, `uncapped`, `worstCase`, `budget`, `cap`, per step `starts`, `usd`, `perStart`, `basis` and `model`, `calibration`, `priors`, `estimator`, `review`, `inputs`)
 |===
 
 === Exit codes
@@ -140,7 +143,7 @@ A workflow that is not approved yet can be estimated, while you write it or afte
 |Estimated (also when cost-estimator's answer could not be read and the definition alone was used, and when the `--review` review did not finish: a warning is shown)
 
 |1
-|An object other than `workflow`, or no name. No such workflow, an invalid definition, an agent or skill not found. Both `--task` and `--task-file`
+|An object other than `workflow`, or no name. No such workflow, an invalid definition, an agent or skill not found. Both `--task` and `--task-file`. An `--input` whose name is not declared, whose value breaks the rules, or given twice
 |===
 
 === Examples
@@ -179,6 +182,9 @@ How to read it:
 [%autowidth.stretch,options="header"]
 |===
 |Column or line |Meaning
+
+|`inputs`
+|Only when the workflow declares `inputs:`. The values passed with `--input` and the `default` values (`name=value`); `(none given)` when none was passed
 
 |`agent starts`
 |How many times the step starts an agent (optimistic – pessimistic), the checking agent included

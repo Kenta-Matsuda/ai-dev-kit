@@ -232,7 +232,7 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |Symptom |What to do
 
 |`workflow <name> is not approved: … is not on origin/main yet`
-|The PR of the definition is not merged. If it is merged, run `git fetch origin`.
+|The PR of the definition is not merged. If it is merged, run `git fetch origin`. To try the definition as it is, run `aidev run workflow <name> --trial` (xref:workflows-trial[Trying it before approval]).
 
 |`workflow <name> is not approved: … differs from origin/main`
 |The definition (or an agent or skill it references) was changed locally. Restore it with `git checkout origin/main -- .aidev/workflows/<name>/`, or the Engineering Manager submits it again.
@@ -281,7 +281,45 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |The branch's definition differs from the approved one. Merge the approved version in the worktree, or run with `--dated`.
 
 |`npm` commands fail with `not found` or `Cannot find module` in the run's worktree
-|The worktree has nothing git ignores (`node_modules` and so on). Start the workflow with a `command: npm ci` step.
+|The worktree has nothing git ignores (`node_modules` and so on). Start the workflow with a `command: npm ci` step (what it installs is never committed). Gitignored data (specifications, fixtures) is copied from your checkout with `provide:` (xref:workflows-provide[Providing files the worktree lacks]).
+
+|`step <id>: <command> was not found on PATH, so "…" could not run`
+|The executable of a command step or `until.command` is not on PATH. Install it or put it on PATH. Nothing has started.
+
+|`the workflow needs --input for: <name> (…)` +
+`the workflow declares no input "<name>" (its inputs: …)` +
+`input <name>: "<value>" does not match its pattern (…)`
+|Pass the inputs the workflow declares under `inputs:` with `--input <name>=<value>`. The declarations are listed under `## Inputs (--input name=value)` in `aidev run workflow <name> --dry-run` (xref:workflows-inputs[Taking values that change per run]). Nothing has started.
+
+|`input <name>: <path> is not committed; a run starts from HEAD (…)` +
+`input <name>: <path> is ignored by git and no provide: entry copies it into the run (…)`
+|A `path: true` input does not reach the run's worktree. Commit it, add it to `provide:`, or pass it as a `file: true` input (xref:workflows-provide[Providing files the worktree lacks]).
+
+|`provide: <glob> matches no file that git ignores in <checkout> (…)`
+|Your checkout has no gitignored file matching that glob. Put the file there, or take the `provide` entry out. Nothing has started.
+
+|`provide: <file> is ignored in <checkout> by a rule the repository does not carry; commit the .gitignore that ignores it, …`
+|The rule that ignores that file is not committed (`.git/info/exclude`, or a `.gitignore` not committed yet). Write it in `.gitignore` and commit.
+
+|`run <id> was a trial run; resume it with --trial` +
+`run <id> was not a trial run; resume it without --trial` +
+`workflow <name> has no recorded run that was not a trial (pass --trial to continue the last trial)`
+|`--resume` continues only a run of the same kind. Add `--trial` to continue a trial, and leave it out for an ordinary run (xref:workflows-trial[Trying it before approval]).
+
+|`the definition of <name> (or an agent or skill it uses) changed since trial run <id> started; start a new trial`
+|The definition (or an agent or skill) changed after the trial started. Run it again with `--trial`, without `--resume`.
+
+|`the checkpoints of run <id> are no longer on <branch> (…); start a new run`
+|The checkpoints of the finished steps are no longer on the branch (a later trial reset it, or the branch was moved after a merge). Start a new run without `--resume`.
+
+|`step <id>: "git … push" pushes; a trial run pushes nothing`
+|With `--trial`, a command step or `until.command` that pushes cannot run. Take it out for the trial, or check another way.
+
+|`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`
+|The run has not stopped. A command step wrote outside `writable`, or an agent wrote past the guard. It is not committed; if it is needed, the Engineering Manager widens that step's `writable`.
+
+|`step <id>: the tool was refused N call(s): … (a path outside writable? see run.json "denied")`
+|The run has not stopped. The agent was refused for calling outside `writable` or for a tool it was not given. The list is in `denied` of that step in `run.json`. If the work needs it, fix `writable` or the agent's `tools`.
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`

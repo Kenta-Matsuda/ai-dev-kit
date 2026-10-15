@@ -12,11 +12,11 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 
 === 説明
 
-定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・起動できるサブエージェント、`for_each` の対象と同時実行数、同時に走る並列グループ、`until`）、agent と skill のファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。
+定義を検証し、`aidev/workflow-<name>` ブランチに `workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/`）・skill（`.aidev/skills/`）を `aidev: workflow <name>` としてコミットし、push して PR を作ります（Azure DevOps。`generic` hosting では push まで行い、PR は手で作ります）。PR 本文には目的、ステップごとの内容（順番・`description`・agent・書ける場所・その agent の skill・ツール・MCP server・起動できるサブエージェント、`for_each` の対象と同時実行数、同時に走る並列グループ、`until`）、agent と skill のファイル（新規か変更か）、上限と、「マージがこの workflow を承認する」旨が書かれます。定義が `inputs`・`provide`・`never_commit` を持つときは、**Inputs (--input name=value)**（名前、説明、必須か既定値、`pattern`、リポジトリ内のパスか、コマンドに届くか）、**Provided from the checkout**、**Never committed** の節も入ります（xref:workflows-inputs[実行ごとに変わる値を受け取る]、xref:workflows-provide[worktree に無いファイルを用意する]、xref:workflows-never-commit[決してコミットしないもの]）。
 
 承認済みの workflow を直した提出では、さらに次が入ります。
 
-* **What changed against the approved workflow**: `origin/main` の版から、追加・削除・並べ替えたステップと、変わったステップの項目（`prompt`、`writable`、`until` など）、`limits` などトップレベルの変更。
+* **What changed against the approved workflow**: `origin/main` の版から、追加・削除・並べ替えたステップと、変わったステップの項目（`prompt`、`writable`、`until` など）、`limits`・`inputs`・`provide`・`never_commit` などトップレベルの変更。
 * **Estimate**: 費用の見積もり（楽観〜悲観）の、変更前と変更後。
 * **Why this change**: `aidev modify` で直したとき（その `modify` が承認済みの版から始めたとき）、頼んだこと、`--from-run` の実行の止まった理由と記録された失敗の出力、agent が見つけた原因（`CAUSE:`）、agent の説明。`modify` の後に手で編集していれば、その旨。
 

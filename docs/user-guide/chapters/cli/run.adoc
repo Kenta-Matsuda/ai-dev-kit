@@ -7,15 +7,18 @@
 
 [source,text]
 ----
-aidev run workflow <name> [--task "<text>" | --task-file <path>] [--dated] [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
-aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--dated] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> --trial [--task "<text>" | --task-file <path>] [--input <name>=<value> …] [--dated] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
+aidev run workflow <name> --resume <run id | last> [--trial] [--max-minutes <n>] [--max-usd <n>] [--log <file>] [--dry-run] [--json]
 ----
 
 === 説明
 
-`.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。
+`.aidev/workflows/<name>/workflow.yaml` と、それが参照する PKG 内の agent（`.aidev/agents/<name>.md`）・skill（`.aidev/skills/<name>/SKILL.md`）が **`origin/<tracking branch>` にあるものと同じ** ときだけ実行します。判定は最後に fetch した内容で行い、hook が書き込みのたびに同じ判定を繰り返します。承認を記録するコマンドはありません（xref:workflows-approval[承認とは]）。`--trial` を付けると、承認を待たずに、手元の定義（未コミットの編集を含む）をそのまま試験として実行します。専用のブランチ `aidev/<name>.trial` で動き、何も push せず、PR も作りません（xref:workflows-trial[承認の前に試す]）。
 
-手順（`steps`）を順に実行します。実行は手元の作業ツリーではなく専用の git worktree（`<AIDEV_HOME>/worktrees/…`）で、workflow ごとのブランチ `aidev/<name>` の上で動きます（`--dated` なら `aidev/<name>-<yyyymmddHHMM>`）。ステップ（`for_each` なら 1 件）が通るたびに、その `writable` の変更をチェックポイントとしてコミットします（xref:workflows-worktree[実行の worktree とブランチ]）。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>`、`AIDEV_WORKFLOW_STEP=<id>`、`AIDEV_WORKFLOW_RUN=<run id>`（`for_each` なら `AIDEV_WORKFLOW_ITEM=<件>` も）を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば `--agents` で渡します）。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら worktree の `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、その worktree の最後のチェックポイントから続けられます（xref:workflows-resume[止まった実行を続ける]）。止まった実行から定義を直すには `aidev modify workflow <name> --from-run <run id>` を使います。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。
+始める前に、起動前の検査を行います。command step と `until.command` の実行ファイルが PATH にあるか、`provide:` の glob に一致する gitignore 済みのファイルが手元のチェックアウトにあるか、`path: true` の入力が worktree に届くか（HEAD にコミット済みか、`provide:` がコピーするか）、`--trial` なら `git … push` の command step が無いかです。問題があれば何も始めずに止まります。`inputs:` を宣言した workflow には `--input <name>=<値>` で値を渡します。値は定義の `{inputs.<name>}` の場所に入り、すべての agent の指示に `## Inputs for this run` としてデータで付きます（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。
+
+手順（`steps`）を順に実行します。実行は手元の作業ツリーではなく専用の git worktree（`<AIDEV_HOME>/worktrees/…`）で、workflow ごとのブランチ `aidev/<name>` の上で動きます（`--dated` なら `aidev/<name>-<yyyymmddHHMM>`、`--trial` なら `aidev/<name>.trial`）。最初のステップの前に、`provide:` のファイルを手元のチェックアウトから worktree にコピーし、`file: true` の入力のコピーを実行記録の `inputs/` に置きます（xref:workflows-provide[worktree に無いファイルを用意する]）。ステップ（`for_each` なら 1 件）が通るたびに、その `writable` の変更をチェックポイントとしてコミットします（xref:workflows-worktree[実行の worktree とブランチ]）。追跡されていないファイルのうち ADK の既定の一覧と `never_commit:` に一致するもの（`node_modules` など）はコミットしません（xref:workflows-never-commit[決してコミットしないもの]）。agent step ごとに AI ツールを新しく起動し、子プロセスに `AIDEV_WORKFLOW=<name>`、`AIDEV_WORKFLOW_STEP=<id>`、`AIDEV_WORKFLOW_RUN=<run id>`（`for_each` なら `AIDEV_WORKFLOW_ITEM=<件>` も。`--trial` なら agent に `AIDEV_WORKFLOW_TRIAL` も）を渡します。hook はそのステップの `writable` への書き込みだけを許可します。Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば `--agents` で渡します）。前の agent step の最終報告は、後の agent step の指示に入ります。記録は実行しながら worktree の `.aidev/workflows/<name>/runs/<id>/`（`run.json`、`log.txt`、報告、コマンドの出力）に書きます。止まった実行は `--resume` で、その worktree の最後のチェックポイントから続けられます（xref:workflows-resume[止まった実行を続ける]）。止まった実行から定義を直すには `aidev modify workflow <name> --from-run <run id>` を使います。実行中に起きることは xref:workflows-run[workflow の実行] を見てください。agent step の間は、agent がツールを呼ぶたびに 1 行（経過時間、ツール名、対象）を表示し、サブエージェントの動きは字下げします（xref:cli-create[aidev create] の「実行中の表示」と同じ形式）。実行の終わりには、ステップの `writable` の外で変わったファイル（`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`）、agent が拒否されたツール呼び出し（`step <id>: the tool was refused N call(s): …`）、決してコミットしないものとして外した件数（`left out, never committed: …`）を表示します。
 
 === オプション
 
@@ -29,20 +32,29 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 |`--task-file <path>`
 |`--task` をファイルから読む。`--task` とは併用できない
 
+|`--input <name>=<value>`
+|workflow が `inputs:` に宣言した入力の値。入力ごとに 1 回ずつ付ける（`--input=<name>=<value>` とも書ける）。`default` の無い入力は必須で、無ければ何も始めずに止まる。`file: true` の入力はこの端末のファイルのパスで、実行がそのコピーを受け取る（xref:workflows-inputs[実行ごとに変わる値を受け取る]）
+
 |`--max-minutes <n>`
 |この実行だけの時間の上限（分）。`limits.max_minutes` があれば、それより下げる方向にだけ効く。無ければ、この実行に時間の上限を付ける
+
+|`--max-usd <n>`
+|この実行だけの費用の上限（USD）。`limits.max_usd` より下げる方向にだけ効く（`limits` の行に `$0.5 (limits.max_usd is $5)` のように出る）
 
 |`--log <file>`
 |実行の全過程とサマリを、このファイルに書く（下の「ログファイル」）。既定では書かない
 
 |`--resume <run id \| last>`
-|止まった実行を、その worktree で、止まったステップの最後のチェックポイントから続ける。`last` は最後の実行。終わったステップはやり直さない。`--task`・`--task-file`・`--dated` とは併用できない（指示とブランチは最初の実行のもの）
+|止まった実行を、その worktree で、止まったステップの最後のチェックポイントから続ける。`last` は同じ種類の最後の実行（`--trial` 付きなら最後の試験、無しなら試験でない最後の実行）。終わったステップはやり直さない。`--task`・`--task-file`・`--input`・`--dated` とは併用できない（指示・入力・ブランチは最初の実行のもの）。試験を続けるには `--trial` が要り、試験でない実行には付けられない。終わったステップのチェックポイントがブランチに残っていなければ続けられない
 
 |`--dated`
 |workflow のブランチ `aidev/<name>` ではなく、日付付きの新しいブランチ `aidev/<name>-<yyyymmddHHMM>` と、その worktree で実行する
 
+|`--trial`
+|承認を待たずに、手元の定義をそのまま試験として実行する。ブランチ `aidev/<name>.trial`（`--dated` なら `aidev/<name>.trial-<yyyymmddHHMM>`）と、その worktree で動く。試験のたびにブランチを今チェックアウトしているコミットへ戻し、定義のファイル（`workflow.yaml` と参照する agent・skill）を `aidev(<name>): trial definition` としてコミットしてから始める。何も push せず、PR も作らない（agent や command step の `git push` も失敗する）。`run.json` に `trial: true` が付き、見積もりはこの実行から学ばない（xref:workflows-trial[承認の前に試す]）
+
 |`--dry-run`
-|承認の状態、関係するファイル、agent と AI ツール、上限、費用の見積もり（楽観〜悲観。内訳は xref:cli-estimate[aidev estimate]）、今回の指示と、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
+|承認の状態、関係するファイル、agent と AI ツール、上限、費用の見積もり（楽観〜悲観。内訳は xref:cli-estimate[aidev estimate]）、今回の指示と入力（`inputs:` があれば `provide`・`never commit` の行、`--trial` なら `trial` の行も）、ステップごとの内容（書ける場所、agent の skill・ツール・MCP server、`until`）を表示し、何も始めない。起動前に止まる問題があれば表示し、終了コード 1 にする
 
 |`--json`
 |JSON で出力する
@@ -67,7 +79,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 |中身 |書き方
 
 |先頭
-|workflow 名、run id、承認の基準、上限、記録の場所、`--task`
+|workflow 名、run id（`--trial` なら `(trial)` 付き）、承認の基準（試験なら `none (a trial run of the definition sha256:…)`）、上限、記録の場所、`--task`、`--input` の値
 
 |経過の行
 |画面と `log.txt` に出る行（ステップの開始・終了、コマンドの終了コード、費用）
@@ -82,7 +94,7 @@ aidev run workflow <name> --resume <run id | last> [--max-minutes <n>] [--log <f
 |`until.command` と command step の出力の全文（`----- output of "…" -----` で囲む）
 
 |サマリ（末尾）
-|結果（終わった / 止まった理由）、開始・終了時刻と所要時間、ブランチ、agent の起動回数、費用、ステップごとの結果と試行回数、`for_each` の件数（終わった・失敗して戻した・未完了）と失敗した件の理由、PR、続けるときのコマンド
+|結果（終わった / 止まった理由。試験なら `(a trial run: nothing pushed)`）、開始・終了時刻と所要時間、ブランチ、入力、agent の起動回数、費用、ステップごとの結果と試行回数、拒否されたツール呼び出し（`refused tool calls`）、`for_each` の件数（終わった・失敗して戻した・未完了）と失敗した件の理由、PR、続けるときのコマンド
 |===
 
 ファイルは実行しながら追記するので、途中で止まった実行でもそこまでが残ります（サマリは終わったときに書きます）。既にあるファイルは上書きします。`--resume` と一緒に使うと、その続きの実行の分だけを書きます。ファイルは PKG の外に置くことをすすめます（コマンドの出力に秘密情報が含まれることがあるため。`runs/` は gitignore 済みです）。
@@ -99,10 +111,10 @@ aidev run workflow e2e-tests --task "注文画面" --log ~/aidev-logs/e2e-tests.
 |コード |条件
 
 |0
-|すべての step を終えた。`--dry-run` で承認済みで、起動前に止まる問題が無かった
+|すべての step を終えた（`--trial` でも同じ）。`--dry-run` で承認済み（`--trial` なら検証を通った）で、起動前に止まる問題が無かった
 
 |1
-|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools`・`mcp`・`subagents` を持つ agent を Claude Code 以外で起動しようとした。実行の worktree の `writable` の範囲に未コミットの変更がある。同じ worktree で別の実行が動いている。ブランチ `aidev/<name>` と起点が衝突した。worktree の定義が承認済みでない。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、チェックポイントのコミットの失敗、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、worktree で動く前の版で始めた実行。`--resume` と `--task`・`--dated` を一緒に指定した
+|`workflow` 以外の object、名前が無い。未承認（`origin/main` に無い、変えてある、fetch していない。`--trial` なら問わない）。定義が不正、agent か skill が PKG にも ADK にも無い。agent の `mcp` にある server が `.mcp.json` に無い。`tools`・`mcp`・`subagents` を持つ agent を Claude Code 以外で起動しようとした。`--input` が足りない、宣言に無い、値が規則に合わない、同じ名前を 2 回渡した。`path: true` の入力が無い、コミットされていない、`provide` がコピーしない。`file: true` の入力がこの端末に無い、テキストでない。`provide` の glob に一致する gitignore 済みのファイルが手元に無い、コピーしたファイルを無視する規則がコミットされていない。command step か `until.command` の実行ファイルが PATH に無い。`--max-minutes`・`--max-usd` が正の数でない。`--trial` で `git … push` の command step がある。実行の worktree の `writable` の範囲に未コミットの変更がある。同じ worktree で別の実行が動いている。ブランチ `aidev/<name>` と起点が衝突した。worktree の定義が承認済みでない（試験なら、手元の定義と違う）。step が失敗した（agent の失敗、`until` が再試行後も失敗、同じ失敗の繰り返し、`command` の exit 0 以外、チェックポイントのコミットの失敗、時間または費用の上限）。`--resume` の実行が無い、終わっている、始めたあとに定義が変わった、worktree で動く前の版で始めた実行、終わったステップのチェックポイントがブランチに無い。試験を `--trial` なしで、または試験でない実行を `--trial` 付きで続けようとした。試験を始めたあとに定義（または agent・skill）が変わった。`--resume` と `--task`・`--input`・`--dated` を一緒に指定した
 |===
 
 === 例
@@ -131,6 +143,7 @@ test-writer via claude [pkg]
   limits    45 min, $5
   cost      $0.80 – $5.40 (optimistic – pessimistic; "aidev estimate workflow write-tests" for the breakdown)
   task      src/services/order.ts
+  inputs    (none declared)
   branch    aidev/write-tests
   worktree  under ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d
 
@@ -144,6 +157,34 @@ test-writer via claude [pkg]
     3. pr: commit, push and open a pull request
 
 ✓ dry run: the workflow is approved and would run.
+----
+
+`inputs:` を宣言した workflow では、`inputs` の行に値が出ます（`file: true` の入力は `(copied from <パス>)` 付き。渡していなければ `(none given; defaults apply)`）。`provide:` があれば `provide` の行、`never_commit:` があれば `never commit` の行、`--trial` なら `trial` の行が出て、ステップの後に `## Inputs (--input name=value)`（名前、説明、必須か既定値か、`pattern`、`a path in the repository`、`reaches a command`）、`## Provided from the checkout`、`## Never committed` の節が付きます。
+
+[source,text]
+----
+aidev run workflow e2e-tests --dry-run --trial --input spec=../specs/login.txt --input screen=login
+  approved  not required: --trial runs the definition as it is in this checkout (NO — .aidev/workflows/e2e-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged))
+  …
+  inputs    spec=.aidev/workflows/e2e-tests/runs/2026-10-14T01-12-03-114Z/inputs/spec.txt (copied from /home/me/specs/login.txt)
+screen=login
+browser=chromium
+  provide   e2e/fixtures/** (ignored files, copied from /home/me/src/my-pkg)
+  never commit  e2e/test-results/** (and the kit's own list: node_modules and the like)
+  branch    aidev/e2e-tests.trial
+  worktree  under ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d
+  trial     nothing is pushed and no pull request is opened; the result stays on the trial branch
+  …
+    ## Inputs (--input name=value)
+
+    - spec: the test specification to work from (required)
+    - screen: the screen to cover (required; pattern [a-z0-9-]+; reaches a command)
+    - browser (default chromium; pattern [a-z]+; reaches a command)
+
+    ## Provided from the checkout
+    …
+
+✓ dry run: the definition validates and would run as a trial (nothing pushed).
 ----
 
 [source,text]
@@ -170,10 +211,27 @@ test-writer via claude [pkg]
 ----
 ✗ workflow write-tests is not approved: .aidev/workflows/write-tests/workflow.yaml is not on origin/main yet (submit it and have the pull request reviewed and merged)
       Approved means identical to origin/main. Submit it ("aidev submit workflow write-tests"), have the pull request reviewed and merged, then fetch.
+      To try it as it is first: aidev run workflow write-tests --trial
+----
+
+`--trial` の実行の終わり（何も push せず、結果は試験のブランチに残ります）:
+
+[source,text]
+----
+✓ workflow finished: 3 step(s)
+    agent runs: 3, reported cost $2.0333
+ℹ trial run: nothing pushed; the result is on aidev/write-tests.trial in ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial (the pull request text it would carry: .aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z/pull-request.md)
+    branch aidev/write-tests.trial (1 checkpoint commit(s) in this start); worktree ~/.local/share/ai-dev-kit/worktrees/my-pkg-1a2b3c4d/aidev-write-tests.trial
+ℹ trial run: nothing was pushed. aidev/write-tests.trial holds 3 commit(s) since 9f8e7d6a1b2c
+    inspect: git -C "<worktree>" log --oneline 9f8e7d6a1b2c..HEAD   /   git -C "<worktree>" diff --stat 9f8e7d6a1b2c
+    when the result is right: aidev submit workflow write-tests   (the reviewed definition then runs with "aidev run workflow write-tests")
+    record: <worktree>/.aidev/workflows/write-tests/runs/2026-10-14T01-12-03-114Z
 ----
 
 === 関連情報
 
 * xref:workflows[AI への作業委譲] — 定義の項目、承認、実行中に起きること、レビュー
+* xref:workflows-trial[承認の前に試す] — `--trial` の動きと、保証しないこと
+* xref:workflows-inputs[実行ごとに変わる値を受け取る]、xref:workflows-provide[worktree に無いファイルを用意する]、xref:workflows-never-commit[決してコミットしないもの]
 * xref:cli-create[aidev create]、xref:cli-estimate[aidev estimate]、xref:cli-submit[aidev submit]、xref:cli-list[aidev list]
 * xref:permissions-source[AI にソースを書かせる方法]

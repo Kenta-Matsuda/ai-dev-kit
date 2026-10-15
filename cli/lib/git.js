@@ -259,15 +259,17 @@ function lsTreeBlobs(cwd, ref = 'HEAD') {
 }
 
 /**
- * Parsed `git status --porcelain -z` entries: [{ xy, path }]. Untracked files
- * are listed one by one. Returns null when the status cannot be read; the
- * output is deliberately not trimmed, because the two-character XY prefix of
- * an unstaged change starts with a space.
+ * Parsed `git status --porcelain -z` entries: [{ xy, path, from }] (`from`:
+ * the original path of a rename or copy, else null). Untracked files are
+ * listed one by one; `pathspecs` narrows the walk (git pathspecs, magic
+ * allowed). Returns null when the status cannot be read; the output is
+ * deliberately not trimmed, because the two-character XY prefix of an
+ * unstaged change starts with a space.
  */
-function statusEntries(cwd) {
+function statusEntries(cwd, { pathspecs = [] } = {}) {
   let out;
   try {
-    out = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '-z'], {
+    out = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '-z', ...(pathspecs.length ? ['--', ...pathspecs] : [])], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, env: sanitizedGitEnv(),
     });
   } catch { return null; }
@@ -277,9 +279,9 @@ function statusEntries(cwd) {
     const e = fields[i];
     if (!e || e.length < 4) continue;
     const xy = e.slice(0, 2);
-    entries.push({ xy, path: e.slice(3) });
     // A rename/copy entry is followed by its original path in the next field.
-    if (/[RC]/.test(xy)) i++;
+    const from = /[RC]/.test(xy) ? (fields[++i] || null) : null;
+    entries.push({ xy, path: e.slice(3), from });
   }
   return entries;
 }
