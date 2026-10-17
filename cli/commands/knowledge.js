@@ -574,8 +574,9 @@ async function openPr(config, { prBranch, id, opKey, targetSha, diff }) {
   const result = { ok: true, created: true, pullRequestId: created?.pullRequestId || null, url: created?.url || null };
   if (mine) {
     try {
+      const superseded = `\n\n> ⚠️ Superseded by \`${prBranch}\`${result.pullRequestId ? ` (PR !${result.pullRequestId})` : ''}. Close this one after review.`;
       await ado.updatePullRequestDescription(config, repo, mine.pullRequestId,
-        `${String(mine.description || '')}\n\n> ⚠️ Superseded by \`${prBranch}\`${result.pullRequestId ? ` (PR !${result.pullRequestId})` : ''}. Close this one after review.`);
+        ado.fitDescription(`${String(mine.description || '')}${superseded}`, { keep: superseded }));
       result.superseded = { pullRequestId: mine.pullRequestId, branch: mine.sourceRefName };
     } catch (e) {
       result.supersedeWarning = `the previous PR !${mine.pullRequestId} could not be annotated: ${e.message}`;

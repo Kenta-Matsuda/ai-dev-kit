@@ -992,8 +992,15 @@ function run() {
         throws(() => agentMod.buildArgv({ tool: 'copilot', promptArg: 'P', capabilities: { tools: ['Read'], mcp: [], mcpConfigFile: 'x' } }),
           /cannot be limited to an agent's tools and MCP servers/);
         const def = wfMod.loadDefinition(fx.root, 'granted');
-        const text = require('../cli/commands/workflow').submitDescription(def, wfMod.resolveDependencies(fx.root, KIT_ROOT, def), []);
+        const { submitDescription, fitSubmitDescription } = require('../cli/commands/workflow');
+        const text = submitDescription(def, wfMod.resolveDependencies(fx.root, KIT_ROOT, def), []);
         ok(/1\. `look`: agent `limited`\n {3}- writes: nothing\n {3}- skills: `test-and-verify`; tools: `Read`, `Grep`; mcp: `tickets`/.test(text), text);
+        eq(fitSubmitDescription(text, 'f.md'), text, 'a text that fits is sent as is');
+        // Over the limit even without the agent's account: within 4000 (the cut used to come out at 4001), the files and what merging means kept.
+        const long = text.replace('## Objective', `<details><summary>x</summary>\n\n${'r'.repeat(3000)}\n\n</details>\n\n## Objective\n\n${'目的の説明。\n'.repeat(700)}`);
+        const sent = fitSubmitDescription(long, '.aidev/cache/submit/granted.md');
+        ok(sent.length <= 4000 && !sent.includes('<details>'), `${sent.length} characters`);
+        ok(/the whole text is in \.aidev\/cache\/submit\/granted\.md\)\n\n## Files under review\n[\s\S]*Merging this pull request approves the workflow/.test(sent), sent.slice(-400));
       });
 
       test('until commands run in order, in cwd and with env; the whole output is kept in the run\'s logs', () => {
@@ -1114,6 +1121,13 @@ function run() {
           reports: [{ id: 'plan', agent: 'coder', report: 'p'.repeat(9000) }, { id: 'write', agent: 'coder', report: 'w'.repeat(9000) }], max: 4000,
         });
         ok(long.length <= 4000 && /### plan/.test(long) && /### write/.test(long) && /does not merge\.$/.test(long), `${long.length} characters`);
+        // A task too long to leave room for the reports: still within the limit, the cut said, the closing line kept.
+        const huge = prDescription({
+          title: 't', name: 'judged', hash: 'sha256:x', runId: j.runId, baseSha: 'b', approval: { ref: 'origin/main', refSha: 'a' },
+          agentRuns: 2, spentUsd: 0.5, task: 'テスト仕様書の内容。\n'.repeat(600), results: [{ id: 'write', ok: true, attempts: 1 }],
+          reports: [{ id: 'write', agent: 'coder', report: '😀'.repeat(3000) }], max: 4000,
+        });
+        ok(huge.length <= 4000 && /pull-request\.md in the run record\)\n\nReview the diff; the workflow does not merge\.$/.test(huge), `${huge.length} characters: ${huge.slice(-200)}`);
       });
 
       test('a step that changes a path it must leave unchanged fails, and is told which', () => {

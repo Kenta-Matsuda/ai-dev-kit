@@ -20,7 +20,7 @@ aidev submit workflow <name> [--no-push] [--dry-run] [--json]
 * **Estimate**: 費用の見積もり（楽観〜悲観）の、変更前と変更後。
 * **Why this change**: `aidev modify` で直したとき（その `modify` が承認済みの版から始めたとき）、頼んだこと、`--from-run` の実行の止まった理由と記録された失敗の出力、agent が見つけた原因（`CAUSE:`）、agent の説明。`modify` の後に手で編集していれば、その旨。
 
-本文の全文は `.aidev/cache/submit/<name>.md` にも書きます（`generic` hosting で PR を手で作るときに貼ります）。Azure DevOps の上限（4000 文字）を超えるときは、agent の説明から省きます。
+本文の全文は `.aidev/cache/submit/<name>.md` にも書きます（`generic` hosting で PR を手で作るときに貼ります）。Azure DevOps の上限（4000 文字）を超えるときは、agent の説明から省き、それでも超えるなら途中を行の区切りで切ります。切った所には全文のファイルの場所を書き、**Files under review** と「マージがこの workflow を承認する」旨は残します。短くした本文を送ったときは、その旨を表示します。
 
 既に `origin/main` と同じなら `already matches origin/main; nothing to submit.` と表示して何もしません。
 

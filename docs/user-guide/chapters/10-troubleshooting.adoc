@@ -332,6 +332,9 @@
 |`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |正常です。push 済みのブランチから手で PR を作ります。
 
+|`the pull request could not be opened: … must not be longer than 4000 characters`
+|Azure DevOps は 4000 文字を超える PR 本文を受け付けません。aidev は本文を 4000 文字に収めて送るので、古い ADK で出ることがあります。`aidev update` で ADK を更新します。push は済んでいるので、今回の PR は全文（`aidev run workflow` は実行記録の `pull-request.md`、`aidev submit workflow` は `.aidev/cache/submit/<name>.md`）を短くして手で作ります。
+
 |`the pull request could not be opened: …`
 |push は済んでいます。`AZURE_DEVOPS_PAT` と PR 作成の権限を確認し、手で PR を作ります。
 

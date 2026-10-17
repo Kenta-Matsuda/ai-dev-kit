@@ -98,6 +98,59 @@ function withApiVersion(url) {
 
 // ---------------------------------------------------------------- Pull requests
 
+/**
+ * Azure DevOps refuses a pull request description longer than this
+ * (HTTP 400, "A description for a pull request must not be longer than 4000
+ * characters"). It counts UTF-16 code units, as JavaScript's `length` does:
+ * an emoji is 2, a line break is 1, and exactly 4000 is accepted.
+ */
+const PR_DESCRIPTION_MAX = 4000;
+const CUT_NOTE = `… (shortened to the ${PR_DESCRIPTION_MAX} characters Azure DevOps accepts)`;
+// Room kept for closing a code fence the cut leaves open.
+const FENCE_ROOM = 8;
+
+/** The first `n` UTF-16 code units of `s`, one fewer when the last would split a surrogate pair. */
+function sliceUnits(s, n) {
+  if (s.length <= n) return s;
+  const end = Math.max(0, n);
+  const c = s.charCodeAt(end - 1);
+  return s.slice(0, c >= 0xd800 && c <= 0xdbff ? end - 1 : end);
+}
+
+/** The fence (``` or ~~~, as long as it was opened) a Markdown text leaves open at its end, or null. */
+function openFence(text) {
+  let open = null;
+  for (const line of text.split('\n')) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    if (!open) open = m[1];
+    else if (m[1][0] === open[0] && m[1].length >= open.length && !m[2].trim()) open = null;
+  }
+  return open;
+}
+
+/**
+ * A pull request description Azure DevOps accepts: `text` as is when it
+ * fits in `max`, otherwise cut at a line break, `note` after the cut, and
+ * `keep` (a suffix of `text`, such as the line telling the reviewer what
+ * merging means) after that. The cut never splits a surrogate pair and
+ * closes a code fence it leaves open, so the note does not read as code.
+ * A lone surrogate left by an earlier cut (a report's tail) becomes U+FFFD.
+ */
+function fitDescription(text, { max = PR_DESCRIPTION_MAX, note = CUT_NOTE, keep = '' } = {}) {
+  const s = String(text ?? '').toWellFormed();
+  if (s.length <= max) return s;
+  const kept = keep && s.endsWith(keep) && keep.length <= max / 2 ? keep : '';
+  const end = `\n\n${note}${kept ? `\n\n${kept.replace(/^\s+/, '')}` : ''}`;
+  let head = sliceUnits(s.slice(0, s.length - kept.length), max - end.length - FENCE_ROOM);
+  const nl = head.lastIndexOf('\n');
+  if (nl > head.length / 2) head = head.slice(0, nl);
+  head = head.trimEnd();
+  const fence = openFence(head);
+  if (fence && fence.length < FENCE_ROOM) head += `\n${fence}`;
+  return sliceUnits(`${head}${end}`, max);
+}
+
 async function listPullRequests(config, repositoryId, { status = 'active', sourceBranch = null, targetBranch = null } = {}) {
   const q = [`searchCriteria.status=${encodeURIComponent(status)}`];
   if (sourceBranch) q.push(`searchCriteria.sourceRefName=${encodeURIComponent(`refs/heads/${sourceBranch}`)}`);
@@ -113,7 +166,8 @@ async function createPullRequest(config, repositoryId, { sourceBranch, targetBra
     sourceRefName: `refs/heads/${sourceBranch}`,
     targetRefName: `refs/heads/${targetBranch}`,
     title,
-    description,
+    // The callers fit their text with a note of their own; this is the last guard.
+    description: fitDescription(description),
     reviewers: reviewers.map((id) => ({ id })),
   });
 }
@@ -121,10 +175,11 @@ async function createPullRequest(config, repositoryId, { sourceBranch, targetBra
 async function updatePullRequestDescription(config, repositoryId, pullRequestId, description) {
   return request(config, 'PATCH', withApiVersion(
     `${baseUrl(config)}/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullrequests/${pullRequestId}`),
-  { description });
+  { description: fitDescription(description) });
 }
 
 module.exports = {
   API_VERSION, baseUrl, request, withApiVersion,
+  PR_DESCRIPTION_MAX, fitDescription,
   listPullRequests, createPullRequest, updatePullRequestDescription,
 };

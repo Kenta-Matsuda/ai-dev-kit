@@ -68,6 +68,14 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
 
+### 長さ（Azure DevOps は 4000 文字まで）
+
+hosting が Azure DevOps のとき、PR 本文が **4000 文字を超えると PR の作成も本文の更新も拒否されます**（HTTP 400「A description for a pull request must not be longer than 4000 characters」）。数え方は UTF-16 で、絵文字は 2 文字、改行は 1 文字です。
+
+- 本文は **3500 文字以内**を目安にします。各節は要点だけにし、ログ・diff・テスト出力の全文を貼りません
+- 収まらない詳細は本文に入れず、PR のコメントや Work Item に分けます
+- 長さで拒否されたら、短くしてから作り直します。同じ本文のまま再試行しません
+
 ### 検証セクションの書き方
 
 ここが**本文で最も重要**です。通っていないものを通ったと書かないでください。
@@ -92,6 +100,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
 - [ ] 秘密情報・デバッグ出力・一時ファイルが入っていない
 - [ ] 計画（[[change-planning]]）の範囲に収まっている
 - [ ] ブランチ名が規約どおり
+- [ ] 本文が 4000 文字（Azure DevOps の上限）に収まっている
 - [ ] 自動マージを設定していない
 
 関連: [[test-and-verify]] / [[code-review]] / [[secure-coding]]

@@ -723,7 +723,7 @@ aidev run workflow write-tests
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。
-* `pull_request` のステップは、チェックポイントの後に残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチを push して PR を作ります。同じブランチの PR が開いていれば、新しく作らずに本文を更新します。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします）。全文は実行記録の `pull-request.md` にあります。ブランチに起点からの変更が無ければ commit も PR も作りません。
+* `pull_request` のステップは、チェックポイントの後に残った `writable` の範囲の変更と実行の記録を最後のコミットにし、ブランチを push して PR を作ります。同じブランチの PR が開いていれば、新しく作らずに本文を更新します。PR 本文に workflow 名・run id・起点のコミット・承認の基準・agent の起動回数・費用と、各 agent step の最終報告が書かれます（Azure DevOps の上限 4000 文字に収まるよう、報告は短くします。それでも収まらなければ行の区切りで切り、切った所に `pull-request.md` を指す注記を入れ、最後の行は残します。短くしたときは実行のログにその旨が出ます）。全文は実行記録の `pull-request.md` にあります。ブランチに起点からの変更が無ければ commit も PR も作りません。
 * 記録は worktree の `.aidev/workflows/<name>/runs/<id>/` に、実行しながら書きます。gitignore 済みで、コミットされません。`--resume`・`aidev estimate`・`aidev modify --from-run` は、手元と worktree の記録をまとめて探します。
 * 実行の終わりに、ステップの `writable` の外で変わったファイル（`N file(s) changed outside what the steps may write, by a command step or past the guard; not committed: …`）と、agent が拒否されたツール呼び出し（`step <id>: the tool was refused N call(s): Write src/x.ts …`。`run.json` のそのステップの `denied` にも残ります）を表示します。どちらもコミットされません。`writable` が足りないのか、ステップを直すのかの手がかりです。
 
