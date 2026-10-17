@@ -33,6 +33,7 @@ ai-dev-kit の **テンプレート（`templates/<tool>/`）を、実際のセ�
 3. `npm run check` と `npm run docs:check` を通す。通らないものは通らないと報告する。
 4. コミットする（メッセージに使った振り返りの一覧を含める）。
 5. PR を作る。手元のツール（GitHub MCP、`gh pr create`、Azure DevOps MCP）のうち、この checkout の `origin` に合うものを使う。**自動マージはしない。**
+   Azure DevOps は 4000 文字を超える PR 本文を拒否するので、本文は 3500 文字以内にする。
 6. 報告する: ブランチ、PR のリンク（作れなければ理由）、採用しなかった提案とその理由。
 
 ## 見積もりの改善（`npm run evolve -- estimates`）

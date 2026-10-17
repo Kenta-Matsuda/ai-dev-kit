@@ -20,7 +20,7 @@ When it submits a change to an approved workflow, the body also has:
 * **Estimate**: the cost estimate (optimistic to pessimistic) before and after.
 * **Why this change**: for a change made with `aidev modify` (that started from the approved version), what was asked, why the `--from-run` run stopped and its failure output as recorded, the cause the agent found (`CAUSE:`) and its account. It also says when the definition was edited by hand after `modify`.
 
-The whole text is also written to `.aidev/cache/submit/<name>.md` (paste it when you open the PR by hand with `generic` hosting). When it is over the Azure DevOps limit (4000 characters), the agent's account is left out first.
+The whole text is also written to `.aidev/cache/submit/<name>.md` (paste it when you open the PR by hand with `generic` hosting). When it is over the Azure DevOps limit (4000 characters), the agent's account is left out first; if it is still over, the middle is cut at a line break. The cut names the file with the whole text, and **Files under review** and the statement that merging approves the workflow are kept. When a shortened body is sent, the command says so.
 
 If it is already identical to `origin/main`, it prints `already matches origin/main; nothing to submit.` and does nothing.
 

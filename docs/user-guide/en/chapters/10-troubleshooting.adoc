@@ -332,6 +332,9 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 |`branch aidev/<name> is ready; hosting.type is generic; open the pull request by hand`
 |Normal. Open the PR by hand from the pushed branch.
 
+|`the pull request could not be opened: … must not be longer than 4000 characters`
+|Azure DevOps does not accept a PR body over 4000 characters. aidev fits the body into 4000 characters before sending it, so this comes from an older ADK. Update it with `aidev update`. The push is done, so open this PR by hand with a shortened copy of the whole text (`pull-request.md` in the run record for `aidev run workflow`, `.aidev/cache/submit/<name>.md` for `aidev submit workflow`).
+
 |`the pull request could not be opened: …`
 |The push is done. Check `AZURE_DEVOPS_PAT` and the permission to create PRs, then open the PR by hand.
 

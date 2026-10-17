@@ -503,12 +503,19 @@ function submitContext(repoRoot, installRoot, config, def, approval) {
   return out;
 }
 
-/** Azure DevOps takes this many characters of a description; what does not fit is cut where it hurts least. */
-function fitDescription(text, max) {
+/**
+ * The submit text cut to what Azure DevOps accepts, where it hurts least: the
+ * agent's account goes first, then the middle, keeping "Files under review"
+ * and what merging means.
+ */
+function fitSubmitDescription(text, fileRel, max = ado.PR_DESCRIPTION_MAX) {
   if (text.length <= max) return text;
   const cut = text.replace(/<details>[\s\S]*?<\/details>\n\n/, '');
-  if (cut.length <= max) return cut;
-  return `${cut.slice(0, max - 60)}\n\n… (cut; the whole text is in the file "aidev submit" wrote)`;
+  const at = cut.lastIndexOf('\n## Files under review\n');
+  return ado.fitDescription(cut, {
+    max, keep: at >= 0 ? cut.slice(at) : '',
+    note: `… (shortened to the ${max} characters Azure DevOps accepts; the whole text is in ${fileRel})`,
+  });
 }
 
 async function submit(ctx) {
@@ -580,7 +587,8 @@ async function submit(ctx) {
       pr.attempted = true;
       try {
         const repo = config.hosting.repository;
-        const sent = fitDescription(description, PR_DESCRIPTION_MAX);
+        const sent = fitSubmitDescription(description, descriptionRel);
+        if (sent !== description) ui.dim(`    the text is over the ${ado.PR_DESCRIPTION_MAX} characters Azure DevOps accepts: the pull request carries a shortened one (the whole text: ${descriptionRel})`);
         const open = await ado.listPullRequests(config, repo, { status: 'active', sourceBranch: branch, targetBranch: target });
         if (open.length > 0) {
           await ado.updatePullRequestDescription(config, repo, open[0].pullRequestId, sent);
@@ -896,9 +904,6 @@ function failedTargets(results) {
     ...(failed.length > 20 ? [`- … and ${failed.length - 20} more (see run.json)`] : []), ''];
 }
 
-/** Azure DevOps refuses a pull request description above 4000 characters. */
-const PR_DESCRIPTION_MAX = 4000;
-
 /**
  * The pull request text: the run record, the task, and what each agent step
  * reported (the plan, what was verified, what is left open — what a reviewer
@@ -929,7 +934,10 @@ function prDescription({ title, name, hash, runId, baseSha, approval, agentRuns,
   if (max != null && text.length > max) {
     const room = max - head.length - foot.length - 20 - reports.length * 60;
     text = build(Math.max(200, Math.floor(room / Math.max(1, reports.length))));
-    if (text.length > max) text = `${text.slice(0, max - 1)}…`;
+    text = ado.fitDescription(text, {
+      max, keep: foot,
+      note: `… (shortened to the ${max} characters Azure DevOps accepts; the whole text is in pull-request.md in the run record)`,
+    });
   }
   return text;
 }
@@ -2167,13 +2175,15 @@ async function runWorkflow(ctx) {
         agentRuns: priorRuns + agentRuns, spentUsd: priorUsd + spentUsd,
       });
       const prFile = path.join(runDir, 'pull-request.md');
-      const prText = artifactsOk && writeArtifact(prFile, `${describe(null)}\n`) ? relOf(prFile) : null;
+      const prWhole = describe(null);
+      const prText = artifactsOk && writeArtifact(prFile, `${prWhole}\n`) ? relOf(prFile) : null;
       if (trial) {
         pr = { ok: false, trial: true, reason: `trial run: nothing pushed; the result is on ${branch} in ${repoRoot}`, branch };
         log(`step ${step.id}: ${pr.reason}`);
       } else if (config.hosting.type === 'azure-devops') {
         try {
-          const description = describe(PR_DESCRIPTION_MAX);
+          const description = describe(ado.PR_DESCRIPTION_MAX);
+          if (description !== prWhole) log(`step ${step.id}: the pull request text is over the ${ado.PR_DESCRIPTION_MAX} characters Azure DevOps accepts; it carries a shortened one${prText ? ` (the whole text: ${prText})` : ''}`);
           // One branch per workflow: a pull request still open for it is
           // brought up to date (the push above added this run's commits).
           const open = await ado.listPullRequests(config, config.hosting.repository, { status: 'active', sourceBranch: branch, targetBranch: config.sync.pr.target_branch });
@@ -2753,5 +2763,5 @@ function list(ctx) {
 }
 
 module.exports = {
-  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, definitionChanges, runDigest, findRun, listRuns, describeSteps, describeExtras, prDescription, preflight,
+  newWorkflow, modifyWorkflow, estimateWorkflow, reviewEstimates, submit, runWorkflow, list, LIMITS: wfMod.LIMITS, stepPrompt, untilPrompt, submitDescription, definitionChanges, runDigest, findRun, listRuns, describeSteps, describeExtras, prDescription, fitSubmitDescription, preflight,
 };

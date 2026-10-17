@@ -1,5 +1,5 @@
 'use strict';
-/** Unit tests for yaml, paths, config validation (schema v2), leases. */
+/** Unit tests for yaml, paths, config validation (schema v2), leases, the Azure DevOps pull request text. */
 
 const path = require('path');
 const fs = require('fs');
@@ -8,6 +8,7 @@ const yaml = require('../cli/lib/yaml');
 const P = require('../cli/lib/paths');
 const cfg = require('../cli/lib/config');
 const leases = require('../cli/lib/leases');
+const ado = require('../cli/lib/ado');
 const { makeRepo } = require('./fixtures');
 
 function run() {
@@ -402,6 +403,37 @@ function run() {
       const fresh = leases.acquireSyncLease(fx.root, { targetSha: 'c'.repeat(40) });
       eq(fresh.targetSha, 'c'.repeat(40));
     } finally { fx.cleanup(); }
+  });
+
+  suite('ado: pull request description');
+
+  const lone = (s) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+
+  test('a description that fits is sent as is; exactly 4000 UTF-16 code units fits', () => {
+    eq(ado.PR_DESCRIPTION_MAX, 4000);
+    eq(ado.fitDescription('short\n'), 'short\n');
+    const exact = 'a'.repeat(3998) + '😀';
+    eq(ado.fitDescription(exact), exact, 'an emoji counts 2, as Azure DevOps counts it');
+  });
+
+  test('a long one is cut at a line break to at most 4000, with the note, never inside a surrogate pair', () => {
+    const lines = Array.from({ length: 600 }, (_, i) => `line ${i} of the report`).join('\n');
+    const cut = ado.fitDescription(lines, { note: '(cut)' });
+    ok(cut.length <= 4000, `${cut.length} characters`);
+    ok(/\nline \d+ of the report\n\n\(cut\)$/.test(cut), cut.slice(-80));
+    for (let off = 0; off < 4; off++) {
+      const s = ado.fitDescription('x'.repeat(off) + '😀'.repeat(3000));
+      ok(s.length <= 4000 && !lone(s), `offset ${off}: ${s.length} characters`);
+    }
+    ok(!lone(ado.fitDescription(`${'a'.repeat(10)}\uD83D`)), 'a lone surrogate left by an earlier cut is replaced');
+    eq(ado.fitDescription('a'.repeat(5000), { note: 'n'.repeat(5000) }).length, 4000, 'even a note too long for the limit');
+  });
+
+  test('a code fence the cut leaves open is closed, and the kept tail survives the cut', () => {
+    const text = `intro\n\n\`\`\`text\n${'a line of log output\n'.repeat(400)}\`\`\`\n\nafter\n\nReview the diff.`;
+    const cut = ado.fitDescription(text, { note: '(cut)', keep: '\n\nReview the diff.' });
+    ok(cut.length <= 4000, `${cut.length} characters`);
+    ok(cut.endsWith('a line of log output\n```\n\n(cut)\n\nReview the diff.'), cut.slice(-120));
   });
 
 }
