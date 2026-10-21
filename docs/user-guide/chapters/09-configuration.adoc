@@ -188,7 +188,7 @@ workflows:                      # workflow ごとの入力の値（この PKG �
 
 `hosting.pat`、`hosting.token`、`hosting.password`、`hosting.secret` は書けません。書くと起動を拒否します。token は `hosting.auth_env` が指す環境変数に入れます（xref:environment-reference[環境変数]）。
 
-`workflows.<name>.inputs` に、認証情報らしい名前（`password`・`passwd`・`pass`・`secret`・`token`・`pat`・`credential(s)`・`api_key`・`private_key` を含む名前）の入力も書けません。長い英数字だけの値も認証情報と見なして拒否します。パスワードは workflow の `env_required` が指す環境変数で渡します（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
+`workflows.<name>.inputs` に、認証情報らしい名前の入力も書けません。`password`・`passwd`・`passphrase`・`passcode`・`secret` をどこかに含む名前、`api_key`・`access_key`・`private_key`・`ssh_key`・`signing_key`、`_` か `-` で区切った最後の語が `pass`・`pw`・`pwd`・`pat`・`otp`・`auth`・`credential(s)` の名前（`db_pass`、`azure-pat`）、`auth_token`・`api_token`・`access_token`・`session_token`・`bearer_token`・`refresh_token` と `token(s)` そのもの、が拒否されます（`pass_rate`・`token_limit`・`max_tokens`・`credential_type` のような設定名は通ります）。値も見ます: パスワードを含む URL（`https://user:pw@host`）、よくあるトークンの形（`ghp_…`、`xox?-…`、`sk-…`、`AKIA…`、JWT）、40 文字以上の英数字の並び（git の SHA は除く）は拒否します。パスワードは workflow の `env_required` が指す環境変数で渡します（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
 
 === 関連情報
 

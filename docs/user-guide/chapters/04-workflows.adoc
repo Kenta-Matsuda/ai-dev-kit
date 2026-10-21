@@ -230,7 +230,7 @@ aidev create workflow e2e-tests
 ✓ wrote .aidev/agents/playwright-test-reviewer.md
 ✓ wrote .aidev/agents/playwright-test-writer.md
 ✓ wrote .aidev/skills/playwright-testing/SKILL.md
-    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、…
+    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
     the files are this PKG's now: edit what differs here (the paths the steps write, the commands they run), then submit them for review
     inputs: spec (a file, --input only), base_url (required), test_user (required), batch_size (default 10)
     set this PKG's values once in aidev.yaml (--input overrides them per run):
@@ -241,6 +241,12 @@ aidev create workflow e2e-tests
             test_user: <テストユーザーのログイン ID（ユーザー名かメールアドレス）>
             batch_size: 10
     before a run, export in the shell: E2E_PASSWORD (テストユーザーのパスワード（実行する人が export する。ファイルには書かない）)
+
+ℹ Next:
+    1. review:  git diff -- .aidev/workflows/e2e-tests/ .aidev/agents/ .aidev/skills/
+    2. try:     aidev run workflow e2e-tests --trial   ← runs it as it is here; pushes nothing
+    3. submit:  aidev submit workflow e2e-tests        ← branch + pull request for the reviewer
+    4. run:     aidev run workflow e2e-tests           ← once merged (anyone on the team)
 ----
 
 * 複製されるのは `workflow.yaml`（`name:` は付けた名前に書き換わる）と、それが使う agent（`.aidev/agents/`）・skill（`.aidev/skills/`）です。複製した時点で **この PKG のファイル** になります。他の workflow と同じく `--trial` で試し、`aidev submit workflow` で PR にし、マージで承認します。実行時に ADK 側のファイルを参照することはありません。
@@ -250,7 +256,7 @@ aidev create workflow e2e-tests
 `playwright-tests` の流れと前提です。
 
 . `deps`（command step）: `npm ci` で依存を実行の worktree に入れる。pnpm / yarn の PKG、テストが別ディレクトリにある PKG は、この command と `cwd` を直す
-. `playwright`（command step）: `npx playwright --version`。Playwright（`@playwright/test` と `playwright.config.*`）が PKG に無ければここで止まる
+. `playwright`（command step）: `node node_modules/@playwright/test/cli.js --version`。`@playwright/test` がこの PKG の依存に無ければここで止まる（`playwright.config.*` と、端末のブラウザ（`npx playwright install`）はこの検査では見ない）
 . `plan`（agent step、何も書かない）: 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く
 . `scaffold`（agent step）: `tests/e2e/support/` に共通の helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる
 . `generate`（agent step、`for_each`、既定で 4 batch 同時）: batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`）
@@ -520,7 +526,7 @@ env_required:
 
 * `aidev run workflow`（`--dry-run` も）は、宣言された変数が設定されているかを **名前だけ** で確かめ、無ければ何も始めずに `the environment variable E2E_PASSWORD (…) is not set; the workflow needs it (env_required)` と止まります。`--dry-run` の `env` の行には `set` / `NOT SET` が出ます。値は出ません。
 * 値は agent とコマンドの環境に届きます（実行する人の shell の環境を子プロセスが引き継ぐ、今までどおりの経路です）。指示には `## Environment variables of this run` として **名前と説明だけ** が入り、agent には「値をどこにも書かない」と伝えます。`run.json`・ログ・PR 本文・コミットにも値は入りません。
-* テストやコマンドは `process.env.E2E_PASSWORD` のように実行時に読みます。command step や `until` の `env` に同じ名前を書くことはできません（検証で拒否されます）。
+* テストやコマンドは `process.env.E2E_PASSWORD` のように実行時に読みます。command step・agent step・`until` の `env` に同じ名前を書くことはできません（検証で拒否されます）。
 * 名前は環境変数の規則（英字か `_` で始まる英数字と `_`）で、`AIDEV_*` と `GIT_CONFIG*` は書けません。
 * 宣言は提出の PR 本文の `## Environment variables the run needs` に出ます。レビューする人は、そこに挙がる変数が本当に認証情報かを見ます（設定値なら `inputs` か `env` へ）。
 

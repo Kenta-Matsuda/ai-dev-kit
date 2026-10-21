@@ -313,7 +313,7 @@ env_required:
 |`env_required`
 |list of names, or mapping name → description
 |optional
-|A name follows the rule for environment variables (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`). `AIDEV_*` and `GIT_CONFIG*` cannot be written. Up to 32. The description is one line, and is shown in the error for the person running it, on the `env` row of `--dry-run`, under `## Environment variables the run needs` in the submit PR body, and under `## Environment variables of this run` in the agents' instructions. The same name written in the `env` of a command step or of `until` is refused by validation (`env sets <NAME>, which env_required says the shell provides`).
+|A name follows the rule for environment variables (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`). `AIDEV_*` and `GIT_CONFIG*` cannot be written. Up to 32. The description is one line, and is shown in the error for the person running it, on the `env` row of `--dry-run`, under `## Environment variables the run needs` in the submit PR body, and under `## Environment variables of this run` in the agents' instructions. The same name written in the `env` of a command step, of an agent step or of `until` is refused by validation (`env sets <NAME>, which env_required says the shell provides`).
 |===
 
 * `aidev run workflow` and `--dry-run` check, before anything starts, that each variable is set (and not empty). When one is not, they print `the environment variable <NAME> (<description>) is not set; the workflow needs it (env_required). Export it in the shell that runs aidev; …` and exit 1. The same with `--resume`. The `env` row of `--dry-run` reads `<NAME>: set` or `<NAME>: NOT SET`.
@@ -442,7 +442,7 @@ A step that starts an agent to do the work. A step with `agent` is an agent step
 |mapping
 |optional
 |`{}`
-|Fixed environment variables (`NAME: value`) added to the environment of this step's agent and of its `until` commands. Use it for settings a test or a tool reads (the URL of the environment under test, say). The same rules as a command step's `env`; writing `{inputs.<name>}` makes that input one that "reaches a command". `until.env` is layered on top. The agent's instructions carry the names and values as `Your environment also has these set for this step`. **Never a secret** (declare the environment variable's name under `env_required`).
+|Fixed environment variables (`NAME: value`) added to the environment of this step's agent and of its `until` commands. Use it for settings a test or a tool reads (the URL of the environment under test, say). The same rules as a command step's `env`; writing `{inputs.<name>}` makes that input one that "reaches a command", and in a `for_each` step `{item}` can be written too. `until.env` is layered on top. The agent's instructions carry the names and values as `Your environment also has these set for this step`. **Never a secret** (declare the environment variable's name under `env_required`; the same name here is refused by validation). Names that change what the agent's tool runs or where it talks (`PATH`, `PATHEXT`, `COMSPEC`, `SHELL`, `HOME`, `USERPROFILE`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_*`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_*`, `ANTHROPIC_*`, `GIT_*`, `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`) cannot be set on an agent step (the hooks must keep running; a command step's `env` may still set them).
 
 |`for_each`
 |mapping

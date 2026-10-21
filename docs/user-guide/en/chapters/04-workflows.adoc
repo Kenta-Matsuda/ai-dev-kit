@@ -230,7 +230,7 @@ aidev create workflow e2e-tests
 ✓ wrote .aidev/agents/playwright-test-reviewer.md
 ✓ wrote .aidev/agents/playwright-test-writer.md
 ✓ wrote .aidev/skills/playwright-testing/SKILL.md
-    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、…
+    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
     the files are this PKG's now: edit what differs here (the paths the steps write, the commands they run), then submit them for review
     inputs: spec (a file, --input only), base_url (required), test_user (required), batch_size (default 10)
     set this PKG's values once in aidev.yaml (--input overrides them per run):
@@ -241,6 +241,12 @@ aidev create workflow e2e-tests
             test_user: <テストユーザーのログイン ID（ユーザー名かメールアドレス）>
             batch_size: 10
     before a run, export in the shell: E2E_PASSWORD (テストユーザーのパスワード（実行する人が export する。ファイルには書かない）)
+
+ℹ Next:
+    1. review:  git diff -- .aidev/workflows/e2e-tests/ .aidev/agents/ .aidev/skills/
+    2. try:     aidev run workflow e2e-tests --trial   ← runs it as it is here; pushes nothing
+    3. submit:  aidev submit workflow e2e-tests        ← branch + pull request for the reviewer
+    4. run:     aidev run workflow e2e-tests           ← once merged (anyone on the team)
 ----
 
 * What is copied is `workflow.yaml` (its `name:` is rewritten to the name you gave) and the agents (`.aidev/agents/`) and skills (`.aidev/skills/`) it uses. Once copied, they are **this PKG's files**. Like any other workflow, try it with `--trial`, open a PR with `aidev submit workflow`, and approve it by merging. A run never refers to the ADK's files.
@@ -250,7 +256,7 @@ aidev create workflow e2e-tests
 How `playwright-tests` goes, and what it assumes.
 
 . `deps` (command step): `npm ci` installs the dependencies into the run's worktree. For a pnpm / yarn PKG, or one whose tests are in another directory, change this command and `cwd`
-. `playwright` (command step): `npx playwright --version`. Without Playwright (`@playwright/test` and `playwright.config.*`) in the PKG, it stops here
+. `playwright` (command step): `node node_modules/@playwright/test/cli.js --version`. Without `@playwright/test` among this PKG's dependencies, it stops here (`playwright.config.*` and the machine's browsers, `npx playwright install`, are not what this check looks at)
 . `plan` (agent step, writes nothing): reads the specification, splits the cases by screen or feature into batches of at most `batch_size`, and puts them in the run's notes
 . `scaffold` (agent step): writes the shared helpers (reading the environment variables, logging in) in `tests/e2e/support/` and a smoke test in `tests/e2e/smoke/`, and makes it pass against the target environment. When the URL, the user, the password or the login screen is wrong, this is where it shows
 . `generate` (agent step, `for_each`, 4 batches at a time by default): writes `tests/e2e/cases/<batch>/<case id>.spec.ts` for each batch and fixes them until that batch's tests pass (up to 3 times). A batch that does not pass is undone and the next one starts (`on_failure: continue`)
@@ -520,7 +526,7 @@ env_required:
 
 * `aidev run workflow` (`--dry-run` too) checks **by name only** that the declared variables are set, and when one is not, nothing starts: it stops with `the environment variable E2E_PASSWORD (…) is not set; the workflow needs it (env_required)`. The `env` row of `--dry-run` shows `set` / `NOT SET`. The values are not shown.
 * The values reach the environment of the agents and commands (the child processes inherit the shell environment of the person running it, the same way as before). The instructions get **the names and descriptions only**, under `## Environment variables of this run`, and the agents are told to write the values nowhere. `run.json`, the logs, the PR body and the commits do not carry the values either.
-* The tests and commands read them at run time, as in `process.env.E2E_PASSWORD`. The same name cannot be written in the `env` of a command step or of `until` (validation refuses it).
+* The tests and commands read them at run time, as in `process.env.E2E_PASSWORD`. The same name cannot be written in the `env` of a command step, of an agent step or of `until` (validation refuses it).
 * A name follows the rules of environment variables (a letter or `_` first, then letters, digits and `_`); `AIDEV_*` and `GIT_CONFIG*` cannot be written.
 * The declaration appears under `## Environment variables the run needs` in the submit PR body. The reviewer checks that the variables listed there really are credentials (a setting goes in `inputs` or `env`).
 

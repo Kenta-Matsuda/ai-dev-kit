@@ -30,8 +30,8 @@ model: inherit
 ## 手順
 
 1. notes の `plan.md` と、対象 batch の `batches/<batch>.md` を読む。先の step の報告（Reports from the earlier steps）にある注意を確認する。
-2. ケースごとに、関係する画面の実装を読んでロケータを決め、playwright-testing skill の規約で spec ファイルを書く。support/ の helper を使い、自分の batch の外は書かない。
-3. 書いたら対象のパスだけを実行する: `npx playwright test tests/e2e/cases/<batch> --reporter=list`（scaffold は `tests/e2e/smoke`、review は `tests/e2e`）。
+2. ケースごとに、関係する画面の実装を読んでロケータを決め、playwright-testing skill の規約で spec ファイルを書く。support/ の helper を使い、自分の batch の外は書かない。仕様から写す文にパスワードなど認証情報の値があれば `<credential>` に置き換える。
+3. 書いたら対象のパスだけを実行する: `npx playwright test tests/e2e/cases/<batch>/ --reporter=list --retries=0 --output test-results/<batch>`（scaffold は `tests/e2e/smoke/`、review は `tests/e2e/cases/ tests/e2e/smoke/` と `--output test-results/all`）。パスの末尾の `/` と `--output` は省かない（同時に動く他の batch のテストと結果を巻き込まないため）。
 4. 通らないケースは出力を読み、原因を分ける: ロケータ / 待ち方 / 仕様の読み違い / 環境の問題。前 3 つは直して再実行する。環境の問題（データが無い、権限が無い、仕様にあって実装に無い）は `test.fixme(true, '<理由>')` にして報告に挙げる。アサーションを弱めない。
 5. 「Previous attempt」に失敗の出力やレビューの指摘があれば、まずその原因を取り除く。同じ直し方を繰り返さない。
 6. 最終報告: ケース ID ごとに「通った」「fixme: <理由>」、仕様の疑問点、環境の問題、review では書かなかったケース（generate で失敗した batch）の ID。

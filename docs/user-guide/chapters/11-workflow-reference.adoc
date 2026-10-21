@@ -313,7 +313,7 @@ env_required:
 |`env_required`
 |名前の list、または名前 → 説明の mapping
 |任意
-|名前は環境変数の規則（`^[A-Za-z_][A-Za-z0-9_]{0,63}$`）。`AIDEV_*` と `GIT_CONFIG*` は書けません。32 個まで。説明は 1 行で、実行する人向けのエラー、`--dry-run` の `env` の行、提出の PR 本文の `## Environment variables the run needs`、agent の指示の `## Environment variables of this run` に出ます。同じ名前を command step や `until` の `env` に書くと検証で拒否されます（`env sets <NAME>, which env_required says the shell provides`）。
+|名前は環境変数の規則（`^[A-Za-z_][A-Za-z0-9_]{0,63}$`）。`AIDEV_*` と `GIT_CONFIG*` は書けません。32 個まで。説明は 1 行で、実行する人向けのエラー、`--dry-run` の `env` の行、提出の PR 本文の `## Environment variables the run needs`、agent の指示の `## Environment variables of this run` に出ます。同じ名前を command step・agent step・`until` の `env` に書くと検証で拒否されます（`env sets <NAME>, which env_required says the shell provides`）。
 |===
 
 * `aidev run workflow` と `--dry-run` は、起動前の検査で変数が設定されているか（空でないか）を確かめます。無ければ `the environment variable <NAME> (<説明>) is not set; the workflow needs it (env_required). Export it in the shell that runs aidev; …` と表示して終了コード 1 です。`--resume` でも同じです。`--dry-run` の `env` の行は `<NAME>: set` か `<NAME>: NOT SET` です。
@@ -442,7 +442,7 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |mapping
 |任意
 |`{}`
-|このステップの agent と、その `until` のコマンドの環境に足す固定の環境変数（`NAME: value`）。テストやツールが読む設定（対象環境の URL など）を渡します。command step の `env` と同じ規則で、`{inputs.<name>}` を書くとその入力は「コマンドに届く」扱いになります。`until.env` はこの上に重なります。agent の指示には `Your environment also has these set for this step` として名前と値が入ります。**秘密情報は書きません**（`env_required` で環境変数の名前を宣言します）。
+|このステップの agent と、その `until` のコマンドの環境に足す固定の環境変数（`NAME: value`）。テストやツールが読む設定（対象環境の URL など）を渡します。command step の `env` と同じ規則で、`{inputs.<name>}` を書くとその入力は「コマンドに届く」扱いになり、`for_each` のステップでは `{item}` も書けます。`until.env` はこの上に重なります。agent の指示には `Your environment also has these set for this step` として名前と値が入ります。**秘密情報は書きません**（`env_required` で環境変数の名前を宣言します。同じ名前をここに書くと検証で拒否されます）。agent のツールが何を実行し、どこと通信するかを変える名前（`PATH`・`PATHEXT`・`COMSPEC`・`SHELL`・`HOME`・`USERPROFILE`・`NODE_OPTIONS`・`NODE_PATH`・`NODE_EXTRA_CA_CERTS`・`SSL_CERT_*`・`LD_PRELOAD`・`LD_LIBRARY_PATH`・`DYLD_*`・`CLAUDE_*`・`ANTHROPIC_*`・`GIT_*`・`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`）は agent step では書けません（hook が動き続けるため。command step の `env` では書けます）。
 
 |`for_each`
 |mapping

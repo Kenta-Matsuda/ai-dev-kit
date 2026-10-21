@@ -198,7 +198,7 @@ workflow名（`layout.WORKFLOW_NAME_RE`）から`{ inputs: { <input>: <value> } 
 
 - `workflows.<name>`のkeyは`inputs`だけ（他は`unknown key`）。input名は`layout.INPUT_NAME_RE`
 - 値はplain scalar（文字列化する。list / mappingはerror）
-- **認証情報は拒否**: 名前が`CREDENTIAL_NAME_RE`（`password` / `passwd` / `pass` / `secret` / `token` / `pat` / `credential(s)` / `api_key` / `private_key`を語として含む）に当たるinput、または40文字以上のbase64らしい値はerror。このfileはcommitされるため。認証情報はworkflowの`env_required`で環境変数から受け取る
+- **認証情報は拒否**: 名前が`CREDENTIAL_NAME_RE`に当たるinputはerror。`password` / `passwd` / `passphrase` / `passcode` / `secret`をどこかに含む、`(api|access|private|ssh|signing)[_-]?key`を含む、`_` / `-`で区切った末尾の語が`pass` / `pw` / `pwd` / `pat` / `otp` / `auth` / `credential(s)`、`(auth|api|access|session|bearer|refresh)[_-]?token(s)`で終わる、`token(s)`そのもの（`pass_rate` / `token_limit` / `max_tokens` / `credential_type`は通る）。値は`credentialValueReason`で見る: パスワード入りURL（`://user:pw@`）、tokenの形（`ghp_` / `gh[osur]_` / `github_pat_`、`xox[abps]-`、`sk-`、`AKIA…`、JWT）、40文字以上のbase64らしい並び（40 / 64桁のhexはgit SHAとして通す）。このfileはcommitされるため。認証情報はworkflowの`env_required`で環境変数から受け取る
 - 宣言に無い名前と`file: true`のinputはここでは検出できず、`run` / `estimate`のときに`collectInputs`がerrorにする
 - `aidev.yaml`は既定policyでagentが書けるfileなので、ここに書いた値は`--input`と同じ「data」の扱い（commandに届く値は`COMMAND_VALUE_RE`と作者の`pattern`で縛られる）。承認の対象（`reviewedFiles`）ではない
 

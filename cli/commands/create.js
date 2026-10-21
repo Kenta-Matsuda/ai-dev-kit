@@ -124,6 +124,7 @@ async function createFile(ctx, kind, name) {
   const rel = kind === 'agent' ? wfMod.agentRel(name) : wfMod.skillRel(name);
   const full = layout.abs(repoRoot, rel);
   if (fs.existsSync(full) && !flags.force) throw new AidevError(`${rel} already exists (pass --force to overwrite)`);
+  if (flags.from != null) throw new AidevError(`--from copies a standard workflow, agents and skills included; it belongs to "aidev create workflow <name> --from <standard>"`);
   ui.heading(`aidev create ${kind} ${name}`);
   if (flags.describe != null) {
     if (kind === 'skill') throw new AidevError('--describe is not available for skills: a skill is a procedure a person writes');

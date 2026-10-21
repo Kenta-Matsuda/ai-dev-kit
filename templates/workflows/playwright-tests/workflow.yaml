@@ -26,7 +26,7 @@ inputs:
     file: true
   base_url:
     description: テスト対象環境の URL（ルート。例 https://staging.example.com）
-    pattern: 'https?://[A-Za-z0-9._:@=+-]+(/[A-Za-z0-9._:@=+/-]*)?'
+    pattern: 'https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._+/-]*)?'   # ユーザー名:パスワード@ を含む URL は通さない
   test_user:
     description: テストユーザーのログイン ID（ユーザー名かメールアドレス）
     pattern: '[A-Za-z0-9._@+-]+'
@@ -54,8 +54,8 @@ steps:
     command: npm ci
     timeout_minutes: 20
   - id: playwright
-    description: Playwright が入っていなければここで止まる（@playwright/test と playwright.config をこの PKG に用意してから実行する）
-    command: npx playwright --version
+    description: この PKG に @playwright/test が入っていなければここで止まる（playwright.config とブラウザ（npx playwright install）も PKG と端末に用意してから実行する）
+    command: node node_modules/@playwright/test/cli.js --version
   - id: plan
     description: 仕様書を読んでケースを batch に分け、この実行の notes に置く（ソースは書かない）
     agent: playwright-test-planner
@@ -63,10 +63,10 @@ steps:
     prompt: |
       テスト仕様書 {inputs.spec} を読み、ケース（ID・タイトル・前提・手順・期待結果）を取り出す。
       ケースを画面や機能ごとにまとめ、1 batch を {inputs.batch_size} ケース以下に分けて、notes ディレクトリに次を書く:
-        - batches.txt: 1 行 1 batch の名前（小文字の英数字とハイフンだけ。例 login-01）。generate step はこの順に 1 batch ずつ agent を起動する
-        - batches/<batch>.md: その batch のケースを仕様の原文のまま（ID・タイトル・前提・手順・期待結果）と、関係する画面・ルート・コンポーネントのファイル
+        - batches.txt: 1 行 1 batch の名前（小文字の英数字とハイフンだけ。例 login-01。他の batch 名の先頭と同じ文字列で始めない）。generate step はこの順に 1 batch ずつ agent を起動する
+        - batches/<batch>.md: その batch のケースを仕様の原文のまま（ID・タイトル・前提・手順・期待結果。ただしパスワード・トークンなど認証情報の値は <credential> に置き換える）と、関係する画面・ルート・コンポーネントのファイル
         - plan.md: アプリの構成、ログインの仕方（画面・入力欄）、ロケータの方針、この PKG の既存テストの慣習、Playwright の設定（testDir・projects・webServer）で注意すること
-      ソースは書かない。ケースが 1 件も読み取れなければ batches.txt を書かず、理由を報告する。
+      ソースは書かない。ケースが 1 件も読み取れなければ batches.txt を作らず（空のファイルも書かない）、理由を報告する。
     timeout_minutes: 30
   - id: scaffold
     description: 共通の helper（環境変数の読み取り・ログイン）と、環境に到達できることを確かめる smoke test を書いて通す
@@ -82,7 +82,7 @@ steps:
       E2E_BASE_URL: "{inputs.base_url}"
       E2E_USER: "{inputs.test_user}"
     until:
-      command: npx playwright test tests/e2e/smoke --reporter=list --output test-results/smoke
+      command: npx playwright test tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/smoke
       env:
         CI: "1"
       timeout_minutes: 20
@@ -100,15 +100,16 @@ steps:
     prompt: |
       batch {item} のテストを書く。ケースは notes の batches/{item}.md に、方針は plan.md にある。
       ケース ID ごとに tests/e2e/cases/{item}/<ケース ID>.spec.ts を 1 つ書き、仕様の手順どおりに操作して期待結果をすべて検証する。
-      support/ の helper（env.ts・login.ts）を使う。support/ と他の batch のファイルは書かない。
-      書いたら `npx playwright test tests/e2e/cases/{item} --reporter=list` で実行し、通るまで直す。
+      support/ の helper（env.ts・login.ts）を使う。support/ と他の batch のファイルは書かない。仕様から写す文に認証情報の値があれば <credential> に置き換える。
+      書いたら `npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}` で実行し、通るまで直す
+      （パスの末尾の / と --output は必ず付ける。他の batch が同時に動いていて、無いと他の batch のテストや結果まで巻き込む）。
       通らないケースは原因（ロケータ・待ち方・仕様の読み違い・環境の問題）を突き止めて直す。アサーションを弱めて通さない。
       仕様にあって実装にない振る舞いは test.fixme に理由を付け、報告に挙げる。
     env:
       E2E_BASE_URL: "{inputs.base_url}"
       E2E_USER: "{inputs.test_user}"
     until:
-      command: npx playwright test tests/e2e/cases/{item} --reporter=list --output test-results/{item}
+      command: npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}
       env:
         CI: "1"
       timeout_minutes: 30
@@ -119,23 +120,25 @@ steps:
     agent: playwright-test-writer
     writable: [tests/e2e/cases/**, tests/e2e/support/**]
     prompt: |
-      すべての batch が書き終わった。tests/e2e/ 全体を `npx playwright test tests/e2e --reporter=list` で実行し、通らないものを直す。
+      すべての batch が書き終わった。この workflow が書いた範囲を `npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all` で実行し、通らないものを直す。
       複数の batch が同じ helper を書いていれば support/ に 1 つにまとめ、各 batch から使う。
       generate step の報告で失敗（left out）になった batch のケースはここでは書かない。報告に、書かなかったケース ID と理由を挙げる。
+      generate step の対象が 0 件だった（batch が無かった）なら、ケースを書かずにその旨を報告して終える。
       レビューの指摘（Previous attempt）があれば、それを直してから再実行する。
     env:
       E2E_BASE_URL: "{inputs.base_url}"
       E2E_USER: "{inputs.test_user}"
     until:
-      command: npx playwright test tests/e2e --reporter=list --output test-results/all
+      command: npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all
       env:
         CI: "1"
       timeout_minutes: 90
       agent: playwright-test-reviewer
       prompt: |
         テスト仕様書 {inputs.spec} のケースごとに、tests/e2e/cases/ の下に対応する spec ファイルがあり、仕様の手順どおりに操作して
-        期待結果をすべて検証しているか。アサーションを弱めたもの、test.skip・.only・waitForTimeout、認証情報の直書き、
-        仕様に無い操作、理由の無い test.fixme が無いか。足りないものはファイルとケース ID と内容を具体的に挙げる。
+        期待結果をすべて検証しているか。アサーションを弱めたもの、test.skip・.only・waitForTimeout、認証情報の直書き
+        （仕様から写したコメントにパスワードの値が残っているものを含む）、仕様に無い操作、理由の無い test.fixme が無いか。
+        足りないものはファイルとケース ID と内容を具体的に挙げる。
         generate step で失敗として残ったケース（報告にある）は無くてよい。
       max_retries: 2
     timeout_minutes: 90

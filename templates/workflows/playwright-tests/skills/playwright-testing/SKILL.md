@@ -5,7 +5,7 @@ description: テスト仕様書から Playwright のテストを書くときの�
 
 # playwright-testing
 
-テスト仕様書の 1 ケースを、`{inputs.base_url}` で動いている環境に対する Playwright のテスト 1 つに写す手順と規約です。
+テスト仕様書の 1 ケースを、環境変数 `E2E_BASE_URL`（workflow の入力 `base_url`）の環境に対する Playwright のテスト 1 つに写す手順と規約です。
 
 ## 接続情報は環境変数から読む（値は書かない）
 
@@ -22,7 +22,7 @@ description: テスト仕様書から Playwright のテストを書くときの�
 ## 1 ケース = 1 spec ファイル
 
 - `tests/e2e/cases/<batch>/<ケース ID>.spec.ts`。ファイル名はケース ID を小文字の英数字とハイフンにしたもの（`TC-012` → `tc-012.spec.ts`）
-- ファイル冒頭のコメントに、仕様のそのケース（ID・タイトル・前提・手順・期待結果）を **原文のまま** 写す。レビューする人が仕様と突き合わせられるようにする
+- ファイル冒頭のコメントに、仕様のそのケース（ID・タイトル・前提・手順・期待結果）を **原文のまま** 写す。レビューする人が仕様と突き合わせられるようにする。ただし仕様にパスワード・トークンなど認証情報の値が書かれていれば `<credential>` に置き換える（コメントも PR に入る）
 - `test.describe('<ケース ID>', …)` の中に `test('<仕様のタイトル原文>', …)` を 1 つ。手順ごとに `test.step('<手順の原文>', …)` で区切り、期待結果ごとに `expect` を書く
 - 前提（ログイン済み、特定のデータがある）は test の先頭で helper を使って作る。他のテストの結果に依存しない
 - 仕様にあって実装に無い振る舞い、期待結果が曖昧で検証できないものは、推測で緩めず `test.fixme(true, '<理由>')` にして最終報告に挙げる
@@ -42,11 +42,11 @@ description: テスト仕様書から Playwright のテストを書くときの�
 
 ## 実行と通し方
 
-- 自分で `npx playwright test <path> --reporter=list` を実行する（workflow の `until` も同じコマンドで判定する）
+- 自分で `npx playwright test <batch のディレクトリ>/ --reporter=list --retries=0 --output test-results/<batch>` を実行する（workflow の `until` も同じコマンドで判定する）。パスの末尾の `/` と `--output` は必ず付ける: 引数は正規表現で、`cart` は `cart-coupon` にも当たる。`--output` が無いと Playwright は既定の `test-results/` を丸ごと消し、同時に動く他の batch の結果を壊す
 - 通らないときは失敗の出力（どの手順のどの expect か、実際の画面）を読み、原因を 4 つに分ける: ロケータが違う / 待ちが足りない / 仕様の読み違い / 環境の問題（データが無い、権限が無い）。前 3 つは直す。環境の問題は `test.fixme` に理由を付けて報告する
 - アサーションを弱めて通さない。`test.skip` で通さない。`retries` を増やさない
 - この PKG に既にある Playwright のテスト（fixture・helper・命名・ディレクトリ）があれば、その書き方に合わせる
 
 ## 書いてはいけないもの
 
-- 認証情報の値、`.only`、`page.waitForTimeout`、`playwright.config.*` / `package.json` の変更、`tests/e2e/` の外のファイル、`console.log` による値の出力
+- 認証情報の値（仕様から写したコメントの中も）、`.only`、`page.waitForTimeout`、`playwright.config.*` / `package.json` の変更、`console.log` による値の出力。テストを書く step では `tests/e2e/` の外（実行の notes ディレクトリを除く）に書かない

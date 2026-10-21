@@ -299,13 +299,24 @@ function cwdRel(v, field, where) {
  * reviewed YAML, so they are settings (CI=1, a local URL), never secrets; the
  * runner's own AIDEV_* variables cannot be set from here.
  */
-function envMap(v, field, where) {
+/**
+ * Names an agent step's `env` may not set: they change what the agent's
+ * tool runs (and so whether the kit's hooks run), where it talks, or how git
+ * behaves under it. A command step's env is the kit's own child and has no
+ * hook to defeat, so these stay allowed there.
+ */
+const AGENT_ENV_DENY_RE = /^(PATH|PATHEXT|COMSPEC|SHELL|HOME|USERPROFILE|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*|CLAUDE_.*|ANTHROPIC_.*|GIT_.*|HTTPS?_PROXY|ALL_PROXY|NO_PROXY)$/i;
+
+function envMap(v, field, where, { agent = false } = {}) {
   if (v == null) return {};
   if (typeof v !== 'object' || Array.isArray(v)) throw new AidevError(`${where}: ${field} must be a mapping of NAME: value`);
   const out = {};
   for (const [k, raw] of Object.entries(v)) {
     if (!ENV_NAME_RE.test(k)) throw new AidevError(`${where}: ${field}: ${JSON.stringify(k)} is not an environment variable name`);
     if (/^AIDEV_/i.test(k)) throw new AidevError(`${where}: ${field}: ${k} is the kit's own; a workflow cannot set AIDEV_* variables`);
+    if (agent && AGENT_ENV_DENY_RE.test(k)) {
+      throw new AidevError(`${where}: ${field}: ${k} changes what the agent's tool runs or where it talks; a workflow cannot set it for an agent (it comes from the shell that runs aidev)`);
+    }
     // The git configuration a run hands its children (a trial's no-push settings) is not a step's to change.
     if (/^GIT_CONFIG/i.test(k)) throw new AidevError(`${where}: ${field}: ${k} is git configuration, which the runner sets; a workflow cannot set GIT_CONFIG* variables`);
     if (raw == null || typeof raw === 'object') throw new AidevError(`${where}: ${field}: ${k} must be a plain value`);
@@ -339,7 +350,7 @@ function envRequiredSpec(v, source) {
     if (descRaw != null && typeof descRaw === 'object') throw new AidevError(`${where}: ${name} takes a description (one line of text), nothing else`);
     const desc = String(descRaw == null ? '' : descRaw).trim();
     if (/[\r\n\0]/.test(desc)) throw new AidevError(`${where}: the description of ${name} must be a single line`);
-    if (name in out) throw new AidevError(`${where}: ${name} is listed twice`);
+    if (Object.prototype.hasOwnProperty.call(out, name)) throw new AidevError(`${where}: ${name} is listed twice`);
     out[name] = desc;
   }
   return out;
@@ -493,15 +504,17 @@ function parseItems(text, spec) {
   return items;
 }
 
-/** The step as one target sees it: `{item}` replaced in the prompt and in `until`. */
+/** The step as one target sees it: `{item}` replaced in the prompt, the env values and in `until`. */
 function forItem(step, item) {
   const put = (s) => String(s).split(ITEM_TOKEN).join(item);
+  const env = (e) => Object.fromEntries(Object.entries(e || {}).map(([k, v]) => [k, put(v)]));
   const until = step.until && {
     ...step.until,
     commands: step.until.commands.map((c) => ({ text: put(c.text), argv: c.argv.map(put) })),
+    env: env(step.until.env),
     prompt: step.until.prompt == null ? null : put(step.until.prompt),
   };
-  return { ...step, prompt: put(step.prompt), writable: step.writable.map(put), until };
+  return { ...step, prompt: put(step.prompt), writable: step.writable.map(put), env: env(step.env), until };
 }
 
 function positiveInt(v, field, source, { max, min = 1 }) {
@@ -942,11 +955,11 @@ function validateDefinition(raw, source = 'workflow.yaml') {
       // Fixed environment variables for the step's agent and its until
       // commands (settings a tool or a test reads: a URL, a mode), as a
       // command step's env. The until's own env comes on top of it.
-      step.env = envMap(s.env, 'env', where);
+      step.env = envMap(s.env, 'env', where, { agent: true });
       step.for_each = forEachSpec(s.for_each, where);
       step.until = untilSpec(s.until, where);
       if (step.until && step.until.agent && !agents.includes(step.until.agent)) agents.push(step.until.agent);
-      const usesItem = [step.prompt, ...step.writable, ...(step.until ? [...step.until.commands.map((c) => c.text), step.until.prompt || ''] : [])]
+      const usesItem = [step.prompt, ...step.writable, ...Object.values(step.env), ...(step.until ? [...step.until.commands.map((c) => c.text), step.until.prompt || '', ...Object.values(step.until.env)] : [])]
         .some((t) => t.includes(ITEM_TOKEN));
       if (step.for_each && !step.prompt.includes(ITEM_TOKEN)) {
         throw new AidevError(`${where}: a for_each step's prompt must name its target as ${ITEM_TOKEN}`);
@@ -1030,7 +1043,7 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   def.env_required = envRequiredSpec(raw.env_required, source);
   for (const s of def.steps) {
     const fixed = [...Object.keys(s.env || {}), ...Object.keys((s.until && s.until.env) || {})];
-    const hit = fixed.find((k) => k in def.env_required);
+    const hit = fixed.find((k) => Object.prototype.hasOwnProperty.call(def.env_required, k));
     if (hit) throw new AidevError(`${source}: steps[${s.id}]: env sets ${hit}, which env_required says the shell provides; take it out of one of them`);
   }
   def.provide = assertGlobList(raw.provide, 'provide', source);

@@ -302,6 +302,7 @@ function run() {
     throws(() => cfg.validateConfig({ ...clone(base), references: { testing: ['docs/plan.docx'] } }), /\.docx/);
     throws(() => cfg.validateConfig({ ...clone(base), references: { conventions: ['../x.md'] } }), /inside the repository/);
     throws(() => cfg.validateConfig({ ...clone(base), references: { 'Bad Topic': ['a.md'] } }), /topic names/);
+    throws(() => cfg.validateConfig({ ...clone(base), references: { testing: 'a.md' } }), /references\.testing must be a list/);
   });
 
   test('workflows.<name>.inputs sets a workflow\'s input values for this PKG; a credential is refused by name', () => {
@@ -316,8 +317,14 @@ function run() {
       throws(() => cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { [name]: 'x' } } } }), /must not be set here: aidev\.yaml is committed, and a credential never is/, name);
     }
     eq(cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { keyboard: 'x', patient_id: '1', passage: 'y' } } } }).workflows.e2e.inputs, { keyboard: 'x', patient_id: '1', passage: 'y' }, 'only a whole word names a credential');
+    for (const name of ['passphrase', 'pwd', 'otp', 'access_key', 'ssh_key', 'secretkey', 'dbpassword', 'auth_token', 'basic_auth', 'tokens']) {
+      throws(() => cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { [name]: 'x' } } } }), /must not be set here/, name);
+    }
+    eq(Object.keys(cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { pass_rate: '90', token_limit: '4000', max_tokens: '8000', credential_type: 'oauth' } } } }).workflows.e2e.inputs), ['pass_rate', 'token_limit', 'max_tokens', 'credential_type'], 'a setting that merely contains such a word is not a credential');
     throws(() => cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { base_url: 'A'.repeat(48) } } } }), /looks like an embedded credential/);
-    throws(() => cfg.validateConfig({ ...clone(base), references: { testing: 'a.md' } }), /references\.testing must be a list/);
+    throws(() => cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { base_url: 'https://qa:S3cret@staging.example.com' } } } }), /looks like a URL with a password in it/);
+    throws(() => cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { base_url: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' } } } }), /looks like a token/);
+    eq(cfg.validateConfig({ ...clone(base), workflows: { e2e: { inputs: { base_commit: '0123456789abcdef0123456789abcdef01234567' } } } }).workflows.e2e.inputs.base_commit, '0123456789abcdef0123456789abcdef01234567', 'a git SHA is not a credential');
   });
 
   suite('config: policy');
