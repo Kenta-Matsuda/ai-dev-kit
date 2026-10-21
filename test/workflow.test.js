@@ -34,6 +34,8 @@ const { suite, test, ok, eq, throws } = require('./harness');
 const { makeRepo, write, git } = require('./fixtures');
 const { aidev, lastJson } = require('./completion.test');
 const wfMod = require('../cli/lib/workflow');
+const cfgMod = require('../cli/lib/config');
+const toolsMod = require('../cli/lib/tools');
 
 const KIT_ROOT = path.resolve(__dirname, '..');
 
@@ -55,7 +57,8 @@ const agentsAt = argv.indexOf('--agents');
 if (agentsAt >= 0 && process.env.STUB_AGENTS_OUT) fs.writeFileSync(process.env.STUB_AGENTS_OUT, fs.readFileSync(argv[agentsAt + 1]));
 // STUB_SPANS_OUT: one line per start (step, target, start and end time); STUB_SLEEP_MS keeps each start busy that long.
 const startedAt = Date.now();
-if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null, ...(process.env.AIDEV_WORKFLOW_TRIAL ? { AIDEV_WORKFLOW_TRIAL: process.env.AIDEV_WORKFLOW_TRIAL } : {}) }));
+// STUB_ENV_PICK: more variables (comma-separated names) to record, as the agent's environment holds them.
+if (process.env.STUB_ENV_OUT) fs.writeFileSync(process.env.STUB_ENV_OUT, JSON.stringify({ AIDEV_WORKFLOW: process.env.AIDEV_WORKFLOW || null, AIDEV_WORKFLOW_STEP: process.env.AIDEV_WORKFLOW_STEP || null, ...(process.env.AIDEV_WORKFLOW_TRIAL ? { AIDEV_WORKFLOW_TRIAL: process.env.AIDEV_WORKFLOW_TRIAL } : {}), ...Object.fromEntries(String(process.env.STUB_ENV_PICK || '').split(',').filter(Boolean).map((k) => [k, process.env[k] == null ? null : process.env[k]])) }));
 if (process.env.STUB_STEPS_OUT) fs.appendFileSync(process.env.STUB_STEPS_OUT, (process.env.AIDEV_WORKFLOW_STEP || '') + '\\n');
 // An until agent (step "<id>:until") answers the next verdict from STUB_VERDICTS (a JSON list).
 let answer = process.env.STUB_ANSWER || 'stub answer';
@@ -150,7 +153,7 @@ function run() {
     const d = wfMod.validateDefinition({ ...GOOD, tool: 'claude', model: '' }, 'wf');
     eq(d.agents, ['issue-to-pr'], 'the agents are the ones the steps name');
     eq([d.tool, d.model], ['claude', null]);
-    eq(d.steps[0], { id: 'a', kind: 'agent', description: '', agent: 'issue-to-pr', prompt: 'go', writable: ['src/**'], unchanged: [], for_each: null, until: null, max_retries: 0, timeout_ms: null });
+    eq(d.steps[0], { id: 'a', kind: 'agent', description: '', agent: 'issue-to-pr', prompt: 'go', writable: ['src/**'], unchanged: [], env: {}, for_each: null, until: null, max_retries: 0, timeout_ms: null });
     const each = wfMod.validateDefinition(withStep({
       prompt: 'test {item}', unchanged: ['tests/**'], for_each: { from: 'targets.txt', max_items: 5 }, until: { command: 'npx playwright test {item}' },
     }), 'wf').steps[0];
@@ -355,7 +358,7 @@ function run() {
     eq(wfMod.pathspecs(['e2e/**'], ['**/node_modules/**']), [':(glob)e2e/**', ':(exclude,glob)**/node_modules/**']);
     // The values: given, checked, defaults filled in, written where the definition named them.
     const v = wfMod.collectInputs(d, ['spec=docs/spec/login.txt', 'notes=be brief']);
-    eq(v, { spec: 'docs/spec/login.txt', notes: 'be brief', browser: 'chromium' });
+    eq(v, { spec: 'docs/spec/login.txt', browser: 'chromium', notes: 'be brief' }, 'in the order they are declared');
     const live = wfMod.withInputs(d, v);
     eq([live.objective, live.steps[0].prompt], ['from docs/spec/login.txt', 'read docs/spec/login.txt for be brief']);
     eq(live.steps[0].until.commands[0].argv, ['npx', 't', '--project', 'chromium'], 'a value is one argv entry');
@@ -412,6 +415,55 @@ function run() {
     // --input is a flag that may be repeated.
     const { parseArgs } = require('../cli/lib/args');
     eq(parseArgs(['--input', 'a=1', '--input=b=2', 'x'], { input: 'list' }), { flags: { input: ['a=1', 'b=2'] }, positionals: ['x'] });
+  });
+
+  test('env_required names what the shell must set; aidev.yaml may set an input\'s value, never a credential or a file', () => {
+    const base = { ...GOOD, inputs: { url: { pattern: 'https?://[a-z.:/-]+' }, browser: { default: 'chromium', pattern: '[a-z]+' }, spec: { file: true } }, steps: [{ ...GOOD.steps[0], prompt: 'go {inputs.spec}', until: { command: 'node x {inputs.url} {inputs.browser}' } }] };
+    // A list of names, or a mapping of name to a description for the person running it.
+    eq(wfMod.validateDefinition({ ...base, env_required: ['E2E_PASSWORD', 'API_TOKEN'] }, 'wf').env_required, { E2E_PASSWORD: '', API_TOKEN: '' });
+    const d = wfMod.validateDefinition({ ...base, env_required: { E2E_PASSWORD: 'the password of the test user', API_TOKEN: null } }, 'wf');
+    eq(d.env_required, { E2E_PASSWORD: 'the password of the test user', API_TOKEN: '' });
+    eq(wfMod.validateDefinition(base, 'wf').env_required, {}, 'absent means none');
+    throws(() => wfMod.validateDefinition({ ...base, env_required: 'E2E_PASSWORD' }, 'wf'), /env_required is a list of environment variable names, or a mapping/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['e2e password'] }, 'wf'), /not an environment variable name/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['AIDEV_WORKFLOW'] }, 'wf'), /the kit's own/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['GIT_CONFIG_COUNT'] }, 'wf'), /git configuration/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: { X: { a: 1 } } }, 'wf'), /takes a description/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['X'], steps: [{ id: 'c', command: 'node x', env: { X: '1' } }] }, 'wf'), /env sets X, which env_required says the shell provides/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['X'], steps: [{ ...GOOD.steps[0], until: { command: 'node x', env: { X: '1' } } }] }, 'wf'), /env sets X/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['X'], steps: [{ ...GOOD.steps[0], env: { X: '1' } }] }, 'wf'), /env sets X/, 'an agent step\'s env too');
+    // An agent step's env: for the agent and its until commands; an input written there reaches a command.
+    const withEnv = wfMod.validateDefinition({ ...base, steps: [{ ...GOOD.steps[0], env: { BASE_URL: '{inputs.url}', MODE: 'e2e' }, until: { command: 'node x', env: { CI: '1' } } }] }, 'wf');
+    eq([withEnv.steps[0].env, withEnv.inputs.url.inCommand], [{ BASE_URL: '{inputs.url}', MODE: 'e2e' }, true]);
+    eq(wfMod.withInputs(withEnv, { url: 'https://x.example', browser: 'chromium' }).steps[0].env, { BASE_URL: 'https://x.example', MODE: 'e2e' });
+    throws(() => wfMod.validateDefinition({ ...GOOD, inputs: { v: {} }, steps: [{ ...GOOD.steps[0], env: { V: '{inputs.v}' } }] }, 'wf'), /reaches a command/, 'an agent step\'s env value is as much a command as an argument');
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], env: { AIDEV_WORKFLOW: 'x' } }] }, 'wf'), /cannot set AIDEV_\* variables/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'p', pull_request: {}, env: { A: '1' } }] }, 'wf'), /env does not belong to a pull-request step/);
+    // What the agent's tool runs and where it talks is the shell's to set, never a step's: the hooks must keep running.
+    for (const n of ['PATH', 'NODE_OPTIONS', 'HOME', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_BASE_URL', 'GIT_SSH_COMMAND', 'HTTPS_PROXY', 'DYLD_INSERT_LIBRARIES']) {
+      throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], env: { [n]: 'x' } }] }, 'wf'), /changes what the agent's tool runs or where it talks/, n);
+    }
+    eq(wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'c', command: 'node x', env: { PATH: '/opt/bin' } }] }, 'wf').steps[0].env, { PATH: '/opt/bin' }, 'a command step (no hook to defeat) may still set it');
+    eq(wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], env: { constructor: '1', toString: '2' } }], env_required: ['hasOwnProperty'] }, 'wf').env_required, { hasOwnProperty: '' }, 'names that are also Object.prototype properties are ordinary names');
+    // {item} in an env value: a target's name, as in the prompt; refused where there is no target.
+    const each = wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], prompt: 'do {item}', writable: ['out/{item}/**'], for_each: { from: 't.txt', max_items: 3 }, env: { TARGET: '{item}' }, until: { command: 'node x', env: { ALSO: 'pre-{item}' } } }] }, 'wf');
+    const one = wfMod.forItem(each.steps[0], 'login-01');
+    eq([one.env, one.until.env, one.prompt], [{ TARGET: 'login-01' }, { ALSO: 'pre-login-01' }, 'do login-01']);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], env: { TARGET: '{item}' } }] }, 'wf'), /\{item\} needs for_each/);
+    throws(() => wfMod.validateDefinition({ ...GOOD, steps: [{ ...GOOD.steps[0], until: { command: 'node x', env: { T: '{item}' } } }] }, 'wf'), /\{item\} needs for_each/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: ['X', 'X'] }, 'wf'), /X is listed twice/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: { X: 'a\nb' } }, 'wf'), /must be a single line/);
+    throws(() => wfMod.validateDefinition({ ...base, env_required: Array.from({ length: 33 }, (_, i) => `V${i}`) }, 'wf'), /above 32/);
+    // The values aidev.yaml sets for this workflow sit between --input and the defaults.
+    eq(wfMod.collectInputs(d, ['spec=package.json'], '--input', { configured: { url: 'https://cfg.example', browser: 'firefox' } }), { url: 'https://cfg.example', browser: 'firefox', spec: 'package.json' });
+    eq(wfMod.collectInputs(d, ['spec=package.json', 'browser=webkit'], '--input', { configured: { url: 'https://cfg.example', browser: 'firefox' } }).browser, 'webkit', '--input wins');
+    eq(wfMod.collectInputs(d, ['spec=package.json', 'url=https://flag.example'], '--input', { configured: {} }).browser, 'chromium', 'the default applies when neither sets it');
+    throws(() => wfMod.collectInputs(d, [], '--input', { configured: { url: 'https://cfg.example' } }), /needs --input for: spec/, 'a file input must still be given');
+    throws(() => wfMod.collectInputs(d, [], '--input', { configured: { spec: 'docs/x.txt' } }), /aidev\.yaml: workflows\.wf\.inputs: input spec is a file on the machine of whoever runs the workflow/);
+    throws(() => wfMod.collectInputs(d, [], '--input', { configured: { nope: '1' } }), /aidev\.yaml: workflows\.wf\.inputs: the workflow declares no input "nope" \(its inputs: url, browser, spec\)/);
+    throws(() => wfMod.collectInputs(d, [], '--input', { configured: { url: 'ftp://x' } }), /aidev\.yaml: workflows\.wf\.inputs: input url: "ftp:\/\/x" does not match its pattern/);
+    throws(() => wfMod.collectInputs(d, [], '--input', { configured: { url: 'https://x/../y' } }), /reaches a command/, 'the argv whitelist holds for a configured value too');
+    eq(Object.keys(wfMod.collectInputs(d, ['spec=package.json'], '--input', { configured: { browser: 'firefox', url: 'https://cfg.example' } })), ['url', 'browser', 'spec'], 'values come in the order the definition declares them');
   });
 
   test('subagents: an agent names the ones it may start, and the guard holds each to its own grants', () => {
@@ -484,6 +536,83 @@ function run() {
         const def = wfMod.loadDefinition(fx.root, 'scaffold');
         eq(def.agents, ['my-agent'], 'the template references the agent a team creates next');
         eq(wfMod.resolveDependencies(fx.root, KIT_ROOT, def).agents['my-agent'].source, 'pkg');
+      });
+
+      test('create --from copies a standard workflow of the kit, with its agents and skills, as files of this PKG', () => {
+        const standard = wfMod.listStandardWorkflows(KIT_ROOT);
+        ok(standard.some((w) => w.name === 'playwright-tests'), 'the kit bundles playwright-tests');
+        ok(standard.every((w) => w.description), 'every standard workflow describes itself');
+        ok(/bundles no standard workflow "nope" \(available: playwright-tests/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'nope']).out));
+        ok(/pass one of them/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--describe', 'x']).out));
+        ok(/--from copies a standard workflow.*aidev create workflow/.test(aidev(fx.root, ['create', 'agent', 'x', '--from', 'playwright-tests']).out), 'an agent is not copied from a standard workflow on its own');
+        ok(!fs.existsSync(path.join(fx.root, '.aidev', 'agents', 'x.md')));
+        const dry = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--dry-run', '--json']);
+        eq(dry.code, 0, dry.out);
+        ok(/would write \.aidev\/workflows\/e2e\/workflow\.yaml/.test(dry.out) && /would write \.aidev\/agents\/playwright-test-writer\.md/.test(dry.out), dry.out);
+        ok(!fs.existsSync(path.join(fx.root, '.aidev', 'workflows', 'e2e')), 'a dry run writes nothing');
+        const files = ['.aidev/workflows/e2e/workflow.yaml', '.aidev/agents/playwright-test-planner.md', '.aidev/agents/playwright-test-reviewer.md', '.aidev/agents/playwright-test-writer.md', '.aidev/skills/playwright-testing/SKILL.md'];
+        try {
+          const r = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--json']);
+          eq(r.code, 0, r.out);
+          const j = lastJson(r.out);
+          eq([j.ok, j.from, j.kept], [true, 'playwright-tests', []]);
+          eq(j.written, files);
+          eq([j.inputs, j.envRequired], [['spec', 'base_url', 'test_user', 'batch_size'], ['E2E_PASSWORD']]);
+          ok(/workflows:\n\s+e2e:\n\s+inputs:\n\s+base_url: <.*>/.test(r.out), `the aidev.yaml snippet names the PKG's values: ${r.out}`);
+          ok(/export in the shell: E2E_PASSWORD/.test(r.out), r.out);
+          const text = fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), 'utf8');
+          ok(/^name: e2e$/m.test(text) && !/^name: playwright-tests$/m.test(text), 'the name line is the PKG\'s');
+          const def = wfMod.loadDefinition(fx.root, 'e2e');
+          const deps = wfMod.resolveDependencies(fx.root, KIT_ROOT, def);
+          eq(Object.values(deps.agents).map((a) => a.source), ['pkg', 'pkg', 'pkg'], 'the agents are the PKG\'s copies, reviewed with the workflow');
+          eq(Object.keys(deps.skills), ['playwright-testing']);
+          eq(wfMod.reviewedFiles(def, deps).map((f) => f.rel).sort(), files.slice().sort(), 'all of it is what approval covers');
+          eq(lastJson(aidev(fx.root, ['list', 'workflows', '--json']).out).standard.map((w) => w.name), ['playwright-tests']);
+          ok(/standard workflows bundled with the kit/.test(aidev(fx.root, ['list', 'workflows']).out));
+          // Copying again under the same name: the workflow directory is there, so --force is needed; with it, an unchanged copy is kept as it is.
+          ok(/workflow e2e already exists at \.aidev\/workflows\/e2e \(pass --force/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests']).out));
+          const same = lastJson(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--force', '--json']).out);
+          eq([same.ok, same.written, same.kept.length], [true, [], 5], 'nothing to write when the copy is already the kit\'s');
+          // A second copy under another name keeps the identical agents and refuses to overwrite an edited one without --force.
+          fs.appendFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), '\nTeam note.\n');
+          const again = aidev(fx.root, ['create', 'workflow', 'e2e-prod', '--from', 'playwright-tests', '--json']);
+          eq(again.code, 1);
+          ok(/\.aidev\/agents\/playwright-test-writer\.md already exists and differs from the kit's playwright-tests \(pass --force/.test(again.out), again.out);
+          ok(!fs.existsSync(path.join(fx.root, '.aidev', 'workflows', 'e2e-prod')), 'nothing was written');
+          const forced = lastJson(aidev(fx.root, ['create', 'workflow', 'e2e-prod', '--from', 'playwright-tests', '--force', '--json']).out);
+          eq([forced.ok, forced.written.includes('.aidev/agents/playwright-test-writer.md'), forced.kept.includes('.aidev/agents/playwright-test-planner.md')], [true, true, true]);
+          ok(!/Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), 'overwritten with --force');
+        } finally {
+          for (const n of ['e2e', 'e2e-prod']) fs.rmSync(path.join(fx.root, '.aidev', 'workflows', n), { recursive: true, force: true });
+          for (const a of ['playwright-test-planner', 'playwright-test-writer', 'playwright-test-reviewer']) fs.rmSync(path.join(fx.root, '.aidev', 'agents', `${a}.md`), { force: true });
+          fs.rmSync(path.join(fx.root, '.aidev', 'skills', 'playwright-testing'), { recursive: true, force: true });
+        }
+      });
+
+      test('every standard workflow the kit bundles validates and resolves once copied into a PKG', () => {
+        for (const w of wfMod.listStandardWorkflows(KIT_ROOT)) {
+          const name = `std-${w.name}`;
+          const std = wfMod.readStandardWorkflow(KIT_ROOT, w.name);
+          try {
+            const r = aidev(fx.root, ['create', 'workflow', name, '--from', w.name, '--force', '--json']);
+            eq(r.code, 0, r.out);
+            const def = wfMod.loadDefinition(fx.root, name);
+            const deps = wfMod.resolveDependencies(fx.root, KIT_ROOT, def);
+            for (const a of std.agents) {
+              const loaded = deps.agents[a.name] || deps.subagents[a.name];
+              ok(loaded && loaded.source === 'pkg', `${w.name}: agents/${a.name}.md is bundled but no step or subagent list names it`);
+              eq(toolsMod.parseFrontmatter(a.text).meta.name, a.name, `${w.name}: the frontmatter name of ${a.name} is its file name`);
+            }
+            for (const s of std.skills) ok(deps.skills[s.name] && deps.skills[s.name].source === 'pkg', `${w.name}: skills/${s.name} is bundled but no agent lists it`);
+            ok(def.steps.some((s) => s.kind === 'pull-request'), `${w.name}: ends in a pull request`);
+            ok(Object.keys(def.inputs).length > 0, `${w.name}: what differs between PKGs is taken as inputs`);
+            eq(wfMod.approvalStatus(fx.root, cfgMod.loadConfig(fx.root), def, deps).approved, false, 'a copy is approved like any workflow: by a reviewed merge, not by the kit');
+          } finally {
+            fs.rmSync(path.join(fx.root, '.aidev', 'workflows', name), { recursive: true, force: true });
+            for (const a of std.agents) fs.rmSync(path.join(fx.root, '.aidev', 'agents', `${a.name}.md`), { force: true });
+            for (const sk of std.skills) fs.rmSync(path.join(fx.root, '.aidev', 'skills', sk.name), { recursive: true, force: true });
+          }
+        }
       });
 
       test('list reports each workflow against origin/main, and agents / skills with their source', () => {
@@ -1473,6 +1602,83 @@ function run() {
         ok(/node tools\/browser\.js chromium exited 9/.test(lastJson(dflt.out).stopReason), 'the default applies: ' + lastJson(dflt.out).stopReason);
       });
 
+      test('aidev.yaml sets a workflow\'s inputs for this PKG; env_required is checked by name before anything starts and never recorded', () => {
+        // The check exits 0 when the browser argument is firefox, the password reached its environment untouched,
+        // and the step's own env (the URL from aidev.yaml) is there as well, with the until's own env on top of it.
+        write(path.join(fx.root, 'tools', 'cfgin.js'), "process.exit(process.argv[2] === 'firefox' && process.env.E2E_PASSWORD === 's3cr3t-value-xyz' && process.env.E2E_BASE_URL === 'https://cfg.example' && process.env.CFGIN_CHECK === '1' && process.env.CFGIN_MODE === 'check' ? 0 : 9);\n");
+        const cfgPath = path.join(fx.root, 'aidev.yaml');
+        const cfgBefore = fs.readFileSync(cfgPath, 'utf8');
+        fs.appendFileSync(cfgPath, 'workflows:\n  cfgin:\n    inputs:\n      browser: firefox\n      url: https://cfg.example\n');
+        define('cfgin', { extra: [
+          'inputs:', '  url:', '    description: the environment under test', '    pattern: "https?://[a-z./:-]+"',
+          '  browser:', '    default: chromium', '    pattern: "[a-z]+"',
+          'env_required:', '  E2E_PASSWORD: the password of the test user',
+        ], steps: [
+          '  - id: write', '    agent: coder', '    prompt: Test {inputs.url} on {inputs.browser}.',
+          '    env:', '      E2E_BASE_URL: "{inputs.url}"', '      CFGIN_MODE: agent',
+          '    until:', '      command: node tools/cfgin.js {inputs.browser}', '      env: { CFGIN_CHECK: "1", CFGIN_MODE: check }', '      max_retries: 0',
+        ] });
+        try {
+          reset();
+          const unset = aidev(fx.root, ['run', 'workflow', 'cfgin', '--dry-run'], { env: env({ E2E_PASSWORD: '' }) });
+          eq(unset.code, 1, unset.out);
+          ok(/the environment variable E2E_PASSWORD \(the password of the test user\) is not set; the workflow needs it \(env_required\)/.test(unset.out), unset.out);
+          ok(/env\s+E2E_PASSWORD: NOT SET \(the password of the test user\)/.test(unset.out), unset.out);
+          const dry = aidev(fx.root, ['run', 'workflow', 'cfgin', '--dry-run'], { env: env({ E2E_PASSWORD: 's3cr3t-value-xyz' }) });
+          eq(dry.code, 0, dry.out);
+          ok(/inputs\s+url=https:\/\/cfg\.example \(from aidev\.yaml\)\nbrowser=firefox \(from aidev\.yaml\)/.test(dry.out), dry.out);
+          ok(/env\s+E2E_PASSWORD: set \(the password of the test user\)/.test(dry.out) && !/s3cr3t/.test(dry.out), 'set, and never the value');
+          ok(/## Environment variables the run needs[\s\S]*- E2E_PASSWORD: the password of the test user/.test(dry.out), dry.out);
+          ok(/env for the agent and its checks: E2E_BASE_URL=https:\/\/cfg\.example/.test(dry.out), 'the step env is shown as it will be set: ' + dry.out);
+          const r = aidev(fx.root, ['run', 'workflow', 'cfgin', '--json'], { env: env({ E2E_PASSWORD: 's3cr3t-value-xyz', STUB_ENV_PICK: 'E2E_BASE_URL,E2E_PASSWORD,CFGIN_CHECK,CFGIN_MODE' }) });
+          eq(r.code, 0, r.out);
+          const j = lastJson(r.out);
+          eq(j.inputs, { url: 'https://cfg.example', browser: 'firefox' }, 'the values of aidev.yaml, recorded like any input');
+          eq(JSON.parse(fs.readFileSync(envOut, 'utf8')), { AIDEV_WORKFLOW: 'cfgin', AIDEV_WORKFLOW_STEP: 'write', E2E_BASE_URL: 'https://cfg.example', E2E_PASSWORD: 's3cr3t-value-xyz', CFGIN_CHECK: null, CFGIN_MODE: 'agent' },
+            'the agent has the step env and the shell\'s variable; the until\'s own env is the check\'s alone, and wins there (cfgin.js saw CFGIN_MODE=check)');
+          const prompt = fs.readFileSync(promptOut, 'utf8');
+          ok(/Your environment also has these set for this step \(the checks below run with them too\): E2E_BASE_URL=https:\/\/cfg\.example/.test(prompt), prompt.slice(0, 2500));
+          ok(/## Environment variables of this run[\s\S]*- E2E_PASSWORD: the password of the test user/.test(prompt), prompt.slice(0, 2000));
+          ok(/## Step write \(1\/1\)\n\nTest https:\/\/cfg\.example on firefox\./.test(prompt), 'the configured values are written where the definition named them');
+          const runDir = path.join(runsDirOf('cfgin'), j.runId);
+          for (const f of ['run.json', 'log.txt']) ok(!/s3cr3t/.test(fs.readFileSync(path.join(runDir, f), 'utf8')), `${f} holds no secret`);
+          ok(!/s3cr3t/.test(prompt) && !/s3cr3t/.test(r.out), 'nor the prompt or the screen');
+          const over = aidev(fx.root, ['run', 'workflow', 'cfgin', '--input', 'browser=chromium', '--json'], { env: env({ E2E_PASSWORD: 's3cr3t-value-xyz' }) });
+          eq(over.code, 1);
+          ok(/node tools\/cfgin\.js chromium exited 9/.test(lastJson(over.out).stopReason), '--input wins over aidev.yaml: ' + lastJson(over.out).stopReason);
+          // Without the variable, a run and a resumed run alike start nothing: no new run directory, no agent.
+          const runsBefore = runsOf('cfgin').length;
+          reset();
+          const noPw = aidev(fx.root, ['run', 'workflow', 'cfgin', '--json'], { env: env({ E2E_PASSWORD: '' }) });
+          eq(noPw.code, 1);
+          ok(/E2E_PASSWORD \(the password of the test user\) is not set/.test(noPw.out), noPw.out);
+          const noPwResume = aidev(fx.root, ['run', 'workflow', 'cfgin', '--resume', 'last', '--json'], { env: env({ E2E_PASSWORD: '' }) });
+          eq(noPwResume.code, 1);
+          ok(/E2E_PASSWORD \(the password of the test user\) is not set/.test(noPwResume.out), noPwResume.out);
+          eq([runsOf('cfgin').length, fs.existsSync(promptOut)], [runsBefore, false], 'nothing started');
+          eq(lastJson(aidev(fx.root, ['estimate', 'workflow', 'cfgin', '--json'], { env: env() }).out).inputs, { url: 'https://cfg.example', browser: 'firefox' }, 'the estimate reads them too');
+          // A value aidev.yaml sets for an input the workflow does not declare is a mistake named at the file, not ignored.
+          fs.appendFileSync(cfgPath, '      nope: x\n');
+          ok(/aidev\.yaml: workflows\.cfgin\.inputs: the workflow declares no input "nope"/.test(aidev(fx.root, ['run', 'workflow', 'cfgin', '--dry-run'], { env: env({ E2E_PASSWORD: 'x' }) }).out));
+        } finally {
+          fs.writeFileSync(cfgPath, cfgBefore);
+        }
+      });
+
+      test('an until agent runs with the step\'s env as the step\'s agent does', () => {
+        const verdicts = path.join(tmp, 'untilenv-verdicts.json');
+        fs.writeFileSync(verdicts, JSON.stringify(['PASS']));
+        define('untilenv', { steps: [
+          '  - id: write', '    agent: coder', '    prompt: write', '    env: { STEP_SETTING: on }',
+          '    until:', '      agent: coder', '      prompt: check it', '      max_retries: 0',
+        ] });
+        reset();
+        const r = aidev(fx.root, ['run', 'workflow', 'untilenv', '--json'], { env: env({ STUB_VERDICTS: verdicts, STUB_ENV_PICK: 'STEP_SETTING' }) });
+        eq(r.code, 0, r.out);
+        // The stub rewrites the file on every start; the until agent started last.
+        eq(JSON.parse(fs.readFileSync(envOut, 'utf8')), { AIDEV_WORKFLOW: 'untilenv', AIDEV_WORKFLOW_STEP: 'write:until', STEP_SETTING: 'on' });
+      });
+
       test('a file input is copied into the run; provide brings ignored files from the checkout, never a secret', () => {
         const specFile = path.join(tmp, 'login.txt');
         fs.writeFileSync(specFile, 'LOGIN SPEC\n');
@@ -1873,8 +2079,19 @@ function run() {
         ok(/## What the team wants changed\n\nbe careful/.test(prompt));
         ok(prompt.includes('## The current workflow.yaml\n\n```yaml\n' + original.trimEnd()), 'the agent starts from the current definition');
         ok(/shared with other workflows[\s\S]*- coder \(\.aidev\/agents\/coder\.md\): also used by other/.test(prompt), 'it is told not to edit the shared agent');
+        ok(/## Standard workflows the kit bundles[\s\S]*- playwright-tests: /.test(prompt), 'the kit\'s standard workflows are in the catalogue');
         eq(lastJson(aidev(fx.root, ['list', 'workflows', '--json']).out).workflows.find((w) => w.name === 'fix').status, 'changed since origin/main',
           'a modified workflow needs a new review');
+      });
+
+      test('create --describe says so when the agent wrote no workflow (a standard one may fit)', () => {
+        fs.rmSync(promptOut, { force: true });
+        const r = aidev(fx.root, ['create', 'workflow', 'fresh', '--describe', 'playwright tests from a spec', '--json'], { env: env() });
+        eq(r.code, 1, r.out);
+        ok(/the agent wrote no \.aidev\/workflows\/fresh\/workflow\.yaml; its message below says why \(a standard workflow may fit: aidev create workflow fresh --from <standard>/.test(r.out), r.out);
+        eq(lastJson(r.out).ok, false);
+        ok(/## Standard workflows the kit bundles[\s\S]*- playwright-tests: /.test(fs.readFileSync(promptOut, 'utf8')), 'the creator was shown them');
+        ok(!fs.existsSync(path.join(fx.root, '.aidev', 'workflows', 'fresh')));
       });
 
       test('a result that does not validate, an edited shared agent, or no change at all is reported', () => {
@@ -1943,9 +2160,9 @@ function run() {
 
         // A step-level account of a change, without a modify note.
         const { definitionChanges } = require('../cli/commands/workflow');
-        const a = wfMod.validateDefinition({ ...GOOD, steps: [{ id: 'x', command: 'npm test' }, { id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }] }, 'wf');
-        const b = wfMod.validateDefinition({ ...GOOD, limits: { max_usd: 3 }, steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['lib/**'], prompt: 'go', until: { command: 'npm test', max_retries: 1 } }, { id: 'y', command: 'npm run lint' }] }, 'wf');
-        eq(definitionChanges(a, b), ['- step `a` changed: `writable`, `until`, `until.max_retries`', '- step `y` added (command)', '- step `x` removed', '- limits changed', '  limits: $1, no time limit → $3, no time limit']);
+        const a = wfMod.validateDefinition({ ...GOOD, env_required: ['A'], steps: [{ id: 'x', command: 'npm test' }, { id: 'a', agent: 'issue-to-pr', writable: ['src/**'], prompt: 'go' }] }, 'wf');
+        const b = wfMod.validateDefinition({ ...GOOD, env_required: ['B'], limits: { max_usd: 3 }, steps: [{ id: 'a', agent: 'issue-to-pr', writable: ['lib/**'], prompt: 'go', env: { MODE: 'e2e' }, until: { command: 'npm test', max_retries: 1 } }, { id: 'y', command: 'npm run lint' }] }, 'wf');
+        eq(definitionChanges(a, b), ['- step `a` changed: `writable`, `env`, `until`, `until.max_retries`', '- step `y` added (command)', '- step `x` removed', '- limits changed', '- env_required changed', '  limits: $1, no time limit → $3, no time limit']);
       });
     } finally { fx.cleanup(); fs.rmSync(tmp, { recursive: true, force: true }); }
   }

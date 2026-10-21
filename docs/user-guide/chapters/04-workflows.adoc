@@ -75,6 +75,8 @@ aidev create workflow write-tests --describe "指定した対象のテストを�
 
 `--describe` は workflow-creator agent を起動して YAML を書かせます。足りない agent・skill があれば、workflow-creator が agents-creator をサブエージェントとして起動し、`.aidev/agents/`・`.aidev/skills/` に書かせます。外部システム（Work Item、チケット、DB）が要るときは、PKG の `.mcp.json` に足す MCP server の定義案を報告に書きます（追加は人が行います）。書いたあと CLI が検証し、結果と次の手順を表示します。
 
+ADK が同梱する **標準 workflow** から始めることもできます。`aidev create workflow e2e-tests --from playwright-tests` は、テスト仕様書から Playwright のテストを書く workflow と、その agent・skill をこの PKG に複製します（xref:workflows-standard[標準 workflow から作る]）。
+
 定義は 2 か所に分かれます。
 
 [cols="1,3,3",options="header"]
@@ -148,6 +150,9 @@ limits:                            # 実行を止める条件
 |`inputs`
 |任意。実行のたびに `--input <name>=<値>` で受け取る値の宣言。定義の `{inputs.<name>}` と書いた場所に入ります（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。
 
+|`env_required`
+|任意。実行する人の shell に設定しておく環境変数（パスワード、トークン）の宣言。無ければ何も始めません。値は agent とコマンドの環境に届くだけで、どこにも記録されません（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
+
 |`provide`
 |任意。git が無視するファイルのうち、手元のチェックアウトから実行の worktree にコピーするもの（glob）（xref:workflows-provide[worktree に無いファイルを用意する]）。
 
@@ -197,6 +202,78 @@ limits:                            # 実行を止める条件
 
 大きな仕事を無人で走らせる書き方は xref:workflows-unattended[人が介入せずに大きな仕事を走らせる] にあります。
 
+[[workflows-standard]]
+==== 標準 workflow から作る（`--from`）
+
+ADK は、よくある仕事の workflow を **標準 workflow** として同梱しています。`aidev list workflows` の末尾に一覧が出ます。
+
+[cols="1,3",options="header"]
+|===
+|標準 workflow |内容
+
+|`playwright-tests`
+|テスト仕様書（CSV・Markdown・テキスト。1 行か 1 節が 1 ケース）の 1 ケースごとに Playwright のテストを書き、対象環境に対して実行して通るまで直し、全件通ったら agent が仕様と突き合わせてレビューし、PR にする。ケースは batch に分けて同時に進める
+|===
+
+標準 workflow は ADK の中では動きません。`--from` で PKG に複製して使います。
+
+[source,bash]
+----
+aidev create workflow e2e-tests --from playwright-tests
+----
+
+[source,text]
+----
+aidev create workflow e2e-tests
+✓ wrote .aidev/workflows/e2e-tests/workflow.yaml
+✓ wrote .aidev/agents/playwright-test-planner.md
+✓ wrote .aidev/agents/playwright-test-reviewer.md
+✓ wrote .aidev/agents/playwright-test-writer.md
+✓ wrote .aidev/skills/playwright-testing/SKILL.md
+    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
+    the files are this PKG's now: edit what differs here (the paths the steps write, the commands they run), then submit them for review
+    inputs: spec (a file, --input only), base_url (required), test_user (required), batch_size (default 10)
+    set this PKG's values once in aidev.yaml (--input overrides them per run):
+      workflows:
+        e2e-tests:
+          inputs:
+            base_url: <テスト対象環境の URL（ルート。例 https://staging.example.com）>
+            test_user: <テストユーザーのログイン ID（ユーザー名かメールアドレス）>
+            batch_size: 10
+    before a run, export in the shell: E2E_PASSWORD (テストユーザーのパスワード（実行する人が export する。ファイルには書かない）)
+
+ℹ Next:
+    1. review:  git diff -- .aidev/workflows/e2e-tests/ .aidev/agents/ .aidev/skills/
+    2. try:     aidev run workflow e2e-tests --trial   ← runs it as it is here; pushes nothing
+    3. submit:  aidev submit workflow e2e-tests        ← branch + pull request for the reviewer
+    4. run:     aidev run workflow e2e-tests           ← once merged (anyone on the team)
+----
+
+* 複製されるのは `workflow.yaml`（`name:` は付けた名前に書き換わる）と、それが使う agent（`.aidev/agents/`）・skill（`.aidev/skills/`）です。複製した時点で **この PKG のファイル** になります。他の workflow と同じく `--trial` で試し、`aidev submit workflow` で PR にし、マージで承認します。実行時に ADK 側のファイルを参照することはありません。
+* 同じ agent・skill が既にあって内容が同じなら残し（`kept`）、違えば `--force` が無いと止まります。別の名前でもう 1 つ複製する（`e2e-staging` と `e2e-prod`）ときは agent を共有します。ADK を更新して新しい版の標準 workflow を取り込むには、もう一度 `--from … --force` で複製し、差分をレビューします。
+* PKG ごとに違うものは 2 種類に分かれます。**定義で違うもの**（テストを置くディレクトリ、依存を入れるコマンド、同時に進める batch の数、費用の上限）は複製した `workflow.yaml` を直します。**値で違うもの**（テスト対象環境の URL、テストユーザー）は定義を変えず、`aidev.yaml` の `workflows.<name>.inputs` に書くか、実行時に `--input` で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。**認証情報**（テストユーザーのパスワード）は定義の `env_required:` が名前を宣言し、実行する人が shell の環境変数で渡します。ファイルには書きません（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
+
+`playwright-tests` の流れと前提です。
+
+. `deps`（command step）: `npm ci` で依存を実行の worktree に入れる。pnpm / yarn の PKG、テストが別ディレクトリにある PKG は、この command と `cwd` を直す
+. `playwright`（command step）: `node node_modules/@playwright/test/cli.js --version`。`@playwright/test` がこの PKG の依存に無ければここで止まる（`playwright.config.*` と、端末のブラウザ（`npx playwright install`）はこの検査では見ない）
+. `plan`（agent step、何も書かない）: 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く
+. `scaffold`（agent step）: `tests/e2e/support/` に共通の helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる
+. `generate`（agent step、`for_each`、既定で 4 batch 同時）: batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`）
+. `review`（agent step）: 全体を実行し、通らないものと重複した helper を直す。確認役の `playwright-test-reviewer` が仕様のケースごとに spec ファイルと検証の内容を突き合わせ、足りなければ指摘を添えて差し戻す（2 回まで）
+. `pr`: PR を作る。失敗して残った batch のケースは PR 本文の「Targets left out」に出る
+
+* 前提: Playwright が PKG に入っていて、`playwright.config.*` の `testDir` が `tests/e2e/` を含むこと（別の場所に置くなら、複製した YAML のパスを直す）。`webServer` でローカルのサーバを起動する設定は、対象環境（`base_url`）に対するこの workflow では外すか、`for_each.parallel` を 1 にする（同時に起動すると port がぶつかる）。
+* テストは `E2E_BASE_URL`・`E2E_USER`・`E2E_PASSWORD` を `process.env` から読みます（各 agent step の `env` が `base_url`・`test_user` を agent と `until` のコマンドに渡し、`E2E_PASSWORD` は shell から届く）。パスワードはテストにもログにも書かれません。
+* 費用の上限（`limits.max_usd: 50`）はケース数に合わせて上げます。達すると止まり、`--resume` で続けられます。
+
+[source,bash]
+----
+export E2E_PASSWORD='…'                                                          # 実行する人の shell にだけ
+aidev run workflow e2e-tests --trial --input spec=~/specs/login.csv --max-usd 5     # まず少ないケースで試す
+aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv
+----
+
 [[workflows-commands]]
 ==== コマンドの書き方
 
@@ -230,7 +307,7 @@ limits:                            # 実行を止める条件
 |コマンドを実行するディレクトリです。PKG の外（`..` や絶対パス）は書けません。
 
 |`env`
-|コマンドに渡す環境変数です。値は定義に書いた固定の文字列で、PR でレビューされます。**秘密情報は書きません。** `AIDEV_` か `GIT_CONFIG` で始まる名前は書けません。
+|コマンドに渡す環境変数です。値は定義に書いた固定の文字列で、PR でレビューされます。**秘密情報は書きません**（パスワードは `env_required` で名前を宣言し、shell から受け取ります。xref:workflows-env-required[認証情報は環境変数で受け取る]）。`AIDEV_` か `GIT_CONFIG` で始まる名前は書けません。agent step 自体にも `env` を書けます。その値は agent の環境と `until` のコマンドの両方に入るので、agent が自分で実行するテストと ADK の判定が同じ設定で動きます（`until.env` はその上に重なります）。
 
 |`timeout_minutes`
 |コマンド 1 つの時間の上限（分）です。省略すると、workflow の時間の上限まで（それも無ければ終わるまで）待ちます。
@@ -408,6 +485,21 @@ steps:
 * `path: true` は PKG 内の相対パスです（`/` やドライブ文字で始まるもの、`..` を含むものは不可）。テキストでなければなりません（`.xlsx`・`.docx`・`.pdf`・画像などは `the AI tools read text; export … to Markdown, CSV or text first and pass that file` と拒否されます）。そのパスは実行の worktree に届くものでなければなりません。HEAD にコミット済みか、git が無視していて `provide` の glob に一致するかのどちらかです。`--dry-run` と実行は始める前にこれを判定し、`is not committed; a run starts from HEAD (commit it, or declare the input with file: true and pass the file)` または `is ignored by git and no provide: entry copies it into the run (add one, or pass it as a file input)` と表示して止まります。`provide` がコピーした後、そのパスが worktree にあることも確かめます。
 * `file: true` はこの端末のどこかにあるファイルのパスです（絶対パスか、シェルのカレントディレクトリからの相対パス）。存在するファイルで、テキストであること（拡張子の規則は `path` と同じ）。ADK は実行の worktree の `.aidev/workflows/<name>/runs/<id>/inputs/<name><拡張子>` にコピーし、`{inputs.<name>}` はその PKG 内の相対パスになります（`runs/` の中なので gitignore 済み。agent は読めますが、コミットされません）。`run.json` にはそのパスが残り、ログに `input <name>: copied <元> to <先>` と書きます。`--resume` はそのコピーをそのまま使います。1 人が持っているファイル（Excel から書き出した仕様書など）には `file`、チーム全員が決まった gitignore 済みのパスに置くデータには `provide` を使います（xref:workflows-provide[worktree に無いファイルを用意する]）。
 
+PKG ごとに違うが実行ごとには変わらない値（テスト対象環境の URL、テストユーザー名）は、`aidev.yaml` の `workflows.<name>.inputs` に書いておけます。定義（`workflow.yaml`）は PKG が違っても同じままで、違うのは `aidev.yaml` だけになります。
+
+[source,yaml]
+----
+workflows:
+  e2e-tests:
+    inputs:
+      base_url: https://staging.example.com
+      test_user: qa-user@example.com
+----
+
+* 優先順位は `--input` > `aidev.yaml` > 宣言の `default` です。`aidev.yaml` の値は `--input` と同じ規則で確かめられ、`--dry-run` の `inputs` の行に `(from aidev.yaml)` と出ます。宣言に無い名前を書くと `aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"` で止まります。
+* `file: true` の入力は書けません（実行する人の端末にあるファイルなので、`--input` で渡します）。
+* `aidev.yaml` はコミットされるので、認証情報は書けません。`password`・`secret`・`token`・`pat`・`api_key` のような名前の入力は設定エラーになります。パスワードは `env_required`（xref:workflows-env-required[認証情報は環境変数で受け取る]）で受け取ります。
+
 実行するときは、入力ごとに `--input` を付けます（`--input=<name>=<値>` とも書けます）。
 
 [source,bash]
@@ -419,6 +511,24 @@ aidev estimate workflow e2e-tests --input screen=login     # 見積もりでは�
 * 必須の入力が無いと、何も始めずに `the workflow needs --input for: spec (the test specification to work from)` と表示して終了コード 1 で止まります（`--dry-run` でも同じです）。宣言に無い名前は `the workflow declares no input "nope" (its inputs: spec, screen, browser)`、同じ名前を 2 回渡すと `input <name> is given twice` です。
 * `--resume` には `--input` を付けられません（`--resume continues the run with the inputs it was started with; do not pass --input`）。続きの実行は記録された値を使い、渡されたときと同じ規則でもう一度確かめます（記録は agent が書き換えられるファイルだからです）。
 * 値は、`{inputs.<name>}` と書いた場所に入るほか、すべての agent（確認役も）の指示に `## Inputs for this run` の節として「データ」として入ります。`--dry-run` の `inputs` の行（`file` の入力は `(copied from <パス>)` 付き）、`--dry-run` と提出の PR 本文の `## Inputs (--input name=value)` の節（名前、説明、必須か既定値か、`pattern`、`a path in the repository`、`reaches a command`）、実行の PR 本文の `## Inputs`、最後のコミットの本文の `inputs:` の行、`run.json` の `inputs`、`--log` の先頭とサマリ、`aidev modify --from-run` が agent に渡す記録にも出ます。
+
+[[workflows-env-required]]
+==== 認証情報は環境変数で受け取る（`env_required`）
+
+テストユーザーのパスワードや API のトークンは、定義にも `aidev.yaml` にも prompt にも書きません。`env_required:` に環境変数の名前（と、実行する人向けの説明）を宣言し、実行する人が shell で設定します。
+
+[source,yaml]
+----
+env_required:
+  E2E_PASSWORD: テストユーザーのパスワード
+  E2E_API_TOKEN:                 # 説明なしでもよい。名前だけの list でも書ける: env_required: [E2E_PASSWORD]
+----
+
+* `aidev run workflow`（`--dry-run` も）は、宣言された変数が設定されているかを **名前だけ** で確かめ、無ければ何も始めずに `the environment variable E2E_PASSWORD (…) is not set; the workflow needs it (env_required)` と止まります。`--dry-run` の `env` の行には `set` / `NOT SET` が出ます。値は出ません。
+* 値は agent とコマンドの環境に届きます（実行する人の shell の環境を子プロセスが引き継ぐ、今までどおりの経路です）。指示には `## Environment variables of this run` として **名前と説明だけ** が入り、agent には「値をどこにも書かない」と伝えます。`run.json`・ログ・PR 本文・コミットにも値は入りません。
+* テストやコマンドは `process.env.E2E_PASSWORD` のように実行時に読みます。command step・agent step・`until` の `env` に同じ名前を書くことはできません（検証で拒否されます）。
+* 名前は環境変数の規則（英字か `_` で始まる英数字と `_`）で、`AIDEV_*` と `GIT_CONFIG*` は書けません。
+* 宣言は提出の PR 本文の `## Environment variables the run needs` に出ます。レビューする人は、そこに挙がる変数が本当に認証情報かを見ます（設定値なら `inputs` か `env` へ）。
 
 [[workflows-provide]]
 ==== worktree に無いファイルを用意する（`provide` と `file` 入力）
@@ -685,7 +795,7 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 
 `--task` は今回の指示です（Work Item の番号、対象のパスなど）。すべての agent step に「データ」として渡され、`objective` や各ステップの `writable` を変えることはできません。長い指示は `--task-file <path>` で渡します。
 
-workflow が `inputs:` を宣言していれば、入力ごとに `--input <name>=<値>` を付けます。必須の入力が無いと、何も始めずに `the workflow needs --input for: …` と表示して止まります（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。`--max-usd <n>` を付けると、この実行だけ費用の上限を `limits.max_usd` より下げられます（`--max-minutes` と同じく、下げる方向だけです）。
+workflow が `inputs:` を宣言していれば、入力ごとに `--input <name>=<値>` を付けます。必須の入力が無いと、何も始めずに `the workflow needs --input for: …` と表示して止まります（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。`aidev.yaml` の `workflows.<name>.inputs` に書いてある値は、`--input` を省いたときに使われます。`env_required:` を宣言していれば、その環境変数（パスワードなど）を shell で設定してから実行します。無ければ何も始めずに止まります（xref:workflows-env-required[認証情報は環境変数で受け取る]）。`--max-usd <n>` を付けると、この実行だけ費用の上限を `limits.max_usd` より下げられます（`--max-minutes` と同じく、下げる方向だけです）。
 
 [source,text]
 ----
@@ -1074,7 +1184,7 @@ agent は AI ツールに渡す役割の定義（Markdown）、skill は手順�
 
 ADK が同梱するのは **仕組み** だけです。workflow の runner と検証、承認の判定、書き込みの制限、そして workflow を書く agent（workflow-creator）、agent を書く agent（agents-creator）、Wiki を書く agent（knowledge-builder）、policy の候補を作る agent（permission-setting）の 4 つです。ほかに、見積もりのために CLI が使う agent（cost-estimator、estimate-reviewer）があります。これは PKG に置かれず、`aidev estimate` と実行の終わりに CLI が起動します（xref:cli-estimate[aidev estimate]）。
 
-開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。ADK は同梱しません。 Engineering Manager が `aidev create workflow <name> --describe "<やりたいこと>"` で作ります。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。ADK はそれを配布も起動もしません。
+開発の中身 — 実装する、テストを書く、規約を書き出す、といった workflow とその agent — は **PKG のもの** です。ADK が同梱するのは標準 workflow の雛形（`playwright-tests`。xref:workflows-standard[標準 workflow から作る]）だけで、それも `--from` で複製した時点で PKG のファイルになります。Engineering Manager が `aidev create workflow <name> --describe "<やりたいこと>"` で作るか、標準 workflow から複製します。MCP server（Azure DevOps の Work Item を読むなど）も PKG が自分の `.mcp.json` に用意します。ADK はそれを配布も起動もしません。
 
 PKG 固有の agent・skill は `.aidev/agents/<name>.md`、`.aidev/skills/<name>/SKILL.md` に置きます。同名の ADK 同梱のものより優先されます。作り方は 3 つです。
 

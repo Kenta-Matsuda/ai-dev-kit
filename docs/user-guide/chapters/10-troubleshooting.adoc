@@ -291,6 +291,13 @@
 `input <name>: "<値>" does not match its pattern (…)`
 |workflow が `inputs:` で宣言した入力を `--input <name>=<値>` で渡します。宣言の一覧は `aidev run workflow <name> --dry-run` の `## Inputs (--input name=value)` に出ます（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。何も始まっていません。
 
+|`the environment variable <NAME> (…) is not set; the workflow needs it (env_required)`
+|workflow が `env_required:` で宣言した環境変数（パスワードなど）が、実行する shell にありません。`export <NAME>=…` してから実行します。値はどこにも記録されません（xref:workflows-env-required[認証情報は環境変数で受け取る]）。何も始まっていません。
+
+|`aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"` +
+`aidev.yaml: workflows.<name>.inputs.<name> must not be set here: aidev.yaml is committed, and a credential never is`
+|`aidev.yaml` の `workflows.<name>.inputs` に、workflow が宣言していない入力か、認証情報らしい名前（`password`、`token` など）の入力があります。宣言した名前だけを書き、認証情報は `env_required` の環境変数で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。
+
 |`input <name>: <path> is not committed; a run starts from HEAD (…)` +
 `input <name>: <path> is ignored by git and no provide: entry copies it into the run (…)`
 |`path: true` の入力が実行の worktree に届きません。コミットするか、`provide:` に足すか、`file: true` の入力にして渡します（xref:workflows-provide[worktree に無いファイルを用意する]）。

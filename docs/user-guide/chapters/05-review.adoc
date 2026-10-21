@@ -115,6 +115,10 @@ aidev run workflow write-tests --dry-run
 |確認役の agent は読むだけのツールで、確認の観点が具体的
 |確認役の agent に `Edit`・`Write`・`Bash` がある（書き込みは hook が拒否しますが、要らない権限です）。「良ければ合格」のような観点の無い `until.prompt`
 
+|`inputs` と `env_required`
+|実行ごと・PKG ごとに変わる値は `inputs` にあり、認証情報は `env_required` に **名前だけ** ある。PR 本文の「Environment variables the run needs」に並ぶのは本当に認証情報
+|`prompt`・`env`・`default` に URL やユーザー名の値が直書きされている（PKG が変わると定義が変わる）。`env` や `default` にパスワード・トークンの値がある。設定値（ブラウザ名、URL）が `env_required` になっている
+
 |`limits.max_usd`・`limits.max_minutes`
 |仕事の大きさに合っている
 |小さな仕事に大きな上限

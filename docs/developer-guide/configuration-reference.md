@@ -72,6 +72,12 @@ quality_gates:
 references:
   conventions: [docs/coding-guide.md]
   testing: [docs/testing.md, CONTRIBUTING.md]
+
+workflows:
+  e2e-tests:
+    inputs:
+      base_url: https://staging.example.com
+      test_user: qa-user@example.com
 ```
 
 ### 全体の規則
@@ -186,6 +192,16 @@ topic名（`[a-z][a-z0-9_-]{0,39}`）からrepo-relative pathの配列へのmapp
 - **Excel / Word / PDF等（`config.NON_TEXT_REFERENCE_EXTENSIONS`）は`validateConfig`で拒否**する。AI toolはtextしか読めないので、Markdown / CSV / textに書き出したfileをcommitしてそれを載せる。directory内のこれらのfileは黙って除外する
 - `..`を含むpathと絶対pathは拒否
 
+### `workflows`
+
+workflow名（`layout.WORKFLOW_NAME_RE`）から`{ inputs: { <input>: <value> } }`へのmapping（`cfg.workflows`。既定`{}`。D30）。そのworkflowが`inputs:`に宣言したinputの、このPKGでの値です。`aidev run workflow` / `aidev estimate workflow`が`--input`の無いinputに使い（`--input` > ここ > 宣言の`default`）、`collectInputs`の`configured`として`--input`と同じ規則で検証します（`where`は`aidev.yaml: workflows.<name>.inputs`）。
+
+- `workflows.<name>`のkeyは`inputs`だけ（他は`unknown key`）。input名は`layout.INPUT_NAME_RE`
+- 値はplain scalar（文字列化する。list / mappingはerror）
+- **認証情報は拒否**: 名前が`CREDENTIAL_NAME_RE`に当たるinputはerror。`password` / `passwd` / `passphrase` / `passcode` / `secret`をどこかに含む、`(api|access|private|ssh|signing)[_-]?key`を含む、`_` / `-`で区切った末尾の語が`pass` / `pw` / `pwd` / `pat` / `otp` / `auth` / `credential(s)`、`(auth|api|access|session|bearer|refresh)[_-]?token(s)`で終わる、`token(s)`そのもの（`pass_rate` / `token_limit` / `max_tokens` / `credential_type`は通る）。値は`credentialValueReason`で見る: パスワード入りURL（`://user:pw@`）、tokenの形（`ghp_` / `gh[osur]_` / `github_pat_`、`xox[abps]-`、`sk-`、`AKIA…`、JWT）、40文字以上のbase64らしい並び（40 / 64桁のhexはgit SHAとして通す）。このfileはcommitされるため。認証情報はworkflowの`env_required`で環境変数から受け取る
+- 宣言に無い名前と`file: true`のinputはここでは検出できず、`run` / `estimate`のときに`collectInputs`がerrorにする
+- `aidev.yaml`は既定policyでagentが書けるfileなので、ここに書いた値は`--input`と同じ「data」の扱い（commandに届く値は`COMMAND_VALUE_RE`と作者の`pattern`で縛られる）。承認の対象（`reviewedFiles`）ではない
+
 ## `.aidev/policy.yaml`（schema version 1）
 
 `aidev create policy --approve`または`aidev init --approve`（対話のyes含む）だけが配置します。`ALWAYS_PROTECTED`なので実行時にagentは書けません。
@@ -219,7 +235,7 @@ AGENTS.md  .kiro/steering/**  .kiro/agents/**  .aidev/policy.yaml
 
 ### workflow.yaml（`.aidev/workflows/<name>/workflow.yaml`）
 
-`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`agents`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。`agents`は`{<agent>: {skills, mcp, tools, subagents}}`のmappingで、そのworkflowの実行でだけagent（stepか`until.agent`が名指すもの、およびそのsubagent）に能力を足します（`skills` / `mcp` / `subagents`はfrontmatterに足し、`tools`は与えればfrontmatterの値を置き換える。どのstepも名指さないagentはerror）。stepの種類は`agent` / `command` / `pull_request` / `parallel`のどのkeyを持つかで決まります（1つだけ）。`parallel`はgroupで、`id`、`description`、`parallel`（同時に起動する2つ以上のagent stepのlist。各stepの`writable`は交わってはならず、groupの中にcommand / pull-request stepは置けない）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`、`parallel`（同時に動かす対象の数。既定1、最大16。2以上ならすべての`writable`が`{item}`を含む））、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`、`max_retries`（0〜10、既定3））、`timeout_minutes`。`for_each`のstepでは`prompt`に`{item}`が必須で、`writable`・`until`にも`{item}`（対象）を書ける（`writable`では`{item}`の前に固定のdirectoryが要る）。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`pull_request`（mapping。`title`だけ。空か`{}`なら既定のtitle）。旧`kind: pull-request`、stepの`title`、stepの`max_retries`は移動先を示すerrorです。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
+`workflow.validateDefinition`が検証します。項目と制約は`architecture.md` §9の表のとおりです。top-levelは`name`、`description`、`objective`、`tool`、`model`、`agents`、`inputs`、`env_required`、`provide`、`never_commit`、`steps`、`limits`（`max_usd`（必須）と`max_minutes`）だけで、他のkeyはerrorです（旧`cost`は「limits.max_usdへ」とerror）。`env_required`は環境変数名のlistか`{ NAME: description }`のmappingで、実行する人のshellに要る認証情報を名前で宣言します（runnerは`preflight`で存在だけを確かめ、値は読まない）。`agents`は`{<agent>: {skills, mcp, tools, subagents}}`のmappingで、そのworkflowの実行でだけagent（stepか`until.agent`が名指すもの、およびそのsubagent）に能力を足します（`skills` / `mcp` / `subagents`はfrontmatterに足し、`tools`は与えればfrontmatterの値を置き換える。どのstepも名指さないagentはerror）。stepの種類は`agent` / `command` / `pull_request` / `parallel`のどのkeyを持つかで決まります（1つだけ）。`parallel`はgroupで、`id`、`description`、`parallel`（同時に起動する2つ以上のagent stepのlist。各stepの`writable`は交わってはならず、groupの中にcommand / pull-request stepは置けない）。stepのkey: agent stepは`id`、`description`、`agent`、`prompt`、`writable`（必須）、`unchanged`（glob list）、`for_each`（mapping: `from`、`max_items`、`on_failure`、`parallel`（同時に動かす対象の数。既定1、最大16。2以上ならすべての`writable`が`{item}`を含む））、`until`（mapping: `command`（1行またはlist）、`cwd`、`env`、`timeout_minutes`、`agent`、`prompt`、`max_retries`（0〜10、既定3））、`timeout_minutes`。`for_each`のstepでは`prompt`に`{item}`が必須で、`writable`・`until`にも`{item}`（対象）を書ける（`writable`では`{item}`の前に固定のdirectoryが要る）。command stepは`id`、`description`、`command`、`cwd`、`env`、`timeout_minutes`、`writable`（任意。commitする範囲を示すだけ）。`cwd`はPKG内のdirectory（絶対pathと`..`はerror）、`env`は`NAME: value`のmapping（名前は`^[A-Za-z_][A-Za-z0-9_]{0,63}$`、`AIDEV_`で始まる名前と複数行の値はerror）、`timeout_minutes`は0より大きく240以下（分。旧`timeout_ms`は「timeout_minutesへ」とerror）。pull-request stepは`id`、`description`、`pull_request`（mapping。`title`だけ。空か`{}`なら既定のtitle）。旧`kind: pull-request`、stepの`title`、stepの`max_retries`は移動先を示すerrorです。`yaml.js`は`key: |` / `key: >`（末尾改行を消すなら`|-` / `>-`）のblock scalarを読めるので、`objective`と`prompt`は複数行で書けます。
 
 ### agentのfrontmatter（`.aidev/agents/<name>.md`、kit同梱agent）
 

@@ -56,6 +56,12 @@ quality_gates:                  # AI がファイルを編集した後に実行�
 references:                     # agent に読ませる既存の文書（テキストのみ）
   conventions: [docs/coding-guide.md]
   testing: [docs/testing.md, CONTRIBUTING.md]
+
+workflows:                      # workflow ごとの入力の値（この PKG で同じもの。--input が優先）
+  e2e-tests:
+    inputs:
+      base_url: https://staging.example.com
+      test_user: qa-user@example.com
 ----
 
 === 主要な設定項目
@@ -123,6 +129,10 @@ references:                     # agent に読ませる既存の文書（テキ�
 |`references.<topic>`
 |無し
 |`aidev run workflow` が agent に「参照文書」として渡す、既存の文書のパス（ファイルかディレクトリ。PKG ルート基準）。トピック名（`conventions`、`testing` など）は自由に決められ、すべての agent step にトピックごとの一覧が渡ります。agent は文書を重要な情報源として扱いますが、古い可能性があるものとしてコードで検証し、食い違いを報告します。**Excel・Word・PDF はそのまま渡せません。** AI ツールはテキストしか読めないため、Markdown か CSV に書き出してコミットし、そのファイルを書きます（`.xlsx` などを書くと `aidev` が設定エラーにします）。
+
+|`workflows.<name>.inputs.<input>`
+|無し
+|workflow `<name>` が `inputs:` に宣言した入力の、この PKG での値。`aidev run workflow` と `aidev estimate workflow` が `--input` を省いたときに使います（`--input` > ここ > 宣言の `default`）。値は `--input` と同じ規則で確かめます。宣言に無い名前は実行時にエラー、`file: true` の入力は書けません。**認証情報は書けません**（`password`・`secret`・`token`・`pat`・`api_key` などの名前は設定エラー）。パスワードは workflow の `env_required` で環境変数から受け取ります（xref:workflows-inputs[実行ごとに変わる値を受け取る]、xref:workflows-standard[標準 workflow から作る]）。
 |===
 
 === 既定のままでよい項目
@@ -177,6 +187,8 @@ references:                     # agent に読ませる既存の文書（テキ�
 === 記述禁止項目
 
 `hosting.pat`、`hosting.token`、`hosting.password`、`hosting.secret` は書けません。書くと起動を拒否します。token は `hosting.auth_env` が指す環境変数に入れます（xref:environment-reference[環境変数]）。
+
+`workflows.<name>.inputs` に、認証情報らしい名前の入力も書けません。`password`・`passwd`・`passphrase`・`passcode`・`secret` をどこかに含む名前、`api_key`・`access_key`・`private_key`・`ssh_key`・`signing_key`、`_` か `-` で区切った最後の語が `pass`・`pw`・`pwd`・`pat`・`otp`・`auth`・`credential(s)` の名前（`db_pass`、`azure-pat`）、`auth_token`・`api_token`・`access_token`・`session_token`・`bearer_token`・`refresh_token` と `token(s)` そのもの、が拒否されます（`pass_rate`・`token_limit`・`max_tokens`・`credential_type` のような設定名は通ります）。値も見ます: パスワードを含む URL（`https://user:pw@host`）、よくあるトークンの形（`ghp_…`、`xox?-…`、`sk-…`、`AKIA…`、JWT）、40 文字以上の英数字の並び（git の SHA は除く）は拒否します。パスワードは workflow の `env_required` が指す環境変数で渡します（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
 
 === 関連情報
 

@@ -64,6 +64,8 @@ inputs:                            # optional. Values taken per run with --input
   browser:
     default: chromium
     pattern: '[a-z]+'              # an input that reaches a command needs a pattern
+env_required:                      # optional. Environment variables (credentials) the shell of whoever runs it must have. A list of names only works too
+  E2E_PASSWORD: the password of the test user
 provide: [e2e/fixtures/**]         # optional. Gitignored files copied from your checkout
 never_commit: [e2e/test-results/**]   # optional. Never committed, on top of the ADK's own list
 
@@ -145,6 +147,11 @@ A field that is not in the tables below is refused by validation (`unknown key �
 |mapping
 |optional
 |Declares the values taken per run with `--input <name>=<value>`. The keys are the inputs' names; each goes where the definition writes `{inputs.<name>}` (xref:workflow-reference-inputs[inputs]).
+
+|`env_required`
+|list or mapping
+|optional
+|Environment variables (credentials) that must be set in the shell of the person running it. A list of names, or a mapping from name to description. Without them, nothing starts (xref:workflow-reference-env-required[env_required]).
 
 |`provide`
 |list of globs
@@ -282,7 +289,35 @@ Rules for `--input` (`aidev run workflow`, `aidev estimate workflow`):
 * `--input <name>=<value>` once per input (`--input=<name>=<value>` works too).
 * A required input missing: `the workflow needs --input for: <name> (<description>)` (the run exits 1 before anything starts; `--dry-run` too. `aidev estimate` estimates without it). A name not declared: `the workflow declares no input "<name>" (its inputs: …)`. The same name twice: `input <name> is given twice`.
 * It cannot be passed with `--resume`. A continued run uses the values recorded in `run.json`, checked again by the same rules as when they were passed.
+* A value written in `aidev.yaml` as `workflows.<name>.inputs.<input>: <value>` is used when `--input` is not given (`--input` > `aidev.yaml` > `default`). It is checked by the same rules; a name not declared stops with `aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"`, and a `file: true` input with `… is a file on the machine of whoever runs the workflow`. An input with a credential-like name is refused when `aidev.yaml` is read (xref:configuration[aidev.yaml reference]). The `inputs` row of `--dry-run` carries `(from aidev.yaml)`.
 * Besides where `{inputs.<name>}` is written, the values go, as data, into a `## Inputs for this run` section of the instructions of every agent (the checking agents included), onto the `inputs` row of `--dry-run`, into `## Inputs` of the run's PR body, into the last commit's message, into `inputs` in `run.json`, into the head and the summary of `--log`, and into the record of `aidev modify --from-run`.
+
+[[workflow-reference-env-required]]
+=== env_required
+
+Environment variables that must be set in the shell of the person running the workflow (xref:workflows-env-required[Taking credentials from environment variables]). They are for credentials (passwords, tokens); a setting goes in `inputs` or `env`.
+
+[source,yaml]
+----
+env_required:
+  E2E_PASSWORD: the password of the test user   # name: description
+  API_TOKEN:                                    # the description can be left out
+# A list of names only can be written too
+# env_required: [E2E_PASSWORD, API_TOKEN]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|Field |Type |Required |Description
+
+|`env_required`
+|list of names, or mapping name → description
+|optional
+|A name follows the rule for environment variables (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`). `AIDEV_*` and `GIT_CONFIG*` cannot be written. Up to 32. The description is one line, and is shown in the error for the person running it, on the `env` row of `--dry-run`, under `## Environment variables the run needs` in the submit PR body, and under `## Environment variables of this run` in the agents' instructions. The same name written in the `env` of a command step, of an agent step or of `until` is refused by validation (`env sets <NAME>, which env_required says the shell provides`).
+|===
+
+* `aidev run workflow` and `--dry-run` check, before anything starts, that each variable is set (and not empty). When one is not, they print `the environment variable <NAME> (<description>) is not set; the workflow needs it (env_required). Export it in the shell that runs aidev; …` and exit 1. The same with `--resume`. The `env` row of `--dry-run` reads `<NAME>: set` or `<NAME>: NOT SET`.
+* The values are never read. The agents and commands inherit the environment of the shell of the person running it, and that is how the values reach them. No value goes into `run.json`, `log.txt`, `--log`, the PR body, a commit message or an agent's instructions.
 
 [[workflow-reference-provide]]
 === provide
@@ -402,6 +437,12 @@ A step that starts an agent to do the work. A step with `agent` is an agent step
 |optional
 |`[]`
 |Paths this step must leave as they are. They cannot be written even inside `writable`, and after every attempt they are compared with how they were when the step started (xref:workflows-unchanged[Naming what must not change]).
+
+|`env`
+|mapping
+|optional
+|`{}`
+|Fixed environment variables (`NAME: value`) added to the environment of this step's agent and of its `until` commands. Use it for settings a test or a tool reads (the URL of the environment under test, say). The same rules as a command step's `env`; writing `{inputs.<name>}` makes that input one that "reaches a command", and in a `for_each` step `{item}` can be written too. `until.env` is layered on top. The agent's instructions carry the names and values as `Your environment also has these set for this step`. **Never a secret** (declare the environment variable's name under `env_required`; the same name here is refused by validation). Names that change what the agent's tool runs or where it talks (`PATH`, `PATHEXT`, `COMSPEC`, `SHELL`, `HOME`, `USERPROFILE`, `NODE_OPTIONS`, `NODE_PATH`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_*`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_*`, `ANTHROPIC_*`, `GIT_*`, `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`) cannot be set on an agent step (the hooks must keep running; a command step's `env` may still set them).
 
 |`for_each`
 |mapping

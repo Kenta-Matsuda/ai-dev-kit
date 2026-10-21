@@ -32,6 +32,15 @@ const ESTIMATES_REL = '.aidev/estimates';
 const AIDEV_GITIGNORE_REL = '.aidev/.gitignore';
 
 /**
+ * The names of a workflow (its directory under .aidev/workflows/) and of a
+ * workflow input. They live here, not in workflow.js, because aidev.yaml
+ * (config.js) names both in its `workflows:` section and config.js cannot
+ * require workflow.js (which requires config.js).
+ */
+const WORKFLOW_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const INPUT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/**
  * The configuration files the kit materialises for each AI coding tool. The
  * registry in `tools.js` reads these; they live here so that policy, layout
  * and the tool adapters agree on one list without a require cycle.
@@ -96,6 +105,6 @@ function ensureAidevGitignore(repoRoot) {
 module.exports = {
   CONFIG_NAME, AIDEV_DIR, KNOWLEDGE_REL, POLICY_REL, POLICY_CANDIDATE_REL, MATERIALIZED_REL,
   EJECT_MARKER_REL, SYNC_LOCK_REL, WORKFLOWS_REL, AGENTS_REL, SKILLS_REL, CONVENTIONS_REL, ESTIMATES_REL,
-  AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE,
+  AIDEV_GITIGNORE_REL, AIDEV_GITIGNORE, WORKFLOW_NAME_RE, INPUT_NAME_RE,
   TOOL_CONFIG_GLOBS, ALL_TOOL_CONFIG_GLOBS, KIT_MANAGED_GLOBS, isKitManaged, toPosix, abs, ensureAidevGitignore,
 };
