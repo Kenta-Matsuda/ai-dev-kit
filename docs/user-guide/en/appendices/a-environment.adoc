@@ -27,6 +27,9 @@ Never write values into files. Set them in your shell profile, as user environme
 |`AIDEV_WORKFLOW` / `AIDEV_WORKFLOW_STEP` / `AIDEV_WORKFLOW_RUN` / `AIDEV_WORKFLOW_ITEM`
 |The workflow name, the `id` of the step now running, the run id (where the notes directory is) and the `for_each` target (the `{item}` in `writable`), which `aidev run workflow` sets, for the child process only, when it starts an agent. The hook uses them to check that the workflow is approved, and allows only writes inside that step's `writable` and the notes, and only the tools, MCP servers and subagents that agent was given. Do not set them yourself.
 
+|The variables a workflow declares under `env_required:` (`E2E_PASSWORD`, say)
+|Credentials set in the shell by whoever runs that workflow. `aidev run workflow` checks by name that they are set and starts nothing while one is missing. The value reaches only the environment of the agents and commands; it goes into no instruction, record, log or PR body (xref:workflows-env-required[Taking credentials from environment variables]).
+
 |`AIDEV_DEBUG`
 |When set, internal errors show a stack trace.
 

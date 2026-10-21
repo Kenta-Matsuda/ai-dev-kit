@@ -56,13 +56,21 @@ const LIMITS = Object.freeze({
   maxParallel: 16,
 });
 
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const NAME_RE = layout.WORKFLOW_NAME_RE;
 const STEP_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 /** Characters a shell would interpret; a command line containing one is refused. */
 const SHELL_CHARS_RE = /[|&;<>`$"'\\]/;
 
 const KIT_AGENTS_DIR = 'templates/claude/.claude/agents';
 const KIT_SKILLS_DIR = 'templates/claude/.claude/skills';
+/**
+ * The standard workflows the kit bundles: `templates/workflows/<name>/` holds
+ * a workflow.yaml and the agents (`agents/<agent>.md`) and skills
+ * (`skills/<skill>/SKILL.md`) it names. They are templates, not runnable in
+ * place: `aidev create workflow <name> --from <standard>` copies them into a
+ * PKG, where they are reviewed and approved like any workflow the PKG wrote.
+ */
+const KIT_WORKFLOWS_DIR = 'templates/workflows';
 
 /** The environment variables the runner sets for its agents; the write guard reads them. */
 const ENV_WORKFLOW = 'AIDEV_WORKFLOW';
@@ -75,7 +83,7 @@ const ENV_ITEM = 'AIDEV_WORKFLOW_ITEM';
 const RUN_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
 
 /** The only keys a definition may carry; anything else is a mistake worth naming. */
-const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'inputs', 'provide', 'never_commit', 'steps', 'limits'];
+const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents', 'inputs', 'env_required', 'provide', 'never_commit', 'steps', 'limits'];
 
 /**
  * `inputs`: what a run is given on the command line (`--input name=value`),
@@ -93,7 +101,18 @@ const TOP_KEYS = ['name', 'description', 'objective', 'tool', 'model', 'agents',
  *                the worktree) and `{inputs.<name>}` is that copy's path
  */
 const INPUT_KEYS = ['description', 'default', 'pattern', 'path', 'file'];
-const INPUT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+const INPUT_NAME_RE = layout.INPUT_NAME_RE;
+/**
+ * `env_required`: environment variables a run needs from the shell that
+ * starts it — the credentials a command or a test needs (a password, a token)
+ * — as a list of names, or a mapping of name to a description for the person
+ * running it. The kit checks they are set before anything starts, and the
+ * agents and commands inherit them as they inherit the rest of the
+ * environment; their values are never read into a prompt, a record or a log.
+ * A value that is not a secret belongs in `inputs` (recorded, reviewed, and
+ * written where the definition says), not here.
+ */
+const ENV_REQUIRED_MAX = 32;
 /** `{inputs.<name>}` wherever a value may be written; anything else inside the braces is a mistake. */
 const INPUT_TOKEN_RE = /\{inputs\.([^}]*)\}/g;
 const INPUT_MAX_CHARS = 1000;
@@ -138,7 +157,7 @@ const LIMIT_KEYS = ['max_usd', 'max_minutes'];
 const STEP_KINDS = [['agent', 'agent'], ['command', 'command'], ['pull_request', 'pull-request'], ['parallel', 'parallel']];
 const STEP_KEYS = {
   parallel: ['id', 'description', 'parallel'],
-  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'for_each', 'until', 'timeout_minutes'],
+  agent: ['id', 'description', 'agent', 'prompt', 'writable', 'unchanged', 'env', 'for_each', 'until', 'timeout_minutes'],
   command: ['id', 'description', 'command', 'cwd', 'env', 'timeout_minutes', 'writable'],
   'pull-request': ['id', 'description', 'pull_request'],
 };
@@ -293,6 +312,35 @@ function envMap(v, field, where) {
     const s = String(raw);
     if (/[\r\n\0]/.test(s)) throw new AidevError(`${where}: ${field}: ${k} must be a single line`);
     out[k] = s;
+  }
+  return out;
+}
+
+/**
+ * The top-level `env_required`, validated: { <NAME>: <description> } (an
+ * empty string when none was given). Names follow the environment variable
+ * rules of `env`, and the runner's own AIDEV_* / GIT_CONFIG* names are not a
+ * workflow's to require.
+ */
+function envRequiredSpec(v, source) {
+  if (v == null) return {};
+  const where = `${source}: env_required`;
+  let entries;
+  if (Array.isArray(v)) entries = v.map((n) => [n, '']);
+  else if (typeof v === 'object') entries = Object.entries(v);
+  else throw new AidevError(`${where} is a list of environment variable names, or a mapping of name to a description (env_required: { E2E_PASSWORD: the password of the test user })`);
+  if (entries.length > ENV_REQUIRED_MAX) throw new AidevError(`${where} names ${entries.length} variables, above ${ENV_REQUIRED_MAX}`);
+  const out = {};
+  for (const [raw, descRaw] of entries) {
+    const name = String(raw == null ? '' : raw).trim();
+    if (!ENV_NAME_RE.test(name)) throw new AidevError(`${where}: ${JSON.stringify(name)} is not an environment variable name`);
+    if (/^AIDEV_/i.test(name)) throw new AidevError(`${where}: ${name} is the kit's own; a workflow cannot require AIDEV_* variables`);
+    if (/^GIT_CONFIG/i.test(name)) throw new AidevError(`${where}: ${name} is git configuration, which the runner sets`);
+    if (descRaw != null && typeof descRaw === 'object') throw new AidevError(`${where}: ${name} takes a description (one line of text), nothing else`);
+    const desc = String(descRaw == null ? '' : descRaw).trim();
+    if (/[\r\n\0]/.test(desc)) throw new AidevError(`${where}: the description of ${name} must be a single line`);
+    if (name in out) throw new AidevError(`${where}: ${name} is listed twice`);
+    out[name] = desc;
   }
   return out;
 }
@@ -659,6 +707,7 @@ function inputUses(def, source = null) {
     never(s.description, `${where}.description`);
     if (s.kind === 'agent') {
       note(s.prompt, `${where}.prompt`);
+      for (const [k, v] of Object.entries(s.env || {})) note(v, `${where}.env.${k}`, true);
       if (s.until) {
         for (const c of s.until.commands) cmd(c, `${where}.until.command`);
         for (const [k, v] of Object.entries(s.until.env || {})) note(v, `${where}.until.env.${k}`, true);
@@ -679,8 +728,16 @@ function inputUses(def, source = null) {
  * recorded { name: value } object): defaults filled in, everything checked.
  * Throws on an input the definition does not declare, a required one that is
  * missing, or a value its declaration refuses.
+ *
+ * `configured` is what the PKG's aidev.yaml sets for this workflow
+ * (`workflows.<name>.inputs`, as config.js validated it): the values that
+ * are the same for every run in this PKG (the URL of the environment under
+ * test, the login of the test user). A value given now wins over it, and it
+ * wins over the declaration's `default`. It is checked as a given value is
+ * (`configuredWhere` names it in the message), and it cannot stand in for a
+ * `file: true` input: that file is on the machine of whoever runs it.
  */
-function collectInputs(def, given, where = '--input', { allowMissing = false, placed = false } = {}) {
+function collectInputs(def, given, where = '--input', { allowMissing = false, placed = false, configured = null, configuredWhere = `${layout.CONFIG_NAME}: workflows.${def.name}.inputs` } = {}) {
   const specs = def.inputs || {};
   const values = {};
   const entries = Array.isArray(given)
@@ -699,6 +756,15 @@ function collectInputs(def, given, where = '--input', { allowMissing = false, pl
     if (name in values) throw new AidevError(`${where}: input ${name} is given twice`);
     values[name] = checkInputValue(specs[name], name, value, where, { placed });
   }
+  for (const [name, value] of Object.entries(configured || {})) {
+    if (name in values) continue;
+    if (!specs[name]) {
+      const known = Object.keys(specs);
+      throw new AidevError(`${configuredWhere}: the workflow declares no input ${JSON.stringify(name)}${known.length ? ` (its inputs: ${known.join(', ')})` : ' (it declares no inputs)'}`);
+    }
+    if (specs[name].file) throw new AidevError(`${configuredWhere}: input ${name} is a file on the machine of whoever runs the workflow; pass it with ${where} ${name}=<path>, not in ${layout.CONFIG_NAME}`);
+    values[name] = checkInputValue(specs[name], name, value, configuredWhere);
+  }
   const missing = [];
   for (const [name, spec] of Object.entries(specs)) {
     if (name in values) continue;
@@ -708,7 +774,10 @@ function collectInputs(def, given, where = '--input', { allowMissing = false, pl
   if (missing.length && !allowMissing) {
     throw new AidevError(`the workflow needs ${where} for: ${missing.map((n) => `${n}${specs[n].description ? ` (${specs[n].description})` : ''}`).join(', ')}`);
   }
-  return values;
+  // In the order the definition declares them, wherever each value came from.
+  const ordered = {};
+  for (const name of Object.keys(specs)) if (name in values) ordered[name] = values[name];
+  return ordered;
 }
 
 /**
@@ -755,7 +824,7 @@ function withInputs(def, values) {
     steps: def.steps.map((s) => {
       if (s.kind === 'agent') {
         const until = s.until && { ...s.until, commands: s.until.commands.map(cmd), env: env(s.until.env), prompt: s.until.prompt == null ? null : put(s.until.prompt) };
-        return { ...s, prompt: put(s.prompt), until };
+        return { ...s, prompt: put(s.prompt), env: env(s.env), until };
       }
       if (s.kind === 'command') return { ...s, command: cmd(s.command), env: env(s.env) };
       return s;
@@ -870,6 +939,10 @@ function validateDefinition(raw, source = 'workflow.yaml') {
         if (list.some((g) => g.includes('{inputs.'))) throw new AidevError(`${where}: ${field} cannot name an input ({inputs.…}); what a step may touch is fixed by the definition`);
       }
       if (step.unchanged.some((g) => g.includes(ITEM_TOKEN))) throw new AidevError(`${where}: unchanged cannot name ${ITEM_TOKEN} (it holds for every target)`);
+      // Fixed environment variables for the step's agent and its until
+      // commands (settings a tool or a test reads: a URL, a mode), as a
+      // command step's env. The until's own env comes on top of it.
+      step.env = envMap(s.env, 'env', where);
       step.for_each = forEachSpec(s.for_each, where);
       step.until = untilSpec(s.until, where);
       if (step.until && step.until.agent && !agents.includes(step.until.agent)) agents.push(step.until.agent);
@@ -952,6 +1025,13 @@ function validateDefinition(raw, source = 'workflow.yaml') {
   }
   for (const [name, spec] of Object.entries(def.inputs)) {
     if (spec.default != null) checkInputValue(spec, name, spec.default, `${source}: inputs.${name}.default`);
+  }
+  // What the shell that starts a run must have set (credentials, mostly).
+  def.env_required = envRequiredSpec(raw.env_required, source);
+  for (const s of def.steps) {
+    const fixed = [...Object.keys(s.env || {}), ...Object.keys((s.until && s.until.env) || {})];
+    const hit = fixed.find((k) => k in def.env_required);
+    if (hit) throw new AidevError(`${source}: steps[${s.id}]: env sets ${hit}, which env_required says the shell provides; take it out of one of them`);
   }
   def.provide = assertGlobList(raw.provide, 'provide', source);
   for (const g of def.provide) {
@@ -1394,6 +1474,70 @@ function contentHash(text) {
   return `sha256:${cfgMod.sha256(Buffer.from(normalize(text), 'utf8'))}`;
 }
 
+// ------------------------------------------------------- standard workflows
+
+function standardWorkflowsDir(installRoot) { return path.join(installRoot, ...KIT_WORKFLOWS_DIR.split('/')); }
+
+/**
+ * One standard workflow of the kit, read from `templates/workflows/<name>/`:
+ * { name, dir, text (its workflow.yaml), description, agents: [{ name, rel,
+ * text }], skills: [{ name, rel, text }] }, or null when the kit bundles no
+ * such workflow. `rel` is where the file lands in a PKG. The text is not
+ * validated here (a PKG validates its copy); `description` is read off the
+ * YAML when it parses, else ''.
+ */
+function readStandardWorkflow(installRoot, name) {
+  if (!NAME_RE.test(String(name || ''))) return null;
+  const dir = path.join(standardWorkflowsDir(installRoot), name);
+  const text = cfgMod.readTextIfExists(path.join(dir, 'workflow.yaml'));
+  if (text == null) return null;
+  let description = '';
+  try { const raw = yaml.parse(text); description = raw && raw.description ? String(raw.description).trim() : ''; } catch { description = ''; }
+  const agents = [];
+  try {
+    for (const f of fs.readdirSync(path.join(dir, 'agents')).sort()) {
+      if (!f.endsWith('.md')) continue;
+      const n = f.replace(/\.md$/, '');
+      agents.push({ name: n, rel: agentRel(n), text: fs.readFileSync(path.join(dir, 'agents', f), 'utf8') });
+    }
+  } catch { /* a workflow that names only the kit's agents has no agents/ */ }
+  const skills = [];
+  try {
+    for (const d of fs.readdirSync(path.join(dir, 'skills'), { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      const t = cfgMod.readTextIfExists(path.join(dir, 'skills', d.name, 'SKILL.md'));
+      if (t == null) continue;
+      skills.push({ name: d.name, rel: skillRel(d.name), text: t });
+    }
+    skills.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  } catch { /* none */ }
+  return { name, dir, text, description, agents, skills };
+}
+
+/** The standard workflows the kit bundles, by name: [{ name, description }]. */
+function listStandardWorkflows(installRoot) {
+  let names = [];
+  try { names = fs.readdirSync(standardWorkflowsDir(installRoot), { withFileTypes: true }).filter((d) => d.isDirectory() && NAME_RE.test(d.name)).map((d) => d.name).sort(); } catch { return []; }
+  return names.map((n) => readStandardWorkflow(installRoot, n)).filter(Boolean).map((w) => ({ name: w.name, description: w.description }));
+}
+
+/**
+ * The files a PKG gets from a standard workflow under the name it chose:
+ * [{ rel, kind, name, text }], the YAML's `name:` line rewritten to that
+ * name. Every other line of the YAML, and the agents and skills, are copied
+ * as they are; the PKG edits its copies (the paths of its tests, the
+ * commands it runs) and submits them for review like a workflow it wrote.
+ */
+function standardWorkflowFiles(std, name) {
+  const renamed = std.text.replace(/^name:[^\n]*$/m, `name: ${name}`);
+  if (!/^name:/m.test(renamed)) throw new AidevError(`the kit's ${std.name} has no name: line in its workflow.yaml`);
+  return [
+    { rel: defRel(name), kind: 'workflow', name, text: renamed },
+    ...std.agents.map((a) => ({ rel: a.rel, kind: 'agent', name: a.name, text: a.text })),
+    ...std.skills.map((s) => ({ rel: s.rel, kind: 'skill', name: s.name, text: s.text })),
+  ];
+}
+
 // ------------------------------------------------------------------- listing
 
 function listWorkflows(repoRoot) {
@@ -1413,4 +1557,5 @@ module.exports = {
   resolveAgent, resolveSkill, resolveDependencies, reviewedFiles, definitionForPrompt,
   agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, subagentGranted, literalPrefix, mayOverlap, mcpServersFor,
   trackingRef, approvalStatus, reviewedHash, trialFile, startTrial, readTrial, trialStatus, inspect, writeGrant, contentHash, listWorkflows,
+  KIT_WORKFLOWS_DIR, standardWorkflowsDir, readStandardWorkflow, listStandardWorkflows, standardWorkflowFiles, envRequiredSpec,
 };

@@ -89,6 +89,15 @@ objective: |
 #     description: the Playwright project to run
 #     default: chromium
 #     pattern: "[a-z]+"
+# A value that is the same for every run in this PKG (the URL of the environment under test, the
+# login of the test user) goes in aidev.yaml instead: workflows.${name}.inputs.<name>: <value>
+# (--input still wins over it). A credential never goes in a file: see env_required below.
+
+# Optional: environment variables the run needs from the shell that starts it (a password, a token).
+# The kit refuses to start while one is unset; the agents and commands inherit it, as they inherit
+# the rest of the environment; its value is never written into a prompt, a record or a log.
+# env_required:
+#   E2E_PASSWORD: the password of the test user
 
 # Optional: files git ignores that the run needs (test data, a spec sheet kept out of git). A run works in
 # a fresh worktree, which has none of them; these are copied from your checkout before the first step.
@@ -136,6 +145,8 @@ steps:
     prompt: Carry out the plan.
     # unchanged: [tests/**]    # optional: paths this step must leave as they are, even inside writable
     #                          #   (checked after every attempt; e.g. the tests an upgrade must not weaken)
+    # env: { BASE_URL: "{inputs.url}" }   # optional: fixed environment variables for the agent and its until
+    #                          #   commands (settings a test reads, never secrets: those go in env_required)
     # for_each:                # optional: run this step once per target, a new start each time
     #   from: targets.txt      #   a file an earlier step wrote in the run's notes directory, one target per line
     #   max_items: 200         #   required; at most ${wfMod.LIMITS.maxItems}. Write {item} in prompt (and until) for the target
@@ -202,6 +213,12 @@ function catalogue(repoRoot, installRoot) {
   let pkgSkills = [];
   try { pkgSkills = fs.readdirSync(layout.abs(repoRoot, layout.SKILLS_REL), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { pkgSkills = []; }
   for (const s of pkgSkills) lines.push(`- ${s} (this PKG)`);
+  const standard = wfMod.listStandardWorkflows(installRoot);
+  if (standard.length) {
+    lines.push('', '## Standard workflows the kit bundles (a person copies one with: aidev create workflow <name> --from <standard>)', '',
+      'When the request is what one of these does, say so in your final message and name the command instead of writing it again; the copy is the team\'s to edit.', '');
+    for (const w of standard) lines.push(`- ${w.name}: ${w.description}`);
+  }
   lines.push('', '## The schema (a template; only these keys exist)', '', '```yaml', TEMPLATE_YAML('example').trim(), '```');
   lines.push('', '## What an agent can use: its frontmatter, plus what the workflow\'s agents: adds for that workflow', '', '```markdown', AGENT_FRONTMATTER_EXAMPLE, '```');
   return lines.join('\n');
@@ -243,7 +260,10 @@ async function createByDescription(ctx, name) {
   let problem = null;
   try { def = wfMod.loadDefinition(repoRoot, name); wfMod.resolveDependencies(repoRoot, installRoot, def); }
   catch (e) { problem = e.message; }
-  if (problem) {
+  if (problem && !fs.existsSync(wfMod.defPath(repoRoot, name))) {
+    // The agent wrote nothing on purpose when a standard workflow of the kit does the job (its message says which).
+    ui.warn(`the agent wrote no ${rel}; its message below says why${wfMod.listStandardWorkflows(installRoot).length ? ` (a standard workflow may fit: aidev create workflow ${name} --from <standard>; "aidev list workflows" names them)` : ''}`);
+  } else if (problem) {
     ui.warn(`the agent finished, but the workflow does not validate: ${problem}`);
     ui.dim('    Fix the YAML by hand, then check with "aidev list workflows".');
   } else {
@@ -255,12 +275,82 @@ async function createByDescription(ctx, name) {
   return problem ? EXIT.GENERAL : EXIT.OK;
 }
 
+/**
+ * `aidev create workflow <name> --from <standard>`: copy one of the kit's
+ * standard workflows (templates/workflows/<standard>/) into this PKG under
+ * the chosen name — the YAML and the agents and skills it names. From then on
+ * they are the PKG's files: edited where the PKG differs (the paths of its
+ * tests, its commands), reviewed and approved like a workflow the PKG wrote.
+ * Nothing resolves to the kit's copy at run time, so a later kit cannot
+ * change what an approved workflow does; a newer standard reaches a PKG by
+ * copying it again (`--force`) and reviewing the diff. What differs between
+ * PKGs is not in the YAML: the values of its inputs go in aidev.yaml
+ * (workflows.<name>.inputs) or on the command line, and a credential in the
+ * shell (env_required).
+ */
+async function createFromStandard(ctx, name) {
+  const { repoRoot, installRoot, flags } = ctx;
+  const from = String(flags.from).trim();
+  const std = wfMod.readStandardWorkflow(installRoot, from);
+  if (!std) {
+    const names = wfMod.listStandardWorkflows(installRoot).map((w) => w.name);
+    throw new AidevError(`the kit bundles no standard workflow ${JSON.stringify(from)}${names.length ? ` (available: ${names.join(', ')})` : ' (it bundles none)'}`);
+  }
+  const files = wfMod.standardWorkflowFiles(std, name).map((f) => {
+    const existing = cfgMod.readTextIfExists(layout.abs(repoRoot, f.rel));
+    const state = existing == null ? 'new' : (existing === f.text ? 'same' : 'differs');
+    return { ...f, state };
+  });
+  const differing = files.filter((f) => f.state === 'differs');
+  if (differing.length && !flags.force) {
+    throw new AidevError(`${differing.map((f) => f.rel).join(', ')} already exist${differing.length > 1 ? '' : 's'} and differ${differing.length > 1 ? '' : 's'} from the kit's ${from} (pass --force to overwrite, or remove ${differing.length > 1 ? 'them' : 'it'} first)`);
+  }
+  const written = files.filter((f) => f.state !== 'same').map((f) => f.rel);
+  const kept = files.filter((f) => f.state === 'same').map((f) => f.rel);
+  ui.heading(`aidev create workflow ${name}${flags['dry-run'] ? ' (dry run)' : ''}`);
+  if (flags['dry-run']) {
+    for (const f of files) ui.ok(`would ${f.state === 'same' ? 'keep' : f.state === 'differs' ? 'overwrite' : 'write'} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
+    if (flags.json) ui.json({ ok: true, name, from, written, kept, dryRun: true });
+    return EXIT.OK;
+  }
+  for (const f of files) if (f.state !== 'same') cfgMod.writeFileAtomic(layout.abs(repoRoot, f.rel), f.text);
+  let def = null;
+  let problem = null;
+  try { def = wfMod.loadDefinition(repoRoot, name); wfMod.resolveDependencies(repoRoot, installRoot, def); }
+  catch (e) { problem = e.message; }
+  for (const f of files) ui.ok(`${f.state === 'same' ? 'kept' : f.state === 'differs' ? 'overwrote' : 'wrote'} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
+  if (problem) ui.warn(`the copy does not validate: ${problem}`);
+  else {
+    ui.dim(`    from the kit's standard workflow ${from}: ${std.description || '(no description)'}`);
+    ui.dim('    the files are this PKG\'s now: edit what differs here (the paths the steps write, the commands they run), then submit them for review');
+    const inputs = Object.entries(def.inputs);
+    if (inputs.length) {
+      ui.dim(`    inputs: ${inputs.map(([n, s]) => `${n}${s.file ? ' (a file, --input only)' : s.default != null ? ` (default ${s.default})` : ' (required)'}`).join(', ')}`);
+      const settable = inputs.filter(([, s]) => !s.file);
+      if (settable.length) {
+        ui.dim(`    set this PKG's values once in ${layout.CONFIG_NAME} (--input overrides them per run):`);
+        ui.dim(`      workflows:\n        ${name}:\n          inputs:\n${settable.map(([n, s]) => `            ${n}: ${s.default != null ? s.default : `<${s.description || 'value'}>`}`).join('\n')}`);
+      }
+    }
+    const env = Object.entries(def.env_required);
+    if (env.length) ui.dim(`    before a run, export in the shell: ${env.map(([n, d]) => `${n}${d ? ` (${d})` : ''}`).join(', ')}`);
+  }
+  nextSteps(name);
+  if (flags.json) ui.json({ ok: !problem, name, from, written, kept, problem, inputs: def ? Object.keys(def.inputs) : null, envRequired: def ? Object.keys(def.env_required) : null });
+  return problem ? EXIT.GENERAL : EXIT.OK;
+}
+
 async function newWorkflow(ctx) {
   const { repoRoot, flags, positionals } = ctx;
   const name = wfMod.sanitizeName(positionals[1]);
   const dir = wfMod.workflowDir(repoRoot, name);
   if (fs.existsSync(dir) && !flags.force) {
     throw new AidevError(`workflow ${name} already exists at ${WORKFLOWS_DIR}/${name} (pass --force to overwrite)`);
+  }
+  if (flags.from != null && flags.describe != null) throw new AidevError('--from copies a standard workflow and --describe writes one from your words; pass one of them');
+  if (flags.from != null) {
+    if (!String(flags.from).trim()) throw new AidevError('--from needs the name of a standard workflow ("aidev list workflows" names them)');
+    return createFromStandard(ctx, name);
   }
   if (flags.describe != null) {
     if (!String(flags.describe).trim()) throw new AidevError('--describe needs text');
@@ -349,6 +439,7 @@ function describeSteps(def, deps) {
         `   - ${grants(deps.agents[s.agent].capabilities)}`,
       ];
       if (s.unchanged.length) lines.push(`   - must leave unchanged: ${codeList(s.unchanged)}`);
+      if (Object.keys(s.env || {}).length) lines.push(`   - env for the agent and its checks: ${Object.entries(s.env).map(([k, v]) => `\`${k}=${v}\``).join(', ')}`);
       if (s.for_each) lines.push(`   - once per target listed in the run's notes file \`${s.for_each.from}\` (at most ${s.for_each.max_items}${s.for_each.parallel > 1 ? `, ${s.for_each.parallel} at a time` : ''})`);
       if (s.group) {
         const others = def.steps.filter((o) => o.group === s.group && o.id !== s.id).map((o) => o.id);
@@ -389,6 +480,11 @@ function describeExtras(def) {
       return `- \`${n}\`${s.description ? `: ${s.description}` : ''} (${facts.join('; ')})`;
     }), '');
   }
+  const env = Object.entries(def.env_required || {});
+  if (env.length) {
+    lines.push('## Environment variables the run needs', '', 'Set in the shell that runs it (a run does not start while one is unset); inherited by the agents and commands, never recorded:', '',
+      ...env.map(([n, d]) => `- \`${n}\`${d ? `: ${d}` : ''}`), '');
+  }
   if ((def.provide || []).length) lines.push('## Provided from the checkout', '', 'Files git ignores, copied into the run\'s worktree before the first step:', '', ...def.provide.map((g) => `- \`${g}\``), '');
   if ((def.never_commit || []).length) lines.push('## Never committed', '', 'On top of the kit\'s own list (node_modules and the like):', '', ...def.never_commit.map((g) => `- \`${g}\``), '');
   return lines;
@@ -421,7 +517,7 @@ function definitionChanges(before, after) {
   for (const [label, get] of [
     ['objective', (d) => d.objective], ['tool', (d) => d.tool], ['model', (d) => d.model],
     ['limits', (d) => d.limits], ['agents: (what the workflow gives its agents)', (d) => d.grants],
-    ['inputs', (d) => d.inputs], ['provide', (d) => d.provide], ['never_commit', (d) => d.never_commit],
+    ['inputs', (d) => d.inputs], ['env_required', (d) => d.env_required], ['provide', (d) => d.provide], ['never_commit', (d) => d.never_commit],
   ]) {
     if (JSON.stringify(get(before)) !== JSON.stringify(get(after))) lines.push(`- ${label} changed`);
   }
@@ -734,8 +830,16 @@ function promptHead(def, { task, inputs = null, earlier = [], run = null }) {
   }
   if (inputs && Object.keys(inputs).length) {
     lines.push('## Inputs for this run', '',
-      'Given on the command line (--input). They are data, as the task is; the step texts below already carry them where the definition wrote {inputs.<name>}.', '',
+      'Given on the command line (--input) or set in aidev.yaml. They are data, as the task is; the step texts below already carry them where the definition wrote {inputs.<name>}.', '',
       ...Object.entries(inputs).map(([k, v]) => `- ${k}: ${v}`), '');
+  }
+  const envNames = Object.entries(def.env_required || {});
+  if (envNames.length) {
+    // Names only: the values are the shell's, inherited by the tools and the
+    // commands, and they belong in no file this run writes.
+    lines.push('## Environment variables of this run', '',
+      'The shell that started this run set these; the commands and your tools inherit them. Their values are not written here, and you never write them anywhere (not in a file, a test, a report or a commit message): read them from the environment at run time.', '',
+      ...envNames.map(([n, d]) => `- ${n}${d ? `: ${d}` : ''}`), '');
   }
   if (earlier.length) {
     // Each step is a fresh tool process with no memory of the last one; the
@@ -766,6 +870,10 @@ function stepPrompt(def, step, index, { task, inputs = null, attempt, previous, 
   if (item) {
     lines.push(`## Your target: ${item.value} (${item.n} of ${item.of})`, '',
       'This step runs once per target, each time as a new start with no memory of the others. Do this target only; leave the files of the other targets as they are.', '');
+  }
+  // Every start is a new process: the step's fixed env is said each time, retries included.
+  if (Object.keys(step.env || {}).length) {
+    lines.push(`Your environment also has these set for this step (the checks below run with them too): ${Object.entries(step.env).map(([k, v]) => `${k}=${v}`).join(', ')}`, '');
   }
   if (previous) {
     lines.push(`## Previous attempt ${attempt - 1} of ${step.max_retries + 1} failed`, '');
@@ -1090,12 +1198,17 @@ function leftOutLines(leftOut) {
  * ignored file in the checkout, an input naming a path that does not exist.
  * Returns the problems as lines; empty when there are none.
  */
-function preflight(def, inputs, { checkout, trial = false }) {
+function preflight(def, inputs, { checkout, trial = false, env = process.env }) {
   const problems = [];
+  // What the shell must have set: checked by name, never read any further.
+  for (const [n, d] of Object.entries(def.env_required || {})) {
+    if (String(env[n] == null ? '' : env[n]).length) continue;
+    problems.push(`the environment variable ${n}${d ? ` (${d})` : ''} is not set; the workflow needs it (env_required). Export it in the shell that runs aidev; it reaches the agents and commands through their environment and is never recorded`);
+  }
   const seen = new Set();
   for (const s of def.steps) {
     const cmds = s.kind === 'command' ? [s.command] : (s.until ? s.until.commands : []);
-    const cmdEnv = { ...process.env, ...((s.kind === 'command' ? s.env : s.until && s.until.env) || {}) };
+    const cmdEnv = { ...process.env, ...(s.env || {}), ...((s.kind === 'agent' && s.until && s.until.env) || {}) };
     for (const c of cmds) {
       const bin = c.argv[0];
       // A trial pushes nothing: a command that would is refused up front (git itself refuses it too).
@@ -1374,9 +1487,11 @@ async function runWorkflow(ctx) {
       if (spec.file && inputs[n] != null && !String(inputs[n]).startsWith(inputsDir)) throw new AidevError(`the recorded input ${n} of run ${prior.runId} is not the run's own copy (${inputs[n]}); start a new run`);
     }
   } else {
-    const given = wfMod.collectInputs(def, flags.input || []);
+    const given = wfMod.collectInputs(def, flags.input || [], '--input', { configured: configuredInputs(config, name) });
     ({ values: inputs, files: inputFiles } = wfMod.placeFileInputs(def, given, { name, runId }));
   }
+  // Where each value came from, for the dry run: the command line, aidev.yaml, or the declaration's default.
+  const inputOrigin = inputOrigins(def, flags.input || [], prior ? null : configuredInputs(config, name));
   // From here on the definition carries the inputs where it wrote {inputs.<name>}.
   def = wfMod.withInputs(def, inputs);
   const priorSteps = new Map(((prior && prior.record.steps) || []).map((s) => [s.id, s]));
@@ -1417,8 +1532,11 @@ async function runWorkflow(ctx) {
       ['cost', `${estimateMod.usdRange([guess.optimistic, guess.pessimistic])} (optimistic – pessimistic; "aidev estimate workflow ${name}" for the breakdown)`],
       ['task', task ? tail(task, 200) : '(none)'],
       ['inputs', Object.keys(inputs).length
-        ? Object.entries(inputs).map(([k, v]) => `${k}=${v}${inputFiles.some((f) => f.name === k) ? ` (copied from ${inputFiles.find((f) => f.name === k).from})` : ''}`).join('\n')
+        ? Object.entries(inputs).map(([k, v]) => `${k}=${v}${inputFiles.some((f) => f.name === k) ? ` (copied from ${inputFiles.find((f) => f.name === k).from})` : inputOrigin[k] === 'config' ? ` (from ${layout.CONFIG_NAME})` : ''}`).join('\n')
         : (Object.keys(def.inputs).length ? '(none given; defaults apply)' : '(none declared)')],
+      ...(Object.keys(def.env_required).length
+        ? [['env', Object.entries(def.env_required).map(([n, d]) => `${n}: ${String(process.env[n] == null ? '' : process.env[n]).length ? 'set' : 'NOT SET'}${d ? ` (${d})` : ''}`).join('\n')]]
+        : []),
       ...(def.provide.length ? [['provide', `${def.provide.join(', ')} (ignored files, copied from ${pkgRoot})`]] : []),
       ...(def.never_commit.length ? [['never commit', `${def.never_commit.join(', ')} (and the kit's own list: node_modules and the like)`]] : []),
       ['branch', prior ? `${prior.record.branch || '(none recorded)'} (the run's)` : runtree.branchFor(name, { dated: !!flags.dated, trial })],
@@ -1756,7 +1874,8 @@ async function runWorkflow(ctx) {
     try {
       res = await agentMod.runAgent({
         repoRoot, installRoot, tool, agent: agentName, definition: wfMod.definitionForPrompt(agent, skills),
-        prompt, model, timeoutMs, env: { ...env, [wfMod.ENV_STEP]: stepId, ...(item != null ? { [wfMod.ENV_ITEM]: item } : {}) },
+        // The step's fixed env under the runner's own variables (a step cannot name AIDEV_* or GIT_CONFIG*; the order keeps it so).
+        prompt, model, timeoutMs, env: { ...env, ...(step.env || {}), [wfMod.ENV_STEP]: stepId, ...(item != null ? { [wfMod.ENV_ITEM]: item } : {}) },
         // Unique per start: agents of one step may run at the same time.
         label: `wf-${name}-${stepId.replace(':', '-')}-${agentRuns}`, capabilities,
         onProgress: progressFor(`${stepId}${item ? ` [${item}]` : ''} #${attempt}`),
@@ -1795,7 +1914,8 @@ async function runWorkflow(ctx) {
     for (let c = 0; c < until.commands.length; c++) {
       const command = until.commands[c];
       // eslint-disable-next-line no-await-in-loop
-      const check = await execCommand(step, command, until, `${tag}.${attempt}.${c + 1}`);
+      // The until commands run in the environment the step's agent had, plus the until's own env.
+      const check = await execCommand(step, command, { ...until, env: { ...(step.env || {}), ...(until.env || {}) } }, `${tag}.${attempt}.${c + 1}`);
       if (check.code !== 0) {
         return { passed: false, failure: { kind: 'command', command: command.text, code: check.code, output: check.output, logRel: check.logRel, text: `${command.text} exited ${check.code}` } };
       }
@@ -2434,7 +2554,8 @@ async function modifyWorkflow(ctx) {
       'a check that cannot pass as written, a tool, skill or MCP server it lacks, a writable too narrow for the work, a target list in a',
       'format the kit refuses, or a setup the worktree does not have (a run works in a fresh git worktree: what git ignores, such as',
       'node_modules, is not there until a command step installs it; a data file git ignores, such as a spec sheet, reaches the worktree',
-      'only through provide:). A value that changes from run to run belongs in inputs: (given with --input), not in the prompt; what a',
+      'only through provide:). A value that changes from run to run belongs in inputs: (given with --input, or set for this PKG in aidev.yaml under workflows.<name>.inputs), not in the prompt; a',
+      'credential a command or a test needs is declared under env_required: and set in the shell, never written in the definition; what a',
       'command leaves behind that must never be committed goes in never_commit:. Change the workflow so the next run does not meet it.',
       'Do not only raise max_retries, timeouts or limits unless the record shows that this is the cause.',
       'Start your final message with one line: CAUSE: <the cause, in one sentence>. Then list the changes.', '',
@@ -2670,7 +2791,7 @@ async function estimateWorkflow(ctx) {
   const { launch } = launchPlan(repoRoot, config, def, deps);
   const task = collectTask(flags);
   // The inputs the run would be given; a missing one is no reason not to estimate.
-  const inputs = wfMod.collectInputs(def, flags.input || [], '--input', { allowMissing: true });
+  const inputs = wfMod.collectInputs(def, flags.input || [], '--input', { allowMissing: true, configured: configuredInputs(config, name) });
   const text = cfgMod.readTextIfExists(wfMod.defPath(repoRoot, name));
   const hash = wfMod.contentHash(text);
 
@@ -2755,11 +2876,32 @@ function list(ctx) {
     }
     return { name: n, description: r.def ? r.def.description : '', status, steps: r.def ? r.def.steps.length : null, writable: r.def ? r.def.writable : null };
   });
-  if (flags.json) { ui.json({ workflows: rows, ref: wfMod.trackingRef(config) }); return EXIT.OK; }
+  // The kit's standard workflows: not runnable here, but a start to copy from.
+  const standard = wfMod.listStandardWorkflows(installRoot);
+  if (flags.json) { ui.json({ workflows: rows, ref: wfMod.trackingRef(config), standard }); return EXIT.OK; }
   ui.heading('aidev list workflows');
   if (rows.length === 0) ui.dim(`    no workflows in ${WORKFLOWS_DIR}/ yet — "aidev create workflow <name> --describe <what you want>"`);
   else ui.table(rows.map((r) => [r.name, r.status, r.description]));
+  if (standard.length) {
+    ui.out('');
+    ui.dim('    standard workflows bundled with the kit (copy one into this PKG: aidev create workflow <name> --from <standard>):');
+    ui.table(standard.map((w) => [`    ${w.name}`, w.description]));
+  }
   return EXIT.OK;
+}
+
+/** What aidev.yaml sets for this workflow's inputs (`workflows.<name>.inputs`), or null. */
+function configuredInputs(config, name) {
+  const w = config && config.workflows ? config.workflows[name] : null;
+  return w && w.inputs && Object.keys(w.inputs).length ? w.inputs : null;
+}
+
+/** Where each input's value comes from: 'flag' (--input), 'config' (aidev.yaml) or 'default'. */
+function inputOrigins(def, givenLines, configured) {
+  const given = new Set(givenLines.map((l) => String(l).slice(0, Math.max(0, String(l).indexOf('='))).trim()));
+  const out = {};
+  for (const n of Object.keys(def.inputs || {})) out[n] = given.has(n) ? 'flag' : (configured && n in configured ? 'config' : 'default');
+  return out;
 }
 
 module.exports = {

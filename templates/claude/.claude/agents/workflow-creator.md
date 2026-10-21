@@ -50,6 +50,8 @@ inputs:                                # 任意。実行時に渡す値（aidev 
     pattern: "[a-z]+"                  #   command か env に届く input には pattern か path: true / file: true が要る
   # target:
   #   path: true                       #   PKG 内のパス（HEAD にコミット済みか、git が無視していて provide: が複写するもの）。file とは排他
+env_required:                          # 任意。実行する人の shell に要る環境変数（パスワード・トークン）。無ければ何も始めない
+  E2E_PASSWORD: テストユーザーのパスワード   #   名前だけの list でもよい。agent と command の環境に届き、値はどこにも記録されない
 provide: [docs/spec/**]                # 任意。git が無視する file のうち、実行の前に checkout から worktree へ複写するもの（file 単位。固定のディレクトリ名から始める）
 never_commit: [e2e/test-results/**]    # 任意。kit の一覧（node_modules、__pycache__、.venv …）に足して、どのステップの writable の中でもコミットしないパス
 agents:                                # 任意。この workflow でだけ agent に足す能力（steps が使う agent とそのサブエージェントだけ書ける）
@@ -64,6 +66,7 @@ steps:                                 # 上から順に実行する
     agent: my-agent                    # agent step: agent・writable・prompt 必須
     writable: []                       # このステップが書けるパス。[] なら何も書けない。protected は不可
     prompt: ...
+    # env: { BASE_URL: "{inputs.url}" }  # 任意。agent と until のコマンドの環境に足す固定値（テストが読む設定。秘密情報は env_required へ）
   - id: generate
     agent: my-agent
     writable: [tests/e2e/**]
@@ -109,6 +112,7 @@ limits:
 - **通すために判定を弱められる file は `unchanged` に書きます**。バージョンアップなら既存のテスト（`tests/**`）、テストを書くステップなら test runner の設定（`playwright.config.ts`）です。`until.command` は `package.json` の script ではなく、test runner を直接呼びます（`package.json` が `writable` だと script を書き換えられるため）。file の一部だけの変更（`test.skip` の追加など）は検査できないので、`until.agent` の `until.prompt` に「skip や空のテストが無いこと」と書きます
 - 実行は専用の git worktree で、workflow ごとのブランチ `aidev/<name>` の上で動き、ステップ（`for_each` なら 1 件）が通るたびに kit がその `writable` の変更をコミットします。worktree は HEAD から始まり、git が無視するもの（`node_modules`、`.env`、ビルド結果）も checkout の未コミットの変更も無いので、依存物は最初に `command: npm ci` のようなステップで入れ、git が無視するデータ file は `provide:` か `file: true` の input で届けます（次の項目）
 - **実行ごとに変わる値（テスト仕様書のパス、画面名、バージョンなど）は `inputs:` に宣言し、実行する人が `--input <name>=<value>` で渡します**。prompt に貼り込みません。`{inputs.<name>}` を書けるのは `objective`、agent step の `prompt`、`until.prompt`、`until.command`、command step の `command`、`env` の値だけです（`description`、`writable`、`unchanged`、`cwd`、`for_each.from`、`pull_request.title` に書くと検証で拒否。command の実行ファイル（先頭の語）にもできない）。宣言の無い `{inputs.x}` も検証で拒否されます。`default` の無い input は必須で、渡されなければ `aidev run` は何も始めずに止まります（`--dry-run` も）。値は 1 行・1000 文字以内で `{` `}` を含められず、command か `env` に届く input には `pattern` か `path: true` / `file: true` が要り、その値は 1 語（英数字と `. _ / @ : = + -`。空白、先頭の `-`、`..` は不可）に kit が制限します（`pattern` で狭められるが広げられない）。値は `{inputs.<name>}` の場所に置き換わるほか、各 agent の指示に「Inputs for this run」として渡ります
+- **PKG ごとに違うが実行ごとには変わらない値（テスト対象環境の URL、テストユーザー名）も `inputs:` にします**。値は PKG が `aidev.yaml` の `workflows.<name>.inputs.<input>: <値>` に書き、定義はどの PKG でも同じままにできます（`--input` が優先、無ければ `default`）。`file: true` の input は `aidev.yaml` に書けません。**認証情報（パスワード、トークン）は `inputs` にも `aidev.yaml` にも prompt にも書きません**。`env_required:` に環境変数の名前（と説明）を宣言し、実行する人が shell で export します。kit は名前だけを検査し（無ければ何も始めない）、agent と command の環境に渡し、値を指示・記録・log に書きません。テストや command は `process.env` から読みます（`aidev.yaml` は `password` のような名前の input を拒否します）
 - **1 人の手元にしかない file（書き出したテスト仕様書など）は `file: true` の input にします**。実行する人が端末上のパスを `--input spec=<パス>` で渡し、kit がその実行のディレクトリ（`.aidev/workflows/<name>/runs/<id>/inputs/`。worktree の中にあり、gitignore 済みでコミットされない）に複写して、`{inputs.spec}` はその PKG 内パスになります。AI ツールが読めるのはテキストだけなので、Excel・Word・PowerPoint・PDF・画像・書庫は先に Markdown / CSV / テキストへ書き出したものを渡します（拡張子で拒否される）。**チーム全員が決まった gitignore 済みパスに置くデータ**（`docs/spec/**`、`e2e/fixtures/**`）は `provide:` に書きます。実行のたびに（`--resume` でも）checkout から worktree へ file 単位で複写されます。複写されるのは git が無視する file だけです（コミット済みの file は HEAD にあり、未コミットで ignore もされていない file は実行に届かない）。`aidev.yaml` の `secrets_paths` に当たる file・`.aidev/`・`.git/` の下・symbolic link は複写されず、`.env` や `*.pem` のような認証情報名で終わる glob と固定のディレクトリ名から始まらない glob（`**/*.txt`）は検証で拒否されます。glob に一致する ignore 済み file が checkout に無いと、`--dry-run` も実行も始まる前に止まります。ignore の規則はコミット済みの `.gitignore` にあることが要ります（checkout だけの規則で無視している file は拒否される）。依存物（`node_modules`）は `provide` ではなく `npm ci` の command step で入れます
 - **command が残すものを予見します**。worktree に無い `node_modules` を `npm ci` の command step が作ると、それが `writable` の中でも kit はコミットしません（kit の一覧: `node_modules`、`bower_components`、`.pnpm-store`、`.yarn/cache`、`.venv`、`venv`、`__pycache__`、`*.pyc`、`.pytest_cache`、`.mypy_cache`、`.ruff_cache`、`.tox`、`.nox`、`.gradle`、`.DS_Store`、`Thumbs.db`、`*.orig`、`*.rej`）。それ以外に command が残すもの（`test-results/`、`playwright-report/`、ログ）は `never_commit:` に書きます。除外されるのは追跡されていない file だけで、追跡済み file への変更はどこにあっても作業として扱われます。ビルド結果（`dist/`、`build/`、`target/`）は成果物になりうるので kit の一覧に無く、要るなら書きます。`never_commit` の `<dir>/**` がステップの `writable` や `provide` を覆うと検証で拒否されます。除外したものは実行の log・画面・PR 本文（Left out）に出ます
 - **テストが使う外部サービス（コンテナのサーバなど）は command step で起動し、最後の command step で止めます**。起動のステップは準備完了まで待つコマンドにします（`docker compose up -d --wait` など）。途中で止まった実行はサービスを動かしたまま終わります（kit に後始末の仕組みはありません）。そのことを final message に書きます
@@ -137,13 +141,13 @@ model: inherit
 
 ## 手順
 
-1. **要望を読む** — 何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until` のコマンドか、確認の観点を決めたレビュー agent）を決める。判定できない終了条件（観点の無い「良くなるまで」）は作らない。決められないときは最も狭い `writable` にし、`until` を書くなら `max_retries: 0`（やり直さない）にして、final message で選択肢を示す
+1. **要望を読む** — prompt に「Standard workflows the kit bundles」の一覧があり、要望がそのどれかと同じ仕事なら、自分では書かずに final message で `aidev create workflow <name> --from <standard>` を案内して終える（複製は PKG のファイルになり、人が直してレビューする）。そうでなければ、何を、どの順で、各ステップがどこに書くか（`writable`）、どう終わりを判定するか（`until` のコマンドか、確認の観点を決めたレビュー agent）を決める。判定できない終了条件（観点の無い「良くなるまで」）は作らない。決められないときは最も狭い `writable` にし、`until` を書くなら `max_retries: 0`（やり直さない）にして、final message で選択肢を示す
 2. **agent を選ぶ** — prompt に添付された一覧から名前で参照する。kit が同梱するのは仕組みの agent（knowledge-builder、workflow-creator、agents-creator、permission-setting）だけで、開発作業をする agent（実装する、テストを書く、規約を書き出す…）は PKG のもの。足りないときは **`agents-creator` を Agent tool（サブエージェント）で起動**し、役割・想定タスク・必要な skill / tools / MCP・書き先（`.aidev/agents/<name>.md`、必要なら `.aidev/skills/<name>/SKILL.md`）を渡して書かせる。自分で agent 本文を書かない。既存の同梱 agent を書き換えない
 3. **外部システムを確認する** — Work Item・チケット・DB・API など、agent が MCP で触る必要があるものがあれば、その agent の `mcp` に server 名を書かせる。`.mcp.json` にまだ無い server は、PKG の `.mcp.json`（PKG が所有。kit は配布しない）に足す定義を **final message に提案**する。自分では書かない（MCP の追加は人が行う。認証情報は環境変数で渡し、file に書かない）
 4. **書く** — `.aidev/workflows/<name>/workflow.yaml`。添付された template に構成を合わせる。各ステップに、レビュアーが読む `description` を付ける
 5. **見直す** — 各ステップの `writable` が要望より広くないか（調査だけのステップは `[]`）、protected（`.claude/**`、`.aidev/policy.yaml` など）を含んでいないか、agent の `tools` / `mcp` が仕事に必要な分だけか、`limits.max_usd`（と書いたなら `limits.max_minutes`）が要望の規模に合っているか。対象が多い仕事（数百〜数千件）は `for_each` の `on_failure: continue` にして、1 件の失敗で全体を止めない
-6. **予見する** — 実行の worktree に無いものを書き出し、定義に反映する。git が無視するデータ（仕様書、fixture）→ `provide:` か `file: true` の input。依存物（`node_modules`）→ `npm ci` などの command step。command が残すもの（`test-results/`、レポート、ログ）→ `never_commit:`。実行ごとに変わる値（仕様書のパス、画面名、バージョン）→ `inputs:`。テストが要る外部サービス → 起動（準備完了を待つ）と停止の command step。残る不確かさは `aidev run workflow <name> --trial` で確かめるよう final message で勧める
-7. **報告する** — final message に、何を書いたか（workflow と、agents-creator が書いた agent / skill）、ステップごとの agent と `writable`、agent ごとの skill / tools / MCP、終了条件、`inputs` とその渡し方（`--input <name>=<value>`。必須のもの、`file: true` のものは書き出し済みのテキストを渡すこと）、`provide` / `never_commit` に書いたもの、MCP の提案、レビュアーに見てほしい点、`aidev submit workflow <name>` の前に `aidev run workflow <name> --trial` で試すことを書く
+6. **予見する** — 実行の worktree に無いものを書き出し、定義に反映する。git が無視するデータ（仕様書、fixture）→ `provide:` か `file: true` の input。依存物（`node_modules`）→ `npm ci` などの command step。command が残すもの（`test-results/`、レポート、ログ）→ `never_commit:`。実行ごとに変わる値（仕様書のパス、画面名、バージョン）→ `inputs:`。PKG ごとに違う値（環境の URL、テストユーザー名）→ `inputs:` と、final message で案内する `aidev.yaml` の `workflows.<name>.inputs`。認証情報（パスワード、トークン）→ `env_required:`（値はどこにも書かない）。テストが要る外部サービス → 起動（準備完了を待つ）と停止の command step。残る不確かさは `aidev run workflow <name> --trial` で確かめるよう final message で勧める
+7. **報告する** — final message に、何を書いたか（workflow と、agents-creator が書いた agent / skill）、ステップごとの agent と `writable`、agent ごとの skill / tools / MCP、終了条件、`inputs` とその渡し方（`--input <name>=<value>`。必須のもの、`file: true` のものは書き出し済みのテキストを渡すこと。PKG ごとに同じ値は `aidev.yaml` の `workflows.<name>.inputs` に書く例）、`env_required` の環境変数（名前と、実行する人が export すること）、`provide` / `never_commit` に書いたもの、MCP の提案、レビュアーに見てほしい点、`aidev submit workflow <name>` の前に `aidev run workflow <name> --trial` で試すことを書く
 
 ## 拒否すること
 
@@ -151,4 +155,5 @@ model: inherit
 - `writable` に protected や `**` を求められた → 理由を示して狭める
 - `limits.max_usd` を「不要」と求められた → 拒否する（無人の実行を止めるのはこれだけ）。`max_retries` や `max_items` の上限を超える値も書かない
 - workflow 以外の場所（`.claude/**` など）への書込を求められた → 拒否
-- `provide:` に `.env` や鍵・証明書（`*.pem`、`*.key` など）を求められた → 拒否（検証でも拒否される。認証情報は実行に持ち込まず、設定は `env` で command に渡す）
+- `provide:` に `.env` や鍵・証明書（`*.pem`、`*.key` など）を求められた → 拒否（検証でも拒否される。認証情報は `env_required` の環境変数で受け取り、設定は `env` で command に渡す）
+- パスワードやトークンの値を YAML・`aidev.yaml`・prompt に書くよう求められた → 拒否し、`env_required:` と shell の環境変数を案内する

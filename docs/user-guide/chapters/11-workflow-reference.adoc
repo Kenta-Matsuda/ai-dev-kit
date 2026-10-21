@@ -64,6 +64,8 @@ inputs:                            # 任意。実行のたびに --input <name>=
   browser:
     default: chromium
     pattern: '[a-z]+'              # コマンドに届く入力には pattern が要る
+env_required:                      # 任意。実行する人の shell に要る環境変数（認証情報）。名前だけの list でもよい
+  E2E_PASSWORD: the password of the test user
 provide: [e2e/fixtures/**]         # 任意。gitignore 済みのファイルを手元のチェックアウトからコピーする
 never_commit: [e2e/test-results/**]   # 任意。ADK の既定の一覧に加えて、決してコミットしないもの
 
@@ -145,6 +147,11 @@ limits:
 |mapping
 |任意
 |実行のたびに `--input <name>=<値>` で受け取る値の宣言。キーは入力の名前で、定義の `{inputs.<name>}` と書いた場所に入ります（xref:workflow-reference-inputs[inputs]）。
+
+|`env_required`
+|list か mapping
+|任意
+|実行する人の shell に設定されていなければならない環境変数（認証情報）。名前の list か、名前から説明への mapping。無ければ何も始めません（xref:workflow-reference-env-required[env_required]）。
 
 |`provide`
 |glob の list
@@ -282,7 +289,35 @@ inputs:
 * 入力ごとに 1 回ずつ `--input <name>=<値>`（`--input=<name>=<値>` も可）。
 * 必須の入力が無い: `the workflow needs --input for: <name> (<description>)`（実行は何も始めずに終了コード 1。`--dry-run` でも同じ。`aidev estimate` は無くても見積もります）。宣言に無い名前: `the workflow declares no input "<name>" (its inputs: …)`。同じ名前が 2 回: `input <name> is given twice`。
 * `--resume` には付けられません。続きの実行は `run.json` に記録された値を、渡されたときと同じ規則でもう一度確かめて使います。
+* `aidev.yaml` の `workflows.<name>.inputs.<input>: <値>` に書いた値は、`--input` が無いときに使います（`--input` > `aidev.yaml` > `default`）。同じ規則で確かめ、宣言に無い名前は `aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"`、`file: true` の入力は `… is a file on the machine of whoever runs the workflow` で止まります。認証情報らしい名前の入力は `aidev.yaml` の読み込みで拒否されます（xref:configuration[aidev.yaml リファレンス]）。`--dry-run` の `inputs` の行には `(from aidev.yaml)` が付きます。
 * 値は、`{inputs.<name>}` の場所のほか、すべての agent（確認役も）の指示の `## Inputs for this run` の節（データとして）、`--dry-run` の `inputs` の行、実行の PR 本文の `## Inputs`、最後のコミットの本文、`run.json` の `inputs`、`--log` の先頭とサマリ、`aidev modify --from-run` の記録に出ます。
+
+[[workflow-reference-env-required]]
+=== env_required
+
+実行する人の shell に設定されていなければならない環境変数です（xref:workflows-env-required[認証情報は環境変数で受け取る]）。認証情報（パスワード、トークン）のためのもので、設定値は `inputs` か `env` に書きます。
+
+[source,yaml]
+----
+env_required:
+  E2E_PASSWORD: the password of the test user   # 名前: 説明
+  API_TOKEN:                                    # 説明は省略できる
+# 名前だけの list でも書けます
+# env_required: [E2E_PASSWORD, API_TOKEN]
+----
+
+[cols="1,1,1,4",options="header"]
+|===
+|項目 |型 |必須 |説明
+
+|`env_required`
+|名前の list、または名前 → 説明の mapping
+|任意
+|名前は環境変数の規則（`^[A-Za-z_][A-Za-z0-9_]{0,63}$`）。`AIDEV_*` と `GIT_CONFIG*` は書けません。32 個まで。説明は 1 行で、実行する人向けのエラー、`--dry-run` の `env` の行、提出の PR 本文の `## Environment variables the run needs`、agent の指示の `## Environment variables of this run` に出ます。同じ名前を command step や `until` の `env` に書くと検証で拒否されます（`env sets <NAME>, which env_required says the shell provides`）。
+|===
+
+* `aidev run workflow` と `--dry-run` は、起動前の検査で変数が設定されているか（空でないか）を確かめます。無ければ `the environment variable <NAME> (<説明>) is not set; the workflow needs it (env_required). Export it in the shell that runs aidev; …` と表示して終了コード 1 です。`--resume` でも同じです。`--dry-run` の `env` の行は `<NAME>: set` か `<NAME>: NOT SET` です。
+* 値は読みません。agent とコマンドは実行する人の shell の環境を引き継ぐので、そこから届きます。`run.json`・`log.txt`・`--log`・PR 本文・コミットの本文・agent の指示のどこにも値は入りません。
 
 [[workflow-reference-provide]]
 === provide
@@ -402,6 +437,12 @@ agent を起動して仕事をさせるステップです。`agent` を持つス
 |任意
 |`[]`
 |このステップが変えてはいけないパス。`writable` の中でも書けず、試行のたびに、ステップを始めたときの状態と比べます（xref:workflows-unchanged[変えてはいけない場所を決める]）。
+
+|`env`
+|mapping
+|任意
+|`{}`
+|このステップの agent と、その `until` のコマンドの環境に足す固定の環境変数（`NAME: value`）。テストやツールが読む設定（対象環境の URL など）を渡します。command step の `env` と同じ規則で、`{inputs.<name>}` を書くとその入力は「コマンドに届く」扱いになります。`until.env` はこの上に重なります。agent の指示には `Your environment also has these set for this step` として名前と値が入ります。**秘密情報は書きません**（`env_required` で環境変数の名前を宣言します）。
 
 |`for_each`
 |mapping

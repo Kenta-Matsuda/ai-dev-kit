@@ -115,6 +115,10 @@ aidev run workflow write-tests --dry-run
 |The checking agent has read-only tools, and the check is specific
 |A checking agent with `Edit`, `Write` or `Bash` (the hook refuses its writes, but it does not need them). An `until.prompt` with no points to check, such as "pass it if it is good"
 
+|`inputs` and `env_required`
+|Values that change per run or per PKG are in `inputs`, and credentials are in `env_required` by **name only**. What is listed under "Environment variables the run needs" in the PR body really is credentials
+|A URL or a user name written directly into `prompt`, `env` or `default` (the definition changes when the PKG changes). A password or token value in `env` or `default`. A setting (a browser name, a URL) in `env_required`
+
 |`limits.max_usd`, `limits.max_minutes`
 |They fit the size of the job
 |Large limits for a small job

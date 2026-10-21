@@ -275,6 +275,14 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: `provide`の複製は毎回上書きで、変更の無いfileを飛ばしません。`node_modules`を`provide`に書くこともできますが、複製は遅く、worktreeのlockfileと違えば壊れます。依存はcommand stepで入れます。
 
+### D30: 標準workflowはkitが雛形として同梱し、`--from`で複製してPKGのものにする。PKGごとの値は`aidev.yaml`の`workflows.<name>.inputs`と`env_required`の環境変数で受け取る
+
+**判断**: よくある仕事のworkflow（最初は`playwright-tests`: テスト仕様書の1ケースごとにPlaywrightのtestを書き、batchごとに通るまで直し、全体をreviewer agentが仕様と突き合わせてPR）を`templates/workflows/<standard>/`に`workflow.yaml`とagent / skillの組で同梱します。kitの中では動かず、`aidev create workflow <name> --from <standard>`がPKGの`.aidev/workflows/<name>/`・`.aidev/agents/`・`.aidev/skills/`へ複製し、以後はPKGが書いたworkflowと同じ扱い（`--trial`、submit、origin一致による承認、`modify`、`remove`）です。実行時にkitの雛形を参照する経路はありません。PKGごとに違うものは定義の外で受け取ります: 実行ごとに変わらない値（対象環境のURL、テストユーザー名）は`inputs:`に宣言し、PKGが`aidev.yaml`の`workflows.<name>.inputs`に書く（`--input` > `aidev.yaml` > `default`。`--input`と同じ検証）。認証情報（パスワード）は新しいtop-level `env_required:`に名前（と説明）だけを宣言し、実行する人のshellの環境変数で渡す。runnerは`preflight`で設定されていることを名前で確かめ（無ければ何も始めない）、値は読まず、agentとcommandには従来どおり環境として届き、prompt・記録・log・PR本文のどこにも値を書かない。`aidev.yaml`は認証情報らしい名前のinput（`password` / `token` / `secret` / `pat` / `api_key`…）を拒否する。あわせてagent stepにも`env:`（command stepと同じ固定値。`{inputs.<name>}`可）を書けるようにし、agentのprocessと`until.commands`の両方に渡す: agentが自分で走らせるtestとrunnerの判定が同じ設定（対象環境のURL）で動く（2026-10-21）。
+
+**理由**: 同じ仕事（仕様書からのIT test作成）を複数PKGで繰り返すとき、各PKGがworkflow-creatorに一から書かせると品質がばらつき、kit側で練った手順（batch化、`for_each.parallel`、smoke testによる環境確認、reviewer agent）が届きません。一方で「PRでreviewされてmainにあるものだけが動く」（D6 / D9）と「`writable`やcommandはPKGの配置に依る」（`writable`にinputは書けない、D28）を保つには、kitのfileを実行時に参照する形ではなく、PKGが自分のfileとして持ちreviewする形が要ります。複製後にkitの版が進んでも承認済みworkflowの動作は変わらず、取り込みは`--from … --force`の差分reviewとして明示されます。PKGごとに違う「値」を定義に書くと、PKGごとにYAMLが変わり共有できないので、`inputs`の値の出所として`aidev.yaml`を足しました（`--input`を毎回打たなくてよい。`aidev.yaml`はPKG所有でreviewされる。agentも書けるfileだが、値は`--input`と同じく「data」で、commandに届く値はwhitelistで縛られる）。パスワードは`inputs`（run.json・log・PR本文・promptに出る）にも`aidev.yaml`（commitされる）にも`env`（reviewされるYAML）にも置けないので、「shellの環境変数で渡し、kitは名前だけを検査する」を`env_required`として定義に書けるようにしました。従来も環境は子processに引き継がれていましたが、宣言が無いと欠落に気付くのがtestの失敗と再試行の後になります。
+
+**却下した代替案**: kitのworkflowを実行時に名前で解決し、kit versionで信頼する案（agent / skillと同じ扱い。`writable`・command・依存の入れ方がPKGごとに違い、どのみち複製して直す必要がある。承認の線（origin一致）も崩れる）。`inputs`に`secret: true`の種類を足す案（値がinputsの経路（記録・prompt）を通る。別の経路にするなら名前だけの宣言で足りる）。`provide`で`.env`を持ち込む案（D29で拒否済み。fileは残る）。`aidev.yaml`に`env`の値を書く案（commitされる）。標準workflowを`templates/claude/.claude/agents/`のagentとして配る案（`sync tools`で全PKGの`.claude/agents/`に入り、対話sessionのsubagentにもなってしまう。標準workflowのagentは複製先の`.aidev/agents/`にだけ置く）。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |

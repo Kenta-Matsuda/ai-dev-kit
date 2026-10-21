@@ -20,7 +20,7 @@ aidev list packages [--json]
 |object |What it shows
 
 |`workflows`
-|The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. The ADK bundles no workflows, so only this PKG's workflows are listed
+|The state of each workflow under `.aidev/workflows/` (`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`) and its description. Only this PKG's workflows carry a state; at the end come the names and descriptions of the standard workflows bundled with the ADK (the ones `aidev create workflow <name> --from <standard>` copies; they do not run inside the ADK)
 
 |`agents`
 |The PKG's `.aidev/agents/` and the agents bundled with the ADK. Name, origin (`this PKG` / `kit`), description. `⚠` is added when `name` in the frontmatter differs from the file name
@@ -43,7 +43,7 @@ Any name listed by `packages` can be passed to any command as `--package <name>`
 |Option |Description
 
 |`--json`
-|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together). Each row of `packages` has `name`, `path`, `present` (whether `aidev.yaml` is there), `here` (whether it is the PKG you are in), `templates` (`current` / `behind` / `unknown`) and `applied` (the ADK commit it took)
+|Machine-readable output. Each row of `workflows` has `name`, `description`, `status`, `steps` (the number of steps) and `writable` (the `writable` of all steps together), and `standard` lists the standard workflows bundled with the ADK (`name`, `description`). Each row of `packages` has `name`, `path`, `present` (whether `aidev.yaml` is there), `here` (whether it is the PKG you are in), `templates` (`current` / `behind` / `unknown`) and `applied` (the ADK commit it took)
 |===
 
 === Exit codes
@@ -73,6 +73,8 @@ aidev list workflows
   e2e-tests             not on origin/main                主要画面の IT テストを Playwright で書く
   write-conventions     changed since origin/main         Wiki と根拠ソースから開発規約を書き、PR を作る
 
+    standard workflows bundled with the kit (copy one into this PKG: aidev create workflow <name> --from <standard>):
+      playwright-tests   テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
 ----
 
 Check the PKGs on this machine and bring one on an older ADK forward:

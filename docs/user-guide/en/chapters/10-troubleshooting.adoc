@@ -291,6 +291,13 @@ Messages from `aidev sync wiki` run on `main` (or with `--branch`).
 `input <name>: "<value>" does not match its pattern (…)`
 |Pass the inputs the workflow declares under `inputs:` with `--input <name>=<value>`. The declarations are listed under `## Inputs (--input name=value)` in `aidev run workflow <name> --dry-run` (xref:workflows-inputs[Taking values that change per run]). Nothing has started.
 
+|`the environment variable <NAME> (…) is not set; the workflow needs it (env_required)`
+|An environment variable the workflow declares under `env_required:` (a password, for instance) is not set in the shell running it. `export <NAME>=…` and run again. The value is recorded nowhere (xref:workflows-env-required[Taking credentials from environment variables]). Nothing has started.
+
+|`aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"` +
+`aidev.yaml: workflows.<name>.inputs.<name> must not be set here: aidev.yaml is committed, and a credential never is`
+|`workflows.<name>.inputs` in `aidev.yaml` holds an input the workflow does not declare, or one whose name looks like a credential (`password`, `token` and so on). Write only the declared names there, and pass credentials through the environment variable of `env_required` (xref:workflows-inputs[Taking values that change per run]).
+
 |`input <name>: <path> is not committed; a run starts from HEAD (…)` +
 `input <name>: <path> is ignored by git and no provide: entry copies it into the run (…)`
 |A `path: true` input does not reach the run's worktree. Commit it, add it to `provide:`, or pass it as a `file: true` input (xref:workflows-provide[Providing files the worktree lacks]).

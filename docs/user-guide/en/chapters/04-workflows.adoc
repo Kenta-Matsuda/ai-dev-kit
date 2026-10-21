@@ -75,6 +75,8 @@ aidev create workflow write-tests --describe "Write tests for a given target in 
 
 `--describe` starts the workflow-creator agent and has it write the YAML. If agents or skills are missing, workflow-creator starts agents-creator as a subagent and has it write them in `.aidev/agents/` and `.aidev/skills/`. When an external system (Work Items, tickets, a database) is needed, it puts a proposed MCP server definition for the PKG's `.mcp.json` in its report (a person adds it). Afterwards the CLI validates it and shows the result and the next steps.
 
+You can also start from a **standard workflow** the ADK bundles. `aidev create workflow e2e-tests --from playwright-tests` copies the workflow that writes Playwright tests from a test specification, and its agents and skills, into this PKG (xref:workflows-standard[Starting from a standard workflow]).
+
 The definition lives in two places.
 
 [cols="1,3,3",options="header"]
@@ -148,6 +150,9 @@ limits:                            # what stops the run
 |`inputs`
 |Optional. Declares the values taken per run with `--input <name>=<value>`. They go where the definition writes `{inputs.<name>}` (xref:workflows-inputs[Taking values that change per run]).
 
+|`env_required`
+|Optional. Declares the environment variables (passwords, tokens) the person running it must set in their shell. Without them, nothing starts. The values only reach the environment of the agents and commands and are recorded nowhere (xref:workflows-env-required[Taking credentials from environment variables]).
+
 |`provide`
 |Optional. Files git ignores that are copied from your checkout into the run's worktree (globs) (xref:workflows-provide[Providing files the worktree lacks]).
 
@@ -197,6 +202,72 @@ What stops a run is the following. The cost limit cannot be omitted, and the ret
 
 How to write a large job to run unattended is in xref:workflows-unattended[Running a large job without anyone stepping in].
 
+[[workflows-standard]]
+==== Starting from a standard workflow (`--from`)
+
+The ADK bundles workflows for common jobs as **standard workflows**. `aidev list workflows` lists them at the end.
+
+[cols="1,3",options="header"]
+|===
+|Standard workflow |What it does
+
+|`playwright-tests`
+|Writes a Playwright test for each case of a test specification (CSV, Markdown or text; one line or one section per case), runs it against the target environment and fixes it until it passes, has an agent review the whole against the specification once every case passes, and opens a PR. The cases are split into batches handled at the same time
+|===
+
+A standard workflow does not run inside the ADK. Copy it into the PKG with `--from` and use it there.
+
+[source,bash]
+----
+aidev create workflow e2e-tests --from playwright-tests
+----
+
+[source,text]
+----
+aidev create workflow e2e-tests
+✓ wrote .aidev/workflows/e2e-tests/workflow.yaml
+✓ wrote .aidev/agents/playwright-test-planner.md
+✓ wrote .aidev/agents/playwright-test-reviewer.md
+✓ wrote .aidev/agents/playwright-test-writer.md
+✓ wrote .aidev/skills/playwright-testing/SKILL.md
+    from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、…
+    the files are this PKG's now: edit what differs here (the paths the steps write, the commands they run), then submit them for review
+    inputs: spec (a file, --input only), base_url (required), test_user (required), batch_size (default 10)
+    set this PKG's values once in aidev.yaml (--input overrides them per run):
+      workflows:
+        e2e-tests:
+          inputs:
+            base_url: <テスト対象環境の URL（ルート。例 https://staging.example.com）>
+            test_user: <テストユーザーのログイン ID（ユーザー名かメールアドレス）>
+            batch_size: 10
+    before a run, export in the shell: E2E_PASSWORD (テストユーザーのパスワード（実行する人が export する。ファイルには書かない）)
+----
+
+* What is copied is `workflow.yaml` (its `name:` is rewritten to the name you gave) and the agents (`.aidev/agents/`) and skills (`.aidev/skills/`) it uses. Once copied, they are **this PKG's files**. Like any other workflow, try it with `--trial`, open a PR with `aidev submit workflow`, and approve it by merging. A run never refers to the ADK's files.
+* When the same agent or skill is already there with the same contents, it is kept (`kept`); when it differs, the copy stops without `--force`. Copying it once more under another name (`e2e-staging` and `e2e-prod`) shares the agents. To take in a newer version of a standard workflow after updating the ADK, copy it again with `--from … --force` and review the diff.
+* What differs per PKG comes in two kinds. **What differs in the definition** (the directory the tests go in, the command that installs dependencies, how many batches run at once, the cost ceiling) is changed in the copied `workflow.yaml`. **What differs in value** (the target environment's URL, the test user) leaves the definition alone: write it in `workflows.<name>.inputs` of `aidev.yaml`, or pass it with `--input` at run time (xref:workflows-inputs[Taking values that change per run]). **Credentials** (the test user's password) are declared by name in the definition's `env_required:` and handed over by the person running it as an environment variable of their shell. They are never written to a file (xref:workflows-env-required[Taking credentials from environment variables]).
+
+How `playwright-tests` goes, and what it assumes.
+
+. `deps` (command step): `npm ci` installs the dependencies into the run's worktree. For a pnpm / yarn PKG, or one whose tests are in another directory, change this command and `cwd`
+. `playwright` (command step): `npx playwright --version`. Without Playwright (`@playwright/test` and `playwright.config.*`) in the PKG, it stops here
+. `plan` (agent step, writes nothing): reads the specification, splits the cases by screen or feature into batches of at most `batch_size`, and puts them in the run's notes
+. `scaffold` (agent step): writes the shared helpers (reading the environment variables, logging in) in `tests/e2e/support/` and a smoke test in `tests/e2e/smoke/`, and makes it pass against the target environment. When the URL, the user, the password or the login screen is wrong, this is where it shows
+. `generate` (agent step, `for_each`, 4 batches at a time by default): writes `tests/e2e/cases/<batch>/<case id>.spec.ts` for each batch and fixes them until that batch's tests pass (up to 3 times). A batch that does not pass is undone and the next one starts (`on_failure: continue`)
+. `review` (agent step): runs the whole suite and fixes what does not pass and the duplicated helpers. The checking agent `playwright-test-reviewer` compares, for each case of the specification, the spec file and what it verifies, and sends the work back with its remarks when something is missing (up to 2 times)
+. `pr`: opens the PR. The cases of the batches that failed and were left behind appear under "Targets left out" in the PR body
+
+* It assumes Playwright is in the PKG and that `testDir` of `playwright.config.*` covers `tests/e2e/` (to put the tests elsewhere, change the paths in the copied YAML). A `webServer` setting that starts a local server is either taken out for this workflow, which runs against the target environment (`base_url`), or `for_each.parallel` is set to 1 (servers started at the same time collide on the port).
+* The tests read `E2E_BASE_URL`, `E2E_USER` and `E2E_PASSWORD` from `process.env` (each agent step's `env` passes `base_url` and `test_user` to the agent and to the `until` commands; `E2E_PASSWORD` comes from the shell). The password is written neither in the tests nor in the logs.
+* Raise the cost ceiling (`limits.max_usd: 50`) to fit the number of cases. When it is reached, the run stops, and `--resume` continues it.
+
+[source,bash]
+----
+export E2E_PASSWORD='…'                                                          # only in the shell of the person running it
+aidev run workflow e2e-tests --trial --input spec=~/specs/login.csv --max-usd 5     # try it with a few cases first
+aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv
+----
+
 [[workflows-commands]]
 ==== Writing commands
 
@@ -230,7 +301,7 @@ How to write a large job to run unattended is in xref:workflows-unattended[Runni
 |The directory the command runs in. It cannot be outside the PKG (`..` or an absolute path).
 
 |`env`
-|Environment variables for the command. The values are fixed text in the definition and are reviewed in the PR. **Do not write secrets.** A name starting with `AIDEV_` or `GIT_CONFIG` is refused.
+|Environment variables for the command. The values are fixed text in the definition and are reviewed in the PR. **Do not write secrets** (a password is declared by name under `env_required` and taken from the shell: xref:workflows-env-required[Taking credentials from environment variables]). A name starting with `AIDEV_` or `GIT_CONFIG` is refused. An agent step may carry `env` too: its values go into both the agent's environment and the `until` commands, so the tests the agent runs itself and the ADK's check run with the same settings (`until.env` is layered on top).
 
 |`timeout_minutes`
 |Time limit for one command, in minutes. If omitted, the command may use the time the workflow has left (or, with no workflow time limit, run until it ends).
@@ -408,6 +479,21 @@ steps:
 * `path: true` is a path relative to the PKG (not starting with `/` or a drive letter, no `..`). It must be text (`.xlsx`, `.docx`, `.pdf`, images and so on are refused with `the AI tools read text; export … to Markdown, CSV or text first and pass that file`). The path must reach the run's worktree: either it is committed at HEAD, or git ignores it and a `provide` glob matches it. `--dry-run` and the run decide this before anything starts and stop with `is not committed; a run starts from HEAD (commit it, or declare the input with file: true and pass the file)` or `is ignored by git and no provide: entry copies it into the run (add one, or pass it as a file input)`. After `provide` has copied, the run also checks that the path exists in the worktree.
 * `file: true` is the path of a file anywhere on this machine (absolute, or relative to the shell's current directory). It must exist and be text (the same extension rule as `path`). The ADK copies it to `.aidev/workflows/<name>/runs/<id>/inputs/<name><extension>` in the run's worktree, and `{inputs.<name>}` becomes that path relative to the PKG (it is under `runs/`, so it is gitignored: the agents can read it, and it is never committed). `run.json` keeps that path, and the log says `input <name>: copied <from> to <to>`. `--resume` uses that copy as it is. Use `file` for a file one person has (a specification exported from Excel, say) and `provide` for data the whole team keeps at a fixed gitignored path (xref:workflows-provide[Providing files the worktree lacks]).
 
+A value that differs per PKG but not per run (the target environment's URL, the test user name) can be written in `workflows.<name>.inputs` of `aidev.yaml`. The definition (`workflow.yaml`) then stays the same from one PKG to another; only `aidev.yaml` differs.
+
+[source,yaml]
+----
+workflows:
+  e2e-tests:
+    inputs:
+      base_url: https://staging.example.com
+      test_user: qa-user@example.com
+----
+
+* The precedence is `--input` > `aidev.yaml` > the declaration's `default`. A value from `aidev.yaml` is checked by the same rules as `--input`, and the `inputs` row of `--dry-run` shows `(from aidev.yaml)`. A name the workflow does not declare stops with `aidev.yaml: workflows.<name>.inputs: the workflow declares no input "<name>"`.
+* A `file: true` input cannot be written there (the file is on the machine of the person running it, so it is passed with `--input`).
+* `aidev.yaml` is committed, so credentials cannot be written there. An input whose name looks like `password`, `secret`, `token`, `pat` or `api_key` is a configuration error. A password is taken through `env_required` (xref:workflows-env-required[Taking credentials from environment variables]).
+
 When you run it, pass `--input` once per input (`--input=<name>=<value>` works too).
 
 [source,bash]
@@ -419,6 +505,24 @@ aidev estimate workflow e2e-tests --input screen=login     # an estimate does no
 * Without a required input, nothing starts: it stops with `the workflow needs --input for: spec (the test specification to work from)` and exit code 1 (`--dry-run` too). A name that is not declared gives `the workflow declares no input "nope" (its inputs: spec, screen, browser)`; the same name twice gives `input <name> is given twice`.
 * `--input` cannot be passed with `--resume` (`--resume continues the run with the inputs it was started with; do not pass --input`). A continued run uses the recorded values and checks them again by the same rules as when they were passed (the record is a file an agent could rewrite).
 * The values go where `{inputs.<name>}` is written and, as data, into the instructions of every agent (the checking agents included) under a `## Inputs for this run` section. They also appear on the `inputs` row of `--dry-run` (a `file` input with `(copied from <path>)`), in the `## Inputs (--input name=value)` section of `--dry-run` and of the submit PR body (name, description, required or default, `pattern`, `a path in the repository`, `reaches a command`), in the `## Inputs` section of the run's PR body, on the `inputs:` lines of the last commit's message, in `inputs` in `run.json`, in the head and the summary of `--log`, and in the record `aidev modify --from-run` hands to the agent.
+
+[[workflows-env-required]]
+==== Taking credentials from environment variables (`env_required`)
+
+A test user's password or an API token is written neither in the definition, nor in `aidev.yaml`, nor in a prompt. Declare the names of the environment variables (with a description for the person running it) under `env_required:`, and the person running it sets them in their shell.
+
+[source,yaml]
+----
+env_required:
+  E2E_PASSWORD: the test user's password
+  E2E_API_TOKEN:                 # a description is optional; a list of names works too: env_required: [E2E_PASSWORD]
+----
+
+* `aidev run workflow` (`--dry-run` too) checks **by name only** that the declared variables are set, and when one is not, nothing starts: it stops with `the environment variable E2E_PASSWORD (…) is not set; the workflow needs it (env_required)`. The `env` row of `--dry-run` shows `set` / `NOT SET`. The values are not shown.
+* The values reach the environment of the agents and commands (the child processes inherit the shell environment of the person running it, the same way as before). The instructions get **the names and descriptions only**, under `## Environment variables of this run`, and the agents are told to write the values nowhere. `run.json`, the logs, the PR body and the commits do not carry the values either.
+* The tests and commands read them at run time, as in `process.env.E2E_PASSWORD`. The same name cannot be written in the `env` of a command step or of `until` (validation refuses it).
+* A name follows the rules of environment variables (a letter or `_` first, then letters, digits and `_`); `AIDEV_*` and `GIT_CONFIG*` cannot be written.
+* The declaration appears under `## Environment variables the run needs` in the submit PR body. The reviewer checks that the variables listed there really are credentials (a setting goes in `inputs` or `env`).
 
 [[workflows-provide]]
 ==== Providing files the worktree lacks (`provide` and `file` inputs)
@@ -685,7 +789,7 @@ aidev estimate workflow write-tests --ai --task "src/services/order.ts"
 
 `--task` is the instruction for this run (a Work Item number, a target path, and so on). It is handed to every agent step as data and cannot change the `objective` or any step's `writable`. Pass a long instruction with `--task-file <path>`.
 
-When the workflow declares `inputs:`, pass `--input <name>=<value>` once per input. Without a required input, nothing starts: it stops with `the workflow needs --input for: …` (xref:workflows-inputs[Taking values that change per run]). `--max-usd <n>` lowers the cost ceiling below `limits.max_usd` for this run only (like `--max-minutes`, it only lowers it).
+When the workflow declares `inputs:`, pass `--input <name>=<value>` once per input. Without a required input, nothing starts: it stops with `the workflow needs --input for: …` (xref:workflows-inputs[Taking values that change per run]). A value written in `workflows.<name>.inputs` of `aidev.yaml` is used when `--input` is left out. When the workflow declares `env_required:`, set those environment variables (a password and the like) in your shell before running it; without them, nothing starts (xref:workflows-env-required[Taking credentials from environment variables]). `--max-usd <n>` lowers the cost ceiling below `limits.max_usd` for this run only (like `--max-minutes`, it only lowers it).
 
 [source,text]
 ----
@@ -1074,7 +1178,7 @@ An agent is a role definition handed to the AI tool (Markdown); a skill is a set
 
 The ADK ships **machinery** only: the workflow runner and its validation, the approval check, the write limits, and four agents — workflow-creator (writes workflows), agents-creator (writes agents), knowledge-builder (writes the Wiki) and permission-setting (drafts the policy candidate). The CLI also has agents for estimates (cost-estimator, estimate-reviewer); they are not placed in the PKG, and the CLI starts them for `aidev estimate` and at the end of a run (xref:cli-estimate[aidev estimate]).
 
-The development work itself — workflows that implement, write tests or write out conventions, and their agents — belongs to the **package**. The ADK does not bundle any. The Engineering Manager creates them with `aidev create workflow <name> --describe "<what you want>"`. MCP servers (reading Azure DevOps Work Items, for instance) are also the package's own, in its `.mcp.json`; the ADK neither ships nor starts them.
+The development work itself — workflows that implement, write tests or write out conventions, and their agents — belongs to the **package**. The only thing the ADK bundles is the standard workflow templates (`playwright-tests`; xref:workflows-standard[Starting from a standard workflow]), and even those become the package's files once copied with `--from`. The Engineering Manager creates them with `aidev create workflow <name> --describe "<what you want>"` or copies a standard workflow. MCP servers (reading Azure DevOps Work Items, for instance) are also the package's own, in its `.mcp.json`; the ADK neither ships nor starts them.
 
 PKG-specific agents and skills go in `.aidev/agents/<name>.md` and `.aidev/skills/<name>/SKILL.md`. They take precedence over a bundled one of the same name. There are three ways to make them.
 

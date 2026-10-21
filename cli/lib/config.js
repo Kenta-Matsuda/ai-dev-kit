@@ -81,6 +81,14 @@ const NON_TEXT_REFERENCE_EXTENSIONS = Object.freeze([
 /** Hosting providers the CLI knows how to talk to. */
 const HOSTING_TYPES = Object.freeze(['azure-devops', 'generic']);
 
+/**
+ * An input name that says it holds a credential. aidev.yaml may set a
+ * workflow's inputs (`workflows.<name>.inputs`), and it is committed, so an
+ * input named like this is refused there: a password reaches a run through
+ * an environment variable the workflow declares under `env_required`.
+ */
+const CREDENTIAL_NAME_RE = /(^|[_-])(password|passwd|pass|secret|token|pat|credentials?|api[_-]?key|private[_-]?key)([_-]|$)/i;
+
 /** AI coding tools whose configuration the kit can materialise and which it can start. */
 const TOOLS = toolsMod.TOOL_IDS;
 
@@ -426,7 +434,38 @@ function validateConfig(raw, source = CONFIG_NAME) {
     })(),
     quality_gates: {},
     references: {},
+    workflows: {},
   };
+  // What this PKG sets for the inputs of a workflow (`workflows.<name>.inputs`):
+  // the values that are the same for every run here — the URL of the
+  // environment a test workflow targets, the login of its test user — so a
+  // workflow copied from the kit's standard ones, or shared between PKGs, is
+  // the same YAML everywhere and only this file differs. A run takes
+  // `--input` over these, and these over the declaration's default. The file
+  // is committed, so a credential is refused by name here: a workflow takes
+  // one from the environment (`env_required`), never from a file.
+  for (const [wname, v] of Object.entries(mapping(raw.workflows, 'workflows'))) {
+    const at = `workflows.${wname}`;
+    if (!layout.WORKFLOW_NAME_RE.test(wname)) throw new AidevError(`${source}: workflows: ${JSON.stringify(wname)} is not a workflow name (lowercase letters, digits and dashes)`);
+    const m = mapping(v, at);
+    for (const k of Object.keys(m)) {
+      if (k !== 'inputs') throw new AidevError(`${source}: ${at}: unknown key ${k} (allowed: inputs)`);
+    }
+    const inputs = {};
+    for (const [iname, val] of Object.entries(mapping(m.inputs, `${at}.inputs`))) {
+      const here = `${at}.inputs.${iname}`;
+      if (!layout.INPUT_NAME_RE.test(iname)) throw new AidevError(`${source}: ${at}.inputs: ${JSON.stringify(iname)} is not an input name (lowercase letters, digits, - and _, starting with a letter)`);
+      if (CREDENTIAL_NAME_RE.test(iname)) {
+        throw new AidevError(`${source}: ${here} must not be set here: ${CONFIG_NAME} is committed, and a credential never is. ` +
+          'Declare it in the workflow under env_required: and set the environment variable in the shell that runs it');
+      }
+      if (val == null || typeof val === 'object') throw new AidevError(`${source}: ${here} must be a plain value`);
+      const s = String(val);
+      if (/^[A-Za-z0-9+/=]{40,}$/.test(s)) throw new AidevError(`${source}: ${here} looks like an embedded credential`);
+      inputs[iname] = s;
+    }
+    cfg.workflows[wname] = { inputs };
+  }
   // Reference documents the team points agents at, by topic. Repo-relative
   // text files or directories; a spreadsheet or office document is refused
   // here so the fix (export it to text and commit that) is found at config
@@ -576,7 +615,7 @@ function tmpDir() { return os.tmpdir(); }
 
 module.exports = {
   CONFIG_NAME, LOCK_NAME, POLICY_REL, SYNC_LOCK_REL, EJECT_MARKER_NAME, ALWAYS_PROTECTED, DEFAULTS,
-  DEFAULT_POLICY_SCOPES, HOSTING_TYPES, TOOLS, MODEL_MAX_LENGTH, NON_TEXT_REFERENCE_EXTENSIONS,
+  DEFAULT_POLICY_SCOPES, HOSTING_TYPES, TOOLS, MODEL_MAX_LENGTH, NON_TEXT_REFERENCE_EXTENSIONS, CREDENTIAL_NAME_RE,
   configPath, policyPath, lockPath, syncLockPath, ejectMarkerPath, readEjectMarker,
   loadConfig, validateConfig, loadPolicy, validatePolicy, loadLock, saveLock,
   readTextIfExists, readJsonIfExists, writeFileAtomic, writeJsonAtomic,

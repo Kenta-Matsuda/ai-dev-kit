@@ -1,0 +1,147 @@
+# playwright-tests — テスト仕様書の 1 ケースごとに Playwright のテストを書き、実行して通るまで直し、
+# 全件通ったら agent がレビューして PR にする（ai-dev-kit の標準 workflow）。
+#
+# これは `aidev create workflow <name> --from playwright-tests` で PKG に複製された、この PKG のファイルです。
+# この PKG で違うところはここを直して提出します（レビューされ、main にあるものだけが実行されます）:
+#   - 依存の入れ方（deps step の npm ci。pnpm / yarn、テストが別ディレクトリにある PKG は command と cwd）
+#   - テストを置く場所（tests/e2e/ 。playwright.config の testDir がこの下を含むこと）
+#   - 同時に書く batch の数（generate step の for_each.parallel。対象環境と端末が耐えられる数に）
+#   - 費用の上限（limits.max_usd）
+# PKG ごとに違う「値」はこのファイルに書きません:
+#   - 対象環境の URL とテストユーザー: aidev.yaml の workflows.<name>.inputs（または実行時の --input）
+#   - テストユーザーのパスワード: 実行する人の shell の環境変数 E2E_PASSWORD（env_required。どこにも記録されない）
+#   - 仕様書: 実行時の --input spec=<path>（この端末のファイル。実行がそのコピーを受け取る）
+name: playwright-tests
+description: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
+
+objective: |
+  テスト仕様書 {inputs.spec} の 1 ケースごとに、{inputs.base_url} で動いている環境に対する Playwright のテストを
+  tests/e2e/ の下に書く。ケース ID ごとに 1 つの spec ファイルで、仕様の手順どおりに操作し、仕様の期待結果を
+  すべて検証する。ログインはテストユーザー {inputs.test_user} で、パスワードは環境変数 E2E_PASSWORD から
+  実行時に読む（値はどこにも書かない）。書き方は playwright-testing skill と、この PKG に既にあるテストに合わせる。
+
+inputs:
+  spec:
+    description: テスト仕様書（CSV・Markdown・テキスト。1 行または 1 節が 1 ケース。Excel は CSV に書き出してから渡す）
+    file: true
+  base_url:
+    description: テスト対象環境の URL（ルート。例 https://staging.example.com）
+    pattern: 'https?://[A-Za-z0-9._:@=+-]+(/[A-Za-z0-9._:@=+/-]*)?'
+  test_user:
+    description: テストユーザーのログイン ID（ユーザー名かメールアドレス）
+    pattern: '[A-Za-z0-9._@+-]+'
+  batch_size:
+    description: 1 つの batch に入れるケースの数（agent の 1 回の起動が 1 batch を書く。小さいほど早く進み、大きいほど共通化しやすい）
+    default: 10
+    pattern: '[1-9][0-9]?'
+
+# 実行する人の shell に設定しておく環境変数。無ければ何も始めずに止まる。agent とコマンドの環境には届くが、
+# 指示・記録・ログのどこにも値は書かれない。
+env_required:
+  E2E_PASSWORD: テストユーザーのパスワード（実行する人が export する。ファイルには書かない）
+
+# Playwright が残すもの。worktree に残っても PR には入らない。
+never_commit: [test-results/**, playwright-report/**, blob-report/**]
+
+# 任意: この PKG が .mcp.json に Playwright の MCP server を登録しているなら、writer に渡すと実際の画面を見ながら書ける。
+# agents:
+#   playwright-test-writer:
+#     mcp: [playwright]
+
+steps:
+  - id: deps
+    description: 依存を実行用の worktree に入れる（pnpm / yarn の PKG、テストが別ディレクトリの PKG はここを直す）
+    command: npm ci
+    timeout_minutes: 20
+  - id: playwright
+    description: Playwright が入っていなければここで止まる（@playwright/test と playwright.config をこの PKG に用意してから実行する）
+    command: npx playwright --version
+  - id: plan
+    description: 仕様書を読んでケースを batch に分け、この実行の notes に置く（ソースは書かない）
+    agent: playwright-test-planner
+    writable: []
+    prompt: |
+      テスト仕様書 {inputs.spec} を読み、ケース（ID・タイトル・前提・手順・期待結果）を取り出す。
+      ケースを画面や機能ごとにまとめ、1 batch を {inputs.batch_size} ケース以下に分けて、notes ディレクトリに次を書く:
+        - batches.txt: 1 行 1 batch の名前（小文字の英数字とハイフンだけ。例 login-01）。generate step はこの順に 1 batch ずつ agent を起動する
+        - batches/<batch>.md: その batch のケースを仕様の原文のまま（ID・タイトル・前提・手順・期待結果）と、関係する画面・ルート・コンポーネントのファイル
+        - plan.md: アプリの構成、ログインの仕方（画面・入力欄）、ロケータの方針、この PKG の既存テストの慣習、Playwright の設定（testDir・projects・webServer）で注意すること
+      ソースは書かない。ケースが 1 件も読み取れなければ batches.txt を書かず、理由を報告する。
+    timeout_minutes: 30
+  - id: scaffold
+    description: 共通の helper（環境変数の読み取り・ログイン）と、環境に到達できることを確かめる smoke test を書いて通す
+    agent: playwright-test-writer
+    writable: [tests/e2e/support/**, tests/e2e/smoke/**]
+    prompt: |
+      plan.md を読み、tests/e2e/support/ に共通の helper を書く: env.ts（E2E_BASE_URL・E2E_USER・E2E_PASSWORD を読み、無ければ
+      その名前を挙げて throw する）、login.ts（テストユーザーでログインする helper。ログインの無いアプリなら、何もしないことを明記した helper）、
+      ほかに全 batch が使う fixture があればそれ。
+      tests/e2e/smoke/ に smoke test を 1 つ書く: {inputs.base_url} を開いてページが表示されることと、ログインが要るアプリなら
+      helper でログインできることを検証する。ここで通らなければ URL・ユーザー・パスワード・ロケータのどれかが違う: 原因を報告する。
+    env:                                   # agent と until のコマンドの環境。テストは process.env から読む
+      E2E_BASE_URL: "{inputs.base_url}"
+      E2E_USER: "{inputs.test_user}"
+    until:
+      command: npx playwright test tests/e2e/smoke --reporter=list --output test-results/smoke
+      env:
+        CI: "1"
+      timeout_minutes: 20
+      max_retries: 2
+    timeout_minutes: 45
+  - id: generate
+    description: batch ごとにテストを書き、その batch のテストが通るまで直す（batch は同時に進み、通らなかった batch は戻して次へ）
+    agent: playwright-test-writer
+    for_each:
+      from: batches.txt
+      max_items: 1000
+      parallel: 4
+      on_failure: continue
+    writable: [tests/e2e/cases/{item}/**]
+    prompt: |
+      batch {item} のテストを書く。ケースは notes の batches/{item}.md に、方針は plan.md にある。
+      ケース ID ごとに tests/e2e/cases/{item}/<ケース ID>.spec.ts を 1 つ書き、仕様の手順どおりに操作して期待結果をすべて検証する。
+      support/ の helper（env.ts・login.ts）を使う。support/ と他の batch のファイルは書かない。
+      書いたら `npx playwright test tests/e2e/cases/{item} --reporter=list` で実行し、通るまで直す。
+      通らないケースは原因（ロケータ・待ち方・仕様の読み違い・環境の問題）を突き止めて直す。アサーションを弱めて通さない。
+      仕様にあって実装にない振る舞いは test.fixme に理由を付け、報告に挙げる。
+    env:
+      E2E_BASE_URL: "{inputs.base_url}"
+      E2E_USER: "{inputs.test_user}"
+    until:
+      command: npx playwright test tests/e2e/cases/{item} --reporter=list --output test-results/{item}
+      env:
+        CI: "1"
+      timeout_minutes: 30
+      max_retries: 3
+    timeout_minutes: 60
+  - id: review
+    description: 全 batch を通して実行し、仕様との対応を agent がレビューする。指摘があれば直し、通るまで繰り返す
+    agent: playwright-test-writer
+    writable: [tests/e2e/cases/**, tests/e2e/support/**]
+    prompt: |
+      すべての batch が書き終わった。tests/e2e/ 全体を `npx playwright test tests/e2e --reporter=list` で実行し、通らないものを直す。
+      複数の batch が同じ helper を書いていれば support/ に 1 つにまとめ、各 batch から使う。
+      generate step の報告で失敗（left out）になった batch のケースはここでは書かない。報告に、書かなかったケース ID と理由を挙げる。
+      レビューの指摘（Previous attempt）があれば、それを直してから再実行する。
+    env:
+      E2E_BASE_URL: "{inputs.base_url}"
+      E2E_USER: "{inputs.test_user}"
+    until:
+      command: npx playwright test tests/e2e --reporter=list --output test-results/all
+      env:
+        CI: "1"
+      timeout_minutes: 90
+      agent: playwright-test-reviewer
+      prompt: |
+        テスト仕様書 {inputs.spec} のケースごとに、tests/e2e/cases/ の下に対応する spec ファイルがあり、仕様の手順どおりに操作して
+        期待結果をすべて検証しているか。アサーションを弱めたもの、test.skip・.only・waitForTimeout、認証情報の直書き、
+        仕様に無い操作、理由の無い test.fixme が無いか。足りないものはファイルとケース ID と内容を具体的に挙げる。
+        generate step で失敗として残ったケース（報告にある）は無くてよい。
+      max_retries: 2
+    timeout_minutes: 90
+  - id: pr
+    pull_request:
+      title: "test: テスト仕様書から Playwright のテストを生成"
+
+limits:
+  max_usd: 50        # ケース数に合わせて上げる。達すると止まり、--resume で続けられる

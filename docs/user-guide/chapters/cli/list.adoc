@@ -20,7 +20,7 @@ aidev list packages [--json]
 |object |表示
 
 |`workflows`
-|`.aidev/workflows/` の各 workflow の状態（`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`）と説明。ADK は workflow を同梱しないので、並ぶのはこの PKG の workflow だけ
+|`.aidev/workflows/` の各 workflow の状態（`approved` / `not on origin/main` / `changed since origin/main` / `invalid: …`）と説明。状態が付くのはこの PKG の workflow だけで、末尾に ADK が同梱する標準 workflow（`aidev create workflow <name> --from <standard>` で複製するもの。ADK の中では動かない）の名前と説明を出す
 
 |`agents`
 |PKG の `.aidev/agents/` と ADK 同梱の agent。名前、由来（`this PKG` / `kit`）、説明。frontmatter の `name` がファイル名と違えば `⚠` を添える
@@ -43,7 +43,7 @@ aidev list packages [--json]
 |オプション |説明
 
 |`--json`
-|JSON で出力する。`workflows` の各行は `name`・`description`・`status`・`steps`（ステップの数）・`writable`（全ステップの `writable` を合わせたもの）を持つ。`packages` の各行は `name`・`path`・`present`（`aidev.yaml` があるか）・`here`（今いる PKG か）・`templates`（`current` / `behind` / `unknown`）・`applied`（取り込んだ ADK のコミット）を持つ
+|JSON で出力する。`workflows` の各行は `name`・`description`・`status`・`steps`（ステップの数）・`writable`（全ステップの `writable` を合わせたもの）を持ち、`standard` に ADK が同梱する標準 workflow（`name`・`description`）が並ぶ。`packages` の各行は `name`・`path`・`present`（`aidev.yaml` があるか）・`here`（今いる PKG か）・`templates`（`current` / `behind` / `unknown`）・`applied`（取り込んだ ADK のコミット）を持つ
 |===
 
 === 終了コード
@@ -73,6 +73,8 @@ aidev list workflows
   e2e-tests             not on origin/main                主要画面の IT テストを Playwright で書く
   write-conventions     changed since origin/main         Wiki と根拠ソースから開発規約を書き、PR を作る
 
+    standard workflows bundled with the kit (copy one into this PKG: aidev create workflow <name> --from <standard>):
+      playwright-tests   テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
 ----
 
 この端末の PKG を確認して、古いテンプレートの PKG に取り込む:

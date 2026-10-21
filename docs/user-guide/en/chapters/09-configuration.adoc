@@ -56,6 +56,12 @@ quality_gates:                  # commands run after the AI edits a file
 references:                     # existing documents handed to agents (text only)
   conventions: [docs/coding-guide.md]
   testing: [docs/testing.md, CONTRIBUTING.md]
+
+workflows:                      # values of each workflow's inputs (the same in this PKG; --input takes precedence)
+  e2e-tests:
+    inputs:
+      base_url: https://staging.example.com
+      test_user: qa-user@example.com
 ----
 
 === Principal settings
@@ -123,6 +129,10 @@ references:                     # existing documents handed to agents (text only
 |`references.<topic>`
 |none
 |Paths of existing documents (files or directories, relative to the PKG root) that `aidev run workflow` hands to the agent as reference material. The topic names (`conventions`, `testing` and so on) are free; every agent step gets the list per topic. Agents treat these as important sources that may be out of date: they verify them against the code and report where the two disagree. **Excel, Word and PDF files cannot be given as they are.** The AI tools read text only, so export them to Markdown or CSV, commit that, and list the exported file (listing an `.xlsx` or similar is a configuration error).
+
+|`workflows.<name>.inputs.<input>`
+|none
+|The value, in this PKG, of an input that workflow `<name>` declares under `inputs:`. `aidev run workflow` and `aidev estimate workflow` use it when `--input` is omitted (`--input` > here > the declaration's `default`). The value is checked by the same rules as `--input`. A name the workflow does not declare is an error at run time, and `file: true` inputs cannot be set here. **Credentials cannot be written here** (names such as `password`, `secret`, `token`, `pat` and `api_key` are a configuration error). Passwords come from an environment variable through the workflow's `env_required` (xref:workflows-inputs[Taking values that change per run], xref:workflows-standard[Starting from a standard workflow]).
 |===
 
 === Settings that can stay at their defaults
@@ -177,6 +187,8 @@ Unknown keys are ignored (they are not an error). A misspelled key name is not c
 === Prohibited settings
 
 `hosting.pat`, `hosting.token`, `hosting.password` and `hosting.secret` are rejected. Writing one stops every command from starting. Put the token in the environment variable named by `hosting.auth_env` (xref:environment-reference[Environment variables]).
+
+`workflows.<name>.inputs` cannot hold inputs whose names look like credentials either (names containing `password`, `passwd`, `pass`, `secret`, `token`, `pat`, `credential(s)`, `api_key` or `private_key`). A long value made only of letters and digits is also taken for a credential and rejected. Pass passwords through the environment variable that the workflow's `env_required` names (xref:workflows-env-required[Taking credentials from environment variables]).
 
 === Related information
 
