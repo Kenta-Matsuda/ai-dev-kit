@@ -560,6 +560,7 @@ function run() {
           eq([j.inputs, j.envRequired], [['spec', 'base_url', 'test_user', 'batch_size'], ['E2E_PASSWORD']]);
           ok(/workflows:\n\s+e2e:\n\s+inputs:\n\s+base_url: <.*>/.test(r.out), `the aidev.yaml snippet names the PKG's values: ${r.out}`);
           ok(/export in the shell: E2E_PASSWORD/.test(r.out), r.out);
+          ok(r.out.includes(`how to use it: ${path.join(KIT_ROOT, 'templates', 'workflows', 'playwright-tests', 'README.md')}`), 'the standard\'s README is named: ' + r.out);
           const text = fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), 'utf8');
           ok(/^name: e2e$/m.test(text) && !/^name: playwright-tests$/m.test(text), 'the name line is the PKG\'s');
           const def = wfMod.loadDefinition(fx.root, 'e2e');
