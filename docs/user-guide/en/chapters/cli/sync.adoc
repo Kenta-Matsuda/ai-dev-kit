@@ -1,7 +1,7 @@
 [[cli-sync]]
 == aidev sync
 
-Brings this PKG in step with something that moved on: `tools` takes the ADK templates into this PKG's tool configuration, `wiki` brings the LLM Wiki to HEAD.
+Brings this PKG in step with something that moved on: `tools` takes the ADK templates into this PKG's tool configuration, `wiki` brings the LLM Wiki to HEAD, `workflow <name>` takes a newer version of an ADK standard workflow into the copy this PKG made and edited.
 
 === Synopsis
 
@@ -9,6 +9,7 @@ Brings this PKG in step with something that moved on: `tools` takes the ADK temp
 ----
 aidev sync tools [--package <name|path>] [--dry-run] [--force] [--json]
 aidev sync wiki [--package <name|path>] [options]
+aidev sync workflow <name> [--from <standard>] [--package <name|path>] [--dry-run] [--force] [--json]
 ----
 
 Without `--package`, the current PKG. `--package` takes a name shown by xref:cli-list[`aidev list packages`] or a path to a PKG. Use it after `aidev update` to bring several PKGs forward from one place.
@@ -278,8 +279,122 @@ Discard an interrupted publish:
 aidev sync wiki --abort
 ----
 
+[[cli-sync-workflow]]
+=== aidev sync workflow
+
+Takes a newer version of an ADK standard workflow into the copy that `aidev create workflow <name> --from <standard>` made, keeping what this PKG changed (`cwd`, paths, `inputs`, the agents' steps). It is the same three-way merge `aidev sync tools` does for the templates.
+
+The copy carries `.aidev/workflows/<name>/standard.json` (the standard it came from, the ADK commit, and per file the hashes of the ADK version and of what was written). From it, each file of the ADK's standard workflow (`workflow.yaml`, agents, skills) ends up as one of:
+
+[%autowidth.stretch,options="header"]
+|===
+|Result |When |What happens
+
+|`+ <path>` (created)
+|A file the ADK's standard workflow gained
+|Written
+
+|unchanged
+|Already identical
+|Nothing
+
+|`~ <path>` (updated)
+|Not edited in this PKG; the ADK changed it
+|Replaced with the ADK version (every file with `--force`)
+
+|kept
+|Edited in this PKG; the ADK has not changed it since the copy
+|Left as it is
+
+|`~ <path> (merged with your edits)`
+|Edited here and changed by the ADK, in different places
+|The three-way merge against the ADK version at the copy is written
+
+|`! <path>` (conflict)
+|Both changed the same lines
+|git-style conflict markers are written, exit code 2. Resolve them and run again (the record is updated). While markers remain, the command refuses to run
+
+|`! <path>` (conflict, no base)
+|Edited here, and the version it was copied from is not in the record or not in the ADK checkout's history
+|Merge by hand (`git diff --no-index <ADK file> <PKG file>`), or take the ADK version with `--force`
+
+|`= <path>` (retired)
+|Recorded, but no longer in the ADK's standard workflow
+|Left as it is
+|===
+
+Afterwards the definition is validated (exit code 1 with the reason when it fails). Review the result with `git diff` and submit it with `aidev submit workflow <name>`: what runs is the submitted and merged version, so taking the update in changes nothing by itself (`--trial` tries it first).
+
+**A copy without `standard.json`** (made before the record existed) needs `--from <standard>` to name where it came from. The newest version in the ADK checkout's history whose files match the copy becomes the base (`no standard.json was there; the copy matches the kit's … at <commit> (N of M file(s))`) and the record is written. When no file matches any version, there is no base and an edited file is a conflict (no base).
+
+==== Options
+
+[%autowidth.stretch,options="header"]
+|===
+|Option |Description
+
+|`--from <standard>`
+|For a copy without `standard.json`: the standard workflow it came from. With a record, it has to match
+
+|`--dry-run`
+|Show what would change; write nothing (the record included)
+
+|`--force`
+|Replace every file with the ADK version, discarding local edits and conflicts
+
+|`--json`
+|Machine-readable output (`ok`, `from`, `kitCommit`, `baseCommit`, `bootstrapped`, `created`, `updated`, `merged`, `kept`, `retired`, `unchanged`, `conflicts`, `problem`)
+|===
+
+==== Exit codes
+
+[%autowidth.stretch,options="header"]
+|===
+|Code |Condition
+
+|0
+|Taken in, or already current
+
+|1
+|No such workflow; no `standard.json` and no `--from`; `--from` differs from the record; the ADK has no such standard workflow; the result fails validation
+
+|2
+|Conflicts remain (markers just written, no base, or markers from an earlier run still unresolved)
+|===
+
+==== Examples
+
+After updating the ADK, take it into the copied `e2e-tests`:
+
+[source,bash]
+----
+aidev update
+aidev sync workflow e2e-tests --dry-run     # see what would change first
+aidev sync workflow e2e-tests
+git diff                                    # review, then
+aidev submit workflow e2e-tests
+----
+
+[source,text]
+----
+aidev sync workflow e2e-tests
+✓ took 3 change(s) from the kit's playwright-tests into workflow e2e-tests
+    ~ .aidev/agents/playwright-test-writer.md
+    ~ .aidev/skills/playwright-testing/SKILL.md
+    ~ .aidev/workflows/e2e-tests/workflow.yaml (merged with your edits)
+    Review with "git diff", then "aidev submit workflow e2e-tests" (the reviewed copy is what runs; try it first with "aidev run workflow e2e-tests --trial").
+----
+
+A copy without a record, naming where it came from:
+
+[source,bash]
+----
+aidev sync workflow e2e-tests --from playwright-tests
+----
+
 === See also
 
+* xref:workflows-standard[Starting from a standard workflow] — the copy and what this PKG changes in it
 * xref:knowledge[LLM Wiki] — reading the state, what happens after a commit, resuming
 * xref:cli-update[aidev update] — updating the ADK itself
 * xref:maintain-update[Updating the ADK]

@@ -1,0 +1,66 @@
+# release-notes — 前回のリリースからの変更を CHANGELOG にまとめて PR にする（ai-dev-kit の標準 workflow）。
+#
+# これは `aidev create workflow <name> --from release-notes` で PKG に複製された、この PKG のファイルです。
+# この PKG で違うところはここを直して提出します（レビューされ、main にあるものだけが実行されます）:
+#   - 書く場所（draft step の writable。CHANGELOG.md か docs/releases/ か）
+#   - 見出しの形式や言語（この PKG に独自の規約があれば release-notes-writing skill を直す）
+# PKG ごとに違う「値」はこのファイルに書きません:
+#   - 次のバージョン: 実行時の --input version=1.2.0
+#   - 起点: 実行時の --input since=<tag か commit>（省略すると最新の tag）
+# 言語やビルドの道具に依存しません（git の履歴だけを読みます）。command step はありません。
+# 新しい版の取り込みは aidev sync workflow <name>（PKG で直したところを保ったまま取り込む）。
+name: release-notes
+description: 前回のリリース（最新の tag）からのコミットを読み、CHANGELOG に次のバージョンの項を書いて PR にする
+
+objective: |
+  {inputs.since} から HEAD までのコミットを読み、利用者から見える変更だけを CHANGELOG の {inputs.version} の項に
+  Keep a Changelog の形（Added / Changed / Deprecated / Removed / Fixed / Security）でまとめる。コミットに無いことは書かない。
+  既存の CHANGELOG の言語と書き方に合わせる。書き方は release-notes-writing skill に従う。
+
+inputs:
+  version:
+    description: 次のリリースのバージョン（例 1.2.0。v 付きも可）
+    pattern: 'v?[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?'
+  since:
+    description: 起点の tag かコミット。latest なら HEAD から辿れる最新の tag（git describe --tags --abbrev=0）
+    default: latest
+    pattern: '[A-Za-z0-9._/-]+'
+
+steps:
+  - id: collect
+    description: 起点からのコミットを集め、分類の候補を notes に置く（ファイルは書かない）
+    agent: release-notes-writer
+    writable: []
+    prompt: |
+      起点は {inputs.since}。latest なら `git describe --tags --abbrev=0` で最新の tag を求める（tag が無ければ、理由を報告して止める）。
+      `git log <起点>..HEAD --no-merges` で起点からのコミットを集め（0 件なら理由を報告して止める）、notes ディレクトリに次を書く:
+        - commits.md: 1 行 1 コミット（短い sha、subject、本文にある参照 #123 や Fixes #45、作者）。省かない
+        - groups.md: Added / Changed / Deprecated / Removed / Fixed / Security の候補と、利用者に関係しない（chore・CI・依存の更新・merge）として外す候補。コミットごとに理由
+      ソースにも CHANGELOG にも書かない。報告に、起点の tag かコミット、コミット数、分類の迷いを書く。
+    timeout_minutes: 15
+  - id: draft
+    description: CHANGELOG の先頭に次のバージョンの項を書く。確認役がコミットと突き合わせ、漏れや創作があれば差し戻す
+    agent: release-notes-writer
+    writable: [CHANGELOG.md, docs/releases/**]      # この PKG の置き場に合わせる
+    prompt: |
+      notes の commits.md と groups.md を読み、CHANGELOG.md の先頭（既存の項の上）に `## [{inputs.version}] - <今日の日付 YYYY-MM-DD>` の項を書く。
+      Keep a Changelog の見出し（Added / Changed / Deprecated / Removed / Fixed / Security）のうち中身のあるものだけを使い、
+      利用者から見える変更を 1 件 1 行で、コミットや PR の参照（#123）を残して書く。chore・CI・依存の更新・merge は利用者に影響しなければ書かない。
+      コミットに無いことは書かない。既存の CHANGELOG の言語（日本語か英語か）と書き方に合わせる。CHANGELOG.md が無ければ作る。
+      報告に、書いた件数と、外したコミット（sha と理由）を挙げる。
+      レビューの指摘（Previous attempt）があれば、それを直す。
+    until:
+      agent: release-notes-reviewer
+      prompt: |
+        notes の commits.md の全コミットが、CHANGELOG の {inputs.version} の項に書かれているか、または報告で理由付きで外されているか。
+        見出しが Keep a Changelog の形か、バージョンと日付が正しいか、コミットに無いことが書かれていないか、
+        利用者に関係しない内容（内部の作業）が混ざっていないか、既存の項の言語と書き方に合っているか。
+        足りないものはコミットの sha と内容を具体的に挙げる。
+      max_retries: 2
+    timeout_minutes: 30
+  - id: pr
+    pull_request:
+      title: "docs: CHANGELOG に次のリリースの変更をまとめる"
+
+limits:
+  max_usd: 10

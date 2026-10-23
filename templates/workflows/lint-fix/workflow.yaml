@@ -1,0 +1,105 @@
+# lint-fix — lint の指摘をファイルごとに並列で直し、全体の lint とテストが通ったら agent がレビューして PR にする
+# （ai-dev-kit の標準 workflow）。
+#
+# これは `aidev create workflow <name> --from lint-fix` で PKG に複製された、この PKG のファイルです。
+# この PKG で違うところはここを直して提出します（レビューされ、main にあるものだけが実行されます）:
+#   - 依存の入れ方（deps step の npm ci。pnpm / yarn の PKG は command を直す）
+#   - linter（linter step と until の npx eslint。他の linter（ruff、golangci-lint、…）を使う PKG は command を直し、
+#     lint-planner agent が読む出力形式も合わせる）
+#   - ソースの置き場（src/ 。fix step の writable・until・prompt の src を直す。並列で直すのはこの下のファイルで、
+#     それ以外（lib/・test/ …）の指摘は review step が順に直す）
+#   - テストのコマンド（review step の until の npm test）
+#   - 同時に直すファイルの数（fix step の for_each.parallel）と費用の上限（limits.max_usd）
+# PKG ごとに違う「値」はこのファイルに書きません:
+#   - lint する範囲: aidev.yaml の workflows.<name>.inputs.scope（または実行時の --input scope=src）。既定は .
+# 冪等性: 指摘を直すだけで、設定（eslint.config.*）は変えず、eslint-disable も足しません。review step の until は
+# lint とテストの両方が通ることで判定します。
+name: lint-fix
+description: lint の指摘をファイルごとに並列で直し、全体の lint とテストが通ったら agent がレビューして PR にする
+
+objective: |
+  この PKG の lint（eslint）の指摘を、振る舞いを変えずにすべて直す。設定を緩めず、eslint-disable を足さず、
+  指摘の原因（使われない変数、== の比較、再代入しない let …）そのものを直す。直したあと lint とテストの両方が通る。
+  書き方は lint-fixing skill に合わせる。
+
+inputs:
+  scope:
+    description: lint する範囲（eslint に渡すパス。既定の . は設定の ignores 以外すべて。plan と review が使う。fix step が並列で直すのはその中の src/ の下）
+    default: .
+    pattern: '[A-Za-z0-9._/-]+'
+
+# 任意: この PKG に lint の MCP server があれば fixer に渡せる（通常は不要）。
+# agents:
+#   lint-fixer:
+#     mcp: [eslint]
+
+steps:
+  - id: deps
+    description: 依存を実行用の worktree に入れる。package.json か package-lock.json が無い PKG はここで止まる（pnpm / yarn の PKG はこの command を直す）
+    command: npm ci
+    timeout_minutes: 20
+  - id: linter
+    description: この PKG の依存に eslint が無ければここで止まる（他の linter を使う PKG は、この command と各 step の npx eslint を直す）
+    command: npx eslint --version
+  - id: plan
+    description: lint を実行して指摘のあるファイルを集め、1 ファイル 1 対象として実行の notes に置く（ソースは書かない）
+    agent: lint-planner
+    writable: []
+    prompt: |
+      `npx eslint {inputs.scope} -f json` を実行し、指摘のあるファイルを集めて notes ディレクトリに次を書く:
+        - targets.txt: src/ の下で指摘のあるファイルを、src/ からの相対パスで 1 行 1 ファイル（例 utils/date.js）。並び順は fix step が処理する順
+        - findings.md: ファイルごとに、行・ルール・メッセージの一覧（src/ の外のファイルも含める。review step が直す）
+        - plan.md: linter の設定（eslint.config.* のルールと ignores）、よく出るルールと直し方の方針、src/ の外で指摘のあるファイルの一覧、
+          指摘の無い場合はその旨
+      ソースは書かない。設定も変えない。指摘が 1 件も無ければ targets.txt を作らず（空のファイルも書かない）、その旨を報告する。
+    timeout_minutes: 20
+  - id: fix
+    description: ファイルごとに指摘を直し、そのファイルの lint が通るまで直す（ファイルは同時に進み、通らなかったファイルは戻して次へ）
+    agent: lint-fixer
+    for_each:
+      from: targets.txt
+      max_items: 1000
+      parallel: 4
+      on_failure: continue
+    writable: [src/{item}]                 # 対象のファイルだけ。src/ がソースの置き場でない PKG は src を直す（until と prompt も）
+    prompt: |
+      src/{item} の lint の指摘を直す。指摘は notes の findings.md に、方針は plan.md にある。
+      振る舞いを変えない。設定（eslint.config.*）を変えない。eslint-disable を足さない。他のファイルは書かない。
+      書いたら `npx eslint src/{item}` で確かめ、指摘が無くなるまで直す。
+      誤検知だと判断した指摘は、黙らせずに理由を付けて報告に挙げる（その場合はこのファイルは通らない）。
+    until:
+      command: npx eslint src/{item}
+      env:
+        CI: "1"
+      timeout_minutes: 10
+      max_retries: 3
+    timeout_minutes: 30
+  - id: review
+    description: 全体の lint とテストを通し、振る舞いを変えていないか agent がレビューする。指摘があれば直し、通るまで繰り返す
+    agent: lint-fixer
+    writable: [src/**, lib/**, test/**, tests/**]    # この PKG のソースの置き場に合わせる
+    prompt: |
+      すべてのファイルを直し終わった。`npx eslint {inputs.scope}` と `npm test` を実行し、残った指摘（src/ の外のファイル、fix step で失敗して戻されたファイル）と
+      通らなくなったテストを直す。振る舞いを変えない。設定を変えない。eslint-disable を足さない。
+      fix step の報告で失敗（left out）になったファイルはここで直す。直せない指摘（誤検知）は、ファイルと行と理由を報告に挙げる。
+      レビューの指摘（Previous attempt）があれば、それを直してから再実行する。
+    until:
+      command:
+        - npx eslint {inputs.scope}
+        - npm test
+      env:
+        CI: "1"
+      timeout_minutes: 30
+      agent: lint-reviewer
+      prompt: |
+        直した差分を読み、振る舞いを変える変更（関数の戻り値や分岐の変更、削除された処理、例外の握りつぶし）、
+        eslint-disable や設定の変更、ルールの無効化、指摘を黙らせるだけの書き換え（使われない変数への _ 付与、無意味な参照）が無いか。
+        あれば、ファイルと行と内容を具体的に挙げる。
+      max_retries: 2
+    timeout_minutes: 60
+  - id: pr
+    pull_request:
+      title: "chore: lint の指摘を直す"
+
+limits:
+  max_usd: 20

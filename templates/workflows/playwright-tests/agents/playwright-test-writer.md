@@ -14,7 +14,7 @@ model: inherit
 
 | step | 仕事 | 書く場所 |
 | --- | --- | --- |
-| scaffold | 共通 helper（`support/env.ts`・`support/login.ts`）と smoke test | `tests/e2e/support/**`、`tests/e2e/smoke/**` |
+| scaffold | 共通 helper（`support/env.ts`・`support/login.ts`・`support/evidence.ts`・plan.md に挙がった前提条件を作る / 戻す helper）と smoke test | `tests/e2e/support/**`、`tests/e2e/smoke/**` |
 | generate | 1 batch のケースを 1 ケース 1 spec ファイルで書き、その batch を通す | `tests/e2e/cases/<batch>/**` |
 | review | 全体を実行し、通らないものとレビューの指摘を直し、重複した helper をまとめる | `tests/e2e/cases/**`、`tests/e2e/support/**` |
 
@@ -22,7 +22,7 @@ model: inherit
 
 | | |
 | --- | --- |
-| 入力 | step の指示（対象の batch）、notes の `batches/<batch>.md` と `plan.md`、先の step の報告、「Environment variables of this run」の変数名、この PKG の既存テスト |
+| 入力 | step の指示（対象の batch）、notes の `batches/<batch>.md` と `plan.md`（「前提条件の作り方」を含む）、先の step の報告、「Environment variables of this run」の変数名、この PKG の既存テスト |
 | 出力 | spec ファイルと helper。最終報告にケースごとの結果（通った / fixme とその理由）、仕様の疑問点、環境の問題 |
 | 必要権限 | step の `writable` だけ（hook が強制する）。`Bash` は `npx playwright test` の実行のため |
 | 前提 | playwright-tests workflow から起動されている。`E2E_BASE_URL`・`E2E_USER`・`E2E_PASSWORD` が環境にある |
@@ -30,11 +30,11 @@ model: inherit
 ## 手順
 
 1. notes の `plan.md` と、対象 batch の `batches/<batch>.md` を読む。先の step の報告（Reports from the earlier steps）にある注意を確認する。
-2. ケースごとに、関係する画面の実装を読んでロケータを決め、playwright-testing skill の規約で spec ファイルを書く。support/ の helper を使い、自分の batch の外は書かない。仕様から写す文にパスワードなど認証情報の値があれば `<credential>` に置き換える。
-3. 書いたら対象のパスだけを実行する: `npx playwright test tests/e2e/cases/<batch>/ --reporter=list --retries=0 --output test-results/<batch>`（scaffold は `tests/e2e/smoke/`、review は `tests/e2e/cases/ tests/e2e/smoke/` と `--output test-results/all`）。パスの末尾の `/` と `--output` は省かない（同時に動く他の batch のテストと結果を巻き込まないため）。
-4. 通らないケースは出力を読み、原因を分ける: ロケータ / 待ち方 / 仕様の読み違い / 環境の問題。前 3 つは直して再実行する。環境の問題（データが無い、権限が無い、仕様にあって実装に無い）は `test.fixme(true, '<理由>')` にして報告に挙げる。アサーションを弱めない。
+2. ケースごとに、関係する画面の実装を読んでロケータを決め、playwright-testing skill の規約で spec ファイルを書く。support/ の helper を使い、自分の batch の外は書かない。仕様から写す文にパスワードなど認証情報の値があれば `<credential>` に置き換える。`test`・`expect` は `support/evidence` から import し、各手順の `test.step` の終わりで `evidence.capture('<何が見えているか>')` を呼んで画面キャプチャをエビデンスとして残す（skill の「エビデンス」）。scaffold では `support/evidence.ts` を skill の参照実装のとおりに書き（変えない）、smoke test もそれを使う。仕様の前提条件（利用者やデータがあること）は skill の「前提条件はテストが作り、終わったら戻す」のとおり、`beforeEach` で support/ の helper（ensure 型。plan.md の「前提条件の作り方」に沿って scaffold が書いたもの。無ければ batch の中に書く）で作り、`afterEach` で作ったものだけ戻す。環境に無いからといって `test.fixme` にしない。
+3. 書いたら対象のパスだけを、2 回続けて実行する: `npx playwright test tests/e2e/cases/<batch>/ --reporter=list --retries=0 --output test-results/<batch>`（scaffold は `tests/e2e/smoke/`、review は `tests/e2e/cases/ tests/e2e/smoke/` と `--output test-results/all`）。パスの末尾の `/` と `--output` は省かない（同時に動く他の batch のテストと結果を巻き込まないため）。workflow の `until` も 2 回続けて実行して判定する: 2 回目だけ落ちるのは後始末の抜け。
+4. 通らないケースは出力を読み、原因を分ける: ロケータ / 待ち方 / 仕様の読み違い / 前提が作れていない。4 つとも直して再実行する（データが無いなら作る helper を書く）。`test.fixme(true, '<理由>')` にして報告に挙げてよいのは、テストユーザーに権限が無い操作と、仕様にあって実装に無い振る舞いだけ。アサーションを弱めない。
 5. 「Previous attempt」に失敗の出力やレビューの指摘があれば、まずその原因を取り除く。同じ直し方を繰り返さない。
-6. 最終報告: ケース ID ごとに「通った」「fixme: <理由>」、仕様の疑問点、環境の問題、review では書かなかったケース（generate で失敗した batch）の ID。
+6. 最終報告: ケース ID ごとに「通った」「fixme: <理由>」、仕様の疑問点、環境の問題、review では書かなかったケース（generate で失敗した batch）の ID、エビデンスの場所（`test-results/evidence/<ケース ID>/`。`E2E_EVIDENCE_DIR` があればそこ）。
 
 ## 停止条件
 

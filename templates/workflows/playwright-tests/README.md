@@ -13,8 +13,8 @@
 | `browsers`（command） | `npx playwright install chromium`。この端末にブラウザが無ければ入れ、あれば何もしない |
 | `plan`（agent、何も書かない） | 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く |
 | `scaffold`（agent） | `tests/e2e/support/` に共通 helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる |
-| `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
-| `review`（agent + 確認役 agent） | 全体を実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで） |
+| `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが **2 回続けて** 通るまで直す（3 回まで。2 回目だけ落ちるのは後始末の抜け）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
+| `review`（agent + 確認役 agent） | 全体を 2 回続けて実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで）。この最後の全体実行で全ケースの画面キャプチャ（エビデンス）が揃う |
 | `pr` | PR を作る。失敗して残った batch のケースは PR 本文の「Targets left out」に出る |
 
 ## 前提
@@ -112,6 +112,40 @@ aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv   # base_url / t
 - `limits.max_usd` に達して止まったら `aidev run workflow e2e-tests --resume last` で続けられます
 - 止まった理由から定義を直すには `aidev modify workflow e2e-tests --from-run last`
 
+## エビデンス（画面キャプチャ）
+
+テストは手順ごとに画面キャプチャを残します。仕組みは `tests/e2e/support/evidence.ts` の fixture 1 つで（scaffold step が skill の参照実装をそのまま書く）、spec は `test`・`expect` をそこから import し、各手順の終わりに `await evidence.capture('<何が見えているか>')` を呼びます。テストの終わりには結果にかかわらず `final` が自動で残ります。
+
+| 項目 | 内容 |
+| --- | --- |
+| 場所 | `<Playwright を実行したディレクトリ>/test-results/evidence/<ケース ID>/<NN>-<label>.png`（全ページ、パスワード欄はマスク）。環境変数 `E2E_EVIDENCE_DIR` で変えられる |
+| 揃うとき | `review` step の最後の全体実行（`generate` の batch ごとの実行でも残るが、最後の全体実行が上書きする） |
+| 実行後の見方 | 実行の worktree の `test-results/evidence/` を開く（画面の `worktree:` のパス）。Playwright のレポートにも添付される |
+| PR に入れる | 既定では入らない（`test-results/**` は `never_commit`）。入れるなら、複製した YAML の `review` step の `env` に `E2E_EVIDENCE_DIR: evidence`、`writable` に `evidence/**` を足す（PNG が PR とリポジトリに入る） |
+| 確認役 | `playwright-test-reviewer` が、`support/evidence` から import していない spec とキャプチャの無い手順を指摘する |
+
+## 前提条件と冪等性
+
+仕様の「前提条件」（利用者 ID「ium12345」の利用者が登録されていること、商品 X があること）は、環境に用意されていることを当てにせず、テストが自分で作って終わったら戻します。無いからといって `test.fixme` で飛ばしません。
+
+| 項目 | 内容 |
+| --- | --- |
+| 作り方 | `plan` step が、前提の種類ごとに「どの画面で作り、どの画面で消すか」を plan.md に書く。`scaffold` step がそれを ensure 型の helper（`ensureUser(page, {...})` は無ければ作り、作ったかを返す。`removeUser(page, id)` は作ったものを消す）として `tests/e2e/support/` に書く |
+| テストの形 | `test.beforeEach` でログインと前提の作成、`test.afterEach` で作ったものだけ削除（結果にかかわらず）。固定 ID が仕様にあればその ID で作り、既にあれば既存を使って消さない |
+| 判定 | `generate` と `review` の `until` は同じテストを 2 回続けて実行し、2 回とも通ることで判定する。1 回目は通って 2 回目に落ちるなら後始末の抜け（固定 ID の重複登録、戻していない値） |
+| fixme にしてよいもの | 外部システムのデータ、テストユーザーに権限の無い操作、実装に無い機能だけ。「環境に無い」は理由にならない（reviewer agent が指摘する） |
+| 対象環境 | チームの検証環境。テストが消すのは自分で作ったものだけで、既存のデータを消す・変える操作は仕様の手順にあるものだけ |
+
 ## 新しい版を取り込む
 
-ADK を更新したら、もう一度 `aidev create workflow e2e-tests --from playwright-tests --force` で複製し直し、`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。
+ADK を更新したら、`aidev sync workflow e2e-tests` を実行します。複製時に書かれた `.aidev/workflows/e2e-tests/standard.json` を元に、この PKG で直したところ（`cwd`、パス、`inputs`、agent の手順）を保ったまま、ファイルごとに ADK の変更を取り込みます: 編集していないファイルは置き換え、編集したファイルは複製時の版を base に 3-way merge、同じ行を両方が変えていれば衝突マーカー（解消してもう一度実行）。`--dry-run` で先に何が変わるかを見られます。`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。
+
+```bash
+aidev update
+aidev sync workflow e2e-tests --dry-run
+aidev sync workflow e2e-tests
+git diff
+aidev submit workflow e2e-tests
+```
+
+`standard.json` の無い複製（記録が入る前に複製したもの）は `aidev sync workflow e2e-tests --from playwright-tests` と複製元を名指しします。ADK の履歴から複製と一致する版を探して base にし、記録を書きます。定義ごと ADK の版に戻すなら `aidev sync workflow e2e-tests --force` です。
