@@ -24,7 +24,7 @@ npm run sandbox -- playwright-tests --keep --json   # PKG・worktree・記録を
 
 `scripts/sandbox-workflow.js` は、使い捨ての PKG（`aidev init` 後の状態 + 筋書きの `files`）を作り、筋書きの `prepare`（test runner の install など）を流して commit し、`aidev create workflow <name> --from <standard>` で複製し、筋書きが起動したサービス（テスト対象のアプリ）に向けて `aidev run workflow <name> --trial --json` を `--dry-run` のあとに実行します。agent だけが本物ではなく、`AIDEV_CLAUDE_BIN` で `scripts/sandbox-agent.js` を指します: これは起動されるたびに step・対象・試行回数・inputs・prompt を筋書きの `agent(ctx)` に渡し、返ってきた `files`（worktree 相対）と `notes`（run の notes 相対）を書き、`report`（と確認役なら `verdict`）を claude adapter が読む stream-json で返します。それ以外（YAML の検証、worktree、`npm ci`、`until` の command が起動する test runner、再試行とその prompt、checkpoint、notes、trial の pull_request step）は実物です。
 
-通るとわかること: 同梱の YAML・agent・skill が、kit の runner と実際の command（npm、Playwright …）の上で、筋書きが「有能な agent ならこう書く」と決めた内容で端から端まで動く。わからないこと: 実際の agent がその内容を書けるか（LLM は起動しない）、hooks の挙動（scripted agent はツールを呼ばない）。
+通るとわかること: 同梱の YAML・agent・skill が、kit の runner と実際の command（npm、Playwright …）の上で、筋書きが「有能な agent ならこう書く」と決めた内容で端から端まで動く。わからないこと: 実際の agent がその内容を書けるか（LLM は起動しない）、hooks と Claude Code の権限（allow / ask / deny）の挙動（scripted agent はツールを呼ばない）。
 
 kit 開発者の端末に Playwright が無くても動きます: 筋書きの `prepare` が使い捨て PKG に `@playwright/test`（端末にブラウザがある版、無ければ最新）を install して `package-lock.json` を作り、`playwright install chromium` でブラウザも入れます（どちらも network が要る。Linux で起動時に共有ライブラリが無いと言われたら、一度 `npx playwright install --with-deps chromium` を手で）。
 

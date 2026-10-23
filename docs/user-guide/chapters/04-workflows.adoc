@@ -831,7 +831,7 @@ aidev run workflow write-tests
 * agent は対話セッションと同じ設定ファイル・hooks・policy のもとで動きます。書けるのは、いま動いているステップの `writable` の中だけで、それ以外への書き込みは hook が拒否します。agent 自身は commit も push もしません。
 * 最初のステップの前に、`provide:` の glob に一致する gitignore 済みのファイルを手元のチェックアウトから worktree にコピーし、`file: true` の入力のコピーを実行記録の `inputs/` に置きます（xref:workflows-provide[worktree に無いファイルを用意する]）。
 * ステップ（`for_each` なら 1 件）が通るたびに、そのステップの `writable` の変更を **チェックポイントとしてコミット** します（`aidev(<name>): <step>`）。止まった実行は、最後のチェックポイントから続けられます。追跡されていないファイルのうち、ADK の既定の一覧（`node_modules`、`__pycache__` など）と `never_commit:` に一致するものはコミットしません（xref:workflows-never-commit[決してコミットしないもの]）。
-* Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば、その定義を `--agents` で渡します）。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。
+* Claude Code は、agent の frontmatter と workflow の `agents:` で与えた `tools` と `mcp` だけを渡して起動します（`subagents` があれば、その定義を `--agents` で渡します）。それ以外のツールは存在しない扱いになり、呼んでも hook が拒否します。`mcp` を書かない agent には MCP server を渡しません。与えた `Bash`・`WebFetch`・`WebSearch` は実行中は承認済みとして扱われます（誰も承認できない実行で、agent が自分でテストを動かせるように）。PKG の `.claude/settings.json` の `deny` / `ask`（`git push` など）と hook（`writable` の外への書き込み、試走の push）は引き続き効きます。
 * 前の agent step の最終報告は、後の agent step の指示に入ります。notes ディレクトリの file も読めます（xref:workflows-handoff[ステップの間で結果を渡す]）。
 * `until` を満たさなければ、その結果（コマンドの出力、または確認役の agent の報告）を添えて同じ agent をもう一度起動します。同じ結果が 2 回続いたら止まります。
 * コマンドが 15 秒以上かかるときは、15 秒ごとに経過を 1 行表示します。

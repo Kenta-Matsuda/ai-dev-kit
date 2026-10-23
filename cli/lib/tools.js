@@ -235,9 +235,16 @@ const REGISTRY = Object.freeze({
         // Only the agent's MCP servers are loaded (none when it names none);
         // the PKG's .mcp.json and the person's own servers are ignored. Each
         // granted server is pre-approved, since no one is there to approve a
-        // call. The variadic --tools goes last.
+        // call — and so are the granted built-in tools acceptEdits does not
+        // cover (Bash, WebFetch, WebSearch): without that, a headless run
+        // denies every command the agent tries, and an agent meant to run
+        // the tests writes them blind. The project's deny and ask rules and
+        // the PreToolUse guard still decide each call. The variadic --tools
+        // goes last.
         argv.push('--mcp-config', capabilities.mcpConfigFile, '--strict-mcp-config');
-        if (capabilities.mcp.length) argv.push('--allowedTools', capabilities.mcp.map((s) => `mcp__${s}`).join(','));
+        const builtIn = capabilities.tools ? capabilities.tools.filter((t) => APPROVAL_TOOLS.includes(t)) : APPROVAL_TOOLS;
+        const approved = [...builtIn, ...capabilities.mcp.map((s) => `mcp__${s}`)];
+        if (approved.length) argv.push('--allowedTools', approved.join(','));
         // The subagents the agent may start, defined for this session only
         // (with -p, --agents takes a file).
         if (capabilities.agentsFile) argv.push('--agents', capabilities.agentsFile);
@@ -450,6 +457,14 @@ function windowsScriptSpec(script, source, env) {
   const comspec = env.ComSpec || env.COMSPEC || process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
   return { ok: true, bin: comspec, argvPrefix: [], cmdScript: script, shell: false, killTree: true, source };
 }
+
+/**
+ * The built-in tools of Claude Code that acceptEdits does not cover: each
+ * call would ask for an approval nobody is there to give. A workflow agent
+ * granted one of them gets it pre-approved for the run (deny/ask rules of
+ * the project and the guard hook still apply).
+ */
+const APPROVAL_TOOLS = ['Bash', 'WebFetch', 'WebSearch'];
 
 /** Characters cmd.exe acts on, inside double quotes or not. */
 const CMD_META_RE = /([()\][%!^"`<>&|;, *?])/g;

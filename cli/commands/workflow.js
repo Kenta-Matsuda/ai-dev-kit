@@ -1816,6 +1816,23 @@ async function runWorkflow(ctx) {
     return (p) => { if (screen) screen(p); if (toFile) toFile(p); };
   };
 
+  // On screen, when a command stops the run: what it printed, and what the
+  // step is for in the definition's own words, so the person knows what to
+  // fix without opening the log (a package without the tool the step needs,
+  // a test that cannot reach the target environment). The start carries the
+  // reason with most tools (npm, node), the end the summary of a test
+  // runner: both are shown when it is long.
+  const showFailedCommand = (step, { text, output, logRel }) => {
+    if (flags.json) return;
+    const lines = String(output || '').split('\n').filter((l) => l.trim());
+    const shown = lines.length <= 30 ? lines : [...lines.slice(0, 12), `… (${lines.length - 27} line(s) left out)`, ...lines.slice(-15)];
+    if (shown.length) {
+      ui.warn(`what "${text}" printed${logRel ? ` (whole output: ${logRel})` : ''}:`);
+      for (const l of shown) ui.dim(`      ${l.length > 200 ? `${l.slice(0, 200)}…` : l}`);
+    }
+    if (step.description) ui.info(`step ${step.id} is: ${step.description}`);
+  };
+
   // One command of a step, its whole output in logs/<label>.log.
   const execCommand = async (step, command, how, label) => {
     const logFile = artifactsOk ? path.join(runDir, 'logs', `${label}.log`) : null;
@@ -1999,6 +2016,8 @@ async function runWorkflow(ctx) {
       if (failure.kind === 'agent') out.review = agentMod.summarizeResult(failure.output, 800);
       else if (failure.logRel) out.log = failure.logRel;
       const signature = `${failure.kind}\n${failure.code ?? ''}\n${tail(failure.output, 2000)}`;
+      // The last failure, for the screen when it stops the run.
+      out.failure = failure.kind === 'command' ? { text: failure.command, output: failure.output, logRel: failure.logRel } : null;
       if (signature === lastSignature) { out.fail = `the same failure repeated (${failure.text} with identical output)`; break; }
       lastSignature = signature;
       previous = failure;
@@ -2041,7 +2060,10 @@ async function runWorkflow(ctx) {
       record.attempts = w.attempts;
       copyWork(record, w);
       if (denied[step.id]) record.denied = denied[step.id];
-      if (!w.ok) return `step ${step.id}: ${w.stop || w.fail}`;
+      if (!w.ok) {
+        if (w.fail && w.failure) showFailedCommand(step, w.failure);
+        return `step ${step.id}: ${w.stop || w.fail}`;
+      }
       const notKept = keep(record, step.writable, step.id);
       if (notKept) return `step ${notKept}`;
       record.ok = true;
@@ -2106,7 +2128,10 @@ async function runWorkflow(ctx) {
       if (!w.ok) {
         const why = w.stop || w.fail;
         // A limit (budget, time) stops the run whatever on_failure says.
-        if (!goOn || w.limit) return `step ${step.id}: target ${value}: ${why}`;
+        if (!goOn || w.limit) {
+          if (w.fail && w.failure) showFailedCommand(step, w.failure);
+          return `step ${step.id}: target ${value}: ${why}`;
+        }
         let undone;
         try { undone = restoreWritable(repoRoot, target.writable, snapshot, ignore); } catch (e) { return `step ${step.id}: target ${value} failed and its changes could not be undone: ${e.message}`; }
         entry.failed = true;
@@ -2223,21 +2248,7 @@ async function runWorkflow(ctx) {
         record.output = tail(r.output, 2000).trim();
         if (r.logRel) record.log = r.logRel;
         stopReason = `step ${step.id}: ${step.command.text} exited ${r.code}`;
-        // On screen: the end of what the command said, and what the step is
-        // for in the definition's own words, so the person knows what to fix
-        // without opening the log (a package without the tool the step
-        // needs, for instance).
-        if (!flags.json) {
-          // The start carries the reason with most tools (npm, node), the end
-          // the summary (a test runner): both are shown when it is long.
-          const lines = String(r.output || '').split('\n').filter((l) => l.trim());
-          const shown = lines.length <= 30 ? lines : [...lines.slice(0, 12), `… (${lines.length - 27} line(s) left out)`, ...lines.slice(-15)];
-          if (shown.length) {
-            ui.warn(`what "${step.command.text}" printed${r.logRel ? ` (whole output: ${r.logRel})` : ''}:`);
-            for (const l of shown) ui.dim(`      ${l.length > 200 ? `${l.slice(0, 200)}…` : l}`);
-          }
-          if (step.description) ui.info(`step ${step.id} is: ${step.description}`);
-        }
+        showFailedCommand(step, { text: step.command.text, output: r.output, logRel: r.logRel });
       }
     } else {
       record.attempts = 1;

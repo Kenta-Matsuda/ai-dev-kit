@@ -173,6 +173,8 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **論点**: `Bash`を持つagentはMCPを通さず外部へ出られるので、外部systemに触るagentに`Bash`を渡さないことはreview（templateのagents-creator / workflow-creatorの指示とuser guide）に頼っています。
 
+**追記（2026-10-23）**: `--permission-mode acceptEdits --permission-prompts none`で起動したagentは、`Bash` / `WebFetch` / `WebSearch`の呼び出しを承認されず全て拒否されていました（最初の実機のworkflow runで、testを動かすはずのwriter agentがtestを一度も実行できずに書き、`until`が同じ失敗を繰り返して止まった）。frontmatter（とworkflowの`agents:`）で与えたこれらは`--allowedTools`で事前承認します（`tools`を書かないagentは3つとも）。能力の線はfrontmatterのまま（D18）、PKGの`.claude/settings.json`の`deny` / `ask`（`git push`など）とguard-write（`writable`の外への書込、試走のpush）は引き続き効きます。
+
 ### D19: 対象PKGは共通option `--package <name|path>`で指定し、一覧は`aidev list packages`で見る
 
 **判断**: PKGに対して動くcommandはすべて`--package <name|path>`（短縮`-p`）を受け付け、cwdの代わりにそのPKGで動きます。解決はentry point（`aidev.js`）の1か所で、registryの名前を先に、無ければpathとして扱います。端末だけに作用する`update`と、toolが起点を渡す`hook`はerrorにします。一覧は`aidev list packages`で、名前・path・templateが最新かを出し、そのまま`--package`に渡せる名前を示します。`sync` / `doctor` / `uninstall`が個別に持っていた位置引数`<package>`は削除しました（2026-09-23）。
