@@ -744,7 +744,8 @@ function run() {
         const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
         ok(!a.includes('--agent'), 'the definition is inlined, so no --agent flag: ' + a.join(' '));
         ok(a.includes('--strict-mcp-config') && a.includes('--mcp-config'), 'an agent that names no MCP server gets none: ' + a.join(' '));
-        ok(!a.includes('--tools') && !a.includes('--allowedTools'), 'no tools listed: the tool\'s default set');
+        ok(!a.includes('--tools'), 'no tools listed: the tool\'s default set');
+        eq(a.slice(a.indexOf('--allowedTools'), a.indexOf('--allowedTools') + 2), ['--allowedTools', 'Bash,WebFetch,WebSearch'], 'the default set: what acceptEdits does not cover is pre-approved');
         const prompts = fs.readFileSync(promptOut, 'utf8').split('\n=====\n').filter(Boolean);
         eq(prompts.length, 2);
         ok(/# Agent: coder/.test(prompts[0]) && /You are the coder\./.test(prompts[0]), 'the PKG agent definition is inlined');
@@ -898,6 +899,25 @@ function run() {
         const j = lastJson(r.out);
         ok(/cost limit of \$0\.02 reached/.test(j.stopReason), j.stopReason);
         eq(j.agentRuns, 2, 'two runs fit under $0.02, the third was refused');
+      });
+
+      test('a failing command step shows the end of its output and the step description on screen', () => {
+        write(path.join(fx.root, 'tools', 'nope.js'), 'process.stdout.write("line one\\n"); process.stderr.write("nope.js says: no playwright here\\n"); process.exit(5);\n');
+        define('cmdout', { steps: ['  - id: deps', '    description: installs the dependencies (a package without Playwright stops here; see the README)', '    command: node tools/nope.js'] });
+        const c = aidev(fx.root, ['run', 'workflow', 'cmdout'], { env: env() });
+        eq(c.code, 1);
+        ok(/what "node tools\/nope\.js" printed \(whole output: [^)]*deps\.1\.1\.log\):\s+line one\s+nope\.js says: no playwright here/.test(c.out), `the output is on screen: ${c.out}`);
+        ok(/step deps is: installs the dependencies \(a package without Playwright stops here; see the README\)/.test(c.out), `the description is on screen: ${c.out}`);
+        ok(/workflow stopped — step deps: node tools\/nope\.js exited 5/.test(c.out), c.out);
+        const j = aidev(fx.root, ['run', 'workflow', 'cmdout', '--json'], { env: env() });
+        ok(!/what "node tools/.test(j.out) && !/step deps is:/.test(j.out), `--json prints neither: ${j.out}`);
+        // The until command that stops an agent step is shown the same way.
+        define('untilout', { steps: ['  - id: smoke', '    description: makes the smoke test pass against the target', '    agent: coder', '    prompt: write it', '    until:', '      command: node tools/nope.js', '      max_retries: 0'] });
+        const u = aidev(fx.root, ['run', 'workflow', 'untilout'], { env: env() });
+        eq(u.code, 1);
+        ok(/what "node tools\/nope\.js" printed \(whole output: [^)]*smoke\.1\.1\.log\):\s+line one\s+nope\.js says: no playwright here/.test(u.out), `the until output is on screen: ${u.out}`);
+        ok(/step smoke is: makes the smoke test pass against the target/.test(u.out), u.out);
+        ok(/workflow stopped — step smoke: the until check still fails after 0 retries/.test(u.out), u.out);
       });
 
       test('a failing agent, a failing command step and a tool outside tools.default each stop the run', () => {
@@ -1078,6 +1098,17 @@ function run() {
         eq(lost.code, 1);
         ok(/does not register/.test(lost.out), lost.out);
         ok(!fs.existsSync(argvOut), 'nothing was started');
+      });
+
+      test('Bash, WebFetch and WebSearch an agent is given are pre-approved for the run; the other tools are not listed', () => {
+        write(path.join(fx.root, '.aidev', 'agents', 'runner.md'), '---\nname: runner\ndescription: runs the tests\ntools: Read, Bash, WebSearch\n---\n\nYou run tests.\n');
+        define('approved', { steps: ['  - id: t', '    agent: runner', '    prompt: run them'] });
+        reset();
+        const r = aidev(fx.root, ['run', 'workflow', 'approved', '--json'], { env: env() });
+        eq(r.code, 0, r.out);
+        const a = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+        eq(a.slice(a.indexOf('--allowedTools'), a.indexOf('--allowedTools') + 2), ['--allowedTools', 'Bash,WebSearch'], 'the granted tools acceptEdits does not cover');
+        eq(a.slice(a.indexOf('--tools')), ['--tools', 'Read', 'Bash', 'WebSearch']);
       });
 
       test('what a workflow\'s agents: assigns reaches the tool, the prompt and the guard, on top of the frontmatter', () => {

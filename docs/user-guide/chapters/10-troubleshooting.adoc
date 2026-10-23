@@ -326,11 +326,14 @@
 |実行は止まっていません。command step が `writable` の外に書いたか、agent が検問を通らずに書いています。コミットされていないので、要るものなら Engineering Manager がそのステップの `writable` を広げます。
 
 |`step <id>: the tool was refused N call(s): … (a path outside writable? see run.json "denied")`
-|実行は止まっていません。agent が `writable` の外や、与えられていないツールを呼んで拒否されています。`run.json` のそのステップの `denied` に一覧があります。仕事に要るなら `writable` か agent の `tools` を直します。
+|実行は止まっていません。agent が `writable` の外や、与えられていないツールを呼んで拒否されています。`run.json` のそのステップの `denied` に一覧があります。仕事に要るなら `writable` か agent の `tools` を直します。frontmatter で与えた `Bash`・`WebFetch`・`WebSearch` は実行中は承認済みなので、`Bash` が拒否されるのは `.claude/settings.json` の `deny` / `ask`（`git push` など）に当たったか、hook が `writable` の外への書き込みと判断したときです。
+
+|`workflow stopped — step <id>: <command> exited N`
+|command step のコマンドが失敗しました。その上に出力の末尾（全文は `run.json` の `log` が指すファイル）と、定義の `description` が出ます。標準 workflow `playwright-tests` が `deps`（`npm ci`）か `playwright` で止まるのは、PKG に Playwright（`@playwright/test` と `package-lock.json`）がまだ無いときです。複製した README の「Playwright がまだ無い PKG に入れる」の手順で入れて commit してから実行します（xref:workflows-standard[標準 workflow から作る]）。終了コード 127 は「command を起動できなかった」です。runner の理由（`<command> was not found on PATH`、`the directory <cwd> does not exist`。worktree には commit されたものしか無い）か、command 自身の出力（`npm install` / `npm ci` なら `package.json` の `prepare` / `postinstall` が呼ぶ tool が無い: `sh: husky: command not found` など）が出力の先頭にあります。前者は PATH と `cwd` を直し、後者はその tool を `devDependencies` に入れるか command を `npm ci --ignore-scripts` にします。
 
 |`workflow stopped — step <id>: the until check still fails after N retries (…)` +
 `… the same failure repeated`
-|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。終わったステップまではブランチ `aidev/<name>` のチェックポイントにあります。手で直せる原因なら worktree で直して `aidev run workflow <name> --resume last` で続けます（xref:workflows-resume[止まった実行を続ける]）。原因が定義にあるなら `aidev modify workflow <name> --from-run last` で直させます（xref:workflows-fix-from-run[止まった実行から直す]）。
+|agent が `until` を満たせませんでした（テストが通らない、または確認役の agent が合格にしない）。command が通らなかったときは、その出力（全文は `run.json` の `log` が指すファイル）と step の `description` が画面に出ます。終わったステップまではブランチ `aidev/<name>` のチェックポイントにあります。手で直せる原因なら worktree で直して `aidev run workflow <name> --resume last` で続けます（xref:workflows-resume[止まった実行を続ける]）。原因が定義にあるなら `aidev modify workflow <name> --from-run last` で直させます（xref:workflows-fix-from-run[止まった実行から直す]）。
 
 |`workflow stopped — step <id>: cost limit of $N reached` +
 `… time limit of N minutes exceeded`

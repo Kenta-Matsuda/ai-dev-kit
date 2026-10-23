@@ -11,6 +11,9 @@
 #   - 対象環境の URL とテストユーザー: aidev.yaml の workflows.<name>.inputs（または実行時の --input）
 #   - テストユーザーのパスワード: 実行する人の shell の環境変数 E2E_PASSWORD（env_required。どこにも記録されない）
 #   - 仕様書: 実行時の --input spec=<path>（この端末のファイル。実行がそのコピーを受け取る）
+# Playwright がまだ無い PKG では最初の step（deps か playwright）で止まります。この workflow は依存を足しません。
+# README「Playwright がまだ無い PKG に入れる」の手順で @playwright/test と playwright.config を入れて commit してから使います
+# （端末のブラウザだけは browsers step が毎回確かめて、無ければ入れます）。
 name: playwright-tests
 description: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
 
@@ -50,12 +53,16 @@ never_commit: [test-results/**, playwright-report/**, blob-report/**]
 
 steps:
   - id: deps
-    description: 依存を実行用の worktree に入れる（pnpm / yarn の PKG、テストが別ディレクトリの PKG はここを直す）
+    description: 依存を実行用の worktree に入れる。package.json か package-lock.json が無い PKG はここで止まる — README「Playwright がまだ無い PKG に入れる」の手順を先に（pnpm / yarn の PKG、テストが別ディレクトリの PKG はこの command と cwd を直す）
     command: npm ci
     timeout_minutes: 20
   - id: playwright
-    description: この PKG に @playwright/test が入っていなければここで止まる（playwright.config とブラウザ（npx playwright install）も PKG と端末に用意してから実行する）
+    description: この PKG の依存に @playwright/test が無ければここで止まる — README「Playwright がまだ無い PKG に入れる」の手順で入れて commit してから（playwright.config の testDir が tests/e2e/ を含むことも確かめる）
     command: node node_modules/@playwright/test/cli.js --version
+  - id: browsers
+    description: この端末にブラウザが無ければ入れる（あれば何もしない。playwright.config の projects が firefox / webkit も使うならここに足す。Linux で共有ライブラリが無いと言われたら一度 npx playwright install --with-deps chromium を手で）
+    command: npx playwright install chromium
+    timeout_minutes: 20
   - id: plan
     description: 仕様書を読んでケースを batch に分け、この実行の notes に置く（ソースは書かない）
     agent: playwright-test-planner
