@@ -251,7 +251,7 @@ aidev create workflow e2e-tests
 ----
 
 * 複製されるのは `workflow.yaml`（`name:` は付けた名前に書き換わる）と、それが使う agent（`.aidev/agents/`）・skill（`.aidev/skills/`）です。複製した時点で **この PKG のファイル** になります。他の workflow と同じく `--trial` で試し、`aidev submit workflow` で PR にし、マージで承認します。実行時に ADK 側のファイルを参照することはありません。
-* 同じ agent・skill が既にあって内容が同じなら残し（`kept`）、違えば `--force` が無いと止まります。別の名前でもう 1 つ複製する（`e2e-staging` と `e2e-prod`）ときは agent を共有します。ADK を更新して新しい版の標準 workflow を取り込むには、`aidev create workflow <name> --from <standard> --update` を実行します。agent・skill が ADK の今の版に置き換わり（`git diff` でレビュー）、この PKG で直した `workflow.yaml` はそのままです。定義が ADK のものと違えば、比べるためのコマンドが表示されるので、取り込みたい変更だけ写します。定義ごと ADK の版に戻すなら `--from … --force` です。
+* 同じ agent・skill が既にあって内容が同じなら残し（`kept`）、違えば `--force` が無いと止まります。別の名前でもう 1 つ複製する（`e2e-staging` と `e2e-prod`）ときは agent を共有します。複製は `.aidev/workflows/<name>/standard.json` に記録されます（複製元、ADK の commit、ファイルごとのハッシュ）。ADK を更新して新しい版の標準 workflow を取り込むには xref:cli-sync-workflow[`aidev sync workflow <name>`] を実行します。この PKG で直したところを保ったまま、ファイルごとに ADK の変更を取り込みます（編集していないファイルは置き換え、編集したファイルは複製時の版を base に 3-way merge、同じ行を変えていれば衝突マーカー）。結果を `git diff` でレビューして提出します。記録の無い古い複製は `--from <standard>` で複製元を名指しします。定義ごと ADK の版に戻すなら `aidev sync workflow <name> --force` です。
 * PKG ごとに違うものは 2 種類に分かれます。**定義で違うもの**（テストを置くディレクトリ、依存を入れるコマンド、同時に進める batch の数、費用の上限）は複製した `workflow.yaml` を直します。**値で違うもの**（テスト対象環境の URL、テストユーザー）は定義を変えず、`aidev.yaml` の `workflows.<name>.inputs` に書くか、実行時に `--input` で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。**認証情報**（テストユーザーのパスワード）は定義の `env_required:` が名前を宣言し、実行する人が shell の環境変数で渡します。ファイルには書きません（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
 
 `playwright-tests` の流れと前提です。

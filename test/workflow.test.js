@@ -31,7 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { suite, test, ok, eq, throws } = require('./harness');
-const { makeRepo, write, git } = require('./fixtures');
+const { makeRepo, write, git, copyDir } = require('./fixtures');
 const { aidev, lastJson } = require('./completion.test');
 const wfMod = require('../cli/lib/workflow');
 const cfgMod = require('../cli/lib/config');
@@ -583,26 +583,102 @@ function run() {
           const forced = lastJson(aidev(fx.root, ['create', 'workflow', 'e2e-prod', '--from', 'playwright-tests', '--force', '--json']).out);
           eq([forced.ok, forced.written.includes('.aidev/agents/playwright-test-writer.md'), forced.kept.includes('.aidev/agents/playwright-test-planner.md')], [true, true, true]);
           ok(!/Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), 'overwritten with --force');
-          // --update: the agents and skills of a copy made earlier become the kit's again; the definition, edited for this PKG, is left alone and compared.
-          fs.appendFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), '\nTeam note.\n');
+          // The copy is recorded, so "aidev sync workflow" can take in the kit's later versions and keep this PKG's edits.
+          const rec = JSON.parse(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'standard.json'), 'utf8'));
+          eq([rec.schema, rec.from, Object.keys(rec.files).sort()], [1, 'playwright-tests', files.slice().sort()]);
+          ok(/^[0-9a-f]{40}$/.test(rec.kitCommit || ''), `the kit commit is recorded: ${rec.kitCommit}`);
+          ok(/recorded the copy in \.aidev\/workflows\/e2e\/standard\.json/.test(r.out), r.out);
+          const cur = aidev(fx.root, ['sync', 'workflow', 'e2e', '--json']);
+          eq(cur.code, 0, cur.out);
+          eq([lastJson(cur.out).ok, lastJson(cur.out).unchanged, lastJson(cur.out).updated, lastJson(cur.out).conflicts], [true, 5, [], []], 'a fresh copy is current');
+          ok(/workflow e2e is current with the kit's playwright-tests \(5 file\(s\)\)/.test(aidev(fx.root, ['sync', 'workflow', 'e2e']).out));
+          // A local edit over an unchanged kit is kept; the sync still validates the result.
           fs.appendFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), '# this PKG: the tests live under IUM/e2e\n');
-          const dryUp = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update', '--dry-run']);
-          eq(dryUp.code, 0, dryUp.out);
-          ok(/would update \.aidev\/agents\/playwright-test-writer\.md/.test(dryUp.out) && /Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), dryUp.out);
-          const up = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update', '--json']);
-          eq(up.code, 0, up.out);
-          const u = lastJson(up.out);
-          eq([u.ok, u.update, u.definition, u.written, u.kept.length], [true, true, 'differs', ['.aidev/agents/playwright-test-writer.md'], 3]);
-          ok(!/Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), 'the agent is the kit\'s again');
-          ok(/this PKG: the tests live under IUM\/e2e/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), 'utf8')), 'the definition is left as it is');
-          const upOut = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update']).out;
-          ok(/workflow\.yaml was left as it is; it differs from the kit's playwright-tests/.test(upOut) && /git diff --no-index/.test(upOut), upOut);
-          ok(/workflow nope does not exist; --update refreshes/.test(aidev(fx.root, ['create', 'workflow', 'nope', '--from', 'playwright-tests', '--update']).out));
-          ok(/--update needs --from/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--update']).out));
-          ok(/--update refreshes the agents and skills/.test(aidev(fx.root, ['create', 'agent', 'x', '--update']).out));
+          const keptRun = lastJson(aidev(fx.root, ['sync', 'workflow', 'e2e', '--json']).out);
+          eq([keptRun.ok, keptRun.kept, keptRun.unchanged], [true, ['.aidev/workflows/e2e/workflow.yaml'], 4]);
+          ok(/this PKG: the tests live under IUM\/e2e/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), 'utf8')), 'the edit stays');
+          ok(/aidev sync workflow needs the name/.test(aidev(fx.root, ['sync', 'workflow']).out));
+          ok(/workflow nope does not exist/.test(aidev(fx.root, ['sync', 'workflow', 'nope']).out));
+          ok(/was copied from playwright-tests \(\.aidev\/workflows\/e2e\/standard\.json\), not other/.test(aidev(fx.root, ['sync', 'workflow', 'e2e', '--from', 'other']).out));
+          fs.rmSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'standard.json'));
+          ok(/has no \.aidev\/workflows\/e2e\/standard\.json: .*--from <standard>/.test(aidev(fx.root, ['sync', 'workflow', 'e2e']).out), 'without a record the standard must be named');
         } finally {
           for (const n of ['e2e', 'e2e-prod']) fs.rmSync(path.join(fx.root, '.aidev', 'workflows', n), { recursive: true, force: true });
           for (const a of ['playwright-test-planner', 'playwright-test-writer', 'playwright-test-reviewer']) fs.rmSync(path.join(fx.root, '.aidev', 'agents', `${a}.md`), { force: true });
+          fs.rmSync(path.join(fx.root, '.aidev', 'skills', 'playwright-testing'), { recursive: true, force: true });
+        }
+      });
+
+      test('sync workflow merges the kit\'s new version of a standard workflow with the PKG\'s edits', () => {
+        // A kit of its own, with history: the standard at commit one is copied, then the kit moves on.
+        const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-stdkit-'));
+        const kit = path.join(base, 'kit');
+        const kgit = (args) => require('child_process').execFileSync('git', args, { cwd: kit, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@e.x', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@e.x' } }).trim();
+        const commit = (m) => { kgit(['add', '-A']); kgit(['commit', '-q', '--allow-empty', '-m', m]); return kgit(['rev-parse', 'HEAD']); };
+        const kitFile = (rel) => path.join(kit, 'templates', 'workflows', 'playwright-tests', ...rel.split('/'));
+        const pkgFile = (rel) => path.join(fx.root, ...rel.split('/'));
+        const planner = '.aidev/agents/playwright-test-planner.md';
+        const def = '.aidev/workflows/e2e/workflow.yaml';
+        try {
+          copyDir(path.join(KIT_ROOT, 'templates', 'workflows', 'playwright-tests'), kitFile(''));
+          kgit(['init', '-q', '-b', 'main']);
+          const one = commit('one');
+          const copy = wfMod.copyStandardWorkflow(fx.root, { installRoot: kit, from: 'playwright-tests', name: 'e2e', kitCommit: one, kitVersion: '1.0.0' });
+          eq(copy.written.length, 5);
+          eq(wfMod.readStandardRecord(fx.root, 'e2e').kitCommit, one);
+          const sync = (opts = {}) => wfMod.syncStandard(fx.root, { name: 'e2e', installRoot: kit, kitCommit: kgit(['rev-parse', 'HEAD']), kitVersion: '1.1.0', ...opts });
+          // Nothing moved: current.
+          eq(sync().unchanged.length, 5);
+          // This PKG edits its definition; the kit changes the planner and, elsewhere in the YAML, a comment: updated, merged, the rest unchanged.
+          fs.appendFileSync(pkgFile(def), '# this PKG: the tests live under IUM/e2e\n');
+          fs.appendFileSync(kitFile('agents/playwright-test-planner.md'), '\nA new paragraph from the kit.\n');
+          fs.writeFileSync(kitFile('workflow.yaml'), fs.readFileSync(kitFile('workflow.yaml'), 'utf8').replace('name: playwright-tests\n', '# the kit added this line\nname: playwright-tests\n'));
+          const two = commit('two');
+          const dry = sync({ dryRun: true });
+          eq([dry.updated, dry.merged, dry.conflicts], [[planner], [def], []]);
+          ok(!/A new paragraph from the kit/.test(fs.readFileSync(pkgFile(planner), 'utf8')), 'a dry run writes nothing');
+          const r = sync();
+          eq([r.updated, r.merged, r.kept, r.conflicts, r.unchanged.length, r.baseCommit, r.kitCommit], [[planner], [def], [], [], 3, one, two]);
+          const merged = fs.readFileSync(pkgFile(def), 'utf8');
+          ok(/^# the kit added this line\nname: e2e\n/m.test(merged) && /this PKG: the tests live under IUM\/e2e/.test(merged), `both sides are in the merged definition: ${merged.slice(0, 200)}`);
+          ok(/A new paragraph from the kit/.test(fs.readFileSync(pkgFile(planner), 'utf8')), 'the untouched agent takes the kit\'s version');
+          eq(wfMod.readStandardRecord(fx.root, 'e2e').kitCommit, two, 'the record moves to the kit commit synced');
+          ok(wfMod.loadDefinition(fx.root, 'e2e'), 'the merged definition validates');
+          // The same lines changed on both sides: markers, and the next sync refuses until they are gone.
+          fs.writeFileSync(pkgFile(def), fs.readFileSync(pkgFile(def), 'utf8').replace('# the kit added this line', '# this PKG changed the kit\'s line'));
+          fs.writeFileSync(kitFile('workflow.yaml'), fs.readFileSync(kitFile('workflow.yaml'), 'utf8').replace('# the kit added this line', '# the kit changed its own line'));
+          commit('three');
+          const c = sync();
+          eq(c.conflicts.map((x) => x.path), [def]);
+          ok(/same lines; conflict markers written/.test(c.conflicts[0].reason), c.conflicts[0].reason);
+          ok(/<<<<<<< \.aidev\/workflows\/e2e\/workflow\.yaml \(this PKG\)/.test(fs.readFileSync(pkgFile(def), 'utf8')), 'markers name the sides');
+          throws(() => sync(), /still carries conflict markers/);
+          fs.writeFileSync(pkgFile(def), fs.readFileSync(pkgFile(def), 'utf8').replace(/<<<<<<< [^\n]*\n([\s\S]*?)=======\n[\s\S]*?>>>>>>> [^\n]*\n/, '$1'));
+          eq(sync().kept, [def], 'the resolved file is a local edit over the synced kit version');
+          // --force takes the kit's version of everything.
+          const forced = sync({ force: true });
+          eq(forced.updated, [def]);
+          ok(!/IUM\/e2e/.test(fs.readFileSync(pkgFile(def), 'utf8')));
+          // A copy made before the record existed: the base is found in the kit's history from the files that still match.
+          fs.rmSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'standard.json'));
+          fs.appendFileSync(pkgFile(def), '# edited after the record was lost\n');
+          fs.appendFileSync(kitFile('skills/playwright-testing/SKILL.md'), '\nMore from the kit.\n');
+          const four = commit('four');
+          throws(() => sync(), /has no \.aidev\/workflows\/e2e\/standard\.json/);
+          const boot = sync({ from: 'playwright-tests' });
+          eq([boot.bootstrapped, boot.baseCommit, boot.updated, boot.kept, boot.conflicts, boot.kitCommit], [true, kgit(['rev-parse', 'HEAD~1']), ['.aidev/skills/playwright-testing/SKILL.md'], [def], [], four]);
+          ok(/edited after the record was lost/.test(fs.readFileSync(pkgFile(def), 'utf8')));
+          // A file the kit no longer ships is left alone and reported; a new one is created.
+          fs.rmSync(kitFile('agents/playwright-test-reviewer.md'));
+          fs.writeFileSync(kitFile('agents/playwright-test-extra.md'), '---\nname: playwright-test-extra\ndescription: extra\n---\n\nExtra.\n');
+          commit('five');
+          const moved = sync();
+          eq([moved.retired, moved.created], [['.aidev/agents/playwright-test-reviewer.md'], ['.aidev/agents/playwright-test-extra.md']]);
+          ok(fs.existsSync(pkgFile('.aidev/agents/playwright-test-reviewer.md')), 'retired files stay');
+        } finally {
+          fs.rmSync(base, { recursive: true, force: true });
+          fs.rmSync(path.join(fx.root, '.aidev', 'workflows', 'e2e'), { recursive: true, force: true });
+          for (const a of ['playwright-test-planner', 'playwright-test-writer', 'playwright-test-reviewer', 'playwright-test-extra']) fs.rmSync(path.join(fx.root, '.aidev', 'agents', `${a}.md`), { force: true });
           fs.rmSync(path.join(fx.root, '.aidev', 'skills', 'playwright-testing'), { recursive: true, force: true });
         }
       });

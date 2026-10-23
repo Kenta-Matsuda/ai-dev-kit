@@ -33,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { AidevError } = require('./errors');
 const layout = require('./layout');
 const cfgMod = require('./config');
@@ -1551,6 +1552,227 @@ function standardWorkflowFiles(std, name) {
   ];
 }
 
+// ------------------------------------- standard workflows: the copy's record
+
+/**
+ * A copy of a standard workflow carries `standard.json` next to its
+ * workflow.yaml: which standard it came from, the kit commit it was copied
+ * at, and per file the hash of the kit's text as copied (`kit`) and of what
+ * was written (`file`). `aidev sync workflow` reads it to tell a local edit
+ * from a kit change, and to find the merge base in the kit's history — the
+ * same scheme as .aidev/materialized.json for the tool templates.
+ */
+const STANDARD_RECORD = 'standard.json';
+const STANDARD_RECORD_SCHEMA = 1;
+
+function standardRecordRel(name) { return `${workflowRel(name)}/${STANDARD_RECORD}`; }
+function standardRecordPath(repoRoot, name) { return path.join(workflowDir(repoRoot, name), STANDARD_RECORD); }
+function hashText(text) { return `sha256:${cfgMod.sha256(Buffer.from(String(text), 'utf8'))}`; }
+const shortSha = (sha) => (sha ? String(sha).slice(0, 12) : '?');
+
+/** The record of a copy, or null when there is none. A broken one is an error, not "none". */
+function readStandardRecord(repoRoot, name) {
+  const text = cfgMod.readTextIfExists(standardRecordPath(repoRoot, name));
+  if (text == null) return null;
+  let rec;
+  try { rec = JSON.parse(text); } catch (e) { throw new AidevError(`${standardRecordRel(name)} is not valid JSON: ${e.message}`); }
+  if (!rec || typeof rec !== 'object' || !NAME_RE.test(String(rec.from || ''))) {
+    throw new AidevError(`${standardRecordRel(name)} does not say which standard workflow the copy came from (from)`);
+  }
+  const files = {};
+  for (const [rel, e] of Object.entries(rec.files && typeof rec.files === 'object' ? rec.files : {})) {
+    if (e && typeof e === 'object' && typeof e.kit === 'string' && typeof e.file === 'string') files[rel] = { kit: e.kit, file: e.file };
+  }
+  return { from: rec.from, kitCommit: rec.kitCommit || null, kitVersion: rec.kitVersion || null, files };
+}
+
+function writeStandardRecord(repoRoot, name, { from, kitCommit = null, kitVersion = null, files }) {
+  cfgMod.writeJsonAtomic(standardRecordPath(repoRoot, name), { schema: STANDARD_RECORD_SCHEMA, from, kitCommit: kitCommit || null, kitVersion: kitVersion || null, files });
+}
+
+/**
+ * Copy a standard workflow into the PKG under `name` and record it. Per file:
+ * `new`, `same` (identical copy already there, kept), `differs` (an edited
+ * copy: refused unless `force`, then overwritten). Returns { std, files:
+ * [{ rel, kind, name, text, state }], written, kept }. Writes nothing on a
+ * dry run.
+ */
+function copyStandardWorkflow(repoRoot, { installRoot, from, name, force = false, dryRun = false, kitCommit = null, kitVersion = null }) {
+  const std = readStandardWorkflow(installRoot, from);
+  if (!std) {
+    const names = listStandardWorkflows(installRoot).map((w) => w.name);
+    throw new AidevError(`the kit bundles no standard workflow ${JSON.stringify(from)}${names.length ? ` (available: ${names.join(', ')})` : ' (it bundles none)'}`);
+  }
+  const files = standardWorkflowFiles(std, name).map((f) => {
+    const existing = cfgMod.readTextIfExists(layout.abs(repoRoot, f.rel));
+    return { ...f, state: existing == null ? 'new' : (existing === f.text ? 'same' : 'differs') };
+  });
+  const differing = files.filter((f) => f.state === 'differs');
+  if (differing.length && !force) {
+    throw new AidevError(`${differing.map((f) => f.rel).join(', ')} already exist${differing.length > 1 ? '' : 's'} and differ${differing.length > 1 ? '' : 's'} from the kit's ${from} (pass --force to overwrite, or remove ${differing.length > 1 ? 'them' : 'it'} first)`);
+  }
+  if (!dryRun) {
+    for (const f of files) if (f.state !== 'same') cfgMod.writeFileAtomic(layout.abs(repoRoot, f.rel), f.text);
+    writeStandardRecord(repoRoot, name, { from, kitCommit, kitVersion, files: Object.fromEntries(files.map((f) => [f.rel, { kit: hashText(f.text), file: hashText(f.text) }])) });
+  }
+  return { std, files, written: files.filter((f) => f.state !== 'same').map((f) => f.rel), kept: files.filter((f) => f.state === 'same').map((f) => f.rel) };
+}
+
+function kitGit(installRoot, args) {
+  try {
+    return execFileSync('git', args, { cwd: installRoot, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 }).toString('utf8');
+  } catch { return null; }
+}
+
+/**
+ * The files of a standard workflow as a copy named `name` got them at a
+ * commit of the kit's history. Null when the commit, the workflow or the
+ * history is not there (not a git checkout, a shallow clone).
+ */
+function standardFilesAt(installRoot, commit, from, name) {
+  if (!commit || !/^[0-9a-f]{7,40}$/i.test(String(commit)) || !NAME_RE.test(String(from || ''))) return null;
+  const prefix = `${KIT_WORKFLOWS_DIR}/${from}/`;
+  const listing = kitGit(installRoot, ['ls-tree', '-r', '--name-only', commit, '--', prefix]);
+  if (listing == null) return null;
+  const paths = listing.split('\n').filter(Boolean);
+  if (!paths.includes(`${prefix}workflow.yaml`)) return null;
+  const show = (p) => kitGit(installRoot, ['show', `${commit}:${p}`]);
+  const text = show(`${prefix}workflow.yaml`);
+  if (text == null) return null;
+  const agents = paths.filter((p) => p.startsWith(`${prefix}agents/`) && p.endsWith('.md') && !p.slice(`${prefix}agents/`.length).includes('/')).sort()
+    .map((p) => { const n = path.posix.basename(p, '.md'); return { name: n, rel: agentRel(n), text: show(p) }; });
+  const skills = paths.filter((p) => p.startsWith(`${prefix}skills/`) && /^[^/]+\/SKILL\.md$/.test(p.slice(`${prefix}skills/`.length))).sort()
+    .map((p) => { const n = p.slice(`${prefix}skills/`.length).split('/')[0]; return { name: n, rel: skillRel(n), text: show(p) }; });
+  if ([...agents, ...skills].some((f) => f.text == null)) return null;
+  try { return standardWorkflowFiles({ name: from, text, agents, skills }, name); } catch { return null; }
+}
+
+/**
+ * For a copy made before records existed: the kit commit it most likely came
+ * from — the newest commit touching the standard at which the most files of
+ * the copy are identical to the kit's. Null when nothing matches any version.
+ */
+function findStandardBase(installRoot, from, name, current, { limit = 300 } = {}) {
+  const listing = kitGit(installRoot, ['log', `--max-count=${limit}`, '--format=%H', '--', `${KIT_WORKFLOWS_DIR}/${from}`]);
+  if (listing == null) return null;
+  let best = null;
+  for (const commit of listing.split('\n').filter(Boolean)) {
+    const files = standardFilesAt(installRoot, commit, from, name);
+    if (!files) continue;
+    const matched = files.filter((f) => current[f.rel] != null && current[f.rel] === f.text).map((f) => f.rel);
+    if (matched.length && (!best || matched.length > best.matched.length)) best = { commit, matched, files };
+    if (best && best.matched.length === files.length) break;
+  }
+  return best;
+}
+
+/**
+ * Take the kit's current version of a standard workflow into a copy made
+ * earlier, keeping the PKG's edits. Per file of the kit's standard, decided
+ * from the record (as `aidev sync tools` decides from materialized.json):
+ *   created    the PKG did not have it
+ *   unchanged  identical already
+ *   updated    not edited locally, the kit changed it: replaced (or --force)
+ *   kept       edited locally, the kit's version unchanged since the copy
+ *   merged     both changed: merged three ways against the kit's version at
+ *              the recorded commit (git merge-file), cleanly
+ *   conflict   both changed the same lines (markers written, resolve and run
+ *              again), or there is no base to merge from (merge by hand, or
+ *              --force takes the kit's)
+ *   retired    recorded, no longer in the kit's standard; left as it is
+ * Without a record, `from` names the standard and the base is the newest kit
+ * commit whose files match the copy (bootstrapped). The record is rewritten
+ * at the end, except on a dry run.
+ */
+function syncStandard(repoRoot, { name, installRoot, kitCommit = null, kitVersion = null, from = null, dryRun = false, force = false }) {
+  const assetsMod = require('./assets');
+  if (!fs.existsSync(defPath(repoRoot, name))) {
+    throw new AidevError(`workflow ${name} does not exist (${defRel(name)}); "aidev create workflow ${name} --from <standard>" copies one`);
+  }
+  let record = readStandardRecord(repoRoot, name);
+  const given = from == null ? null : String(from).trim();
+  if (record && given && given !== record.from) throw new AidevError(`workflow ${name} was copied from ${record.from} (${standardRecordRel(name)}), not ${given}`);
+  const stdName = record ? record.from : given;
+  if (!stdName) {
+    throw new AidevError(`workflow ${name} has no ${standardRecordRel(name)}: it was copied before the record existed, or written by hand. Name the standard it came from: aidev sync workflow ${name} --from <standard>`);
+  }
+  const std = readStandardWorkflow(installRoot, stdName);
+  if (!std) {
+    const names = listStandardWorkflows(installRoot).map((w) => w.name);
+    throw new AidevError(`the kit bundles no standard workflow ${JSON.stringify(stdName)}${names.length ? ` (available: ${names.join(', ')})` : ''}`);
+  }
+  const theirs = standardWorkflowFiles(std, name);
+  const current = {};
+  for (const rel of new Set([...theirs.map((f) => f.rel), ...Object.keys(record ? record.files : {})])) current[rel] = cfgMod.readTextIfExists(layout.abs(repoRoot, rel));
+  const marked = Object.entries(current).filter(([, t]) => t != null && assetsMod.hasConflictMarkers(Buffer.from(t))).map(([rel]) => rel);
+  if (marked.length) throw new AidevError(`${marked.join(', ')} still ${marked.length > 1 ? 'carry' : 'carries'} conflict markers from an earlier sync; resolve them first`);
+
+  const result = { name, from: stdName, kitCommit, baseCommit: null, bootstrapped: false, matched: [], created: [], unchanged: [], updated: [], kept: [], merged: [], conflicts: [], retired: [], files: {} };
+  let baseFiles;
+  if (!record) {
+    const found = findStandardBase(installRoot, stdName, name, current);
+    if (found) {
+      record = { from: stdName, kitCommit: found.commit, files: Object.fromEntries(found.files.map((f) => [f.rel, { kit: hashText(f.text), file: hashText(f.text) }])) };
+      baseFiles = found.files;
+      result.bootstrapped = true;
+      result.matched = found.matched;
+    } else {
+      record = { from: stdName, kitCommit: null, files: {} };
+    }
+  }
+  result.baseCommit = record.kitCommit;
+  const baseOf = (rel) => {
+    if (baseFiles === undefined) baseFiles = (record.kitCommit && standardFilesAt(installRoot, record.kitCommit, stdName, name)) || null;
+    return baseFiles ? baseFiles.find((b) => b.rel === rel) || null : null;
+  };
+  const write = (rel, text) => { if (!dryRun) cfgMod.writeFileAtomic(layout.abs(repoRoot, rel), text); };
+  const newFiles = {};
+  for (const f of theirs) {
+    const ours = current[f.rel];
+    const entry = record.files[f.rel] || null;
+    const kitHash = hashText(f.text);
+    const keep = (text) => { newFiles[f.rel] = { kit: kitHash, file: hashText(text) }; };
+    if (ours == null) { result.created.push(f.rel); write(f.rel, f.text); keep(f.text); continue; }
+    if (ours === f.text) { result.unchanged.push(f.rel); keep(f.text); continue; }
+    if (force) { result.updated.push(f.rel); write(f.rel, f.text); keep(f.text); continue; }
+    // A conflict that cannot be merged keeps the PKG's file and records it
+    // against the kit's current version: the next sync sees a local edit over
+    // an unchanged kit (kept) until the kit moves again, when it merges from here.
+    if (!entry) {
+      result.conflicts.push({ path: f.rel, reason: 'edited here, and no record says which version of the kit\'s it was copied from; merge by hand against the kit\'s file, or take the kit\'s with --force' });
+      keep(ours);
+      continue;
+    }
+    if (hashText(ours) === entry.file) { result.updated.push(f.rel); write(f.rel, f.text); keep(f.text); continue; }
+    if (kitHash === entry.kit) { result.kept.push(f.rel); keep(ours); continue; }
+    const base = baseOf(f.rel);
+    if (!base || hashText(base.text) !== entry.kit) {
+      result.conflicts.push({ path: f.rel, reason: `edited here and changed in the kit, and the version it was copied from (kit ${shortSha(record.kitCommit)}) is not in the kit checkout's history; merge by hand, or take the kit's with --force` });
+      keep(ours);
+      continue;
+    }
+    const merged = assetsMod.mergeFile({
+      ours: Buffer.from(ours, 'utf8'), base: Buffer.from(base.text, 'utf8'), theirs: Buffer.from(f.text, 'utf8'),
+      labels: { ours: `${f.rel} (this PKG)`, base: `kit ${shortSha(record.kitCommit)}`, theirs: `kit ${shortSha(kitCommit)} ${stdName}` },
+    });
+    if (merged.status === 'clean') {
+      const text = merged.content.toString('utf8');
+      result.merged.push(f.rel); write(f.rel, text); keep(text);
+    } else if (merged.status === 'conflict') {
+      const text = merged.content.toString('utf8');
+      result.conflicts.push({ path: f.rel, reason: 'edited here and changed in the kit on the same lines; conflict markers written — resolve them, then run again' });
+      write(f.rel, text); keep(text);
+    } else {
+      result.conflicts.push({ path: f.rel, reason: 'git merge-file failed; merge by hand, or take the kit\'s with --force' });
+      keep(ours);
+    }
+  }
+  for (const rel of Object.keys(record.files)) if (!theirs.some((f) => f.rel === rel) && current[rel] != null) result.retired.push(rel);
+  if (!dryRun) writeStandardRecord(repoRoot, name, { from: stdName, kitCommit, kitVersion, files: newFiles });
+  result.files = newFiles;
+  return result;
+}
+
 // ------------------------------------------------------------------- listing
 
 function listWorkflows(repoRoot) {
@@ -1571,4 +1793,5 @@ module.exports = {
   agentCapabilities, agentGrants, mergeCapabilities, agentSkills, stepAccess, toolGranted, subagentGranted, literalPrefix, mayOverlap, mcpServersFor,
   trackingRef, approvalStatus, reviewedHash, trialFile, startTrial, readTrial, trialStatus, inspect, writeGrant, contentHash, listWorkflows,
   KIT_WORKFLOWS_DIR, standardWorkflowsDir, readStandardWorkflow, listStandardWorkflows, standardWorkflowFiles, envRequiredSpec,
+  STANDARD_RECORD, standardRecordRel, standardRecordPath, readStandardRecord, writeStandardRecord, copyStandardWorkflow, standardFilesAt, findStandardBase, syncStandard,
 };

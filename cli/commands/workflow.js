@@ -291,55 +291,21 @@ async function createByDescription(ctx, name) {
 async function createFromStandard(ctx, name) {
   const { repoRoot, installRoot, flags } = ctx;
   const from = String(flags.from).trim();
-  const std = wfMod.readStandardWorkflow(installRoot, from);
-  if (!std) {
-    const names = wfMod.listStandardWorkflows(installRoot).map((w) => w.name);
-    throw new AidevError(`the kit bundles no standard workflow ${JSON.stringify(from)}${names.length ? ` (available: ${names.join(', ')})` : ' (it bundles none)'}`);
-  }
-  // --update: a copy made earlier takes the kit's current agents and skills;
-  // its workflow.yaml, edited for this PKG (paths, cwd, inputs), is left alone
-  // and compared instead of overwritten.
-  const update = !!flags.update;
-  const defRel = wfMod.defRel(name);
-  if (update && !fs.existsSync(wfMod.defPath(repoRoot, name))) {
-    throw new AidevError(`workflow ${name} does not exist; --update refreshes the agents and skills of a copy made earlier (copy it first: aidev create workflow ${name} --from ${from})`);
-  }
-  const all = wfMod.standardWorkflowFiles(std, name).map((f) => {
-    const existing = cfgMod.readTextIfExists(layout.abs(repoRoot, f.rel));
-    const state = existing == null ? 'new' : (existing === f.text ? 'same' : 'differs');
-    return { ...f, state };
-  });
-  const definition = all.find((f) => f.rel === defRel) || null;
-  const files = update ? all.filter((f) => f.rel !== defRel) : all;
-  const differing = files.filter((f) => f.state === 'differs');
-  if (differing.length && !flags.force && !update) {
-    throw new AidevError(`${differing.map((f) => f.rel).join(', ')} already exist${differing.length > 1 ? '' : 's'} and differ${differing.length > 1 ? '' : 's'} from the kit's ${from} (pass --force to overwrite, or remove ${differing.length > 1 ? 'them' : 'it'} first)`);
-  }
-  const written = files.filter((f) => f.state !== 'same').map((f) => f.rel);
-  const kept = files.filter((f) => f.state === 'same').map((f) => f.rel);
-  const verb = (f, past) => (f.state === 'same' ? (past ? 'kept' : 'keep') : f.state === 'differs' ? (update ? (past ? 'updated' : 'update') : (past ? 'overwrote' : 'overwrite')) : (past ? 'wrote' : 'write'));
-  const extra = update ? { update: true, definition: definition ? definition.state : null } : {};
-  const compare = () => {
-    if (!update || !definition) return;
-    if (definition.state === 'differs') {
-      ui.info(`${defRel} was left as it is; it differs from the kit's ${from} (this PKG's edits, the kit's changes, or both). Compare and take over what this PKG wants:`);
-      ui.dim(`    git diff --no-index "${path.join(std.dir, 'workflow.yaml')}" "${layout.abs(repoRoot, defRel)}"   (the name: line differs by design)`);
-    } else ui.ok(`${defRel} is the kit's ${from} already`);
-  };
-  ui.heading(`aidev create workflow ${name}${update ? ' --update' : ''}${flags['dry-run'] ? ' (dry run)' : ''}`);
-  if (flags['dry-run']) {
-    for (const f of files) ui.ok(`would ${verb(f, false)} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
-    compare();
-    if (flags.json) ui.json({ ok: true, name, from, ...extra, written, kept, dryRun: true });
+  const dryRun = !!flags['dry-run'];
+  const copy = wfMod.copyStandardWorkflow(repoRoot, { installRoot, from, name, force: !!flags.force, dryRun, kitCommit: gitMod.headSha(installRoot), kitVersion: ctx.version || null });
+  const { std, files, written, kept } = copy;
+  ui.heading(`aidev create workflow ${name}${dryRun ? ' (dry run)' : ''}`);
+  if (dryRun) {
+    for (const f of files) ui.ok(`would ${f.state === 'same' ? 'keep' : f.state === 'differs' ? 'overwrite' : 'write'} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
+    if (flags.json) ui.json({ ok: true, name, from, written, kept, dryRun: true });
     return EXIT.OK;
   }
-  for (const f of files) if (f.state !== 'same') cfgMod.writeFileAtomic(layout.abs(repoRoot, f.rel), f.text);
   let def = null;
   let problem = null;
   try { def = wfMod.loadDefinition(repoRoot, name); wfMod.resolveDependencies(repoRoot, installRoot, def); }
   catch (e) { problem = e.message; }
-  for (const f of files) ui.ok(`${verb(f, true)} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
-  compare();
+  for (const f of files) ui.ok(`${f.state === 'same' ? 'kept' : f.state === 'differs' ? 'overwrote' : 'wrote'} ${f.rel}${f.state === 'same' ? ' (identical to the kit\'s)' : ''}`);
+  ui.ok(`recorded the copy in ${wfMod.standardRecordRel(name)} (so "aidev sync workflow ${name}" can take in the kit's later versions and keep your edits)`);
   if (problem) ui.warn(`the copy does not validate: ${problem}`);
   else {
     ui.dim(`    from the kit's standard workflow ${from}: ${std.description || '(no description)'}`);
@@ -359,7 +325,7 @@ async function createFromStandard(ctx, name) {
     if (env.length) ui.dim(`    before a run, export in the shell: ${env.map(([n, d]) => `${n}${d ? ` (${d})` : ''}`).join(', ')}`);
   }
   nextSteps(name);
-  if (flags.json) ui.json({ ok: !problem, name, from, ...extra, written, kept, problem, inputs: def ? Object.keys(def.inputs) : null, envRequired: def ? Object.keys(def.env_required) : null });
+  if (flags.json) ui.json({ ok: !problem, name, from, written, kept, record: wfMod.standardRecordRel(name), problem, inputs: def ? Object.keys(def.inputs) : null, envRequired: def ? Object.keys(def.env_required) : null });
   return problem ? EXIT.GENERAL : EXIT.OK;
 }
 
@@ -367,9 +333,8 @@ async function newWorkflow(ctx) {
   const { repoRoot, flags, positionals } = ctx;
   const name = wfMod.sanitizeName(positionals[1]);
   const dir = wfMod.workflowDir(repoRoot, name);
-  if (flags.update && flags.from == null) throw new AidevError('--update needs --from <standard>: it refreshes the agents and skills of a workflow copied from a standard workflow earlier');
-  if (fs.existsSync(dir) && !flags.force && !flags.update) {
-    throw new AidevError(`workflow ${name} already exists at ${WORKFLOWS_DIR}/${name} (pass --force to overwrite${flags.from != null ? ', or --update to refresh its agents and skills from the kit\'s' : ''})`);
+  if (fs.existsSync(dir) && !flags.force) {
+    throw new AidevError(`workflow ${name} already exists at ${WORKFLOWS_DIR}/${name} (pass --force to overwrite${flags.from != null ? `; "aidev sync workflow ${name}" takes in the kit's newer version and keeps your edits` : ''})`);
   }
   if (flags.from != null && flags.describe != null) throw new AidevError('--from copies a standard workflow and --describe writes one from your words; pass one of them');
   if (flags.from != null) {

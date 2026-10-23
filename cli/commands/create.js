@@ -22,14 +22,13 @@ const ui = require('../lib/ui');
 
 const KINDS = ['workflow', 'agent', 'skill', 'policy'];
 
-const FLAGS = { json: 'boolean', force: 'boolean', 'dry-run': 'boolean', describe: 'string', from: 'string', update: 'boolean', approve: 'boolean' };
+const FLAGS = { json: 'boolean', force: 'boolean', 'dry-run': 'boolean', describe: 'string', from: 'string', approve: 'boolean' };
 const FLAG_HELP = {
   json: 'machine-readable output',
   force: 'workflow / agent / skill: overwrite an existing one (with --from: also the agents and skills the copy brings). policy: also place a candidate that gives up a protection the current policy has',
   'dry-run': 'show what would be written; write nothing, start nothing',
   describe: 'workflow / agent: describe it in plain language; the workflow-creator / agents-creator agent writes the file',
   from: 'workflow: copy one of the standard workflows bundled with the kit ("aidev list workflows" names them), with the agents and skills it uses, into this PKG under <name>',
-  update: 'workflow, with --from: refresh the agents and skills of a workflow copied earlier to the kit\'s current version; its workflow.yaml is left as it is (a command to compare it is shown when it differs)',
   approve: 'policy: place .aidev/policy.yaml from the freshly generated candidate (a human decision)',
 };
 
@@ -126,7 +125,6 @@ async function createFile(ctx, kind, name) {
   const full = layout.abs(repoRoot, rel);
   if (fs.existsSync(full) && !flags.force) throw new AidevError(`${rel} already exists (pass --force to overwrite)`);
   if (flags.from != null) throw new AidevError(`--from copies a standard workflow, agents and skills included; it belongs to "aidev create workflow <name> --from <standard>"`);
-  if (flags.update) throw new AidevError('--update refreshes the agents and skills of a copied standard workflow; it belongs to "aidev create workflow <name> --from <standard> --update"');
   ui.heading(`aidev create ${kind} ${name}`);
   if (flags.describe != null) {
     if (kind === 'skill') throw new AidevError('--describe is not available for skills: a skill is a procedure a person writes');

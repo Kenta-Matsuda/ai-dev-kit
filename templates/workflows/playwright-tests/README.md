@@ -138,4 +138,14 @@ aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv   # base_url / t
 
 ## 新しい版を取り込む
 
-ADK を更新したら、`aidev create workflow e2e-tests --from playwright-tests --update` を実行します。agent・skill が ADK の今の版に置き換わり（同じ内容なら残る）、この PKG で直した `workflow.yaml`（`cwd`、パス、`inputs` など）はそのままです。定義が ADK のものと違えば、比べるための `git diff --no-index` のコマンドが表示されるので、取り込みたい変更だけ写します。`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。定義ごと ADK の版に戻すなら `--from … --force` です。
+ADK を更新したら、`aidev sync workflow e2e-tests` を実行します。複製時に書かれた `.aidev/workflows/e2e-tests/standard.json` を元に、この PKG で直したところ（`cwd`、パス、`inputs`、agent の手順）を保ったまま、ファイルごとに ADK の変更を取り込みます: 編集していないファイルは置き換え、編集したファイルは複製時の版を base に 3-way merge、同じ行を両方が変えていれば衝突マーカー（解消してもう一度実行）。`--dry-run` で先に何が変わるかを見られます。`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。
+
+```bash
+aidev update
+aidev sync workflow e2e-tests --dry-run
+aidev sync workflow e2e-tests
+git diff
+aidev submit workflow e2e-tests
+```
+
+`standard.json` の無い複製（記録が入る前に複製したもの）は `aidev sync workflow e2e-tests --from playwright-tests` と複製元を名指しします。ADK の履歴から複製と一致する版を探して base にし、記録を書きます。定義ごと ADK の版に戻すなら `aidev sync workflow e2e-tests --force` です。
