@@ -285,6 +285,8 @@ PKG clone方式（0.2.0で採用）以降の設計判断、検討した代替案
 
 **却下した代替案**: kitのworkflowを実行時に名前で解決し、kit versionで信頼する案（agent / skillと同じ扱い。`writable`・command・依存の入れ方がPKGごとに違い、どのみち複製して直す必要がある。承認の線（origin一致）も崩れる）。`inputs`に`secret: true`の種類を足す案（値がinputsの経路（記録・prompt）を通る。別の経路にするなら名前だけの宣言で足りる）。`provide`で`.env`を持ち込む案（D29で拒否済み。fileは残る）。`aidev.yaml`に`env`の値を書く案（commitされる）。標準workflowを`templates/claude/.claude/agents/`のagentとして配る案（`sync tools`で全PKGの`.claude/agents/`に入り、対話sessionのsubagentにもなってしまう。標準workflowのagentは複製先の`.aidev/agents/`にだけ置く）。
 
+**追記（2026-10-23）**: 複製した定義はPKGが直す（`cwd`、path、`inputs`）ので、新しい版の取り込みを`--from … --force`の全上書きにすると、その直しを毎回戻すことになる。`--update`は共有部分（agent / skill）だけをkitの版に置き換え、`workflow.yaml`は触らずに違いを比べるcommandを案内する。標準workflowの振る舞いの追加は、できるだけagent / skill側に置き（`playwright-tests`のエビデンスはskillの参照実装とagentの手順）、PKGの`workflow.yaml`を変えずに届くようにする。
+
 ## 未決の論点
 
 | 論点 | 内容 | 関連 |

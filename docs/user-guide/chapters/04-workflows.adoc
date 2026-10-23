@@ -251,7 +251,7 @@ aidev create workflow e2e-tests
 ----
 
 * 複製されるのは `workflow.yaml`（`name:` は付けた名前に書き換わる）と、それが使う agent（`.aidev/agents/`）・skill（`.aidev/skills/`）です。複製した時点で **この PKG のファイル** になります。他の workflow と同じく `--trial` で試し、`aidev submit workflow` で PR にし、マージで承認します。実行時に ADK 側のファイルを参照することはありません。
-* 同じ agent・skill が既にあって内容が同じなら残し（`kept`）、違えば `--force` が無いと止まります。別の名前でもう 1 つ複製する（`e2e-staging` と `e2e-prod`）ときは agent を共有します。ADK を更新して新しい版の標準 workflow を取り込むには、もう一度 `--from … --force` で複製し、差分をレビューします。
+* 同じ agent・skill が既にあって内容が同じなら残し（`kept`）、違えば `--force` が無いと止まります。別の名前でもう 1 つ複製する（`e2e-staging` と `e2e-prod`）ときは agent を共有します。ADK を更新して新しい版の標準 workflow を取り込むには、`aidev create workflow <name> --from <standard> --update` を実行します。agent・skill が ADK の今の版に置き換わり（`git diff` でレビュー）、この PKG で直した `workflow.yaml` はそのままです。定義が ADK のものと違えば、比べるためのコマンドが表示されるので、取り込みたい変更だけ写します。定義ごと ADK の版に戻すなら `--from … --force` です。
 * PKG ごとに違うものは 2 種類に分かれます。**定義で違うもの**（テストを置くディレクトリ、依存を入れるコマンド、同時に進める batch の数、費用の上限）は複製した `workflow.yaml` を直します。**値で違うもの**（テスト対象環境の URL、テストユーザー）は定義を変えず、`aidev.yaml` の `workflows.<name>.inputs` に書くか、実行時に `--input` で渡します（xref:workflows-inputs[実行ごとに変わる値を受け取る]）。**認証情報**（テストユーザーのパスワード）は定義の `env_required:` が名前を宣言し、実行する人が shell の環境変数で渡します。ファイルには書きません（xref:workflows-env-required[認証情報は環境変数で受け取る]）。
 
 `playwright-tests` の流れと前提です。
@@ -267,6 +267,7 @@ aidev create workflow e2e-tests
 
 * 前提: Playwright が PKG に入っていて、`playwright.config.*` の `testDir` が `tests/e2e/` を含むこと（別の場所に置くなら、複製した YAML のパスを直す）。まだ無い PKG では最初の step（`deps` の `npm ci` か `playwright`）で止まり、画面にその command の出力と step の説明が出ます。この workflow は依存を足さないので、複製した README（`aidev create workflow --from` が場所を表示する）の「Playwright がまだ無い PKG に入れる」の手順で `@playwright/test` と `playwright.config.*` を入れて commit してから実行します（Node.js でない PKG でも、ルートに Playwright のためだけの `package.json` を置けば動く）。`webServer` でローカルのサーバを起動する設定は、対象環境（`base_url`）に対するこの workflow では外すか、`for_each.parallel` を 1 にする（同時に起動すると port がぶつかる）。
 * テストは `E2E_BASE_URL`・`E2E_USER`・`E2E_PASSWORD` を `process.env` から読みます（各 agent step の `env` が `base_url`・`test_user` を agent と `until` のコマンドに渡し、`E2E_PASSWORD` は shell から届く）。パスワードはテストにもログにも書かれません。
+* エビデンス: テストは手順ごとに画面キャプチャを残します（`tests/e2e/support/evidence.ts` の fixture。各手順の終わりの `evidence.capture`、テストの終わりに `final`）。場所は Playwright を実行したディレクトリの `test-results/evidence/<ケース ID>/<NN>-<label>.png` で、`review` step の最後の全体実行で全ケース分が揃い、実行の worktree に残ります（`never_commit` なので PR には入らない。PR に入れる設定は複製元の README に）。
 * 費用の上限（`limits.max_usd: 50`）はケース数に合わせて上げます。達すると止まり、`--resume` で続けられます。
 
 [source,bash]

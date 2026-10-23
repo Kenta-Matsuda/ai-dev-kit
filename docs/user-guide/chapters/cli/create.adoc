@@ -7,7 +7,7 @@ workflow・agent・skill のファイルを書きます。書くだけで、実�
 
 [source,text]
 ----
-aidev create workflow <name> [--describe "<text>" | --from <standard>] [--force] [--dry-run] [--json]
+aidev create workflow <name> [--describe "<text>" | --from <standard> [--update]] [--force] [--dry-run] [--json]
 aidev create agent <name> [--describe "<text>"] [--force] [--dry-run] [--json]
 aidev create skill <name> [--force] [--dry-run] [--json]
 aidev create policy [--approve] [--force] [--dry-run] [--json]
@@ -20,7 +20,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |object |書くもの
 
 |`workflow <name>`
-|`.aidev/workflows/<name>/workflow.yaml`。既定は空の雛形。`--describe "<text>"` で workflow-creator agent（`aidev.yaml` の `tools.agent`）に YAML と必要な `.aidev/agents/`・`.aidev/skills/` を書かせる。`--from <standard>` で ADK が同梱する標準 workflow（`aidev list workflows` の末尾に一覧）の `workflow.yaml`（`name:` は `<name>` に書き換える）と、それが使う agent・skill をこの PKG に複製する。複製したものは PKG のファイルで、他の workflow と同じく提出・承認する（xref:workflows-standard[標準 workflow から作る]）。同じ agent・skill が既にあって内容が同じなら残し、違えば `--force` が無いと何も書かずに止まる。`--describe` と `--from` は同時に使えない。どちらも書いたあと検証し、結果と次の手順（`--from` では使い方をまとめた README の場所、`inputs` の一覧、`aidev.yaml` に書く値の雛形、shell で設定する環境変数）を表示する
+|`.aidev/workflows/<name>/workflow.yaml`。既定は空の雛形。`--describe "<text>"` で workflow-creator agent（`aidev.yaml` の `tools.agent`）に YAML と必要な `.aidev/agents/`・`.aidev/skills/` を書かせる。`--from <standard>` で ADK が同梱する標準 workflow（`aidev list workflows` の末尾に一覧）の `workflow.yaml`（`name:` は `<name>` に書き換える）と、それが使う agent・skill をこの PKG に複製する。複製したものは PKG のファイルで、他の workflow と同じく提出・承認する（xref:workflows-standard[標準 workflow から作る]）。同じ agent・skill が既にあって内容が同じなら残し、違えば `--force` が無いと何も書かずに止まる。`--describe` と `--from` は同時に使えない。どちらも書いたあと検証し、結果と次の手順（`--from` では使い方をまとめた README の場所、`inputs` の一覧、`aidev.yaml` に書く値の雛形、shell で設定する環境変数）を表示する。`--from <standard> --update` は、以前に複製した workflow の agent・skill を ADK の今の版に置き換え（同じ内容なら残す）、`workflow.yaml` は触らない。定義が ADK のものと違えば、比べるための `git diff --no-index` のコマンドを表示する
 
 |`agent <name>`
 |`.aidev/agents/<name>.md`。frontmatter（`name`、`description`、`skills: []`、`tools`、`mcp: []`、`model: inherit`）と、入出力契約・手順・停止条件の見出しを持つ雛形。`skills`・`tools`・`mcp` はその agent が使えるもの（xref:workflows-agents-skills[agent と skill]）。`--describe "<text>"` で agents-creator agent に書かせる。書いたあと frontmatter の `name` がファイル名と一致するか、`tools`・`mcp` の書き方が正しいかを検証する
@@ -47,6 +47,9 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 
 |`--from <standard>`
 |`workflow`: ADK が同梱する標準 workflow を、その agent・skill ごと複製する（xref:workflows-standard[標準 workflow から作る]）
+
+|`--update`
+|`workflow`、`--from` と一緒に: 以前に複製した workflow の agent・skill を ADK の今の版に置き換える。`workflow.yaml` は触らない
 
 |`--approve`
 |`policy`: 作り直した候補を `.aidev/policy.yaml` として置く
@@ -89,7 +92,7 @@ aidev create policy [--approve] [--force] [--dry-run] [--json]
 |`policy --approve` で保護の弱化を検出した（`--force` 無し）
 
 |1
-|object や名前が無い・不正。既にあって `--force` が無い。`--describe` を skill に付けた。agent が失敗した（`--describe`）。`policy` に名前を付けた。`--from` の名前の標準 workflow が無い、複製する agent・skill が既にあって内容が違う（`--force` 無し）、`--describe` と `--from` を両方付けた、複製が検証を通らない
+|object や名前が無い・不正。既にあって `--force` が無い。`--describe` を skill に付けた。agent が失敗した（`--describe`）。`policy` に名前を付けた。`--from` の名前の標準 workflow が無い、複製する agent・skill が既にあって内容が違う（`--force` 無し）、`--describe` と `--from` を両方付けた、複製が検証を通らない、`--update` の workflow が無い、`--update` に `--from` が無い
 |===
 
 === 例

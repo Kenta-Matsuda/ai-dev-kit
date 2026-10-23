@@ -583,6 +583,23 @@ function run() {
           const forced = lastJson(aidev(fx.root, ['create', 'workflow', 'e2e-prod', '--from', 'playwright-tests', '--force', '--json']).out);
           eq([forced.ok, forced.written.includes('.aidev/agents/playwright-test-writer.md'), forced.kept.includes('.aidev/agents/playwright-test-planner.md')], [true, true, true]);
           ok(!/Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), 'overwritten with --force');
+          // --update: the agents and skills of a copy made earlier become the kit's again; the definition, edited for this PKG, is left alone and compared.
+          fs.appendFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), '\nTeam note.\n');
+          fs.appendFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), '# this PKG: the tests live under IUM/e2e\n');
+          const dryUp = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update', '--dry-run']);
+          eq(dryUp.code, 0, dryUp.out);
+          ok(/would update \.aidev\/agents\/playwright-test-writer\.md/.test(dryUp.out) && /Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), dryUp.out);
+          const up = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update', '--json']);
+          eq(up.code, 0, up.out);
+          const u = lastJson(up.out);
+          eq([u.ok, u.update, u.definition, u.written, u.kept.length], [true, true, 'differs', ['.aidev/agents/playwright-test-writer.md'], 3]);
+          ok(!/Team note/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'agents', 'playwright-test-writer.md'), 'utf8')), 'the agent is the kit\'s again');
+          ok(/this PKG: the tests live under IUM\/e2e/.test(fs.readFileSync(path.join(fx.root, '.aidev', 'workflows', 'e2e', 'workflow.yaml'), 'utf8')), 'the definition is left as it is');
+          const upOut = aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--update']).out;
+          ok(/workflow\.yaml was left as it is; it differs from the kit's playwright-tests/.test(upOut) && /git diff --no-index/.test(upOut), upOut);
+          ok(/workflow nope does not exist; --update refreshes/.test(aidev(fx.root, ['create', 'workflow', 'nope', '--from', 'playwright-tests', '--update']).out));
+          ok(/--update needs --from/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--update']).out));
+          ok(/--update refreshes the agents and skills/.test(aidev(fx.root, ['create', 'agent', 'x', '--update']).out));
         } finally {
           for (const n of ['e2e', 'e2e-prod']) fs.rmSync(path.join(fx.root, '.aidev', 'workflows', n), { recursive: true, force: true });
           for (const a of ['playwright-test-planner', 'playwright-test-writer', 'playwright-test-reviewer']) fs.rmSync(path.join(fx.root, '.aidev', 'agents', `${a}.md`), { force: true });

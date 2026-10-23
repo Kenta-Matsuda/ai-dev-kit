@@ -29,6 +29,7 @@ model: inherit
    - 仕様の手順が `test.step` で順に操作されている
    - 仕様の期待結果が **すべて** `expect` で検証されている（表示される、遷移する、値が変わる）。画面が開くことだけを見て終わっていない
    - `test.fixme` には理由があり、理由が妥当（実装に無い、環境に依存）
+   - `test`・`expect` を `support/evidence` から import し、手順ごとの `test.step` の終わりで `evidence.capture` を呼んでいる（エビデンス。`@playwright/test` から直接 import したもの、キャプチャの無い手順は指摘する）
 3. 規約違反を探す: アサーションを弱めたもの（`toBeVisible` だけで内容を見ない、`try/catch` で expect を握りつぶす）、`test.skip`・`.only`、`page.waitForTimeout`、認証情報の直書き（URL・ユーザー名・パスワードの値）、`playwright.config.*` の変更、仕様に無い操作（削除、設定変更）。
 4. 共通化: 同じ helper を複数の batch が持っていれば指摘する（support/ にまとめる）。
 5. 判定する。全ケースに対応する spec があり、期待結果がすべて検証され、規約違反が無ければ PASS。そうでなければ、writer が直せる粒度（ファイル、ケース ID、足りない expect、違反の行）で挙げて FAIL。

@@ -111,15 +111,26 @@ export async function login(page: Page): Promise<void> {
 }
 `;
 
-const SMOKE_TS = `import { expect, test } from '@playwright/test';
+/** The reference implementation the skill carries: the sandbox runs exactly what the agents are told to write. */
+function referenceEvidence() {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'playwright-testing', 'SKILL.md'), 'utf8');
+  const m = /```ts\n(\/\/ tests\/e2e\/support\/evidence\.ts[^\n]*\n[\s\S]*?)```/.exec(skill);
+  if (!m) throw new Error('the playwright-testing skill has no reference implementation of tests/e2e/support/evidence.ts (a ```ts block starting with "// tests/e2e/support/evidence.ts")');
+  return m[1];
+}
+const EVIDENCE_TS = referenceEvidence();
+
+const SMOKE_TS = `import { expect, test } from '../support/evidence';
 import { login } from '../support/login';
 import { url } from '../support/env';
 
-test('smoke: the environment answers and the test user can sign in', async ({ page }) => {
+test('smoke: the environment answers and the test user can sign in', async ({ page, evidence }) => {
   await page.goto(url('/'));
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await evidence.capture('sign-in-page');
   await login(page);
   await expect(page).toHaveURL(/\\/home$/);
+  await evidence.capture('after-login');
 });
 `;
 
@@ -127,76 +138,81 @@ const header = (c) => `// ${c.id}: ${c.title}\n// 前提: ${c.precondition}\n// 
 
 /** One spec per case; `attempt` lets a case be wrong once (TC-004) so the retry path runs. */
 const CASES = {
-  'TC-001': () => `import { expect, test } from '@playwright/test';
+  'TC-001': () => `import { expect, test } from '../../support/evidence';
 import { login } from '../../support/login';
 
 test.describe('TC-001', () => {
-  test('正しいユーザーでログインできる', async ({ page }) => {
-    await test.step('ログインする', async () => { await login(page); });
-    await test.step('ホームにいる', async () => { await expect(page).toHaveURL(/\\/home$/); });
+  test('正しいユーザーでログインできる', async ({ page, evidence }) => {
+    await test.step('ログインする', async () => { await login(page); await evidence.capture('ログイン後'); });
+    await test.step('ホームにいる', async () => { await expect(page).toHaveURL(/\\/home$/); await evidence.capture('home'); });
   });
 });
 `,
-  'TC-002': () => `import { expect, test } from '@playwright/test';
+  'TC-002': () => `import { expect, test } from '../../support/evidence';
 import { env, url } from '../../support/env';
 
 test.describe('TC-002', () => {
-  test('誤ったパスワードではログインできない', async ({ page }) => {
+  test('誤ったパスワードではログインできない', async ({ page, evidence }) => {
     await test.step('誤ったパスワードで送信する', async () => {
       await page.goto(url('/'));
       await page.getByLabel('Username').fill(env.user);
       await page.getByLabel('Password').fill('not-the-password');
+      await evidence.capture('filled-in');
       await page.getByRole('button', { name: 'Sign in' }).click();
     });
-    await test.step('警告が出る', async () => { await expect(page.getByRole('alert')).toHaveText('Invalid credentials'); });
+    await test.step('警告が出る', async () => { await expect(page.getByRole('alert')).toHaveText('Invalid credentials'); await evidence.capture('warning'); });
   });
 });
 `,
-  'TC-003': () => `import { expect, test } from '@playwright/test';
+  'TC-003': () => `import { expect, test } from '../../support/evidence';
 import { login } from '../../support/login';
 
 test.describe('TC-003', () => {
-  test('一覧に初期の商品が表示される', async ({ page }) => {
+  test('一覧に初期の商品が表示される', async ({ page, evidence }) => {
     await login(page);
-    await test.step('Items を開く', async () => { await page.getByRole('link', { name: 'Items' }).click(); });
+    await test.step('Items を開く', async () => { await page.getByRole('link', { name: 'Items' }).click(); await evidence.capture('items'); });
     await test.step('初期の商品がある', async () => {
       await expect(page.getByRole('listitem').filter({ hasText: 'Apple' })).toBeVisible();
       await expect(page.getByRole('listitem').filter({ hasText: 'Banana' })).toBeVisible();
+      await evidence.capture('initial-items');
     });
   });
 });
 `,
-  'TC-004': (attempt) => `import { expect, test } from '@playwright/test';
+  'TC-004': (attempt) => `import { expect, test } from '../../support/evidence';
 import { login } from '../../support/login';
 
 test.describe('TC-004', () => {
-  test('商品を追加すると一覧に出る', async ({ page }) => {
+  test('商品を追加すると一覧に出る', async ({ page, evidence }) => {
     const name = \`Cherry-\${Date.now()}\`;
     await login(page);
     await test.step('Items から Add item を開く', async () => {
       await page.getByRole('link', { name: 'Items' }).click();
       await page.getByRole('link', { name: 'Add item' }).click();
+      await evidence.capture('add-item-form');
     });
     await test.step('名前を入れて Add を押す', async () => {
       await page.getByLabel('Name').fill(name);
       await page.getByRole('button', { name: 'Add' }).click();
+      await evidence.capture('after-add');
     });
     await test.step('一覧にある', async () => {
       ${attempt === 1
     ? "await expect(page.getByRole('listitem').filter({ hasText: 'Durian' })).toBeVisible(); // wrong on purpose: the first attempt fails"
     : "await expect(page.getByRole('listitem').filter({ hasText: name })).toBeVisible();"}
+      await evidence.capture('items-with-new-one');
     });
   });
 });
 `,
-  'TC-005': () => `import { expect, test } from '@playwright/test';
+  'TC-005': () => `import { expect, test } from '../../support/evidence';
 import { login } from '../../support/login';
 
 test.describe('TC-005', () => {
-  test('ログアウトするとサインイン画面に戻る', async ({ page }) => {
+  test('ログアウトするとサインイン画面に戻る', async ({ page, evidence }) => {
     await login(page);
-    await test.step('Log out を押す', async () => { await page.getByRole('link', { name: 'Log out' }).click(); });
-    await test.step('サインイン画面', async () => { await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible(); });
+    await test.step('Log out を押す', async () => { await page.getByRole('link', { name: 'Log out' }).click(); await evidence.capture('after-logout'); });
+    await test.step('サインイン画面', async () => { await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible(); await evidence.capture('sign-in-page'); });
   });
 });
 `,
@@ -269,7 +285,7 @@ module.exports = {
       return { notes, report: `${cases.length} cases in ${batches.length} batches: ${batches.map((b) => `${b.name} (${b.cases.map((c) => c.id).join(', ')})`).join('; ')}` };
     }
     if (ctx.step === 'scaffold') {
-      return { files: { 'tests/e2e/support/env.ts': ENV_TS, 'tests/e2e/support/login.ts': LOGIN_TS, 'tests/e2e/smoke/login.spec.ts': SMOKE_TS }, report: 'support/env.ts, support/login.ts and smoke/login.spec.ts written; the smoke test signs in as the test user' };
+      return { files: { 'tests/e2e/support/env.ts': ENV_TS, 'tests/e2e/support/login.ts': LOGIN_TS, 'tests/e2e/support/evidence.ts': EVIDENCE_TS, 'tests/e2e/smoke/login.spec.ts': SMOKE_TS }, report: 'support/env.ts, support/login.ts, support/evidence.ts and smoke/login.spec.ts written; the smoke test signs in as the test user' };
     }
     if (ctx.step === 'generate') {
       const md = fs.readFileSync(path.join(ctx.notesDir, 'batches', `${ctx.item}.md`), 'utf8');
@@ -303,11 +319,17 @@ module.exports = {
     const review = step('review');
     assert(review && /VERDICT: PASS/.test(review.review || ''), 'the reviewer passed the work');
     const committed = git(['ls-files', 'tests']).split('\n');
-    for (const f of ['tests/e2e/support/env.ts', 'tests/e2e/support/login.ts', 'tests/e2e/smoke/login.spec.ts', 'tests/e2e/cases/login-01/tc-001.spec.ts', 'tests/e2e/cases/login-01/tc-002.spec.ts', 'tests/e2e/cases/items-01/tc-003.spec.ts', 'tests/e2e/cases/items-01/tc-004.spec.ts', 'tests/e2e/cases/session-01/tc-005.spec.ts']) {
+    for (const f of ['tests/e2e/support/env.ts', 'tests/e2e/support/login.ts', 'tests/e2e/support/evidence.ts', 'tests/e2e/smoke/login.spec.ts', 'tests/e2e/cases/login-01/tc-001.spec.ts', 'tests/e2e/cases/login-01/tc-002.spec.ts', 'tests/e2e/cases/items-01/tc-003.spec.ts', 'tests/e2e/cases/items-01/tc-004.spec.ts', 'tests/e2e/cases/session-01/tc-005.spec.ts']) {
       assert(committed.includes(f), `${f} is committed on the trial branch`);
     }
     assert(!git(['ls-files', 'test-results', 'node_modules']), 'Playwright output and node_modules are never committed');
     assert(!git(['status', '--porcelain', '--', 'tests']), 'nothing is left uncommitted under tests/');
     assert(fs.existsSync(path.join(worktree, 'test-results', 'items-01')), 'the until ran Playwright with the per-batch output directory');
+    // The evidence of the final run: one directory per case, the captures in order, the final one last.
+    for (const id of ['login', 'tc-001', 'tc-002', 'tc-003', 'tc-004', 'tc-005']) {
+      const dir = path.join(worktree, 'test-results', 'evidence', id);
+      const pngs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.png')).sort() : [];
+      assert(pngs.length >= 3 && pngs[0].startsWith('01-') && /-final\.png$/.test(pngs[pngs.length - 1]), `${id}: the evidence captures of the final run (${JSON.stringify(pngs)})`);
+    }
   },
 };

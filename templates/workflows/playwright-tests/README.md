@@ -14,7 +14,7 @@
 | `plan`（agent、何も書かない） | 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く |
 | `scaffold`（agent） | `tests/e2e/support/` に共通 helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる |
 | `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
-| `review`（agent + 確認役 agent） | 全体を実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで） |
+| `review`（agent + 確認役 agent） | 全体を実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで）。この最後の全体実行で全ケースの画面キャプチャ（エビデンス）が揃う |
 | `pr` | PR を作る。失敗して残った batch のケースは PR 本文の「Targets left out」に出る |
 
 ## 前提
@@ -112,6 +112,18 @@ aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv   # base_url / t
 - `limits.max_usd` に達して止まったら `aidev run workflow e2e-tests --resume last` で続けられます
 - 止まった理由から定義を直すには `aidev modify workflow e2e-tests --from-run last`
 
+## エビデンス（画面キャプチャ）
+
+テストは手順ごとに画面キャプチャを残します。仕組みは `tests/e2e/support/evidence.ts` の fixture 1 つで（scaffold step が skill の参照実装をそのまま書く）、spec は `test`・`expect` をそこから import し、各手順の終わりに `await evidence.capture('<何が見えているか>')` を呼びます。テストの終わりには結果にかかわらず `final` が自動で残ります。
+
+| 項目 | 内容 |
+| --- | --- |
+| 場所 | `<Playwright を実行したディレクトリ>/test-results/evidence/<ケース ID>/<NN>-<label>.png`（全ページ、パスワード欄はマスク）。環境変数 `E2E_EVIDENCE_DIR` で変えられる |
+| 揃うとき | `review` step の最後の全体実行（`generate` の batch ごとの実行でも残るが、最後の全体実行が上書きする） |
+| 実行後の見方 | 実行の worktree の `test-results/evidence/` を開く（画面の `worktree:` のパス）。Playwright のレポートにも添付される |
+| PR に入れる | 既定では入らない（`test-results/**` は `never_commit`）。入れるなら、複製した YAML の `review` step の `env` に `E2E_EVIDENCE_DIR: evidence`、`writable` に `evidence/**` を足す（PNG が PR とリポジトリに入る） |
+| 確認役 | `playwright-test-reviewer` が、`support/evidence` から import していない spec とキャプチャの無い手順を指摘する |
+
 ## 新しい版を取り込む
 
-ADK を更新したら、もう一度 `aidev create workflow e2e-tests --from playwright-tests --force` で複製し直し、`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。
+ADK を更新したら、`aidev create workflow e2e-tests --from playwright-tests --update` を実行します。agent・skill が ADK の今の版に置き換わり（同じ内容なら残る）、この PKG で直した `workflow.yaml`（`cwd`、パス、`inputs` など）はそのままです。定義が ADK のものと違えば、比べるための `git diff --no-index` のコマンドが表示されるので、取り込みたい変更だけ写します。`git diff` で差分をレビューして `aidev submit workflow` で提出します。実行時に ADK 側のファイルを参照することはないので、取り込まない限り承認済みの workflow は変わりません。定義ごと ADK の版に戻すなら `--from … --force` です。
