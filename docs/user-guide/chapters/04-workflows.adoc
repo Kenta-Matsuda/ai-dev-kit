@@ -212,7 +212,16 @@ ADK は、よくある仕事の workflow を **標準 workflow** として同梱
 |標準 workflow |内容
 
 |`playwright-tests`
-|テスト仕様書（CSV・Markdown・テキスト。1 行か 1 節が 1 ケース）の 1 ケースごとに Playwright のテストを書き、対象環境に対して実行して通るまで直し、全件通ったら agent が仕様と突き合わせてレビューし、PR にする。ケースは batch に分けて同時に進める
+|テスト仕様書（CSV・Markdown・テキスト。1 行か 1 節が 1 ケース）の 1 ケースごとに Playwright のテストを書き、対象環境に対して実行して通るまで直し、全件通ったら agent が仕様と突き合わせてレビューし、PR にする。ケースは batch に分けて同時に進める。手順ごとの画面キャプチャをエビデンスとして残し、前提条件はテストが作って戻す
+
+|`implement-task`
+|`--task` / `--task-file` で渡したタスク（Issue 本文）を読んで計画を notes に書き、テストと一緒に最小の変更で実装し、テストが通ったら確認役 agent がタスクと突き合わせて PR にする。依存の入れ方とテストのコマンド（`npm ci`・`npm test`）、書いてよい場所は複製した YAML で PKG に合わせる
+
+|`lint-fix`
+|lint（既定は ESLint。入力 `scope`、省略時 `.`）の指摘があるファイルを notes に並べ、ファイルごとに同時に直してそのファイルの lint が通るまで繰り返し、全体の lint とテストが通ったら確認役 agent が「指摘を消す細工（`eslint-disable`、設定の緩和）や振る舞いの変更が無いか」を検査して PR にする。他の linter の PKG は複製した YAML のコマンドを直す
+
+|`release-notes`
+|入力 `since`（省略時は最新の tag）からのコミットを集めて notes に書き、CHANGELOG に入力 `version` の項（Keep a Changelog 形式、既存のファイルの言語）を書き、確認役 agent が漏れと捏造を検査して PR にする。言語・ビルドツールに依らない
 |===
 
 標準 workflow は ADK の中では動きません。`--from` で PKG に複製して使います。ADK のチェックアウトの `templates/workflows/<standard>/README.md` に、その workflow の流れ・前提・複製から実行までの手順をまとめた手引きがあります（`aidev create workflow --from` が場所を表示します）。

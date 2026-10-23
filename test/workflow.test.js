@@ -542,7 +542,7 @@ function run() {
         const standard = wfMod.listStandardWorkflows(KIT_ROOT);
         ok(standard.some((w) => w.name === 'playwright-tests'), 'the kit bundles playwright-tests');
         ok(standard.every((w) => w.description), 'every standard workflow describes itself');
-        ok(/bundles no standard workflow "nope" \(available: playwright-tests/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'nope']).out));
+        ok(/bundles no standard workflow "nope" \(available: [a-z, -]*playwright-tests/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'nope']).out));
         ok(/pass one of them/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests', '--describe', 'x']).out));
         ok(/--from copies a standard workflow.*aidev create workflow/.test(aidev(fx.root, ['create', 'agent', 'x', '--from', 'playwright-tests']).out), 'an agent is not copied from a standard workflow on its own');
         ok(!fs.existsSync(path.join(fx.root, '.aidev', 'agents', 'x.md')));
@@ -568,7 +568,7 @@ function run() {
           eq(Object.values(deps.agents).map((a) => a.source), ['pkg', 'pkg', 'pkg'], 'the agents are the PKG\'s copies, reviewed with the workflow');
           eq(Object.keys(deps.skills), ['playwright-testing']);
           eq(wfMod.reviewedFiles(def, deps).map((f) => f.rel).sort(), files.slice().sort(), 'all of it is what approval covers');
-          eq(lastJson(aidev(fx.root, ['list', 'workflows', '--json']).out).standard.map((w) => w.name), ['playwright-tests']);
+          eq(lastJson(aidev(fx.root, ['list', 'workflows', '--json']).out).standard.map((w) => w.name), ['implement-task', 'lint-fix', 'playwright-tests', 'release-notes']);
           ok(/standard workflows bundled with the kit/.test(aidev(fx.root, ['list', 'workflows']).out));
           // Copying again under the same name: the workflow directory is there, so --force is needed; with it, an unchanged copy is kept as it is.
           ok(/workflow e2e already exists at \.aidev\/workflows\/e2e \(pass --force/.test(aidev(fx.root, ['create', 'workflow', 'e2e', '--from', 'playwright-tests']).out));
@@ -699,7 +699,8 @@ function run() {
             }
             for (const s of std.skills) ok(deps.skills[s.name] && deps.skills[s.name].source === 'pkg', `${w.name}: skills/${s.name} is bundled but no agent lists it`);
             ok(def.steps.some((s) => s.kind === 'pull-request'), `${w.name}: ends in a pull request`);
-            ok(Object.keys(def.inputs).length > 0, `${w.name}: what differs between PKGs is taken as inputs`);
+            // What differs between PKGs is taken as inputs — or the run's --task, when the whole job is the task (implement-task).
+            ok(Object.keys(def.inputs).length > 0 || /--task/.test(std.text), `${w.name}: what differs between PKGs is taken as inputs (or the job comes from --task, said in the YAML)`);
             eq(wfMod.approvalStatus(fx.root, cfgMod.loadConfig(fx.root), def, deps).approved, false, 'a copy is approved like any workflow: by a reviewed merge, not by the kit');
           } finally {
             fs.rmSync(path.join(fx.root, '.aidev', 'workflows', name), { recursive: true, force: true });

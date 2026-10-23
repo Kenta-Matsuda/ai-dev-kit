@@ -1,0 +1,90 @@
+# implement-task — タスク（Issue 本文・依頼文）を読んで実装し、テストを書いて通し、agent がレビューして PR にする
+# （ai-dev-kit の標準 workflow）。
+#
+# これは `aidev create workflow <name> --from implement-task` で PKG に複製された、この PKG のファイルです。
+# この PKG で違うところはここを直して提出します（レビューされ、main にあるものだけが実行されます）:
+#   - 依存の入れ方（deps step の npm ci。pnpm / yarn / pip / gradle の PKG は command を直す）
+#   - テストの実行（implement / review の until.command の npm test。この PKG のテストのコマンドに）
+#   - 書いてよい場所（implement / review の writable。この PKG のソース・テスト・ドキュメントの置き場に）
+#   - 費用の上限（limits.max_usd）
+# タスクは実行時に渡します（aidev run workflow <name> --task "<本文>" か --task-file <file>）。定義には書きません。
+# 実行は専用の worktree で行われ、step が通るたびにコミットされます。PR 本文にタスクと各 step の報告が入ります。
+name: implement-task
+description: タスク（Issue 本文・依頼文）を読んで実装し、テストを書いて通し、agent がレビューして PR にする
+
+objective: |
+  「Task for this run」のタスクを、この PKG の作法に沿った最小の変更で実装する。変更には自動テストを添え、
+  この PKG のテストが全部通る状態で、ドキュメント（README・docs）がタスクの内容を反映している状態にする。
+  タスクに無い変更（リファクタ、整形、無関係な修正）はしない。書き方は implementing-tasks skill に従う。
+
+# 任意: この PKG が .mcp.json に issue tracker の MCP server を登録しているなら、planner に渡すと
+# タスク本文が参照している Issue や設計書を読める。
+# agents:
+#   task-planner:
+#     mcp: [tickets]
+
+steps:
+  - id: deps
+    description: 依存を実行用の worktree に入れる（pnpm / yarn / pip / gradle の PKG はここを直す。package.json / package-lock.json が無い PKG はここで止まる）
+    command: npm ci
+    timeout_minutes: 20
+  - id: plan
+    description: タスクを読んで、変える場所・やり方・足すテスト・リスクを notes に置く（ソースは書かない）
+    agent: task-planner
+    writable: []
+    prompt: |
+      「Task for this run」のタスクを読み、この PKG のソースを調べて、notes ディレクトリに plan.md を書く:
+        - タスクの要点（何ができれば「できた」と言えるか。検証できる受け入れ条件の形で）
+        - 変えるファイルと、それぞれで何を変えるか（既存の関数・モジュール・画面の名前で。推測で書かず Grep で確かめる）
+        - 足すテスト（どのファイルに、何を検証するか）と、影響を受ける既存テスト
+        - この PKG の作法（ディレクトリ構成、命名、テストの書き方、lint・整形の決まり）で守ること
+        - リスクと不明点（仕様が曖昧なところ、タスクが前提にしているが実装に無いもの）
+      タスクが「(none given)」なら plan.md を書かず、--task か --task-file でタスクを渡すよう報告して終える。
+      ソースは書かない。
+    timeout_minutes: 20
+  - id: implement
+    description: plan.md のとおりに実装し、テストを書いて、この PKG のテストが通るまで直す
+    agent: task-implementer
+    writable: [src/**, lib/**, test/**, tests/**, docs/**, README.md]   # この PKG のソース・テスト・ドキュメントの置き場に直す
+    prompt: |
+      notes の plan.md のとおりに実装する。タスクを満たす最小の変更にし、変更には自動テストを添える（先にテストを書いてもよい）。
+      この PKG の既存のコードとテストの書き方に合わせる。README や docs にタスクの内容（使い方、挙動の変更）が関係するなら更新する。
+      書いたら `npm test` でこの PKG のテストを実行し、通るまで直す（until も同じコマンドで判定する）。
+      通らないテストは原因を突き止めて直す。アサーションを弱めたり、テストを skip して通さない。
+      タスクに無い変更（リファクタ、整形、無関係な修正）はしない。
+      plan.md の不明点で、実装の途中で判断が要ったものは、どう判断したかを最終報告に書く。
+    until:
+      command: npm test
+      env:
+        CI: "1"
+      timeout_minutes: 30
+      max_retries: 3
+    timeout_minutes: 60
+  - id: review
+    description: テストを通した上で、タスクを満たしているかを agent がレビューする。指摘があれば直し、通るまで繰り返す
+    agent: task-implementer
+    writable: [src/**, lib/**, test/**, tests/**, docs/**, README.md]   # implement と同じにする
+    prompt: |
+      実装は終わっている。レビューの指摘（Previous attempt）があれば、それを直して `npm test` を通す。
+      指摘が無ければ、変更全体を見直す: タスクの要点（plan.md）をすべて満たしているか、テストが変更を検証しているか、
+      タスクに無い変更が混ざっていないか、ドキュメントが更新されているか。足りなければ直す。何も直すものが無ければその旨を報告する。
+    until:
+      command: npm test
+      env:
+        CI: "1"
+      timeout_minutes: 30
+      agent: task-reviewer
+      prompt: |
+        「Task for this run」のタスクと notes の plan.md に対して、この実行の変更（diff）を確かめる:
+        タスクの要点をすべて満たしているか。変更に自動テストが添えられ、テストが変更を実際に検証しているか
+        （アサーションを弱めたもの、skip、常に通るテストは不可）。タスクに無い変更（リファクタ、整形、無関係な修正）が
+        混ざっていないか。ドキュメント（README・docs）がタスクの内容を反映しているか。この PKG の作法に合っているか。
+        足りないものはファイルと内容を具体的に挙げる。
+      max_retries: 2
+    timeout_minutes: 60
+  - id: pr
+    pull_request:
+      title: "feat: タスクの実装（implement-task）"   # 題はこの PKG で直してよい。PR 本文にタスクの本文と各 step の報告が入る
+
+limits:
+  max_usd: 20        # 大きなタスクでは上げる。達すると止まり、--resume で続けられる

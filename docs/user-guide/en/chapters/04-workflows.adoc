@@ -212,7 +212,16 @@ The ADK bundles workflows for common jobs as **standard workflows**. `aidev list
 |Standard workflow |What it does
 
 |`playwright-tests`
-|Writes a Playwright test for each case of a test specification (CSV, Markdown or text; one line or one section per case), runs it against the target environment and fixes it until it passes, has an agent review the whole against the specification once every case passes, and opens a PR. The cases are split into batches handled at the same time
+|Writes a Playwright test for each case of a test specification (CSV, Markdown or text; one line or one section per case), runs it against the target environment and fixes it until it passes, has an agent review the whole against the specification once every case passes, and opens a PR. The cases are split into batches handled at the same time. Each step leaves a screen capture as evidence, and the tests make and remove their own preconditions
+
+|`implement-task`
+|Reads the task given with `--task` / `--task-file` (an issue body), writes a plan into the notes, implements the smallest change together with tests, and once the tests pass has a checking agent compare the result with the task before opening a PR. The dependency and test commands (`npm ci`, `npm test`) and the writable paths are adjusted to the PKG in the copied YAML
+
+|`lint-fix`
+|Lists the files with lint findings (ESLint by default; input `scope`, `.` when omitted) in the notes, fixes them at the same time, one file at a time until that file's lint passes, and once the whole scope lints and the tests pass has a checking agent look for tricks that hide findings (`eslint-disable`, weakened rules) or changed behaviour before opening a PR. A PKG with another linter changes the commands in the copied YAML
+
+|`release-notes`
+|Collects the commits since input `since` (the newest tag when omitted) into the notes, writes the entry for input `version` into the CHANGELOG (Keep a Changelog form, in the language the file already uses), and has a checking agent look for omissions and inventions before opening a PR. Independent of language and build tool
 |===
 
 A standard workflow does not run inside the ADK. Copy it into the PKG with `--from` and use it there. `templates/workflows/<standard>/README.md` in the ADK checkout is a guide to that workflow: its flow, what it assumes, and the steps from the copy to a run (`aidev create workflow --from` prints where it is).

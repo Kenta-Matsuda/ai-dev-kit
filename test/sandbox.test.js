@@ -193,7 +193,7 @@ function run() {
   test('an unknown standard is refused with the names available', () => {
     const r = spawnSync(process.execPath, [RUNNER, 'no-such-workflow'], { encoding: 'utf8', env: { ...process.env, AIDEV_NO_UPDATE_CHECK: '1' } });
     eq(r.status, 1, 'exit 1');
-    ok(/no standard workflow "no-such-workflow" \(available: playwright-tests/.test(r.stderr), `the message: ${r.stderr}`);
+    ok(/no standard workflow "no-such-workflow" \(available: [a-z, -]*playwright-tests/.test(r.stderr), `the message: ${r.stderr}`);
   });
 }
 
