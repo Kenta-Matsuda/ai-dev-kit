@@ -215,7 +215,7 @@ ADK は、よくある仕事の workflow を **標準 workflow** として同梱
 |テスト仕様書（CSV・Markdown・テキスト。1 行か 1 節が 1 ケース）の 1 ケースごとに Playwright のテストを書き、対象環境に対して実行して通るまで直し、全件通ったら agent が仕様と突き合わせてレビューし、PR にする。ケースは batch に分けて同時に進める
 |===
 
-標準 workflow は ADK の中では動きません。`--from` で PKG に複製して使います。
+標準 workflow は ADK の中では動きません。`--from` で PKG に複製して使います。ADK のチェックアウトの `templates/workflows/<standard>/README.md` に、その workflow の流れ・前提・複製から実行までの手順をまとめた手引きがあります（`aidev create workflow --from` が場所を表示します）。
 
 [source,bash]
 ----
@@ -232,6 +232,7 @@ aidev create workflow e2e-tests
 ✓ wrote .aidev/skills/playwright-testing/SKILL.md
     from the kit's standard workflow playwright-tests: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
     the files are this PKG's now: edit what differs here (the paths the steps write, the commands they run), then submit them for review
+    how to use it: /home/me/ai-dev-kit/templates/workflows/playwright-tests/README.md
     inputs: spec (a file, --input only), base_url (required), test_user (required), batch_size (default 10)
     set this PKG's values once in aidev.yaml (--input overrides them per run):
       workflows:

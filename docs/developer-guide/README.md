@@ -53,6 +53,7 @@
 | hooks（after-bash / session-stopを含む）とtool adapter | `cli/commands/hook.js`、`cli/lib/tools.js`（`HOOK_ADAPTERS`）、`templates/claude/.claude/settings.json`、`templates/copilot/.github/hooks/aidev.json`、`templates/codex/.codex/hooks.json`、`templates/kiro/.kiro/agents/aidev.json` |
 | workflow | `cli/commands/workflow.js` |
 | self-evolution（kit開発者向け。CLI外） | `scripts/evolve.js`（`npm run evolve`）、`cli/agents/evolution.md`、`cli/commands/hook.js`（`session-stop`） |
+| 標準workflowとそのsandbox（kit開発者向け。CLI外） | `templates/workflows/<standard>/`（`workflow.yaml`、`agents/`、`skills/`、`README.md`、`sandbox/scenario.js`）、`scripts/sandbox-workflow.js`（`npm run sandbox`）、`scripts/sandbox-agent.js` |
 | uninstall（端末 / `--package`で旧eject / `--all`） | `cli/commands/uninstall.js`、`cli/lib/eject.js` |
 | 同梱Agents / Skills | `templates/claude/.claude/agents/`、`templates/claude/.claude/skills/`（他toolの形式は`templates/copilot/`、`templates/codex/`、`templates/kiro/`に手で同期） |
 | installer | `scripts/install.ps1`、`scripts/install.sh` |
@@ -66,9 +67,10 @@ npm run lint        # 全moduleのload確認（test/loadall.js）
 npm test            # test/run.js（各suiteはnode test/<file>.jsで単独実行可）
 npm run check       # 上記2つ
 npm run docs:check  # 利用者ガイド（必須ID検証）とdeveloper guide（file間linkの解決）のbuild
+npm run sandbox -- <standard>   # 標準workflowを使い捨てPKGで端から端まで動かす（network・browserが要る。npm testには含めない）
 ```
 
-testは実際の`claude`を起動しません。agent経路は`AIDEV_CLAUDE_BIN`でstubを指します。CLIを起動するtestは`AIDEV_HOME`を一時directoryへ、`AIDEV_NO_UPDATE_CHECK=1`を必ず設定します（設定しないとregistryが本物のhomeへ書かれ、update checkがnetworkへ出ます）。self-evolutionのtestは`AIDEV_HOME`を一時directoryにした上で`npm run evolve -- enable`か`AIDEV_KIT_DEVELOPER=1`で開発者端末の状態を作り、`evolve run`の実起動（kit checkoutのworktree作成）は行いません。
+testは実際の`claude`を起動しません。agent経路は`AIDEV_CLAUDE_BIN`でstubを指します。標準workflow（`templates/workflows/`）の動作は`npm run sandbox -- <standard>`で確かめます: 使い捨てのPKGで、`AIDEV_CLAUDE_BIN`に`scripts/sandbox-agent.js`（標準workflowの`sandbox/scenario.js`の筋書きどおりにfileを書く）を指し、runner・worktree・`until`のcommand（実npm・実Playwright）・再試行・trialのPR stepを実物で通します（詳細は`templates/workflows/README.md`）。CLIを起動するtestは`AIDEV_HOME`を一時directoryへ、`AIDEV_NO_UPDATE_CHECK=1`を必ず設定します（設定しないとregistryが本物のhomeへ書かれ、update checkがnetworkへ出ます）。self-evolutionのtestは`AIDEV_HOME`を一時directoryにした上で`npm run evolve -- enable`か`AIDEV_KIT_DEVELOPER=1`で開発者端末の状態を作り、`evolve run`の実起動（kit checkoutのworktree作成）は行いません。
 
 help出力を文書へ写すときは次で実際に確認します。
 

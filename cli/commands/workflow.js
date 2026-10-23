@@ -323,6 +323,8 @@ async function createFromStandard(ctx, name) {
   else {
     ui.dim(`    from the kit's standard workflow ${from}: ${std.description || '(no description)'}`);
     ui.dim('    the files are this PKG\'s now: edit what differs here (the paths the steps write, the commands they run), then submit them for review');
+    // The standard's own README (not copied): the flow, what it assumes, and the steps from copy to run.
+    if (fs.existsSync(path.join(std.dir, 'README.md'))) ui.dim(`    how to use it: ${path.join(std.dir, 'README.md')}`);
     const inputs = Object.entries(def.inputs);
     if (inputs.length) {
       ui.dim(`    inputs: ${inputs.map(([n, s]) => `${n}${s.file ? ' (a file, --input only)' : s.default != null ? ` (default ${s.default})` : ' (required)'}`).join(', ')}`);
