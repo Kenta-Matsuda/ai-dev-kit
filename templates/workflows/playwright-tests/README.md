@@ -9,7 +9,8 @@
 | step | 内容 |
 | --- | --- |
 | `deps`（command） | `npm ci` で依存を実行用 worktree に入れる。pnpm / yarn の PKG、テストが別ディレクトリにある PKG はこの command と `cwd` を直す |
-| `playwright`（command） | `node node_modules/@playwright/test/cli.js --version`。`@playwright/test` がこの PKG の依存に無ければここで止まる |
+| `playwright`（command） | `node node_modules/@playwright/test/cli.js --version`。`@playwright/test` がこの PKG の依存に無ければここで止まる（[Playwright がまだ無い PKG に入れる](#playwright-がまだ無い-pkg-に入れる最初の-1-回)） |
+| `browsers`（command） | `npx playwright install chromium`。この端末にブラウザが無ければ入れ、あれば何もしない |
 | `plan`（agent、何も書かない） | 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く |
 | `scaffold`（agent） | `tests/e2e/support/` に共通 helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる |
 | `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
@@ -18,10 +19,44 @@
 
 ## 前提
 
-- PKG に `@playwright/test` と `playwright.config.*` があり、`testDir` が `tests/e2e/` を含むこと（別の場所に置くなら、複製した YAML のパスを直す）
-- 実行する端末にブラウザが入っていること（`npx playwright install`）
+- PKG に `@playwright/test`（と `package-lock.json`）と `playwright.config.*` があり、`testDir` が `tests/e2e/` を含むこと（別の場所に置くなら、複製した YAML のパスを直す）。無い PKG は次の節の手順で入れてから
+- 実行する端末にブラウザが入っていること。無ければ `browsers` step が入れる（network が要る）
 - `webServer` でローカルのサーバを起動する設定は、対象環境（`base_url`）に対するこの workflow では外すか、`generate` の `for_each.parallel` を 1 にする（同時に起動すると port がぶつかる）
 - テストは `E2E_BASE_URL`・`E2E_USER`・`E2E_PASSWORD` を `process.env` から読む。前 2 つは各 agent step の `env` が入力から渡し、`E2E_PASSWORD` は実行する人の shell から届く
+
+## Playwright がまだ無い PKG に入れる（最初の 1 回）
+
+この workflow は Playwright を入れません。依存を足すのは PKG の判断で、PR でレビューするものだからです。無い PKG で実行すると最初の step で止まります（`deps` の `npm ci` は `package.json` / `package-lock.json` が無いと失敗し、`playwright` は `@playwright/test` が無いと失敗する。画面にその command の出力の末尾と step の説明が出ます。`--dry-run` はこれを見ません）。次を一度やって commit してから、複製・実行します。
+
+**Node.js の PKG**（ルートに `package.json` がある）:
+
+```bash
+npm install --save-dev @playwright/test   # package.json と package-lock.json に入る（pnpm: pnpm add -D、yarn: yarn add -D。deps step の command も合わせる）
+npx playwright install chromium           # この端末のブラウザ（workflow の browsers step も毎回確かめる）
+```
+
+`playwright.config.ts` が無ければ次を置く（あるなら `testDir` が `tests/e2e/` を含むことと、`webServer` を見直す）:
+
+```ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  timeout: 30_000,
+  retries: 0,
+  reporter: 'list',
+  use: { trace: 'retain-on-failure' },   // テストは対象環境の URL を E2E_BASE_URL から読む（scaffold step の helper）
+  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+});
+```
+
+`.gitignore` に `node_modules/`、`test-results/`、`playwright-report/`、`blob-report/` を入れます。
+
+`deps` の `npm ci` を `npm install` に変えても動きますが、worktree で変わった `package-lock.json` は `writable` の外なので commit されません。lockfile は上のとおり checkout で作って commit し、`npm ci` のままにする方が再現性があります。`npm ci` / `npm install` が **127** で止まるのは「command を起動できなかった」で、画面に出る出力の先頭に理由があります: `package.json` の `prepare` / `postinstall` が呼ぶ tool（husky、lefthook、patch-package など）が worktree に無い（`sh: husky: command not found`）なら、その tool を `devDependencies` に入れるか command を `npm ci --ignore-scripts` にする。`<command> was not found on PATH` なら aidev を動かす shell の PATH、`the directory <cwd> does not exist` なら `cwd`（worktree には commit されたものしか無い）を直す。
+
+**Node.js でない PKG**（Java / Python / .NET など）: ルートに Playwright のためだけの `package.json` を置くのが簡単です（`npm init -y` のあと上の 2 行。アプリのビルドには関係しない）。別ディレクトリ（`e2e/` など）に置くなら、複製した YAML の `deps`・`playwright`・`browsers` の command に `cwd: e2e/` を、agent step の `until.command` にも `cwd: e2e/` を付け、`writable`・`never_commit`・`objective` のパスを `e2e/tests/e2e/…` に直します。
+
+**ブラウザ**は端末ごと（CI runner も）に要ります。`browsers` step が `npx playwright install chromium` を毎回実行するので、入っていれば何もせず、無ければ download します（network が要る）。`playwright.config` の projects が firefox / webkit も使うなら、step のブラウザ名に足します。Linux で起動時に共有ライブラリが無いと言われたら、一度 `npx playwright install --with-deps chromium` を手で実行します（管理者権限が要るので step にはしない）。
 
 ## 使い方
 

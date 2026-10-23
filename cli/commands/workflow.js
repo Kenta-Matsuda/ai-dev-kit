@@ -2223,6 +2223,21 @@ async function runWorkflow(ctx) {
         record.output = tail(r.output, 2000).trim();
         if (r.logRel) record.log = r.logRel;
         stopReason = `step ${step.id}: ${step.command.text} exited ${r.code}`;
+        // On screen: the end of what the command said, and what the step is
+        // for in the definition's own words, so the person knows what to fix
+        // without opening the log (a package without the tool the step
+        // needs, for instance).
+        if (!flags.json) {
+          // The start carries the reason with most tools (npm, node), the end
+          // the summary (a test runner): both are shown when it is long.
+          const lines = String(r.output || '').split('\n').filter((l) => l.trim());
+          const shown = lines.length <= 30 ? lines : [...lines.slice(0, 12), `… (${lines.length - 27} line(s) left out)`, ...lines.slice(-15)];
+          if (shown.length) {
+            ui.warn(`what "${step.command.text}" printed${r.logRel ? ` (whole output: ${r.logRel})` : ''}:`);
+            for (const l of shown) ui.dim(`      ${l.length > 200 ? `${l.slice(0, 200)}…` : l}`);
+          }
+          if (step.description) ui.info(`step ${step.id} is: ${step.description}`);
+        }
       }
     } else {
       record.attempts = 1;

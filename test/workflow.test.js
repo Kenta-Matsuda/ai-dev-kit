@@ -900,6 +900,18 @@ function run() {
         eq(j.agentRuns, 2, 'two runs fit under $0.02, the third was refused');
       });
 
+      test('a failing command step shows the end of its output and the step description on screen', () => {
+        write(path.join(fx.root, 'tools', 'nope.js'), 'process.stdout.write("line one\\n"); process.stderr.write("nope.js says: no playwright here\\n"); process.exit(5);\n');
+        define('cmdout', { steps: ['  - id: deps', '    description: installs the dependencies (a package without Playwright stops here; see the README)', '    command: node tools/nope.js'] });
+        const c = aidev(fx.root, ['run', 'workflow', 'cmdout'], { env: env() });
+        eq(c.code, 1);
+        ok(/what "node tools\/nope\.js" printed \(whole output: [^)]*deps\.1\.1\.log\):\s+line one\s+nope\.js says: no playwright here/.test(c.out), `the output is on screen: ${c.out}`);
+        ok(/step deps is: installs the dependencies \(a package without Playwright stops here; see the README\)/.test(c.out), `the description is on screen: ${c.out}`);
+        ok(/workflow stopped — step deps: node tools\/nope\.js exited 5/.test(c.out), c.out);
+        const j = aidev(fx.root, ['run', 'workflow', 'cmdout', '--json'], { env: env() });
+        ok(!/what "node tools/.test(j.out) && !/step deps is:/.test(j.out), `--json prints neither: ${j.out}`);
+      });
+
       test('a failing agent, a failing command step and a tool outside tools.default each stop the run', () => {
         define('cmd', { steps: ['  - id: c', '    command: node -e process.exit(7)'] });
         const c = aidev(fx.root, ['run', 'workflow', 'cmd', '--json'], { env: env() });

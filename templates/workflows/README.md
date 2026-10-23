@@ -26,6 +26,8 @@ npm run sandbox -- playwright-tests --keep --json   # PKG・worktree・記録を
 
 通るとわかること: 同梱の YAML・agent・skill が、kit の runner と実際の command（npm、Playwright …）の上で、筋書きが「有能な agent ならこう書く」と決めた内容で端から端まで動く。わからないこと: 実際の agent がその内容を書けるか（LLM は起動しない）、hooks の挙動（scripted agent はツールを呼ばない）。
 
+kit 開発者の端末に Playwright が無くても動きます: 筋書きの `prepare` が使い捨て PKG に `@playwright/test`（端末にブラウザがある版、無ければ最新）を install して `package-lock.json` を作り、`playwright install chromium` でブラウザも入れます（どちらも network が要る。Linux で起動時に共有ライブラリが無いと言われたら、一度 `npx playwright install --with-deps chromium` を手で）。
+
 筋書きが export するもの（`scripts/sandbox-workflow.js` の冒頭に同じ一覧）:
 
 | export | 内容 |
