@@ -13,8 +13,8 @@
 | `browsers`（command） | `npx playwright install chromium`。この端末にブラウザが無ければ入れ、あれば何もしない |
 | `plan`（agent、何も書かない） | 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く |
 | `scaffold`（agent） | `tests/e2e/support/` に共通 helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる |
-| `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
-| `review`（agent + 確認役 agent） | 全体を実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで）。この最後の全体実行で全ケースの画面キャプチャ（エビデンス）が揃う |
+| `generate`（agent、`for_each`、既定で 4 batch 同時） | batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが **2 回続けて** 通るまで直す（3 回まで。2 回目だけ落ちるのは後始末の抜け）。通らなかった batch は戻して次へ進む（`on_failure: continue`） |
+| `review`（agent + 確認役 agent） | 全体を 2 回続けて実行し、通らないものと重複した helper を直す。`playwright-test-reviewer` が仕様のケースごとに spec と検証内容を突き合わせ、足りなければ差し戻す（2 回まで）。この最後の全体実行で全ケースの画面キャプチャ（エビデンス）が揃う |
 | `pr` | PR を作る。失敗して残った batch のケースは PR 本文の「Targets left out」に出る |
 
 ## 前提
@@ -123,6 +123,18 @@ aidev run workflow e2e-tests --input spec=~/specs/all-cases.csv   # base_url / t
 | 実行後の見方 | 実行の worktree の `test-results/evidence/` を開く（画面の `worktree:` のパス）。Playwright のレポートにも添付される |
 | PR に入れる | 既定では入らない（`test-results/**` は `never_commit`）。入れるなら、複製した YAML の `review` step の `env` に `E2E_EVIDENCE_DIR: evidence`、`writable` に `evidence/**` を足す（PNG が PR とリポジトリに入る） |
 | 確認役 | `playwright-test-reviewer` が、`support/evidence` から import していない spec とキャプチャの無い手順を指摘する |
+
+## 前提条件と冪等性
+
+仕様の「前提条件」（利用者 ID「ium12345」の利用者が登録されていること、商品 X があること）は、環境に用意されていることを当てにせず、テストが自分で作って終わったら戻します。無いからといって `test.fixme` で飛ばしません。
+
+| 項目 | 内容 |
+| --- | --- |
+| 作り方 | `plan` step が、前提の種類ごとに「どの画面で作り、どの画面で消すか」を plan.md に書く。`scaffold` step がそれを ensure 型の helper（`ensureUser(page, {...})` は無ければ作り、作ったかを返す。`removeUser(page, id)` は作ったものを消す）として `tests/e2e/support/` に書く |
+| テストの形 | `test.beforeEach` でログインと前提の作成、`test.afterEach` で作ったものだけ削除（結果にかかわらず）。固定 ID が仕様にあればその ID で作り、既にあれば既存を使って消さない |
+| 判定 | `generate` と `review` の `until` は同じテストを 2 回続けて実行し、2 回とも通ることで判定する。1 回目は通って 2 回目に落ちるなら後始末の抜け（固定 ID の重複登録、戻していない値） |
+| fixme にしてよいもの | 外部システムのデータ、テストユーザーに権限の無い操作、実装に無い機能だけ。「環境に無い」は理由にならない（reviewer agent が指摘する） |
+| 対象環境 | チームの検証環境。テストが消すのは自分で作ったものだけで、既存のデータを消す・変える操作は仕様の手順にあるものだけ |
 
 ## 新しい版を取り込む
 

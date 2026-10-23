@@ -261,13 +261,14 @@ aidev create workflow e2e-tests
 . `browsers`（command step）: `npx playwright install chromium`。実行する端末にブラウザが無ければ入れ、あれば何もしない
 . `plan`（agent step、何も書かない）: 仕様書を読み、ケースを画面・機能ごとに `batch_size` 以下の batch に分けて、実行の notes に置く
 . `scaffold`（agent step）: `tests/e2e/support/` に共通の helper（環境変数の読み取り、ログイン）、`tests/e2e/smoke/` に smoke test を書き、対象環境に対して通す。URL・ユーザー・パスワード・ログイン画面のどれかが違えばここで分かる
-. `generate`（agent step、`for_each`、既定で 4 batch 同時）: batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`）
+. `generate`（agent step、`for_each`、既定で 4 batch 同時）: batch ごとに `tests/e2e/cases/<batch>/<ケース ID>.spec.ts` を書き、その batch のテストが 2 回続けて通るまで直す（3 回まで）。通らなかった batch は戻して次へ進む（`on_failure: continue`）
 . `review`（agent step）: 全体を実行し、通らないものと重複した helper を直す。確認役の `playwright-test-reviewer` が仕様のケースごとに spec ファイルと検証の内容を突き合わせ、足りなければ指摘を添えて差し戻す（2 回まで）
 . `pr`: PR を作る。失敗して残った batch のケースは PR 本文の「Targets left out」に出る
 
 * 前提: Playwright が PKG に入っていて、`playwright.config.*` の `testDir` が `tests/e2e/` を含むこと（別の場所に置くなら、複製した YAML のパスを直す）。まだ無い PKG では最初の step（`deps` の `npm ci` か `playwright`）で止まり、画面にその command の出力と step の説明が出ます。この workflow は依存を足さないので、複製した README（`aidev create workflow --from` が場所を表示する）の「Playwright がまだ無い PKG に入れる」の手順で `@playwright/test` と `playwright.config.*` を入れて commit してから実行します（Node.js でない PKG でも、ルートに Playwright のためだけの `package.json` を置けば動く）。`webServer` でローカルのサーバを起動する設定は、対象環境（`base_url`）に対するこの workflow では外すか、`for_each.parallel` を 1 にする（同時に起動すると port がぶつかる）。
 * テストは `E2E_BASE_URL`・`E2E_USER`・`E2E_PASSWORD` を `process.env` から読みます（各 agent step の `env` が `base_url`・`test_user` を agent と `until` のコマンドに渡し、`E2E_PASSWORD` は shell から届く）。パスワードはテストにもログにも書かれません。
 * エビデンス: テストは手順ごとに画面キャプチャを残します（`tests/e2e/support/evidence.ts` の fixture。各手順の終わりの `evidence.capture`、テストの終わりに `final`）。場所は Playwright を実行したディレクトリの `test-results/evidence/<ケース ID>/<NN>-<label>.png` で、`review` step の最後の全体実行で全ケース分が揃い、実行の worktree に残ります（`never_commit` なので PR には入らない。PR に入れる設定は複製元の README に）。
+* 前提条件と冪等性: 仕様の前提（利用者やデータがあること）はテストが `beforeEach` で作り、`afterEach` で作ったものだけ戻します（`plan` step が作り方を調べ、`scaffold` step が helper を書く）。環境に無いからといって `test.fixme` にはしません。`generate` と `review` の `until` は同じテストを 2 回続けて実行し、2 回とも通ることで判定します（後始末の無いテストは 2 回目に落ちる）。
 * 費用の上限（`limits.max_usd: 50`）はケース数に合わせて上げます。達すると止まり、`--resume` で続けられます。
 
 [source,bash]

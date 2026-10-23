@@ -17,6 +17,8 @@
 # エビデンス: テストは手順ごとに画面キャプチャを test-results/evidence/<ケース ID>/ に残します（support/evidence.ts の fixture。
 # review step の最後の全体実行で全ケース分が揃う）。test-results/ は never_commit なので PR には入らず、実行の worktree に残ります。
 # PR に入れるなら review step の env に E2E_EVIDENCE_DIR: evidence を、writable に evidence/** を足します。
+# 冪等性: テストは前提条件（必要な利用者やデータ）を自分で作り、終わったら戻します。generate と review の until は同じテストを
+# 2 回続けて実行し、2 回とも通ることで判定します（後始末の無いテストは 2 回目に落ちる）。
 name: playwright-tests
 description: テスト仕様書（CSV など）の 1 ケースごとに Playwright のテストを書き、通るまで直し、全件通ったら agent がレビューして PR にする
 
@@ -75,7 +77,8 @@ steps:
       ケースを画面や機能ごとにまとめ、1 batch を {inputs.batch_size} ケース以下に分けて、notes ディレクトリに次を書く:
         - batches.txt: 1 行 1 batch の名前（小文字の英数字とハイフンだけ。例 login-01。他の batch 名の先頭と同じ文字列で始めない）。generate step はこの順に 1 batch ずつ agent を起動する
         - batches/<batch>.md: その batch のケースを仕様の原文のまま（ID・タイトル・前提・手順・期待結果。ただしパスワード・トークンなど認証情報の値は <credential> に置き換える）と、関係する画面・ルート・コンポーネントのファイル
-        - plan.md: アプリの構成、ログインの仕方（画面・入力欄）、ロケータの方針、この PKG の既存テストの慣習、Playwright の設定（testDir・projects・webServer）で注意すること
+        - plan.md: アプリの構成、ログインの仕方（画面・入力欄）、ロケータの方針、この PKG の既存テストの慣習、Playwright の設定（testDir・projects・webServer）で注意すること、
+          前提条件の作り方（仕様の前提の種類ごとに、どの画面で作り、どの画面で消すか。アプリで作れないものはその旨）
       ソースは書かない。ケースが 1 件も読み取れなければ batches.txt を作らず（空のファイルも書かない）、理由を報告する。
     timeout_minutes: 30
   - id: scaffold
@@ -85,7 +88,9 @@ steps:
     prompt: |
       plan.md を読み、tests/e2e/support/ に共通の helper を書く: env.ts（E2E_BASE_URL・E2E_USER・E2E_PASSWORD を読み、無ければ
       その名前を挙げて throw する）、login.ts（テストユーザーでログインする helper。ログインの無いアプリなら、何もしないことを明記した helper）、
-      evidence.ts（playwright-testing skill の参照実装をそのまま写す。画面キャプチャをエビデンスとして残す fixture）、ほかに全 batch が使う fixture があればそれ。
+      evidence.ts（playwright-testing skill の参照実装をそのまま写す。画面キャプチャをエビデンスとして残す fixture）、
+      plan.md の「前提条件の作り方」にある前提を作る・戻す helper（ensure 型。無ければ作り、作ったかを返す。戻す側は作ったものだけ消す）、
+      ほかに全 batch が使う fixture があればそれ。
       tests/e2e/smoke/ に smoke test を 1 つ書く: {inputs.base_url} を開いてページが表示されることと、ログインが要るアプリなら
       helper でログインできることを検証する。test と expect は support/evidence から import し、手順の終わりに evidence.capture を呼ぶ。
       ここで通らなければ URL・ユーザー・パスワード・ロケータのどれかが違う: 原因を報告する。
@@ -115,13 +120,17 @@ steps:
       evidence.capture('<何が見えているか>') を呼んで画面キャプチャをエビデンスとして残す。support/ と他の batch のファイルは書かない。仕様から写す文に認証情報の値があれば <credential> に置き換える。
       書いたら `npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}` で実行し、通るまで直す
       （パスの末尾の / と --output は必ず付ける。他の batch が同時に動いていて、無いと他の batch のテストや結果まで巻き込む）。
-      通らないケースは原因（ロケータ・待ち方・仕様の読み違い・環境の問題）を突き止めて直す。アサーションを弱めて通さない。
-      仕様にあって実装にない振る舞いは test.fixme に理由を付け、報告に挙げる。
+      前提条件（利用者やデータがあること）は beforeEach で support/ の helper を使って作り、afterEach で作ったものだけ戻す（冪等。until は 2 回続けて実行する）。
+      環境に無いからといって test.fixme にしない。helper が足りなければ batch の中に書く。
+      通らないケースは原因（ロケータ・待ち方・仕様の読み違い・前提が作れていない）を突き止めて直す。アサーションを弱めて通さない。
+      仕様にあって実装にない振る舞いと、テストユーザーに権限の無い操作だけ test.fixme に理由を付け、報告に挙げる。
     env:
       E2E_BASE_URL: "{inputs.base_url}"
       E2E_USER: "{inputs.test_user}"
     until:
-      command: npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}
+      command:                             # 2 回続けて通ること（後始末の無いテストは 2 回目に落ちる）
+        - npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}
+        - npx playwright test tests/e2e/cases/{item}/ --reporter=list --retries=0 --output test-results/{item}
       env:
         CI: "1"
       timeout_minutes: 30
@@ -132,7 +141,8 @@ steps:
     agent: playwright-test-writer
     writable: [tests/e2e/cases/**, tests/e2e/support/**]
     prompt: |
-      すべての batch が書き終わった。この workflow が書いた範囲を `npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all` で実行し、通らないものを直す。
+      すべての batch が書き終わった。この workflow が書いた範囲を `npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all` で
+      2 回続けて実行し、通らないものを直す（2 回目だけ落ちるのは後始末の抜け）。
       複数の batch が同じ helper を書いていれば support/ に 1 つにまとめ、各 batch から使う。
       generate step の報告で失敗（left out）になった batch のケースはここでは書かない。報告に、書かなかったケース ID と理由を挙げる。
       generate step の対象が 0 件だった（batch が無かった）なら、ケースを書かずにその旨を報告して終える。
@@ -142,7 +152,9 @@ steps:
       E2E_BASE_URL: "{inputs.base_url}"
       E2E_USER: "{inputs.test_user}"
     until:
-      command: npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all
+      command:                             # 2 回続けて通ること
+        - npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all
+        - npx playwright test tests/e2e/cases/ tests/e2e/smoke/ --reporter=list --retries=0 --output test-results/all
       env:
         CI: "1"
       timeout_minutes: 90

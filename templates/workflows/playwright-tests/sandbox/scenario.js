@@ -36,7 +36,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const page = (title, body) => \`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>\${title}</title></head><body><main>\${body}</main></body></html>\`;
 const nav = '<nav><a href="/home">Home</a> <a href="/items">Items</a> <a href="/logout">Log out</a></nav>';
 const signIn = (error) => page('Sign in', \`<h1>Sign in</h1>\${error ? '<p role="alert">Invalid credentials</p>' : ''}<form method="post" action="/login"><label>Username <input name="username"></label><label>Password <input type="password" name="password"></label><button type="submit">Sign in</button></form>\`);
-const itemList = () => page('Items', \`\${nav}<h1>Items</h1><ul>\${items.map((i) => \`<li>\${esc(i)}</li>\`).join('')}</ul><a href="/items/new">Add item</a>\`);
+const itemList = () => page('Items', \`\${nav}<h1>Items</h1><ul>\${items.map((i) => \`<li>\${esc(i)} <form method="post" action="/items/delete" style="display:inline"><input type="hidden" name="name" value="\${esc(i)}"><button type="submit">Delete</button></form></li>\`).join('')}</ul><a href="/items/new">Add item</a>\`);
 const loggedIn = (req) => /(^|;\\s*)session=ok(;|$)/.test(req.headers.cookie || '');
 const form = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(b)))); });
 const send = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers }); res.end(body); };
@@ -54,6 +54,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/items') return send(res, 200, itemList());
   if (req.method === 'GET' && url.pathname === '/items/new') return send(res, 200, page('Add item', \`\${nav}<h1>Add item</h1><form method="post" action="/items"><label>Name <input name="name"></label><button type="submit">Add</button></form>\`));
   if (req.method === 'POST' && url.pathname === '/items') { const f = await form(req); if (f.name) items.push(f.name); return send(res, 302, '', { location: '/items' }); }
+  if (req.method === 'POST' && url.pathname === '/items/delete') { const f = await form(req); const at = items.indexOf(f.name); if (at >= 0) items.splice(at, 1); return send(res, 302, '', { location: '/items' }); }
   send(res, 404, page('Not found', '<h1>Not found</h1>'));
 });
 server.listen(Number(process.argv[2] || 0), '127.0.0.1', () => { process.stdout.write(\`listening on \${server.address().port}\\n\`); });
@@ -79,6 +80,7 @@ const SPEC = [
   'TC-003,items,一覧に初期の商品が表示される,ログイン済み,1. Items を開く,Apple と Banana が一覧にある',
   'TC-004,items,商品を追加すると一覧に出る,ログイン済み,1. Items を開く 2. Add item を押す 3. 名前を入力して Add を押す,追加した名前が一覧にある',
   'TC-005,session,ログアウトするとサインイン画面に戻る,ログイン済み,1. Log out を押す,Sign in のボタンが表示される',
+  'TC-006,items,登録済みの商品が一覧に表示される,商品「Mango」が登録されていること,1. Items を開く,Mango が一覧にある',
   '',
 ].join('\n');
 
@@ -119,6 +121,31 @@ function referenceEvidence() {
   return m[1];
 }
 const EVIDENCE_TS = referenceEvidence();
+
+// The helpers for the precondition "item X is registered": made by the test when missing, removed by the test that made it.
+const ITEMS_TS = `import { expect, type Page } from '@playwright/test';
+import { url } from './env';
+
+/** The precondition "the item <name> is registered": make it true; true when this call created it. */
+export async function ensureItem(page: Page, name: string): Promise<boolean> {
+  await page.goto(url('/items'));
+  if ((await page.getByRole('listitem').filter({ hasText: name }).count()) > 0) return false;
+  await page.getByRole('link', { name: 'Add item' }).click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: name })).toBeVisible();
+  return true;
+}
+
+/** The clean-up of ensureItem: remove the item the test created. */
+export async function removeItem(page: Page, name: string): Promise<void> {
+  await page.goto(url('/items'));
+  const row = page.getByRole('listitem').filter({ hasText: name });
+  if ((await row.count()) === 0) return;
+  await row.getByRole('button', { name: 'Delete' }).click();
+  await expect(row).toHaveCount(0);
+}
+`;
 
 const SMOKE_TS = `import { expect, test } from '../support/evidence';
 import { login } from '../support/login';
@@ -205,6 +232,25 @@ test.describe('TC-004', () => {
   });
 });
 `,
+  'TC-006': () => `import { expect, test } from '../../support/evidence';
+import { login } from '../../support/login';
+import { ensureItem, removeItem } from '../../support/items';
+
+test.describe('TC-006', () => {
+  let created = false;
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+    created = await ensureItem(page, 'Mango');   // the precondition: made by the test when it is missing
+  });
+  test.afterEach(async ({ page }) => {
+    if (created) await removeItem(page, 'Mango');   // only what this test created
+  });
+  test('登録済みの商品が一覧に表示される', async ({ page, evidence }) => {
+    await test.step('Items を開く', async () => { await page.getByRole('link', { name: 'Items' }).click(); await evidence.capture('items'); });
+    await test.step('Mango がある', async () => { await expect(page.getByRole('listitem').filter({ hasText: 'Mango' })).toBeVisible(); await evidence.capture('mango-listed'); });
+  });
+});
+`,
   'TC-005': () => `import { expect, test } from '../../support/evidence';
 import { login } from '../../support/login';
 
@@ -231,7 +277,7 @@ function detectPlaywrightVersion() {
 }
 
 module.exports = {
-  description: 'a sign-in / items application, five cases on three screens, one case wrong on its first attempt',
+  description: 'a sign-in / items application, six cases on three screens, one case wrong on its first attempt, one with a precondition the test makes and removes',
   workflowName: 'e2e-tests',
   files: {
     'package.json': `${JSON.stringify({ name: 'sandbox-app', private: true, version: '0.0.0', scripts: { start: 'node app/server.js' } }, null, 2)}\n`,
@@ -280,12 +326,12 @@ module.exports = {
       for (const [screen, list] of byScreen) {
         for (let i = 0; i < list.length; i += size) batches.push({ name: `${screen}-${String(Math.floor(i / size) + 1).padStart(2, '0')}`, cases: list.slice(i, i + size) });
       }
-      const notes = { 'batches.txt': `${batches.map((b) => b.name).join('\n')}\n`, 'plan.md': '# Plan\n\n- app/server.js: sign-in at /, home at /home, items at /items (+ /items/new), log-out at /logout\n- locators: labels (Username, Password, Name), roles (button Sign in / Add, link Items / Add item / Log out, heading Welcome)\n- Playwright: testDir ./tests, one chromium project, no webServer (the target is E2E_BASE_URL)\n' };
+      const notes = { 'batches.txt': `${batches.map((b) => b.name).join('\n')}\n`, 'plan.md': '# Plan\n\n- app/server.js: sign-in at /, home at /home, items at /items (+ /items/new), log-out at /logout\n- locators: labels (Username, Password, Name), roles (button Sign in / Add, link Items / Add item / Log out, heading Welcome)\n- Playwright: testDir ./tests, one chromium project, no webServer (the target is E2E_BASE_URL)\n- preconditions: an item is made at /items/new (Name, Add) and removed with the Delete button of its row at /items; support/items.ts: ensureItem (made it? true) / removeItem\n' };
       for (const b of batches) notes[`batches/${b.name}.md`] = `# ${b.name}\n\n${b.cases.map((c) => `## ${c.id}: ${c.title}\n\n- 前提: ${c.precondition}\n- 手順: ${c.steps}\n- 期待結果: ${c.expected}\n`).join('\n')}`;
       return { notes, report: `${cases.length} cases in ${batches.length} batches: ${batches.map((b) => `${b.name} (${b.cases.map((c) => c.id).join(', ')})`).join('; ')}` };
     }
     if (ctx.step === 'scaffold') {
-      return { files: { 'tests/e2e/support/env.ts': ENV_TS, 'tests/e2e/support/login.ts': LOGIN_TS, 'tests/e2e/support/evidence.ts': EVIDENCE_TS, 'tests/e2e/smoke/login.spec.ts': SMOKE_TS }, report: 'support/env.ts, support/login.ts, support/evidence.ts and smoke/login.spec.ts written; the smoke test signs in as the test user' };
+      return { files: { 'tests/e2e/support/env.ts': ENV_TS, 'tests/e2e/support/login.ts': LOGIN_TS, 'tests/e2e/support/evidence.ts': EVIDENCE_TS, 'tests/e2e/support/items.ts': ITEMS_TS, 'tests/e2e/smoke/login.spec.ts': SMOKE_TS }, report: 'support/env.ts, support/login.ts, support/evidence.ts, support/items.ts (ensureItem / removeItem for the item preconditions) and smoke/login.spec.ts written; the smoke test signs in as the test user' };
     }
     if (ctx.step === 'generate') {
       const md = fs.readFileSync(path.join(ctx.notesDir, 'batches', `${ctx.item}.md`), 'utf8');
@@ -306,11 +352,11 @@ module.exports = {
   },
 
   /** What this scenario expects beyond the common checks. */
-  expect({ record, worktree, git, calls }) {
+  expect({ record, worktree, git, calls, log }) {
     const step = (id) => record.steps.find((s) => s.id === id);
     const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
     const gen = step('generate');
-    assert(gen && gen.items && gen.items.map((x) => x.item).join(',') === 'login-01,items-01,session-01', `generate ran the batches ${JSON.stringify(gen && gen.items)}`);
+    assert(gen && gen.items && gen.items.map((x) => x.item).join(',') === 'login-01,items-01,items-02,session-01', `generate ran the batches ${JSON.stringify(gen && gen.items)}`);
     const items01 = gen.items.find((x) => x.item === 'items-01');
     assert(items01.attempts === 2, `items-01 should pass on its second attempt (TC-004 is wrong on the first), got ${items01.attempts}`);
     assert(gen.items.filter((x) => x.item !== 'items-01').every((x) => x.attempts === 1), 'the other batches pass first time');
@@ -319,14 +365,17 @@ module.exports = {
     const review = step('review');
     assert(review && /VERDICT: PASS/.test(review.review || ''), 'the reviewer passed the work');
     const committed = git(['ls-files', 'tests']).split('\n');
-    for (const f of ['tests/e2e/support/env.ts', 'tests/e2e/support/login.ts', 'tests/e2e/support/evidence.ts', 'tests/e2e/smoke/login.spec.ts', 'tests/e2e/cases/login-01/tc-001.spec.ts', 'tests/e2e/cases/login-01/tc-002.spec.ts', 'tests/e2e/cases/items-01/tc-003.spec.ts', 'tests/e2e/cases/items-01/tc-004.spec.ts', 'tests/e2e/cases/session-01/tc-005.spec.ts']) {
+    for (const f of ['tests/e2e/support/env.ts', 'tests/e2e/support/login.ts', 'tests/e2e/support/evidence.ts', 'tests/e2e/support/items.ts', 'tests/e2e/smoke/login.spec.ts', 'tests/e2e/cases/login-01/tc-001.spec.ts', 'tests/e2e/cases/login-01/tc-002.spec.ts', 'tests/e2e/cases/items-01/tc-003.spec.ts', 'tests/e2e/cases/items-01/tc-004.spec.ts', 'tests/e2e/cases/items-02/tc-006.spec.ts', 'tests/e2e/cases/session-01/tc-005.spec.ts']) {
       assert(committed.includes(f), `${f} is committed on the trial branch`);
     }
     assert(!git(['ls-files', 'test-results', 'node_modules']), 'Playwright output and node_modules are never committed');
     assert(!git(['status', '--porcelain', '--', 'tests']), 'nothing is left uncommitted under tests/');
     assert(fs.existsSync(path.join(worktree, 'test-results', 'items-01')), 'the until ran Playwright with the per-batch output directory');
+    // The until runs each batch twice (idempotency): two Playwright runs per passing attempt, in order.
+    const untilRuns = log.split('\n').filter((l) => /step generate: "npx playwright test tests\/e2e\/cases\/items-02\//.test(l));
+    assert(untilRuns.length === 2 && untilRuns.every((l) => / exited 0 /.test(l)), `items-02 ran twice and passed both times: ${JSON.stringify(untilRuns)}`);
     // The evidence of the final run: one directory per case, the captures in order, the final one last.
-    for (const id of ['login', 'tc-001', 'tc-002', 'tc-003', 'tc-004', 'tc-005']) {
+    for (const id of ['login', 'tc-001', 'tc-002', 'tc-003', 'tc-004', 'tc-005', 'tc-006']) {
       const dir = path.join(worktree, 'test-results', 'evidence', id);
       const pngs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.png')).sort() : [];
       assert(pngs.length >= 3 && pngs[0].startsWith('01-') && /-final\.png$/.test(pngs[pngs.length - 1]), `${id}: the evidence captures of the final run (${JSON.stringify(pngs)})`);
