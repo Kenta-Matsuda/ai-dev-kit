@@ -1,7 +1,7 @@
 [[cli-sync]]
 == aidev sync
 
-この PKG を、進んだ側に追従させます。`tools` は ADK のテンプレートをこの PKG のツール設定へ、`wiki` は HEAD を LLM Wiki へ。
+この PKG を、進んだ側に追従させます。`tools` は ADK のテンプレートをこの PKG のツール設定へ、`wiki` は HEAD を LLM Wiki へ、`workflow <name>` は ADK の標準 workflow の新しい版を、この PKG が複製して直した workflow へ。
 
 === 書式
 
@@ -9,6 +9,7 @@
 ----
 aidev sync tools [--package <name|path>] [--dry-run] [--force] [--json]
 aidev sync wiki [--package <name|path>] [options]
+aidev sync workflow <name> [--from <standard>] [--package <name|path>] [--dry-run] [--force] [--json]
 ----
 
 `--package` を省略するとカレントの PKG が対象です。`--package` には xref:cli-list[`aidev list packages`] に出る名前か、PKG のパスを渡します。`aidev update` のあと、複数の PKG を 1 か所から追従させるときに使います。
@@ -278,8 +279,122 @@ aidev sync wiki --branch
 aidev sync wiki --abort
 ----
 
+[[cli-sync-workflow]]
+=== aidev sync workflow
+
+`aidev create workflow <name> --from <standard>` で複製した workflow に、ADK の標準 workflow の新しい版を取り込みます。この PKG で直したところ（`cwd`、パス、`inputs`、agent の手順）は保ちます。`aidev sync tools` がテンプレートにするのと同じ 3-way merge です。
+
+複製したときに `.aidev/workflows/<name>/standard.json` が書かれています（複製元の標準 workflow の名前、ADK の commit、ファイルごとの ADK 版と書いた内容のハッシュ）。これを元に、ADK の標準 workflow のファイル（`workflow.yaml`、agent、skill）ごとに次のどれかになります。
+
+[%autowidth.stretch,options="header"]
+|===
+|結果 |条件 |すること
+
+|`+ <path>`（created）
+|ADK の標準 workflow に増えたファイル
+|書く
+
+|unchanged
+|すでに同じ
+|何もしない
+
+|`~ <path>`（updated）
+|この PKG で編集していない。ADK が変えた
+|ADK 版に置き換える（`--force` なら全ファイル）
+
+|kept
+|この PKG で編集した。ADK は複製時から変えていない
+|そのまま
+
+|`~ <path> (merged with your edits)`
+|この PKG で編集し、ADK も変えた。重ならない
+|複製時の ADK 版を base に 3-way merge した結果を書く
+
+|`! <path>`（conflict）
+|両方が同じ行を変えた
+|git 形式の衝突マーカーを書き、終了コード 2。マーカーを解消してからもう一度実行する（記録が更新される）。マーカーが残っている間は実行を拒否する
+
+|`! <path>`（conflict、base 無し）
+|編集したが、複製時の版が記録に無いか ADK の checkout の履歴に無い
+|手で merge する（`git diff --no-index <ADK の file> <PKG の file>`）か、`--force` で ADK 版にする
+
+|`= <path>`（retired）
+|記録にあるが ADK の標準 workflow から無くなった
+|そのまま残す
+|===
+
+取り込んだあと、定義を検証します（通らなければ終了コード 1 と理由）。結果は `git diff` でレビューし、`aidev submit workflow <name>` で提出します。承認されるのは提出してマージされた版なので、取り込んだだけでは実行は変わりません（`--trial` で先に試せます）。
+
+**`standard.json` が無い複製**（記録が入る前に複製したもの）は、`--from <standard>` で複製元を名指しします。ADK の checkout の履歴から、複製の各ファイルと一致する最も新しい版を探して base にし（`no standard.json was there; the copy matches the kit's … at <commit> (N of M file(s))`）、記録を書きます。どのファイルも一致しなければ base が無く、編集したファイルは conflict（base 無し）になります。
+
+==== オプション
+
+[%autowidth.stretch,options="header"]
+|===
+|オプション |説明
+
+|`--from <standard>`
+|`standard.json` が無い複製の、複製元の標準 workflow の名前。記録があるときは一致していなければならない
+
+|`--dry-run`
+|何が変わるかを表示し、何も書かない（記録も更新しない）
+
+|`--force`
+|全ファイルを ADK 版に置き換える。ローカルの編集と衝突は捨てる
+
+|`--json`
+|JSON で出力する（`ok`、`from`、`kitCommit`、`baseCommit`、`bootstrapped`、`created`、`updated`、`merged`、`kept`、`retired`、`unchanged`、`conflicts`、`problem`）
+|===
+
+==== 終了コード
+
+[%autowidth.stretch,options="header"]
+|===
+|コード |条件
+
+|0
+|取り込んだ、または最新だった
+
+|1
+|workflow が無い、`standard.json` が無くて `--from` も無い、`--from` が記録と違う、ADK にその標準 workflow が無い、取り込んだ結果が検証を通らない
+
+|2
+|衝突が残っている（新しく書いたマーカー、base 無し、または前回のマーカーが未解消）
+|===
+
+==== 例
+
+ADK を更新してから、複製した `e2e-tests` に取り込む:
+
+[source,bash]
+----
+aidev update
+aidev sync workflow e2e-tests --dry-run     # 何が変わるかを先に見る
+aidev sync workflow e2e-tests
+git diff                                    # レビューしてから
+aidev submit workflow e2e-tests
+----
+
+[source,text]
+----
+aidev sync workflow e2e-tests
+✓ took 3 change(s) from the kit's playwright-tests into workflow e2e-tests
+    ~ .aidev/agents/playwright-test-writer.md
+    ~ .aidev/skills/playwright-testing/SKILL.md
+    ~ .aidev/workflows/e2e-tests/workflow.yaml (merged with your edits)
+    Review with "git diff", then "aidev submit workflow e2e-tests" (the reviewed copy is what runs; try it first with "aidev run workflow e2e-tests --trial").
+----
+
+記録の無い複製に、複製元を名指しして取り込む:
+
+[source,bash]
+----
+aidev sync workflow e2e-tests --from playwright-tests
+----
+
 === 関連情報
 
+* xref:workflows-standard[標準 workflow から作る] — 複製と、この PKG で直すもの
 * xref:knowledge[LLM Wiki] — 状態の読み方、コミット後の流れ、再開
 * xref:cli-update[aidev update] — ADK 本体の更新
 * xref:maintain-update[ADK の更新]

@@ -41,7 +41,7 @@ const SUBCOMMANDS = {
   list: ['workflows', 'agents', 'skills', 'packages'],
   submit: ['workflow'],
   run: ['workflow'],
-  sync: ['tools', 'wiki'],
+  sync: ['tools', 'wiki', 'workflow'],
   hook: ['session-start', 'guard-write', 'quality-gate', 'after-bash', 'session-stop'],
 };
 

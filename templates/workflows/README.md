@@ -10,7 +10,7 @@
 | `<standard>/README.md` | （複製しない） | 使い方の要約（流れ・前提・複製から実行までの手順）。`aidev create workflow --from` が場所を案内する |
 | `<standard>/sandbox/scenario.js` | （複製しない） | sandbox の筋書き（下記）。kit 開発者が `npm run sandbox -- <standard>` でその workflow を端から端まで動かすためのもので、必須 |
 
-複製したあとは PKG のファイルです。`templates/claude/` と違い `aidev sync tools` は触らず、新しい版は `--from … --force` で複製し直して差分をレビューします。実行時に kit 側のファイルを参照することはありません。
+複製したあとは PKG のファイルです。`templates/claude/` と違い `aidev sync tools` は触らず、新しい版は `aidev sync workflow <name>` で取り込みます（複製時の `standard.json` を元に、PKG の編集を保った 3-way merge。`aidev sync tools` と同じ仕組み）。実行時に kit 側のファイルを参照することはありません。
 
 `test/workflow.test.js` が、ここにある全 workflow が検証を通り、複製後に agent / skill が解決できることを確かめます。
 

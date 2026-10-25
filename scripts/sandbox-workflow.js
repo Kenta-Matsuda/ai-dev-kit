@@ -28,6 +28,7 @@
  *   inputs        { name: value } the other inputs (one that start() supplies
  *                 holds a placeholder here, for the offline check of
  *                 test/sandbox.test.js)
+ *   task          the text the run gets with --task (none when absent)
  *   env           { NAME: value } the environment of the run (what
  *                 env_required asks for); their values must appear nowhere
  *   start         async ({ pkgRoot, base }) => { inputs?, env?, stop() } —
@@ -195,7 +196,7 @@ async function main() {
     Object.assign(inputs, (services && services.inputs) || {});
     const runEnv = { ...env, ...(scenario.env || {}), ...((services && services.env) || {}) };
     const secrets = Object.fromEntries(Object.keys(def.env_required || {}).map((k) => [k, runEnv[k]]));
-    const args = ['run', 'workflow', wfName, '--trial', '--json', '--log', path.join(base, 'run.log'), ...Object.entries(inputs).flatMap(([k, v]) => ['--input', `${k}=${v}`])];
+    const args = ['run', 'workflow', wfName, '--trial', '--json', '--log', path.join(base, 'run.log'), ...(scenario.task ? ['--task', String(scenario.task)] : []), ...Object.entries(inputs).flatMap(([k, v]) => ['--input', `${k}=${v}`])];
 
     // 4. The pre-launch checks first, then the run.
     const dry = await aidev([...args, '--dry-run'], { cwd: fx.root, env: runEnv });
